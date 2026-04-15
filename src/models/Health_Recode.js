@@ -17,7 +17,7 @@ const healthRecords = pgTable("health_records", {
 
   recoed: text("record"),
 
-  isDeleted: boolean("is_deleted").default(false).notNull(),
+  softDelete: boolean("soft_delete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

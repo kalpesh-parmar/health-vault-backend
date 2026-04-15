@@ -18,7 +18,7 @@ const user = pgTable("users", {
   password: varchar("password", { length: 255 }).notNull(),
   // phone: varchar("phone", { length: 10 }).notNull(),
 
-  isDeleted: boolean("is_deleted").default(false).notNull(),
+  softDeleted: boolean("soft_deleted").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

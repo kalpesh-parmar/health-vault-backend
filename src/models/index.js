@@ -1,13 +1,14 @@
-const { user } = require("./User");
-const { document } = require("./Document");
-const { healthRecords } = require("./Health_Recode");
-const { roleEnum, ROLE } = require("../enum/roles");
-const { genderEnum } = require("../enum/gender");
+// index.js
 
+const { user } = require("./User");
+const { session } = require("./Session");
+const { healthRecords } = require("./HealthRecords");
+const { document } = require("./Document");
+
+// Export all tables in one place
 module.exports = {
   user,
-  document,
+  session,
   healthRecords,
-  roleEnum,
-  genderEnum,
+  document,
 };
