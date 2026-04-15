@@ -8,6 +8,13 @@
       "when": 1776229430622,
       "tag": "0000_shocking_adam_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776256661175,
+      "tag": "0001_open_misty_knight",
+      "breakpoints": true
     }
   ]
 }
