@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "version": "5",
   "dialect": "pg",
   "entries": [
@@ -7,6 +8,23 @@
       "version": "5",
       "when": 1776229430622,
       "tag": "0000_shocking_adam_warlock",
+=======
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1776248132260,
+      "tag": "0000_daffy_bill_hollister",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776248806692,
+      "tag": "0001_closed_overlord",
+>>>>>>> feature/firebase_auth
       "breakpoints": true
     }
   ]

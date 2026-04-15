@@ -6,7 +6,7 @@ const phoneRegex = /^\+?[0-9]{10,15}$/;
 const passwordRegex =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
-const userShema = z.object({
+const userSchema = z.object({
   userName: z.string().min(1, MessageConstant.USER_NAME_REQUIRED),
   // firstName: z.string().min(1, MessageConstant.FIRST_NAME_REQUIRED),
   // lastName: z.string().min(1, MessageConstant.LAST_NAME_REQUIRED),
@@ -21,4 +21,10 @@ const userShema = z.object({
   isDeleted: z.boolean().optional(),
 });
 
-module.exports = { userShema };
+// const userSchema = z
+//   .object({
+//     userName:userName,
+//     email: email,
+//     password: password,
+//     });
+module.exports = { userSchema };
