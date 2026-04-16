@@ -1,9 +1,4 @@
 {
-<<<<<<< HEAD
-  "id": "ed7384ac-2095-48a5-94f8-599bab311f92",
-  "prevId": "00000000-0000-0000-0000-000000000000",
-=======
->>>>>>> origin/feature/database_setup
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -68,12 +63,6 @@
           ],
           "nullsNotDistinct": false
         }
-<<<<<<< HEAD
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-=======
       },
       "policies": {},
       "isRLSEnabled": false,
@@ -158,7 +147,6 @@
         "female",
         "male"
       ]
->>>>>>> origin/feature/database_setup
     }
   },
   "enums": {},
