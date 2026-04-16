@@ -65,14 +65,14 @@ class GeneralResponse {
 
   //401 Unauthorized Error
   static UnauthorizeResponse(res, message = "Unauthorized error") {
-  return new UnauthorizedResponse(
-    401,
-    null,
-    STATUS_CODE.UNAUTHORIZED,
-    false,
-    message,
-  );
-}
+    return new UnauthorizedResponse(
+      401,
+      null,
+      STATUS_CODE.UNAUTHORIZED,
+      false,
+      message,
+    );
+  }
 }
 
 module.exports = GeneralResponse;
