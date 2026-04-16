@@ -1,5 +1,5 @@
 const MessageConstant = {
-  USER_NAME_REQUIRED: "user name is required",
+  USER_NAME_REQUIRED: "User name is required",
   FIRST_NAME_REQUIRED: "First name is required",
   LAST_NAME_REQUIRED: "Last name is required",
   INVALID_VALID_EMAIL_FORMAT: "Invalid email format",

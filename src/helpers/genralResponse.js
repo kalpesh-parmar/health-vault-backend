@@ -1,5 +1,4 @@
-const STATUS_CODE = require("../constant/statusCode");
-
+const { StatusCodes } = require("http-status-codes");
 class GeneralResponse {
   constructor(res, data, statusCode, success, message, errors = null) {
     this.data = data;
@@ -22,12 +21,12 @@ class GeneralResponse {
 
   // 200 OK
   static success(res, data = null, message = "Success") {
-    return new GeneralResponse(res, data, STATUS_CODE.OK, true, message);
+    return new GeneralResponse(res, data, StatusCodes.OK, true, message);
   }
 
   // 201 Created
   static created(res, data = null, message = "Created successfully") {
-    return new GeneralResponse(res, data, STATUS_CODE.CREATED, true, message);
+    return new GeneralResponse(res, data, StatusCodes.CREATED, true, message);
   }
 
   // 400 Bad Request
@@ -35,7 +34,7 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.BAD_REQUEST,
+      StatusCodes.BAD_REQUEST,
       false,
       message,
       errors,
@@ -47,7 +46,7 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.NOT_FOUND,
+      StatusCodes.NOT_FOUND,
       false,
       message,
     );
@@ -58,7 +57,7 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.INTERNAL_SERVER_ERROR,
+      StatusCodes.INTERNAL_SERVER_ERROR,
       false,
       message,
     );

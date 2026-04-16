@@ -8,5 +8,10 @@ const pool = new Pool({
 });
 
 const db = drizzle(pool);
+pool
+  .connect()
+  .then(() => console.log("database connect"))
+  .catch((error) => console.log("error", error));
 
 module.exports = { db, pool };
+//check db connection
