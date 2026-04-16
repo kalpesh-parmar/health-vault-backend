@@ -7,10 +7,10 @@ const passwordRegex =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
 const userSchema = z.object({
-  userName: z.string().min(1, MessageConstant.NAME_REQUIRED),
+  userName: z.string().min(1, MessageConstant.USER_NAME_REQUIRED),
   email: z
     .string()
-    .regex(emailRegex, MessageConstant.VALID_EMAIL),
+    .regex(emailRegex, MessageConstant.INVALID_VALID_EMAIL_FORMAT),
   password: z
     .string()
     .min(8)

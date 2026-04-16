@@ -1,4 +1,13 @@
-const messageConstant = {
+const MessageConstant = {
+  //EXCEPTION
+  USER_NAME_REQUIRED: "user name is required",
+  FIRST_NAME_REQUIRED: "First name is required",
+  LAST_NAME_REQUIRED: "Last name is required",
+  INVALID_VALID_EMAIL_FORMAT: "Invalid email format",
+  INVALID_PASSWORD:
+    "Password must contain uppercase, lowercase, number and special character",
+  INVALID_PHONE: "Invalid phone number",
+
   // RESPONSE
   SUCCESS: "Success",
   ERROR: "Error",
@@ -18,47 +27,7 @@ const messageConstant = {
   USER_LOGIN_SUCCESSFULLY: "User Login Successfully",
   OTP_VERIFIED: "OTP is verified",
   USER_BLOCKED: "User Blocked",
-  EMAIL_VERIFY_SUCCESSFULLY:"Email is verified successfully",
-
-  //EXCEPTION
-  INVALID_REQUEST: "Invalid request",
-  NOT_FOUND: "Not found",
-  USER_NOT_FOUND: "user not found",
-  UNAUTHORIZED: "Unauthorized",
-  INTERNAL_SERVER_ERROR: "Internal server error",
-  USER_DOES_NOT_EXIST_WITH_THIS_EMAIL: "User does not exist with this email",
-  INCORRECT_PASSWORD: (remainingAttemptCount) =>
-    `Incorrect password ${remainingAttemptCount} attempts remaining.`,
-  EMAIL_PASSWORD_REQUIRED: "Email & Passwrod are required",
-  USER_ALREADY_EXISTS_WITH_THIS_EMAIL: "User already exists with this email",
-  TOO_MANY_ATTEMPTS: "Too many failed attempts. Your account has been BLOCKED.",
-  INVALID_EXPIRE_OTP:"Invalid Or Expired OTP",
-
-  //VALIDATIORS
-  VALID_EMAIL: "Please enter valid email",
-  EMAIL_REQUIRED: "Please Enter Email",
-  EMAIL_TOO_SHORT: "Email must be atleast 5 character",
-  EMAIL_TOO_LONG: "Email is too long",
-  INVALID_PASSWORD:"Invalid Password",
-  PASSWORD_REQUIRED: "Enter Password",
-  PASSWORD_TOO_SHORT: "PASSWORD_TOO_SHORT",
-  PASSWORD_TOO_LONG: "PASSWORD_TOO_LONG",
-  NAME_REQUIRED: "Enter Name",
-  NAME_TOO_SHORT: "Name is too short",
-  NAME_TOO_LONG: "Name is too long ",
-  PHONE_NUMBER_REQUIRED: "Enter phone number",
-  PHONE_NUMBER_MUST_BE_10_DIGITS: "Enter only 10 digit number",
-  PASS_TOO_LONG: "Password is too long",
-  NO_ALFABATES: "No alphabates are allowed",
-  AGE_GREATER_0: "Age must be greater than zero",
-  MUSTCONTAIN_LOWERCASE: "Name must write in lowercase letter",
-  FUTURE_dateOfBirth: "Date of birth cant be in future",
-  NOT_ELIGIBLE: "Not eligible for login",
-  INVALID_ZIP: "Invalid zipCode",
-  MUST_UPPER: "Must contain uppercase",
-  MUST_LOWER: "Must contain lowercase",
-  MUST_NUM: "Must contain number",
-  MUST_SYMBOL: "Must contain special character",
-  ONLY_ALPHABETS: "only alphabets are allowed",
+  EMAIL_VERIFY_SUCCESSFULLY:"Email is verified successfully"
 };
-module.exports = messageConstant;
+
+module.exports = MessageConstant;
