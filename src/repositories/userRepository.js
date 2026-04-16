@@ -14,7 +14,7 @@ const createUser = async (data) => {
 const getUserById = async (id) => {
   const result = await db
     .select()
-    .form(user)
+    .from(user)
     .where(and(eq(user.id, id), eq(user.softDeleted, false)));
   return result[0];
 };

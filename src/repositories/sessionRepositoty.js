@@ -1,55 +1,50 @@
 const { any } = require("zod");
-const db = require("../config/db");
+const { db } = require("../config/db");
 const { session } = require("../models/session");
 const { eq, and } = require("drizzle-orm");
 
-//create session
-const createSession = async (data) => {
-  const result = await db.insert(session).values(data).returning();
+class SessionRepository {
+  async create(data) {
+    const result = await db.insert(session).values(data).returning();
+    return result[0];
+  }
 
-  return result[0];
-};
+  async findById(id) {
+    const result = await db
+      .select()
+      .from(session)
+      .where(and(eq(session.id, id), eq(session.softDelete, false)));
 
-//get session by device token (not deleted)
-const getSessionById = async (deviceToken) => {
-  const result = await db
-    .select()
-    .form(session)
-    .where(
-      and(eq(session.deviceToken, deviceToken), eq(session.softDelete, false)),
-    );
+    return result[0];
+  }
 
-  return result[0];
-};
+  async logout(sessionId) {
+    const result = await db
+      .update(session)
+      .set({
+        logoutTime: new Date(),
+        isActive: false,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(session.id, sessionId), eq(session.softDelete, false)))
+      .returning();
 
-//logeout session
-const logoutSession = async () => {
-  const result = await db
-    .update(session)
-    .set({
-      isActive: false,
-      logoutTime: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(session.userId, userId), eq(session.softDelete, false)));
+    return result[0];
+  }
 
-  return result[0];
-};
+  async softDelete(sessionId) {
+    const result = await db
+      .update(session)
+      .set({
+        softDelete: true,
+        isActive: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(session.id, sessionId))
+      .returning();
 
-//soft delete session
-const softDelteSession = async () => {
-  const result = await db
-    .update(session)
-    .set({
-      softDelete: true,
-      updatedAt: new Date(),
-    })
-    .where(eq(session.id, session));
-};
+    return result[0];
+  }
+}
 
-module.exports = {
-  createSession,
-  getSessionById,
-  logoutSession,
-  softDelteSession,
-};
+module.exports = new SessionRepository();
