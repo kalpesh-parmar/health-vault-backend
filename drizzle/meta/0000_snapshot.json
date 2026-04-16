@@ -1,4 +1,9 @@
 {
+<<<<<<< HEAD
+  "id": "ed7384ac-2095-48a5-94f8-599bab311f92",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+=======
+>>>>>>> origin/feature/database_setup
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12,45 +17,9 @@
           "primaryKey": true,
           "notNull": true
         },
-        "first_name": {
-          "name": "first_name",
+        "user_name": {
+          "name": "user_name",
           "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "middle_name": {
-          "name": "middle_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_name": {
-          "name": "last_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "initial": {
-          "name": "initial",
-          "type": "varchar(2)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "date_of_birth": {
-          "name": "date_of_birth",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "age": {
-          "name": "age",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "gender": {
-          "name": "gender",
-          "type": "gender",
           "primaryKey": false,
           "notNull": true
         },
@@ -66,36 +35,25 @@
           "primaryKey": false,
           "notNull": true
         },
-        "mobile_no": {
-          "name": "mobile_no",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "city": {
-          "name": "city",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "roles": {
-          "name": "roles",
-          "type": "role",
+        "soft_delete": {
+          "name": "is_deleted",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": "'user'"
+          "default": false
         },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
           "default": "now()"
         }
       },
@@ -110,6 +68,12 @@
           ],
           "nullsNotDistinct": false
         }
+<<<<<<< HEAD
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+=======
       },
       "policies": {},
       "isRLSEnabled": false,
@@ -194,9 +158,15 @@
         "female",
         "male"
       ]
+>>>>>>> origin/feature/database_setup
     }
   },
+  "enums": {},
   "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
   "_meta": {
     "schemas": {},
     "tables": {},
