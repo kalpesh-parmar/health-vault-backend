@@ -7,7 +7,6 @@ const { db } = require("../config/db");
 const userRepository = require("../repositories/userRepository");
 const messageConstant = require("../constant/messageConstant");
 const jwt = require("jsonwebtoken");
-// const { v4: uuidv4 } = require("uuid");
 
 class userService {
   // Create User

@@ -1,6 +1,5 @@
 const MessageConstant = {
-  //EXCEPTION
-  USER_NAME_REQUIRED: "user name is required",
+  USER_NAME_REQUIRED: "User name is required",
   FIRST_NAME_REQUIRED: "First name is required",
   LAST_NAME_REQUIRED: "Last name is required",
   INVALID_VALID_EMAIL_FORMAT: "Invalid email format",
@@ -8,26 +7,17 @@ const MessageConstant = {
     "Password must contain uppercase, lowercase, number and special character",
   INVALID_PHONE: "Invalid phone number",
 
-  // RESPONSE
-  SUCCESS: "Success",
-  ERROR: "Error",
-  OK: "OK",
-  CREATED: "CREATED",
-  UPDATED: "UPDATED",
-  DELETED: "DELETED",
-  NO_DATA_FOUND: "No data found",
-  SOMETHING_WENT_WRONG: "Something went wrong, please try again later",
-
-  // USER
-  USER_ADDED_SUCCESSFULLY: "User Added Successfully",
-  USER_UPDATED_SUCCESSFULLY: "User Updated Successfully",
-  USER_DELETED_SUCCESSFULLY: "User Deleted Successfully",
-  USERS_FOUND_SUCCESSFULLY: "User Found Successfully",
-  LOGIN_SUCCESSFULLY: "Login Successfully",
-  USER_LOGIN_SUCCESSFULLY: "User Login Successfully",
-  OTP_VERIFIED: "OTP is verified",
-  USER_BLOCKED: "User Blocked",
-  EMAIL_VERIFY_SUCCESSFULLY:"Email is verified successfully"
+  SESSION_CREATED: "Session created successfully",
+  LOGOUT_SUCCESS: "User logged out successfully",
+  SESSION_NOT_FOUND: "Session not found",
+  VALIDATION_FAILED: "Validation failed",
+  INTERNAL_ERROR: "Something went wrong",
+  SESSION_DELETED: "Session soft deleted successfully",
+  ALREADY_LOGOUT: "User already logged out",
+  SESSION_FETCHED: "Session fetched successfully",
+  TOKEN_NOT_FOUND: "Token not found",
+  SESSION_EXPIRED: "Session expired",
+  INVALID_TOKEN: "invalid token",
 };
 
 module.exports = MessageConstant;

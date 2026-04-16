@@ -1,13 +1,16 @@
 const messageConstant = require("../constant/messageConstant");
-const { getOkResponse, getCreatedResponse, getGeneralResponse } = require("../helpers/generalResponse");
+const { getOkResponse, getCreatedResponse, GeneralResponse } = require("../helpers/genralResponse");
 const userService=require("../services/userService")
 
 class userController {
     loginUser = async (req,res,next) => {
         try {
             const result=await userService.loginUser(req.body);
-            const meta=getCreatedResponse(messageConstant.LOGIN_SUCCESSFULLY)
-            return getGeneralResponse(res, meta, result);
+            return GeneralResponse.created(
+                res,
+                messageConstant.USER_LOGIN_SUCCESSFULLY,
+                result
+            );
         } catch (error) {
             console.log("error in login user:",error);
             next(error);
@@ -16,8 +19,11 @@ class userController {
     createUser = async(req,res,next)=>{
         try{
             const result = await userService.createUser(req.body);
-            const meta=getCreatedResponse(messageConstant.USER_ADDED_SUCCESSFULLY)
-            return getGeneralResponse(res,meta,result);
+            return GeneralResponse(
+                res,
+                messageConstant.USER_ADDED_SUCCESSFULLY,
+                result
+            );
         }catch(error){
             console.log("error in create user:",error);
             next(error);            

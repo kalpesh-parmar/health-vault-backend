@@ -29,6 +29,13 @@
       "when": 1776331218010,
       "tag": "0003_keen_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776256661175,
+      "tag": "0001_open_misty_knight",
+      "breakpoints": true
     }
   ]
 }
