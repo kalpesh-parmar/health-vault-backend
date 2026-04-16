@@ -1,0 +1,73 @@
+paths:
+  /users/add:
+    post:
+      summary: Create user (Sign Up)
+      tags:
+        - User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                -userName
+                - email
+                - password
+              properties:
+                userName:
+                  type: varchar
+                  example: "Abcpqr"
+                email:
+                  type: varchar
+                  example: "Abcd1@gmail.com"
+                password:
+                  type: varchar
+                  example: "S1234@abc"
+      responses:
+        201:
+          description: User created successfully
+
+  /users/{id}:
+    get:
+      summary: Get user by ID
+      tags:
+        - User
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: User fetched successfully
+        404:
+          description: User not found
+
+  /users/login:
+    post:
+      summary: Login user
+      tags:
+        - User
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: varchar
+                  example: "Abc123@gmail.com"
+                password:
+                  type: varchar
+                  example: "Abc123@gmail.com"
+      responses:
+        200:
+          description: Login successful
+        404:
+          description: User not found
