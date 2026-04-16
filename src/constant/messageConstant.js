@@ -39,6 +39,7 @@ const messageConstant = {
   EMAIL_REQUIRED: "Please Enter Email",
   EMAIL_TOO_SHORT: "Email must be atleast 5 character",
   EMAIL_TOO_LONG: "Email is too long",
+  INVALID_PASSWORD:"Invalid Password",
   PASSWORD_REQUIRED: "Enter Password",
   PASSWORD_TOO_SHORT: "PASSWORD_TOO_SHORT",
   PASSWORD_TOO_LONG: "PASSWORD_TOO_LONG",

@@ -1,25 +1,30 @@
 const { any } = require("zod");
 const { db } = require("../config/db"); 
 const { user: userTable } = require("../models/User");
+const {session:sessionTable}=require("../models/session")
 const { eq, and } = require("drizzle-orm");
 
 class userRepository {
   //Login USer
   async loginUser(email) {
-    const result = await db
-      .select()
-      .from(userTable)
-      .where(eq(userTable.email, email))
-      .limit(1);
-    return result || null;
+  
+  const user=await db
+  .select()
+  .from(userTable)
+  .where(eq(userTable.email, email))
+  .limit(1);
+  return user[0];
   }
-
-  //create user
-  // async createUser(data) {
-  //   const result = await db.insert(user).values(data).returning();
-  //   return result[0];
-  //   //retutn object array
-  // }
+createSession = async ({ userId }) => {
+  return db.insert(sessionTable).values({
+    userId: userId,
+    loginTime: new Date(),
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }).returning();
+};
+  //Create User
   async createUser(data) {
     return await db
       .insert(userTable)
