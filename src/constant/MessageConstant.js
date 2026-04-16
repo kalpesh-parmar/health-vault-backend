@@ -15,6 +15,9 @@ const MessageConstant = {
   SESSION_DELETED: "Session soft deleted successfully",
   ALREADY_LOGOUT: "User already logged out",
   SESSION_FETCHED: "Session fetched successfully",
+  TOKEN_NOT_FOUND: "Token not found",
+  SESSION_EXPIRED: "Session expired",
+  INVALID_TOKEN: "invalid token",
 };
 
 module.exports = MessageConstant;
