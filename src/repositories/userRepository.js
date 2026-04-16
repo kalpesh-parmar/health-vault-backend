@@ -40,20 +40,20 @@ createSession = async ({ userId }) => {
   async getUserById(id) {
     const result = await db
       .select()
-      .from(user)
-      .where(and(eq(user.id, id), eq(user.softDelete, false)));
+      .from(userTable)
+      .where(and(eq(userTable.id, id), eq(userTable.softDeleted, false)));
     return result[0];
   }
 
   //updated user if not delted
   async updateUser(id, data) {
     const result = await db
-      .update(user)
+      .update(userTable)
       .set({
         ...data,
         updatedAt: new Date(),
       })
-      .where(and(eq(user.id, id), eq(user.softDelete, false)))
+      .where(and(eq(userTable.id, id), eq(userTable.softDelete, false)))
       .returning();
     return result[0];
   }
@@ -61,12 +61,13 @@ createSession = async ({ userId }) => {
   //soft delte
   async deleteUser(id) {
     const result = await db
-      .update(user)
+      .update(userTable)
       .set({
         softDeleted: true,
         updateUser: new Date(),
       })
-      .where(and(eq(user.id, id), eq(user.softDelete, false)))
+      .where(and(eq(userTable.id, id),
+       eq(userTable.softDelete, false)))
       .returning();
 
     return result[0];

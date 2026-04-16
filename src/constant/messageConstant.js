@@ -18,6 +18,8 @@ const MessageConstant = {
   TOKEN_NOT_FOUND: "Token not found",
   SESSION_EXPIRED: "Session expired",
   INVALID_TOKEN: "invalid token",
+  USER_NOT_FOUND:"User not found",
+  USER_FOUND_SUCCESSFULLY:"User found successfully"
 };
 
 module.exports = MessageConstant;
