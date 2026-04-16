@@ -6,6 +6,15 @@ const MessageConstant = {
   INVALID_PASSWORD:
     "Password must contain uppercase, lowercase, number and special character",
   INVALID_PHONE: "Invalid phone number",
+
+  SESSION_CREATED: "Session created successfully",
+  LOGOUT_SUCCESS: "User logged out successfully",
+  SESSION_NOT_FOUND: "Session not found",
+  VALIDATION_FAILED: "Validation failed",
+  INTERNAL_ERROR: "Something went wrong",
+  SESSION_DELETED: "Session soft deleted successfully",
+  ALREADY_LOGOUT: "User already logged out",
+  SESSION_FETCHED: "Session fetched successfully",
 };
 
 module.exports = MessageConstant;
