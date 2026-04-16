@@ -33,17 +33,6 @@ class SessionService {
     const result = await sessionRepository.logout(sessionId);
     return { data: result, message: MessageConstant.LOGOUT_SUCCESS };
   }
-
-  // soft delete session
-  async deleteSession(sessionId) {
-    const session = await sessionRepository.findById(sessionId);
-
-    if (!session) {
-      throw new Error(MessageConstant.SESSION_NOT_FOUND);
-    }
-
-    return await sessionRepository.softDelete(sessionId);
-  }
 }
 
 module.exports = new SessionService();

@@ -1,47 +1,67 @@
 const STATUS_CODE = require("../constant/statusCode");
 
 class GeneralResponse {
+  constructor(res, data, statusCode, success, message, errors = null) {
+    this.data = data;
+    this.success = success;
+    this.statusCode = statusCode;
+    this.message = message;
+    this.errors = errors;
+
+    if (res) {
+      res.status(statusCode).json({
+        status: {
+          success: success,
+          statusCode: statusCode,
+          message: message,
+        },
+        data: data,
+      });
+    }
+  }
+
+  // 200 OK
   static success(res, data = null, message = "Success") {
-    return res.status(STATUS_CODE.OK).json({
-      success: true,
-      statusCode: STATUS_CODE.OK,
-      message,
-      data,
-    });
+    return new GeneralResponse(res, data, STATUS_CODE.OK, true, message);
   }
 
+  // 201 Created
   static created(res, data = null, message = "Created successfully") {
-    return res.status(STATUS_CODE.CREATED).json({
-      success: true,
-      statusCode: STATUS_CODE.CREATED,
-      message,
-      data,
-    });
+    return new GeneralResponse(res, data, STATUS_CODE.CREATED, true, message);
   }
 
+  // 400 Bad Request
   static badRequest(res, message = "Bad request", errors = null) {
-    return res.status(STATUS_CODE.BAD_REQUEST).json({
-      success: false,
-      statusCode: STATUS_CODE.BAD_REQUEST,
+    return new GeneralResponse(
+      res,
+      null,
+      STATUS_CODE.BAD_REQUEST,
+      false,
       message,
       errors,
-    });
+    );
   }
 
+  // 404 Not Found
   static notFound(res, message = "Not found") {
-    return res.status(STATUS_CODE.NOT_FOUND).json({
-      success: false,
-      statusCode: STATUS_CODE.NOT_FOUND,
+    return new GeneralResponse(
+      res,
+      null,
+      STATUS_CODE.NOT_FOUND,
+      false,
       message,
-    });
+    );
   }
 
+  // 500 Internal Server Error
   static serverError(res, message = "Internal server error") {
-    return res.status(STATUS_CODE.INTERNAL_SERVER_ERROR).json({
-      success: false,
-      statusCode: STATUS_CODE.INTERNAL_SERVER_ERROR,
+    return new GeneralResponse(
+      res,
+      null,
+      STATUS_CODE.INTERNAL_SERVER_ERROR,
+      false,
       message,
-    });
+    );
   }
 }
 

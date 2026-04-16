@@ -84,33 +84,6 @@ class SessionController {
       return GeneralResponse.serverError(res, error.message);
     }
   }
-
-  // soft delete session
-  async deleteSession(req, res) {
-    try {
-      const validated = deleteSchema.parse(req.body);
-
-      const result = await sessionService.deleteSession(validated.sessionId);
-
-      return GeneralResponse.success(
-        res,
-        result,
-        MessageConstant.SESSION_DELETED,
-      );
-    } catch (error) {
-      if (error.name === "ZodError") {
-        return GeneralResponse.badRequest(
-          res,
-          MessageConstant.VALIDATION_FAILED,
-          error.errors,
-        );
-      }
-      if (error.message === MessageConstant.SESSION_NOT_FOUND) {
-        return GeneralResponse.notFound(res, error.message);
-      }
-      return GeneralResponse.serverError(res, error.message);
-    }
-  }
 }
 
 module.exports = new SessionController();

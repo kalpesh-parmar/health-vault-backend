@@ -23,19 +23,6 @@ class SessionRepository {
       .update(session)
       .set({
         logoutTime: new Date(),
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(session.id, sessionId), eq(session.softDelete, false)))
-      .returning();
-
-    return result[0];
-  }
-
-  async softDelete(sessionId) {
-    const result = await db
-      .update(session)
-      .set({
         softDelete: true,
         isActive: false,
         updatedAt: new Date(),
