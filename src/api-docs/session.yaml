@@ -63,26 +63,3 @@ paths:
           description: Logout successful
         404:
           description: Session not found
-
-  /session/delete:
-    delete:
-      summary: Soft delete session
-      tags:
-        - Session
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - sessionId
-              properties:
-                sessionId:
-                  type: integer
-                  example: 1
-      responses:
-        200:
-          description: Session deleted successfully
-        404:
-          description: Session not found
