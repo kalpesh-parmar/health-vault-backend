@@ -3,7 +3,6 @@ const express = require("express");
 require("dotenv").config();
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./src/config/swagger");
-// const errorHandler = require("./src/middlerwares/authMiddleware");
 
 // import routes index
 const routes = require("./src/routes");
@@ -11,14 +10,6 @@ const routes = require("./src/routes");
 const app = express();
 
 app.use(express.json());
-//check db connection
-pool
-  .connect()
-  .then(() => console.log("database connect"))
-  .catch((error) => console.log("error", error));
-
-//handle middleware error
-// app.use(errorHandler);
 
 // all routes
 app.use("/api", routes);
