@@ -10,12 +10,12 @@ class GeneralResponse {
 
     if (res) {
       res.status(statusCode).json({
+        data: data,
         status: {
           success: success,
           statusCode: statusCode,
           message: message,
         },
-        data: data,
       });
     }
   }

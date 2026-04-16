@@ -3,7 +3,7 @@ const express = require("express");
 require("dotenv").config();
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./src/config/swagger");
-const errorHandler = require("./src/middlerwares/authMiddleware");
+// const errorHandler = require("./src/middlerwares/authMiddleware");
 
 // import routes index
 const routes = require("./src/routes");
@@ -18,7 +18,7 @@ pool
   .catch((error) => console.log("error", error));
 
 //handle middleware error
-app.use(errorHandler);
+// app.use(errorHandler);
 
 // all routes
 app.use("/api", routes);
