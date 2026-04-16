@@ -1,12 +1,13 @@
 require("dotenv").config();
-const bcrypt=require("bcrypt");
-const {userSchema,} = require("../validation/zodValidation");
+const bcrypt = require("bcrypt");
+const { userSchema } = require("../validation/zodValidation");
 const userRepository = require("../repositories/userRepository");
 const messageConstant = require("../constant/messageConstant");
-const jwt = require("jsonwebtoken")
-// const { InvalidRequestException } = require("../helpers/generalResponse");
+const jwt = require("jsonwebtoken");
+const { v4: uuidv4 } = require("uuid");
+
 class userService {
-     // Create User
+  // Create User
   async createUser(data) {
     const result = userSchema.safeParse(data);
     console.log(data);
@@ -15,10 +16,10 @@ class userService {
     }
     const validatedData = result.data;
     validatedData.password = await bcrypt.hash(validatedData.password, 10);
-    const newUser=await userRepository.createUser(validatedData);
-    return newUser
+    const newUser = await userRepository.createUser(validatedData);
+    return newUser;
   }
-    //Login User
+  //Login User
   async loginUser(data) {
     const { firebaseToken } = data;
     // const decoded = await admin.auth().verifyIdToken(firebaseToken);
@@ -31,11 +32,14 @@ class userService {
     //   id: user.id,
     //   email: user.email,
     // });
-    const tempToken = jwt.sign({ email }, process.env.JWT_SECRET, {
+    const sessionId = uuidv4();
+
+    const tempToken = jwt.sign({ email, sessionId }, process.env.JWT_SECRET, {
       expiresIn: "5m",
     });
     return {
       tempToken,
+      sessionId
     };
   }
 }
