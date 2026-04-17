@@ -1,28 +1,37 @@
 const { any } = require("zod");
-const { db } = require("../config/db"); 
-const { user: userTable } = require("../models/User");
+const { db } = require("../config/db");
+const { session } = require("../models/session");
 const { eq, and } = require("drizzle-orm");
+const User = require("../models/User");
 
 class userRepository {
   //Login USer
   async loginUser(email) {
-    const result = await db
+    const user = await db
       .select()
-      .from(userTable)
-      .where(eq(userTable.email, email))
+      .from(User)
+      .where(eq(User.email, email))
       .limit(1);
-    return result || null;
+    return user[0];
   }
 
-  //create user
-  // async createUser(data) {
-  //   const result = await db.insert(user).values(data).returning();
-  //   return result[0];
-  //   //retutn object array
-  // }
+  //create user session
+  createSession = async ({ userId }) => {
+    return db
+      .insert(session)
+      .values({
+        userId: userId,
+        loginTime: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+  };
+  //Create User
   async createUser(data) {
     return await db
-      .insert(userTable)
+      .insert(User)
       .values({
         userName: data.userName,
         email: data.email,
@@ -35,20 +44,25 @@ class userRepository {
   async getUserById(id) {
     const result = await db
       .select()
-      .from(user)
-      .where(and(eq(user.id, id), eq(user.softDelete, false)));
+      .from(User)
+      .where(and(eq(User.id, id), eq(User.softDelete, false)));
     return result[0];
+  }
+
+  //get all user
+  async getUserList() {
+    return await db.select().from(User).where(eq(User.softDelete, false));
   }
 
   //updated user if not delted
   async updateUser(id, data) {
     const result = await db
-      .update(user)
+      .update(User)
       .set({
         ...data,
         updatedAt: new Date(),
       })
-      .where(and(eq(user.id, id), eq(user.softDelete, false)))
+      .where(and(eq(User.id, id), eq(User.softDelete, false)))
       .returning();
     return result[0];
   }
@@ -56,12 +70,12 @@ class userRepository {
   //soft delte
   async deleteUser(id) {
     const result = await db
-      .update(user)
+      .update(User)
       .set({
-        softDeleted: true,
-        updateUser: new Date(),
+        softDelete: true,
+        updatedAt: new Date(),
       })
-      .where(and(eq(user.id, id), eq(user.softDelete, false)))
+      .where(and(eq(User.id, id), eq(User.softDelete, false)))
       .returning();
 
     return result[0];

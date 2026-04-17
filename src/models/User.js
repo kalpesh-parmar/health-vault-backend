@@ -1,6 +1,12 @@
-const {serial,pgTable,varchar,timestamp,boolean,} = require("drizzle-orm/pg-core");
+const {
+  serial,
+  pgTable,
+  varchar,
+  timestamp,
+  boolean,
+} = require("drizzle-orm/pg-core");
 
-const user = pgTable("users", {
+const User = pgTable("users", {
   id: serial("id").primaryKey(),
 
   userName: varchar("user_name", { length: 255 }).notNull(),
@@ -12,8 +18,8 @@ const user = pgTable("users", {
   password: varchar("password", { length: 255 }).notNull(),
   // phone: varchar("phone", { length: 10 }).notNull(),
 
-  softDeleted: boolean("soft_delete").default(false).notNull(),
+  softDelete: boolean("soft_delete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
-module.exports = { user };
+module.exports = User;
