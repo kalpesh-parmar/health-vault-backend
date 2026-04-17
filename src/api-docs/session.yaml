@@ -12,14 +12,10 @@ paths:
               type: object
               required:
                 - userId
-                - deviceToken
               properties:
                 userId:
                   type: integer
                   example: 1
-                deviceToken:
-                  type: string
-                  example: "device_token_123"
       responses:
         201:
           description: Session created successfully

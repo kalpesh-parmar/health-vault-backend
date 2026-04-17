@@ -1,33 +1,42 @@
-const STATUS_CODE = require("../constant/statusCode");
-
+const { StatusCodes } = require("http-status-codes");
 class GeneralResponse {
-  constructor(res, data, statusCode, success, message, errors = null) {
+  constructor(res, data, statusCode, status, message) {
     this.data = data;
-    this.success = success;
+    this.status = status;
     this.statusCode = statusCode;
     this.message = message;
-    this.errors = errors;
 
     if (res) {
       res.status(statusCode).json({
-        status: {
-          success: success,
-          statusCode: statusCode,
-          message: message,
-        },
         data: data,
+        status: {
+          status: status,
+          statusCode: statusCode,
+          description: message,
+        },
       });
     }
   }
 
   // 200 OK
   static success(res, data = null, message = "Success") {
-    return new GeneralResponse(res, data, STATUS_CODE.OK, true, message);
+    return new GeneralResponse(res, data, StatusCodes.OK, "SUCCESS", message);
+  }
+
+  // 200 OK
+  static updated(res, data = null, message = "Updated successfully") {
+    return new GeneralResponse(res, data, StatusCodes.OK, "UPDATED", message);
   }
 
   // 201 Created
   static created(res, data = null, message = "Created successfully") {
-    return new GeneralResponse(res, data, STATUS_CODE.CREATED, true, message);
+    return new GeneralResponse(
+      res,
+      data,
+      StatusCodes.CREATED,
+      "CREATED",
+      message,
+    );
   }
 
   // 400 Bad Request
@@ -35,8 +44,8 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.BAD_REQUEST,
-      false,
+      StatusCodes.BAD_REQUEST,
+      "BAD_REQUEST",
       message,
       errors,
     );
@@ -47,8 +56,8 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.NOT_FOUND,
-      false,
+      StatusCodes.NOT_FOUND,
+      "NOT_FOUND",
       message,
     );
   }
@@ -58,22 +67,22 @@ class GeneralResponse {
     return new GeneralResponse(
       res,
       null,
-      STATUS_CODE.INTERNAL_SERVER_ERROR,
-      false,
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      "INTERNAL_SERVER_ERROR",
       message,
     );
   }
 
   //401 Unauthorized Error
   static UnauthorizeResponse(res, message = "Unauthorized error") {
-  return new UnauthorizedResponse(
-    401,
-    null,
-    STATUS_CODE.UNAUTHORIZED,
-    false,
-    message,
-  );
-}
+    return new UnauthorizedResponse(
+      401,
+      null,
+      STATUS_CODE.UNAUTHORIZED,
+      "UNAUTHORIZED",
+      message,
+    );
+  }
 }
 
 module.exports = GeneralResponse;

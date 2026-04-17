@@ -1,33 +1,37 @@
 const { any } = require("zod");
-const { db } = require("../config/db"); 
-const { user: userTable } = require("../models/User");
-const {session:sessionTable}=require("../models/session")
+const { db } = require("../config/db");
+const { session } = require("../models/session");
 const { eq, and } = require("drizzle-orm");
+const User = require("../models/User");
 
 class userRepository {
   //Login USer
   async loginUser(email) {
-  
-  const user=await db
-  .select()
-  .from(userTable)
-  .where(eq(userTable.email, email))
-  .limit(1);
-  return user[0];
+    const user = await db
+      .select()
+      .from(User)
+      .where(eq(User.email, email))
+      .limit(1);
+    return user[0];
   }
-createSession = async ({ userId }) => {
-  return db.insert(sessionTable).values({
-    userId: userId,
-    loginTime: new Date(),
-    isActive: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  }).returning();
-};
+
+  //create user session
+  createSession = async ({ userId }) => {
+    return db
+      .insert(session)
+      .values({
+        userId: userId,
+        loginTime: new Date(),
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+  };
   //Create User
   async createUser(data) {
     return await db
-      .insert(userTable)
+      .insert(User)
       .values({
         userName: data.userName,
         email: data.email,
@@ -40,20 +44,25 @@ createSession = async ({ userId }) => {
   async getUserById(id) {
     const result = await db
       .select()
-      .from(userTable)
-      .where(and(eq(userTable.id, id), eq(userTable.softDeleted, false)));
+      .from(User)
+      .where(and(eq(User.id, id), eq(User.softDelete, false)));
     return result[0];
+  }
+
+  //get all user
+  async getUserList() {
+    return await db.select().from(User).where(eq(User.softDelete, false));
   }
 
   //updated user if not delted
   async updateUser(id, data) {
     const result = await db
-      .update(userTable)
+      .update(User)
       .set({
         ...data,
         updatedAt: new Date(),
       })
-      .where(and(eq(userTable.id, id), eq(userTable.softDelete, false)))
+      .where(and(eq(User.id, id), eq(User.softDelete, false)))
       .returning();
     return result[0];
   }
@@ -61,13 +70,12 @@ createSession = async ({ userId }) => {
   //soft delte
   async deleteUser(id) {
     const result = await db
-      .update(userTable)
+      .update(User)
       .set({
-        softDeleted: true,
-        updateUser: new Date(),
+        softDelete: true,
+        updatedAt: new Date(),
       })
-      .where(and(eq(userTable.id, id),
-       eq(userTable.softDelete, false)))
+      .where(and(eq(User.id, id), eq(User.softDelete, false)))
       .returning();
 
     return result[0];
