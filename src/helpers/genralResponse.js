@@ -1,19 +1,18 @@
 const { StatusCodes } = require("http-status-codes");
 class GeneralResponse {
-  constructor(res, data, statusCode, success, message, errors = null) {
+  constructor(res, data, statusCode, status, message) {
     this.data = data;
-    this.success = success;
+    this.status = status;
     this.statusCode = statusCode;
     this.message = message;
-    this.errors = errors;
 
     if (res) {
       res.status(statusCode).json({
         data: data,
         status: {
-          success: success,
+          status: status,
           statusCode: statusCode,
-          message: message,
+          description: message,
         },
       });
     }
@@ -21,12 +20,23 @@ class GeneralResponse {
 
   // 200 OK
   static success(res, data = null, message = "Success") {
-    return new GeneralResponse(res, data, StatusCodes.OK, true, message);
+    return new GeneralResponse(res, data, StatusCodes.OK, "SUCCESS", message);
+  }
+
+  // 200 OK
+  static updated(res, data = null, message = "Updated successfully") {
+    return new GeneralResponse(res, data, StatusCodes.OK, "UPDATED", message);
   }
 
   // 201 Created
   static created(res, data = null, message = "Created successfully") {
-    return new GeneralResponse(res, data, StatusCodes.CREATED, true, message);
+    return new GeneralResponse(
+      res,
+      data,
+      StatusCodes.CREATED,
+      "CREATED",
+      message,
+    );
   }
 
   // 400 Bad Request
@@ -35,7 +45,7 @@ class GeneralResponse {
       res,
       null,
       StatusCodes.BAD_REQUEST,
-      false,
+      "BAD_REQUEST",
       message,
       errors,
     );
@@ -47,7 +57,7 @@ class GeneralResponse {
       res,
       null,
       StatusCodes.NOT_FOUND,
-      false,
+      "NOT_FOUND",
       message,
     );
   }
@@ -58,7 +68,7 @@ class GeneralResponse {
       res,
       null,
       StatusCodes.INTERNAL_SERVER_ERROR,
-      false,
+      "INTERNAL_SERVER_ERROR",
       message,
     );
   }
@@ -69,7 +79,7 @@ class GeneralResponse {
       401,
       null,
       STATUS_CODE.UNAUTHORIZED,
-      false,
+      "UNAUTHORIZED",
       message,
     );
   }
