@@ -18,7 +18,7 @@ const session = pgTable("session", {
 
   loginTime: timestamp("login_time").defaultNow().notNull(),
   logoutTime: timestamp("logout_time"),
-  deviceToken: varchar("device_token", { length: 500 }).notNull(),
+  deviceToken: varchar("device_token", { length: 500 }),
   isActive: boolean("is_active").default(true).notNull(),
 
   softDelete: boolean("soft_delete").default(false).notNull(),

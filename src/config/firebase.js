@@ -1,8 +1,8 @@
-const admin =require("firebase-admin");
+const admin = require("firebase-admin");
 require("dotenv").config();
-const serviceAccount =JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
-    credential:adminmin.credential.cert(serviceAccount)
+  credential: adminmin.credential.cert(serviceAccount),
 });
 export default admin;
