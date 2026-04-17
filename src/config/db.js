@@ -14,4 +14,3 @@ pool
   .catch((error) => console.log("error", error));
 
 module.exports = { db, pool };
-//check db connection

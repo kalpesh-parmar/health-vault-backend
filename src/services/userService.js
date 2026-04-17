@@ -45,18 +45,15 @@ class userService {
         expiresIn: "7d",
       },
     );
-    return {
-      tempToken,
-    };
+    return tempToken;
   }
 
   //get user by id
   async getUserById(id) {
-    const result = await userRepository.getUserById(id);
+    return await userRepository.getUserById(id);
     if (!result) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
-    return result;
   }
 
   //get user list
