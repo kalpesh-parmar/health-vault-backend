@@ -18,6 +18,21 @@ const MessageConstant = {
   TOKEN_NOT_FOUND: "Token not found",
   SESSION_EXPIRED: "Session expired",
   INVALID_TOKEN: "invalid token",
+
+  USER_LIST_FETCHED_SUCCESSFULL: "User list fetched successfully",
+  USER_LOGIN_SUCCESSFULLY: "User logged in successfully",
+  USER_ADDED_SUCCESSFULLY: "User added successfully",
+  USER_LIST_FETCHED_SUCCESSFULLY: "User list fetched successfully",
+  USER_UPDATED_SUCCESSFULLY: "User updated successfully",
+  USER_DELETED_SUCCESSFULLY: "User deleted successfully",
+  USER_FETCHED_SUCCESSFULLY: "User fetched successfully",
+
+  INVALID_REQUEST: "Invalid request",
+  NOT_FOUND: "Not found",
+  ALREADY_EXIST: "Already exists",
+  UNAUTHORIZED: "Unauthorized",
+  ACCESS_DENIED: "Access denied",
+  USER_NOT_FOUND: "Usser not found",
 };
 
 module.exports = MessageConstant;
