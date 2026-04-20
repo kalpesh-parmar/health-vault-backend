@@ -55,17 +55,35 @@ class userRepository {
   }
 
   //updated user if not delted
+  // async updateUser(id, data) {
+  //   console.log("DB DATA:", data);
+  //   const result = await db
+  //     .update(User)
+  //     .set({
+  //       ...data,
+  //       updatedAt: new Date(),
+  //     })
+  //     .where(and(eq(User.id, id), eq(User.softDelete, false)))
+  //     .returning();
+  //   return result[0];
+  // }
   async updateUser(id, data) {
-    const result = await db
-      .update(User)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(User.id, id), eq(User.softDelete, false)))
-      .returning();
-    return result[0];
-  }
+  const result = await db
+    .update(User)
+    .set({
+      ...data,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(User.id, Number(id)), 
+        eq(User.softDelete, false)
+      )
+    )
+    .returning();
+
+  return result[0];
+}
 
   //soft delte
   async deleteUser(id) {
@@ -80,6 +98,15 @@ class userRepository {
 
     return result[0];
   }
-}
+  async findUserByEmail(email) {
+    const user = await db
+    .select()
+    .from(User)
+    .where(and(eq(User.email, email), eq(User.softDelete, false)))
+    .limit(1);
+
+  return user.length ? user[0] : null;
+  }
+};
 
 module.exports = new userRepository();

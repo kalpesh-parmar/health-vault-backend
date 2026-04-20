@@ -6,14 +6,18 @@ const {
   logoutSchema,
   deleteSchema,
 } = require("../validation/sessionValidation");
+const jwt = require("jsonwebtoken");
 
 class SessionController {
   //create session
   async createSession(req, res) {
     try {
-      const validated = createSessionSchema.parse(req.body);
-
-      const result = await sessionService.createSession(validated);
+      const { token } = createSessionSchema.parse(req.body);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const data = {
+        userId: decoded.userId,
+      };
+      const result = await sessionService.createSession(data);
 
       return GeneralResponse.created(
         res,
@@ -28,7 +32,12 @@ class SessionController {
           error.errors,
         );
       }
-
+      if (error.name === "JsonWebTokenError") {
+      return GeneralResponse.UnauthorizeResponse(
+        res,
+        "Invalid token"
+      );
+    }
       return GeneralResponse.serverError(res, error.message);
     }
   }

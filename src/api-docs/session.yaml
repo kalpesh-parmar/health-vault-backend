@@ -10,12 +10,10 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - userId
               properties:
-                userId:
-                  type: integer
-                  example: 1
+                token:
+                  type: string
+                  example: your_jwt_token_here
       responses:
         201:
           description: Session created successfully

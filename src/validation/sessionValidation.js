@@ -1,7 +1,7 @@
 const { z } = require("zod");
 
 const createSessionSchema = z.object({
-  userId: z.number(),
+  token: z.string(),
 });
 
 const logoutSchema = z.object({

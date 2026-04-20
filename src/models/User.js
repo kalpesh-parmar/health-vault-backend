@@ -5,6 +5,7 @@ const {
   timestamp,
   boolean,
 } = require("drizzle-orm/pg-core");
+const { string } = require("zod");
 
 const User = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -18,8 +19,8 @@ const User = pgTable("users", {
   password: varchar("password", { length: 255 }).notNull(),
   // phone: varchar("phone", { length: 10 }).notNull(),
 
-  softDelete: boolean("soft_delete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  softDelete: boolean("soft_delete").default(false).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 module.exports = User;

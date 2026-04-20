@@ -1,6 +1,17 @@
 require("dotenv").config();
 const bcrypt = require("bcrypt");
-const { userSchema, updateUserSchema } = require("../validation/zodValidation");
+const {
+  InvalidRequestException,
+  NotFoundException,
+  AlredayExistsException,
+  UnauthorizedException,
+  AccessDeniedError,
+} = require("../excptions/ApiError");
+const {
+  userSchema,
+  updateUserSchema,
+  loginUserSchema,
+} = require("../validation/zodValidation");
 const { session: sessionTable } = require("../models/session");
 const { user } = require("../models/User");
 const { db } = require("../config/db");
@@ -8,38 +19,32 @@ const { GeneralResponse } = require("../helpers/genralResponse");
 const userRepository = require("../repositories/userRepository");
 const messageConstant = require("../constant/messageConstant");
 const jwt = require("jsonwebtoken");
-const {
-  InvalidRequestException,
-  NotFoundException,
-} = require("../excptions/ApiError");
+const zodValidateData = require("../validation");
 
 class userService {
-  // Create User
-  async createUser(data) {
-    const result = userSchema.safeParse(data);
-
-    console.log(data);
-    if (!result.success) {
-      throw result.error;
-    }
-    const validatedData = result.data;
-    validatedData.password = await bcrypt.hash(validatedData.password, 10);
-    const newUser = await userRepository.createUser(validatedData);
-    return newUser;
-  }
-
   //Login User
   async loginUser(data) {
     const { email, password } = data;
+    if (!email || !password) {
+      throw new InvalidRequestException(
+        messageConstant.EMAIL_PASSWORD_REQUIRED,
+      );
+    }
     const userData = await userRepository.loginUser(email);
     if (!userData) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
-
+    const isMatch = await bcrypt.compare(password, userData.password);
+    if (!isMatch) {
+      throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
+    }
     //Sessiondata
     const session = await userRepository.createSession({ userId: userData.id });
     const tempToken = jwt.sign(
-      { sessionId: session.id },
+      {
+        sessionId: session.id,
+        userId: userData.id,
+      },
       process.env.JWT_SECRET,
       {
         expiresIn: "7d",
@@ -48,6 +53,24 @@ class userService {
     return tempToken;
   }
 
+  // Create User
+  async createUser(data) {
+    const validation = await zodValidateData(userSchema, data);
+    if (!validation.success) {
+      throw new InvalidRequestException(validation.error);
+    }
+    const validatedData = validation.data;
+    const existingUser = await userRepository.findUserByEmail(
+      validatedData.email,
+    );
+
+    if (existingUser) {
+      throw new InvalidRequestException(messageConstant.EMAIL_ALREADY_EXISTS);
+    }
+    validatedData.password = await bcrypt.hash(validatedData.password, 10);
+    const newUser = await userRepository.createUser(validatedData);
+    return newUser;
+  }
   //get user by id
   async getUserById(id) {
     return await userRepository.getUserById(id);
@@ -69,11 +92,12 @@ class userService {
     if (!data || Object.keys(data).length === 0) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
-    const result = updateUserSchema.safeParse(data);
-    if (!result.success) {
-      throw result.error;
+
+    const validation = await zodValidateData(updateUserSchema, data);
+    if (!validation.success) {
+      throw new InvalidRequestException(validation.error);
     }
-    const validatedData = result.data;
+    const validatedData = validation.data;
     if (validatedData.password) {
       validatedData.password = await bcrypt.hash(validatedData.password, 10);
     }

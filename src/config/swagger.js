@@ -15,16 +15,16 @@ const options = {
     // //     description: "Local server",
     // //   },
     // // ],
-    // components: {
-    //   // securitySchemes: {
-    //   //   bearerAuth: {
-    //   //     type: "http",
-    //   //     scheme: "bearer",
-    //   //     bearerFormat: "JWT",
-    //   //   },
-    //   // },
-    // },
-    //applies authentication to ALL endpoints by default
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+    },
+    // applies authentication to ALL endpoints by default
     security: [
       {
         bearerAuth: [],

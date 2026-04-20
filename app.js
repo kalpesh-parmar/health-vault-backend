@@ -4,10 +4,10 @@ const express = require("express");
 require("dotenv").config();
 const swaggerUi = require("swagger-ui-express");
 const swaggerDocs = require("./src/config/swagger");
-const errorHandler = require("./src/middlerwares/authMiddleware");
 
 // import routes index
 const routes = require("./src/routes/index");
+const errorMiddleware = require("./src/excptions/globalHandling");
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -16,7 +16,7 @@ const port = process.env.PORT || 3000;
 // all routes
 app.use(routes);
 swaggerDocs(app, port);
-
+app.use(errorMiddleware);
 app.listen(port, () => {
   console.log(`Server started on port ${port}`);
 });

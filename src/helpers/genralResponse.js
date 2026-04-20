@@ -75,10 +75,10 @@ class GeneralResponse {
 
   //401 Unauthorized Error
   static UnauthorizeResponse(res, message = "Unauthorized error") {
-    return new UnauthorizedResponse(
+    return new GeneralResponse(
       401,
       null,
-      STATUS_CODE.UNAUTHORIZED,
+      StatusCodes.UNAUTHORIZED,
       "UNAUTHORIZED",
       message,
     );

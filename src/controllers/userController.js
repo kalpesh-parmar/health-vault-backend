@@ -1,41 +1,49 @@
+const { validate } = require("uuid");
 const messageConstant = require("../constant/messageConstant");
+const errorHandler = require("../excptions/globalHandling");
 const GeneralResponse = require("../helpers/genralResponse");
 const userService = require("../services/userService");
+const zodValidateData = require("../validation");
+const {
+  userSchema,
+  loginUserSchema,
+  updateUserSchema,
+} = require("../validation/zodValidation");
 
 class userController {
   // User Login
   loginUser = async (req, res, next) => {
     try {
-      const result = await userService.loginUser(req.body);
+      const validation = await zodValidateData(loginUserSchema, req.body);
+      if (!validation.success) {
+        return GeneralResponse.badRequest(
+          res,
+          "Validation failed",
+          validation.error,
+        );
+      }
+      const token = await userService.loginUser(validation.data);
       return GeneralResponse.created(
         res,
+        { token },
         messageConstant.USER_LOGIN_SUCCESSFULLY,
-        result,
       );
     } catch (error) {
       console.log("error in login user:", error);
       next(error);
     }
   };
-
   // Create User
   createUser = async (req, res, next) => {
     try {
       const result = await userService.createUser(req.body);
       return GeneralResponse.created(
         res,
-        messageConstant.USER_ADDED_SUCCESSFULLY,
         result,
+        messageConstant.USER_ADDED_SUCCESSFULLY,
       );
     } catch (error) {
       console.log("error in create user:", error);
-
-      if (error.errors) {
-        return GeneralResponse.badRequest(
-          res,
-          messageConstant.INVALID_PASSWORD,
-        );
-      }
       next(error);
     }
   };
@@ -46,8 +54,8 @@ class userController {
       const result = await userService.getUserById(req.params.id);
       return GeneralResponse.success(
         res,
-        messageConstant.USER_FETCHED_SUCCESSFULLY,
         result,
+        messageConstant.USER_FETCHED_SUCCESSFULLY,
       );
     } catch (error) {
       console.log("error in get user by id:", error);

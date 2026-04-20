@@ -4,6 +4,9 @@ const MessageConstant = require("../constant/MessageConstant");
 class SessionService {
   // create session
   async createSession(data) {
+    if (!data.userId) {
+    throw new Error("UserId is required");
+  }
     return await sessionRepository.create(data);
   }
 
@@ -35,4 +38,4 @@ class SessionService {
   }
 }
 
-module.exports = new SessionService();
+module.exports = new SessionService();  

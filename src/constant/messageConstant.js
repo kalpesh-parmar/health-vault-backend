@@ -19,9 +19,11 @@ const messageConstant = {
   OTP_VERIFIED: "OTP is verified",
   USER_BLOCKED: "User Blocked",
   EMAIL_VERIFY_SUCCESSFULLY: "Email is verified successfully",
+  EMAIL_ALREADY_EXISTS: "Email is already exists",
 
   //EXCEPTION
   INVALID_REQUEST: "Invalid request",
+  ALREADY_EXIST:"Already exist",
   NOT_FOUND: "Not found",
   USER_NOT_FOUND: "user not found",
   UNAUTHORIZED: "Unauthorized",

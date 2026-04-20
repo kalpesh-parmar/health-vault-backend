@@ -1,3 +1,4 @@
+const messageConstant = require("../constant/MessageConstant");
 const MessageConstant = require("../constant/MessageConstant");
 const { StatusCodes } = require("http-status-codes");
 
@@ -24,7 +25,7 @@ class NotFoundException extends AppError {
 }
 
 class AlredayExistsException extends AppError {
-  constructor(message = MessageConstant.ALREADY_EXIST) {
+  constructor(message = messageConstant.ALREADY_EXIST) {
     super(StatusCodes.CONFLICT, message);
   }
 }
@@ -40,10 +41,21 @@ class AccessDeniedError extends AppError {
     super(StatusCodes.FORBIDDEN, message);
   }
 }
+
+class InternalServerError extends AppError {
+  constructor(message = MessageConstant.INTERNAL_SERVER_ERROR) {
+    super(
+      StatusCodes.INTERNAL_SERVER_ERROR,
+      messageConstant.SOMETHING_WENT_WRONG,
+    );
+  }
+}
 module.exports = {
+  AppError,
   InvalidRequestException,
   NotFoundException,
   AlredayExistsException,
   UnauthorizedException,
   AccessDeniedError,
+  InternalServerError,
 };
