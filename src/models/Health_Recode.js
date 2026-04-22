@@ -6,16 +6,16 @@ const {
   boolean,
   timestamp,
 } = require("drizzle-orm/pg-core");
-const { user } = require("./User");
+const { User } = require("./User");
 
 const healthRecords = pgTable("health_records", {
   id: serial("id").primaryKey(),
 
   userId: integer("user_id")
     .notNull()
-    .references(() => user.id),
+    .references(() => User.id),
 
-  recoed: text("record"),
+  record: text("record"),
 
   softDelete: boolean("soft_delete").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

@@ -5,43 +5,22 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1776248132260,
-      "tag": "0000_daffy_bill_hollister",
+      "when": 1776836902452,
+      "tag": "0000_bent_spencer_smythe",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1776248806692,
-      "tag": "0001_closed_overlord",
+      "when": 1776838575932,
+      "tag": "0001_huge_gertrude_yorkes",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
-      "when": 1776316327069,
-      "tag": "0002_broken_ma_gnuci",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1776331218010,
-      "tag": "0003_keen_thor_girl",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1776256661175,
-      "tag": "0001_open_misty_knight",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1776332358914,
-      "tag": "0002_lazy_boomerang",
+      "when": 1776838964341,
+      "tag": "0002_certain_mindworm",
       "breakpoints": true
     }
   ]

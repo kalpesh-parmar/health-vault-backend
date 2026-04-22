@@ -1,5 +1,8 @@
 const jwt = require("jsonwebtoken");
 const MessageConstants = require("../constant/MessageConstant");
+const {} = require("drizzle-orm");
+const { InvalidRequestException } = require("../excptions/ApiError");
+const messageConstant = require("../constant/MessageConstant");
 
 class AuthMiddleware {
   constructor(db) {
@@ -8,25 +11,26 @@ class AuthMiddleware {
   }
   async auth(req, res, next) {
     try {
-      const token = req.headers.authorization?.split(" ")[1];
+      const token = req.headers?.authorization.split(" ")[1];
       if (!token) {
-        return res
-          .status(401)
-          .json({ message: MessageConstants.TOKEN_NOT_FOUND });
+        throw InvalidRequestException(messageConstant.INVALID_TOKEN);
       }
       //decode token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      //get session from db
-      const session = await this.db.session.findOne({
-        id: decoded.sessionId,
-      });
+      // get session from db
+      // const session = await this.db.session.findOne({
+      //   id: decoded.sessionId,
+      // });
+      const session = await this.db
+        .select()
+        .from(this.db.session)
+        .where(eq(this.db.session.id, decoded.sessionId))
+        .limit(1);
 
       //vaidate session
       if (!session || !session.isActive || session.logoutTime) {
-        return res
-          .status(401)
-          .json({ message: MessageConstants.SESSION_EXPIRED });
+        throw InvalidRequestException(messageConstant.INVALID_SESSIONID);
       }
       //  user/session requrest
       req.session = session;
@@ -34,7 +38,20 @@ class AuthMiddleware {
       next();
     } catch (error) {
       console.error("Authentication error:", error);
-      return res.status(401).json({ message: MessageConstants.INVALID_TOKEN });
+      if (error.name === "TokenExpiredError") {
+        try {
+          const decoded = jwt.decode(token); // decode without verify
+
+          if (decoded?.sessionId) {
+            await this.db
+              .update(this.db.session)
+              .set({ isActive: false })
+              .where(eq(this.db.session.id, decoded.sessionId));
+          }
+        } catch (dbError) {
+          console.error("Session update error:", dbError);
+        }
+      }
     }
   }
 }

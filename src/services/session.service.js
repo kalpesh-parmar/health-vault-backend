@@ -1,17 +1,21 @@
 const sessionRepository = require("../repositories/sessionRepositoty");
 const MessageConstant = require("../constant/MessageConstant");
+const messageConstant = require("../constant/MessageConstant");
 
 class SessionService {
   // create session
   async createSession(data) {
     if (!data.userId) {
-    throw new Error("UserId is required");
-  }
+      throw new Error("UserId is required");
+    }
     return await sessionRepository.create(data);
   }
 
   // get session by id
   async getSessionById(sessionId) {
+    if (!sessionId) {
+      return GeneralResponse.badRequest(res,messageConstant.INVALID_SESSIONID);
+    }
     const session = await sessionRepository.findById(sessionId);
 
     if (!session) {
@@ -38,4 +42,4 @@ class SessionService {
   }
 }
 
-module.exports = new SessionService();  
+module.exports = new SessionService();

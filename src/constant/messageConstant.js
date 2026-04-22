@@ -22,6 +22,9 @@ const messageConstant = {
   EMAIL_ALREADY_EXISTS: "Email is already exists",
 
   //EXCEPTION
+  INVALID_SESSIONID:"Invalid session id",
+  INVALID_TOKEN:"Invalid token",
+  VALIDATION_FAILED:"Validation failed",
   INVALID_REQUEST: "Invalid request",
   ALREADY_EXIST:"Already exist",
   NOT_FOUND: "Not found",
@@ -38,6 +41,11 @@ const messageConstant = {
 
   //VALIDATIORS
   VALID_EMAIL: "Please enter valid email",
+  ENTER_VALID_GENDER:"Enter a valid gender",
+  HSP_NAME_REQUIRE:"Hospital name is required",
+  VALID_FILE_SIZE:"File size exceeds the 25MB limit. Please upload a smaller file.",
+  ENTER_VALID_FILETYPE:"Please enter a valid file ",
+  VALID_DOCUMENT:"Please enter valid document type",
   EMAIL_REQUIRED: "Please Enter Email",
   EMAIL_TOO_SHORT: "Email must be atleast 5 character",
   EMAIL_TOO_LONG: "Email is too long",

@@ -9,12 +9,12 @@ const options = {
       version: "1.0.0",
       description: "API documentation using Swagger",
     },
-    // // servers: [
-    // //   {
-    // //     url: "http://localhost:3003/api",
-    // //     description: "Local server",
-    // //   },
-    // // ],
+    servers: [
+      {
+        url: "http://localhost:3003/",
+        description: "Local server",
+      },
+    ],
     components: {
       securitySchemes: {
         bearerAuth: {
