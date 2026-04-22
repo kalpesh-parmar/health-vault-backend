@@ -4,7 +4,7 @@ const { StatusCodes } = require("http-status-codes");
 
 //throw error
 class AppError extends Error {
-  constructor(code, description) {
+  constructor(code, description, errors = null) {
     super(description);
     this.code = code;
     this.description = description;

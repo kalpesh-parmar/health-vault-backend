@@ -3,29 +3,20 @@ const messageConstant = require("../constant/messageConstant");
 const errorHandler = require("../excptions/globalHandling");
 const GeneralResponse = require("../helpers/genralResponse");
 const userService = require("../services/userService");
-const zodValidateData = require("../validation");
-const {
-  userSchema,
+const zodValidateData=require("../validation/index");
+const{  userSchema,
   loginUserSchema,
   updateUserSchema,
-} = require("../validation/zodValidation");
+} = require("../validation/zodUserValidation");
 
 class userController {
   // User Login
   loginUser = async (req, res, next) => {
     try {
-      const validation = await zodValidateData(loginUserSchema, req.body);
-      if (!validation.success) {
-        return GeneralResponse.badRequest(
-          res,
-          "Validation failed",
-          validation.error,
-        );
-      }
-      const token = await userService.loginUser(validation.data);
+      const result = await userService.loginUser(req?.body);
       return GeneralResponse.created(
         res,
-        { token },
+        result,
         messageConstant.USER_LOGIN_SUCCESSFULLY,
       );
     } catch (error) {
@@ -36,7 +27,7 @@ class userController {
   // Create User
   createUser = async (req, res, next) => {
     try {
-      const result = await userService.createUser(req.body);
+      const result = await userService.createUser(req?.body);
       return GeneralResponse.created(
         res,
         result,
@@ -51,7 +42,7 @@ class userController {
   // Get User by ID
   getUserById = async (req, res, next) => {
     try {
-      const result = await userService.getUserById(req.params.id);
+      const result = await userService.getUserById(req?.params?.id);
       return GeneralResponse.success(
         res,
         result,
@@ -81,7 +72,7 @@ class userController {
   // Update User
   updateUser = async (req, res, next) => {
     try {
-      const result = await userService.updateUser(req.params.id, req.body);
+      const result = await userService.updateUser(req?.params?.id, req?.body);
       return GeneralResponse.updated(
         res,
         result,
@@ -96,7 +87,7 @@ class userController {
   // Delete User
   deleteUser = async (req, res, next) => {
     try {
-      const result = await userService.deleteUser(req.params.id);
+      const result = await userService.deleteUser(req?.params?.id);
       return GeneralResponse.success(
         res,
         result,

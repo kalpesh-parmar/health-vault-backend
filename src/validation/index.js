@@ -9,11 +9,11 @@ async function zodValidateData(schema, data) {
     }
     const result = await schema.safeParseAsync(data);
     if (!result.success) {
-      const issues = result?.error?.issues || [];
-      const error = issues?.[0] ||{};
+      // const issues = result?.error?.issues || [];
+      // const error = issues?.[0] ||{};
       return {
         success: false,
-        error: error.message,
+        error: result.error.issues,
       };
     }
     return {
@@ -21,11 +21,11 @@ async function zodValidateData(schema, data) {
       data: result.data,
     };
   } catch (errors) {
-    const issues = errors?.error?.issues || [];
+    const issues = errors?.issues || [];
     const error = issues?.[0] || {};
     return {
       success: false,
-      error: error.message,
+      error: issues,
     };
   }
 }

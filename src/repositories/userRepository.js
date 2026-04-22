@@ -1,8 +1,8 @@
 const { any } = require("zod");
 const { db } = require("../config/db");
-const { session } = require("../models/session");
+const  {session}  = require("../models/session");
 const { eq, and } = require("drizzle-orm");
-const User = require("../models/User");
+const {User} = require("../models/User");
 
 class userRepository {
   //Login USer
@@ -20,23 +20,18 @@ class userRepository {
     return db
       .insert(session)
       .values({
-        userId: userId,
+        userId,
         loginTime: new Date(),
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
-      .returning();
   };
   //Create User
   async createUser(data) {
     return await db
       .insert(User)
-      .values({
-        userName: data.userName,
-        email: data.email,
-        password: data.password,
-      })
+      .values(data)
       .returning();
   }
 
@@ -54,19 +49,7 @@ class userRepository {
     return await db.select().from(User).where(eq(User.softDelete, false));
   }
 
-  //updated user if not delted
-  // async updateUser(id, data) {
-  //   console.log("DB DATA:", data);
-  //   const result = await db
-  //     .update(User)
-  //     .set({
-  //       ...data,
-  //       updatedAt: new Date(),
-  //     })
-  //     .where(and(eq(User.id, id), eq(User.softDelete, false)))
-  //     .returning();
-  //   return result[0];
-  // }
+  
   async updateUser(id, data) {
   const result = await db
     .update(User)

@@ -13,18 +13,35 @@ paths:
               type: object
               required:
                 - userName
+                - fullName
                 - email
                 - password
+                - gender
+                - dateOfBirth
+                - phoneNo
               properties:
                 userName:
                   type: varchar
                   example: "Abcpqr"
+                fullName:
+                  type: varchar
+                  example: "Abc Pqr Xyz"
                 email:
                   type: varchar
                   example: "Abcd1@gmail.com"
                 password:
                   type: varchar
                   example: "S1234@abc"
+                gender:
+                  type: string
+                  example: "male/female"
+                dateOfBirth:
+                  type: date
+                  example: "2006-01-31"
+                phone:
+                  type: string
+                  example: "1234567890"
+
       responses:
         201:
           description: User created successfully
@@ -102,12 +119,24 @@ paths:
                 userName:
                   type: string
                   example: "UpdatedName"
+                fullName:
+                  type: string
+                  example: "Abc Pqr Xyz"
                 email:
                   type: string
                   example: "updated@gmail.com"
                 password:
                   type: string
                   example: "NewPassword123"
+                gender:
+                  type: string
+                  example: "male/female"
+                dateOfBirth:
+                  type: date
+                  example: "2006-01-31"
+                phone:
+                  type: string
+                  example: "1234567890"
       responses:
         200:
           description: User updated successfully
