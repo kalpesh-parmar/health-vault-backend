@@ -13,7 +13,7 @@ const healthRecords = pgTable("health_records", {
 
   userId: integer("user_id")
     .notNull()
-    .references(() => User.id),
+    .references(() => User.id, { onDelete: "cascade" }),
 
   record: text("record"),
 

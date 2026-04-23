@@ -10,7 +10,7 @@ const {
 
 } = require("drizzle-orm/pg-core");
 const { User } = require("./User");
-const { fileType } = require("../enumData/fileEnum");
+const { fileEnum } = require("../enumData/fileEnum");
 const { ocrStatus } = require("../enumData/ocrStatus");
 const { documentTypeEnum } = require("../enumData/documentType");
 
@@ -19,11 +19,11 @@ const Document = pgTable("documents", {
   id: serial("id").primaryKey(),
   userId: integer("user_id")
     .notNull()
-    .references(() => User.id),
+    .references(() => User.id, { onDelete: "cascade" }),
   documentType:documentTypeEnum("document_type").notNull(),
   fileName:varchar("file_name",{ length: 255 }).notNull(),
   fileStoragePath:text("file_path"),
-  fileType:fileType("file").notNull(),
+  fileType:fileEnum("file_types").notNull(),
   fileSize:integer("file_size"),
   OCRStatus:ocrStatus("OCR_status").default("Pending").notNull(),
   ocrextractedText:text("OCR_extracted_text"),

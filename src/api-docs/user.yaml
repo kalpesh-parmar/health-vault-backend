@@ -158,3 +158,19 @@ paths:
           description: User deleted successfully
         404:
           description: User not found
+  /user/permanentDelete/{id}:
+    delete:
+      summary: Permanent delete user
+      tags:
+        - User
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        200:
+          description: User permanently deleted successfully
+        404:
+          description: User not found

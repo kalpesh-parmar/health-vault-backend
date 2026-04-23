@@ -69,6 +69,14 @@ class userRepository {
 
     return user.length ? user[0] : null;
   }
+
+  //permanent delete user by id
+  async permanentDeleteUser(id) {
+    const result = await db
+      .delete(User)
+      .where(eq(User.id, id));
+    return result[0] || null;
+  }
 }
 
 module.exports = new userRepository();

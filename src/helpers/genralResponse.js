@@ -24,7 +24,7 @@ class GeneralResponse {
   }
 
   // 200 OK
-  static success(res, data = null, message = "Success") {
+  static success(res, data = null, message = "Success") { 
     return new GeneralResponse(res, data, StatusCodes.OK, "SUCCESS", message);
   }
 
