@@ -23,6 +23,9 @@ const messageConstant = {
 
   //EXCEPTION
   INVALID_SESSIONID:"Invalid session id",
+  SESSION_NOT_FOUND: "Session not found",
+  LOGOUT_SUCCESS: "Logout successfully",
+  ALREADY_LOGOUT: "Already logout",
   INVALID_TOKEN:"Invalid token",
   VALIDATION_FAILED:"Validation failed",
   INVALID_REQUEST: "Invalid request",

@@ -1,8 +1,8 @@
 const { any } = require("zod");
 const { db } = require("../config/db");
-const  {session}  = require("../models/session");
+const { session } = require("../models/session");
 const { eq, and } = require("drizzle-orm");
-const {User} = require("../models/User");
+const { User } = require("../models/User");
 
 class userRepository {
   //Login USer
@@ -17,7 +17,7 @@ class userRepository {
 
   //create user session
   createSession = async ({ userId }) => {
-    return db
+    const [sessionCreate] = await db
       .insert(session)
       .values({
         userId,
@@ -26,13 +26,12 @@ class userRepository {
         createdAt: new Date(),
         updatedAt: new Date(),
       })
+      .returning();
+    return sessionCreate ?? null;
   };
   //Create User
   async createUser(data) {
-    return await db
-      .insert(User)
-      .values(data)
-      .returning();
+    return await db.insert(User).values(data).returning();
   }
 
   //get user by id if not delted
@@ -49,24 +48,18 @@ class userRepository {
     return await db.select().from(User).where(eq(User.softDelete, false));
   }
 
-  
   async updateUser(id, data) {
-  const result = await db
-    .update(User)
-    .set({
-      ...data,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(User.id, Number(id)), 
-        eq(User.softDelete, false)
-      )
-    )
-    .returning();
+    const result = await db
+      .update(User)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(User.id, Number(id)), eq(User.softDelete, false)))
+      .returning();
 
-  return result[0];
-}
+    return result[0];
+  }
 
   //soft delte
   async deleteUser(id) {
@@ -83,13 +76,13 @@ class userRepository {
   }
   async findUserByEmail(email) {
     const user = await db
-    .select()
-    .from(User)
-    .where(and(eq(User.email, email), eq(User.softDelete, false)))
-    .limit(1);
+      .select()
+      .from(User)
+      .where(and(eq(User.email, email), eq(User.softDelete, false)))
+      .limit(1);
 
-  return user.length ? user[0] : null;
+    return user.length ? user[0] : null;
   }
-};
+}
 
 module.exports = new userRepository();

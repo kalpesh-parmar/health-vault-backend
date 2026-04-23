@@ -25,7 +25,7 @@ const Document = pgTable("documents", {
   fileStoragePath:text("file_path"),
   fileType:fileType("file").notNull(),
   fileSize:integer("file_size"),
-  OCRStatus:ocrStatus("status").default("Pending").notNull(),
+  OCRStatus:ocrStatus("OCR_status").default("Pending").notNull(),
   ocrextractedText:text("OCR_extracted_text"),
   structuredExtractedData:varchar("structured_extracted_data"),
   reportDate:date("report_date"),

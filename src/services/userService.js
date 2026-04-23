@@ -19,9 +19,10 @@ const { GeneralResponse } = require("../helpers/genralResponse");
 const userRepository = require("../repositories/userRepository");
 const messageConstant = require("../constant/messageConstant");
 const jwt = require("jsonwebtoken");
-const zodValidateData = require("../validation");
+const zodValidateData = require("../validation/index");
 const { generateNumericPatientCode } = require("../utils/generateCode");
 const { tempToken } = require("../utils/jwtUtils");
+const JwtUtils = require("../utils/jwtUtils");
 
 class userService {
   //Login User
@@ -34,15 +35,11 @@ class userService {
     }
     const validation = await zodValidateData(loginUserSchema, data);
     if (!validation.success) {
-      return GeneralResponse.badRequest(
-        res,
-        messageConstant.VALIDATION_FAILED,
-        validation.error,
-      );
+      throw new InvalidRequestException("Validation failed", validation.error);
     }
     const userData = await userRepository.loginUser(email);
-    console.log("userData====",userData.id);
-    
+    console.log("userData====", userData);
+
     if (!userData) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
@@ -51,20 +48,19 @@ class userService {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
     //Sessiondata
-    const session = await userRepository.createSession({userId:userData.id});
+    const session = await userRepository.createSession({ userId: userData.id });
+    console.log("session====", session);
     const payload = { session: session.id };
-    const token = tempToken(payload);
-    return token ;
+    return JwtUtils.generateToken(payload);
   }
 
   // Create User
   async createUser(data) {
-      data.patientCode = generateNumericPatientCode();
+    data.patientCode = generateNumericPatientCode();
     const validation = await zodValidateData(userSchema, data);
     if (!validation.success) {
-      throw new InvalidRequestException(validation.error);
+      throw new InvalidRequestException("Validation failed", validation.error);
     }
-    console.log("Validation Result:", validation);
     const validatedData = validation.data || {};
     const existingUser = await userRepository.findUserByEmail(
       validatedData.email,
@@ -73,7 +69,7 @@ class userService {
     if (existingUser) {
       throw new InvalidRequestException(messageConstant.EMAIL_ALREADY_EXISTS);
     }
-    validatedData.password = await bcrypt.hash(validatedData.password, 10);    
+    validatedData.password = await bcrypt.hash(validatedData.password, 10);
     const newUser = await userRepository.createUser(validatedData);
     return newUser;
   }
@@ -98,7 +94,7 @@ class userService {
     }
     const validation = await zodValidateData(updateUserSchema, data);
     if (!validation.success) {
-      throw new InvalidRequestException(validation.error);
+      throw new InvalidRequestException("Validation failed", validation.error);
     }
     const validatedData = validation.data || {};
     if (validatedData.password) {

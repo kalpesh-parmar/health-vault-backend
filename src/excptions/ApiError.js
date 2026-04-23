@@ -9,17 +9,18 @@ class AppError extends Error {
     this.code = code;
     this.description = description;
     this.status = "ERROR";
+    this.errors = errors;
   }
 }
 
 class InvalidRequestException extends AppError {
-  constructor(message = MessageConstant.INVALID_REQUEST) {
-    super(StatusCodes.BAD_REQUEST, message);
+  constructor(message = MessageConstant.INVALID_REQUEST, errors = null) {
+    super(StatusCodes.BAD_REQUEST, message, errors);
   }
 }
 
 class NotFoundException extends AppError {
-  constructor(message = MessageConstant.NOT_FOUND) {
+  constructor(message = MessageConstant.NOT_FOUND, errors = null) {
     super(StatusCodes.NOT_FOUND, message);
   }
 }

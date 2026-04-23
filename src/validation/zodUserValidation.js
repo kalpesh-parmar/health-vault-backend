@@ -2,7 +2,7 @@ const { z } = require("zod");
 const messageConstant = require("../constant/messageConstant");
 const { genderValues } = require("../enumData/genderEnum");
 
-const genderZod = z.enum(genderValues);
+const genderZod = z.enum(genderValues,messageConstant.INVALID_GENDER);
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 const UPPER_REGEX = /[A-Z]/;

@@ -18,10 +18,6 @@ class AuthMiddleware {
       //decode token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // get session from db
-      // const session = await this.db.session.findOne({
-      //   id: decoded.sessionId,
-      // });
       const session = await this.db
         .select()
         .from(this.db.session)
@@ -34,7 +30,6 @@ class AuthMiddleware {
       }
       //  user/session requrest
       req.session = session;
-      req.userid = session.userId;
       next();
     } catch (error) {
       console.error("Authentication error:", error);
