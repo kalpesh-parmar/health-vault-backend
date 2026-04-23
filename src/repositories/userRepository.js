@@ -15,20 +15,6 @@ class userRepository {
     return user[0];
   }
 
-  //create user session
-  createSession = async ({ userId }) => {
-    const [sessionCreate] = await db
-      .insert(session)
-      .values({
-        userId,
-        loginTime: new Date(),
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-    return sessionCreate ?? null;
-  };
   //Create User
   async createUser(data) {
     return await db.insert(User).values(data).returning();

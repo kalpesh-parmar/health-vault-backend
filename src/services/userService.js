@@ -23,13 +23,16 @@ const zodValidateData = require("../validation/index");
 const { generateNumericPatientCode } = require("../utils/generateCode");
 const { tempToken } = require("../utils/jwtUtils");
 const JwtUtils = require("../utils/jwtUtils");
+const sessionRepositoty = require("../repositories/sessionRepositoty");
 
 class userService {
   //Login User
   async loginUser(data) {
-    const { email, password } = data;
+    const { email, password } = data || {};
     if (!email || !password) {
-      throw new InvalidRequestException(messageConstant.EMAIL_PASSWORD_REQUIRED);
+      throw new InvalidRequestException(
+        messageConstant.EMAIL_PASSWORD_REQUIRED,
+      );
     }
     const validation = await zodValidateData(loginUserSchema, data);
     if (!validation.success) {
@@ -44,7 +47,7 @@ class userService {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
     //Sessiondata
-    const session = await userRepository.createSession({ userId: userData.id });
+    const session = await sessionRepositoty.createSession({ userId: userData.id });
     const payload = { session: session.id };
     return JwtUtils.generateToken(payload);
   }
@@ -69,11 +72,14 @@ class userService {
   }
   //get user by id
   async getUserById(id) {
-    if (!id) throw InvalidRequestException(messageConstant.USER_NOT_FOUND);
+    if (!id) {
+      throw new InvalidRequestException(messageConstant.USER_NOT_FOUND);
+    }
     return await userRepository.getUserById(id);
     if (!result) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
+    return result;
   }
 
   //get user list
