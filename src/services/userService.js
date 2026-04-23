@@ -29,17 +29,13 @@ class userService {
   async loginUser(data) {
     const { email, password } = data;
     if (!email || !password) {
-      throw new InvalidRequestException(
-        messageConstant.EMAIL_PASSWORD_REQUIRED,
-      );
+      throw new InvalidRequestException(messageConstant.EMAIL_PASSWORD_REQUIRED);
     }
     const validation = await zodValidateData(loginUserSchema, data);
     if (!validation.success) {
       throw new InvalidRequestException("Validation failed", validation.error);
     }
     const userData = await userRepository.loginUser(email);
-    console.log("userData====", userData);
-
     if (!userData) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
@@ -49,7 +45,6 @@ class userService {
     }
     //Sessiondata
     const session = await userRepository.createSession({ userId: userData.id });
-    console.log("session====", session);
     const payload = { session: session.id };
     return JwtUtils.generateToken(payload);
   }
@@ -65,7 +60,6 @@ class userService {
     const existingUser = await userRepository.findUserByEmail(
       validatedData.email,
     );
-
     if (existingUser) {
       throw new InvalidRequestException(messageConstant.EMAIL_ALREADY_EXISTS);
     }
