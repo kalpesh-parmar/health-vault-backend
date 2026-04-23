@@ -40,18 +40,6 @@ paths:
       summary: Logout session
       tags:
         - Session
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - sessionId
-              properties:
-                sessionId:
-                  type: integer
-                  example: 1
       responses:
         200:
           description: Logout successful

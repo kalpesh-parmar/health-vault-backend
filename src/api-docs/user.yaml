@@ -34,7 +34,7 @@ paths:
                   example: "S1234@abc"
                 gender:
                   type: string
-                  example: "male/female"
+                  example: "female"
                 dateOfBirth:
                   type: date
                   example: "2006-01-31"

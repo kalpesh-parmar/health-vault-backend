@@ -1,20 +1,25 @@
 const { StatusCodes } = require("http-status-codes");
 class GeneralResponse {
-  constructor(res, data, statusCode, status, message) {
+  constructor(res, data, statusCode, status, message, errors = null) {
     this.data = data;
     this.status = status;
     this.statusCode = statusCode;
     this.message = message;
+    this.errors = errors;
 
     if (res) {
-      res.status(statusCode).json({
+      const response = {
         data: data,
         status: {
           status: status,
           statusCode: statusCode,
           description: message,
         },
-      });
+      };
+      if (errors) {
+        response.errors = errors;
+      }
+      res.status(statusCode).json(response);
     }
   }
 

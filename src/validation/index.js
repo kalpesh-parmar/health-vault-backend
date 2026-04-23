@@ -9,8 +9,6 @@ async function zodValidateData(schema, data) {
     }
     const result = await schema.safeParseAsync(data);
     if (!result.success) {
-      // const issues = result?.error?.issues || [];
-      // const error = issues?.[0] ||{};
       return {
         success: false,
         error: result.error.issues,

@@ -2,11 +2,11 @@ const { z } = require("zod");
 const messageConstant = require("../constant/messageConstant");
 const { documentTypeEnum } = require("../enumData/documentType");
 const { fileType } = require("../enumData/fileEnum");
-const { ocrStatus } = require("../enumData/ocrStatus");
+const { statusType } = require("../enumData/ocrStatus");
 
 const documentEnum = z.enum(documentTypeEnum, messageConstant.VALID_DOCUMENT);
 const fileEnum = z.enum(fileType,messageConstant.ENTER_VALID_FILETYPE);
-const ocrEnum = z.enum(ocrStatus);
+const ocrEnum = z.enum(statusType);
 const UPPER_REGEX = /[A-Z]/;
 const LOWER_CASE = /[a-z]/;
 const NUMBER = /[0-9]/;
@@ -29,7 +29,7 @@ const fileSize = z
 const fileStoragePath= z.string().min(1, "Storage path is required");
 const ocrextractedText= z.string().optional().nullable();
 const structuredExtractedData= z.string().optional().nullable();
-const reportDate= z.string().pipe(z.coerce.date()).optional().nullable();
+const reportDate= z.coerce.date().optional().nullable();
 const hospitalName= z.string().min(1, messageConstant.HSP_NAME_REQUIRE);
 const doctorName= z.string().max(25,messageConstant.NAME_TOO_LONG);
 const remarks= z.string().optional().nullable();
@@ -49,16 +49,5 @@ const DocumentSchema = z
     doctorName:doctorName,
     remarks:remarks,
   });
-
-//updated user schema for update operation
-// const updateUserSchema = z.object({
-//   userName: userName.optional(),
-//   password: password.optional(),
-//   email: email.optional(),
-// });
-// const loginUserSchema = z.object({
-//   email: email,
-//   password: password,
-// });
 
 module.exports = { DocumentSchema };

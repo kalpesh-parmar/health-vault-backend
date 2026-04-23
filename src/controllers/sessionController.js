@@ -1,18 +1,12 @@
 const sessionService = require("../services/session.service");
 const GeneralResponse = require("../helpers/genralResponse");
 const MessageConstant = require("../constant/MessageConstant");
-const {
-  createSessionSchema,
-  logoutSchema,
-  deleteSchema,
-} = require("../validation/sessionValidation");
 const jwt = require("jsonwebtoken");
 
 class SessionController {
   //create session
   async createSession(req, res, next) {
     try {
-      const { token } = createSessionSchema.parse(req?.body);
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const data = {
         userId: decoded.userId,
@@ -46,12 +40,13 @@ class SessionController {
     }
   }
   // logout session
-  async logout(req, res) {
+  async logout(req, res,next) {
     try {
-      const validated = logoutSchema.parse(req.body);
-
-      const result = await sessionService.logoutSession(validated.sessionId);
-
+      const token = req.headers?.authorization.split(" ")[1];
+      if (!token) {
+      throw new Error(MessageConstant.INVALID_TOKEN); 
+    }
+      const result = await sessionService.logoutSession(token);
       return GeneralResponse.success(
         res,
         result,

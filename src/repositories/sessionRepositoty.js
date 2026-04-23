@@ -14,8 +14,7 @@ class SessionRepository {
       .select()
       .from(session)
       .where(and(eq(session.id, id), eq(session.softDelete, false)));
-
-    return result[0];
+      return result[0];
   }
 
   async logout(sessionId) {
