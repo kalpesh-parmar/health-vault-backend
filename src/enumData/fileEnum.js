@@ -1,5 +1,5 @@
 const { pgEnum } = require("drizzle-orm/pg-core");
+const fileTypes= ["PDF", "JPG","JPEG","PNG"];
+const fileEnum = pgEnum("file", fileTypes);
 
-const fileType = pgEnum("file", ["PDF", "JPG","JPEG","PNG"]);
-
-module.exports = { fileType };
+module.exports = { fileEnum, fileTypes };

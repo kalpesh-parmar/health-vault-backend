@@ -21,33 +21,34 @@ class InvalidRequestException extends AppError {
 
 class NotFoundException extends AppError {
   constructor(message = MessageConstant.NOT_FOUND, errors = null) {
-    super(StatusCodes.NOT_FOUND, message);
+    super(StatusCodes.NOT_FOUND, message, errors);
   }
 }
 
 class AlredayExistsException extends AppError {
-  constructor(message = messageConstant.ALREADY_EXIST) {
-    super(StatusCodes.CONFLICT, message);
+  constructor(message = messageConstant.ALREADY_EXIST, errors = null) {
+    super(StatusCodes.CONFLICT, message, errors);
   }
 }
 
 class UnauthorizedException extends AppError {
-  constructor(message = MessageConstant.UNAUTHORIZED) {
-    super(StatusCodes.UNAUTHORIZED, message);
+  constructor(message = MessageConstant.UNAUTHORIZED, errors = null) {
+    super(StatusCodes.UNAUTHORIZED, message, errors);
   }
 }
 
 class AccessDeniedError extends AppError {
-  constructor(message = MessageConstant.ACCESS_DENIED) {
-    super(StatusCodes.FORBIDDEN, message);
+  constructor(message = MessageConstant.ACCESS_DENIED, errors = null) {
+    super(StatusCodes.FORBIDDEN, message, errors);
   }
 }
 
 class InternalServerError extends AppError {
-  constructor(message = MessageConstant.INTERNAL_SERVER_ERROR) {
+  constructor(message = MessageConstant.INTERNAL_SERVER_ERROR, errors = null) {
     super(
       StatusCodes.INTERNAL_SERVER_ERROR,
       messageConstant.SOMETHING_WENT_WRONG,
+      errors
     );
   }
 }
