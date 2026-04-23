@@ -46,6 +46,13 @@ class SessionRepository {
 
     return result[0];
   }
+
+  async deleteSessionsByUserId(userId) {
+    const result = await db
+      .delete(session)
+      .where(eq(session.userId, userId));
+       return result[0] || null;
+    }
 }
 
 module.exports = new SessionRepository();

@@ -23,8 +23,9 @@ const zodValidateData = require("../validation/index");
 const { generateNumericPatientCode } = require("../utils/generateCode");
 const { tempToken } = require("../utils/jwtUtils");
 const JwtUtils = require("../utils/jwtUtils");
-const sessionRepositoty = require("../repositories/sessionRepositoty");
-
+const sessionRepositoty = require("../repositories/sessionRepository");
+const documentRepository = require("../repositories/doucumentRepository");
+const healthRecordsRepository = require("../repositories/healthRecordsRepository");
 class userService {
   //Login User
   async loginUser(data) {
@@ -106,7 +107,6 @@ class userService {
 
   //delete user by id
   async deleteUser(id) {
-    {
       if (!id) {
         throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
       }
@@ -115,6 +115,17 @@ class userService {
         throw new NotFoundException(messageConstant.USER_NOT_FOUND);
       }
     }
+
+  //permanent delete user by id
+  async permanentDeleteUser(id) {
+    if (!id) {
+      throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
+    }
+    await sessionRepositoty.deleteSessionsByUserId(id);
+    await documentRepository.permanentDeleteDocument(id);
+    await healthRecordsRepository.permanentDeleteHealthRecord(id);
+    const result = await userRepository.permanentDeleteUser(id);
+    return result;
   }
 }
 

@@ -14,7 +14,7 @@ const session = pgTable("session", {
 
   userId: integer("user_id")
     .notNull()
-    .references(() => User.id),
+    .references(() => User.id, { onDelete: "cascade" }),
 
   loginTime: timestamp("login_time").defaultNow().notNull(),
   logoutTime: timestamp("logout_time"),

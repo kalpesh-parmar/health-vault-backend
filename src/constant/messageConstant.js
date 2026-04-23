@@ -20,6 +20,9 @@ const messageConstant = {
   USER_BLOCKED: "User Blocked",
   EMAIL_VERIFY_SUCCESSFULLY: "Email is verified successfully",
   EMAIL_ALREADY_EXISTS: "Email is already exists",
+  USER_PERMANENTLY_DELETED_SUCCESSFULLY: "User Permanently Deleted Successfully",
+  USER_FETCHED_SUCCESSFULLY: "User Fetched Successfully",
+  USER_LIST_FETCHED_SUCCESSFULLY: "User List Fetched Successfully",
 
   //EXCEPTION
   INVALID_SESSIONID:"Invalid session id",

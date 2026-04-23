@@ -1,4 +1,4 @@
-const sessionRepository = require("../repositories/sessionRepositoty");
+const sessionRepository = require("../repositories/sessionRepository");
 const MessageConstant = require("../constant/MessageConstant");
 const messageConstant = require("../constant/MessageConstant");
 const jwt = require("jsonwebtoken");

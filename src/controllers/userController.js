@@ -3,8 +3,9 @@ const messageConstant = require("../constant/messageConstant");
 const errorHandler = require("../excptions/globalHandling");
 const GeneralResponse = require("../helpers/genralResponse");
 const userService = require("../services/userService");
-const zodValidateData=require("../validation/index");
-const{  userSchema,
+const zodValidateData = require("../validation/index");
+const {
+  userSchema,
   loginUserSchema,
   updateUserSchema,
 } = require("../validation/zodUserValidation");
@@ -95,6 +96,21 @@ class userController {
       );
     } catch (error) {
       console.log("error in delete user:", error);
+      next(error);
+    }
+  };
+
+  // Permanent Delete User
+  permanentDeleteUser = async (req, res, next) => {
+    try {
+      const result = await userService.permanentDeleteUser(req?.params?.id);
+      return GeneralResponse.success(
+        res,
+        result,
+        messageConstant.USER_PERMANENTLY_DELETED_SUCCESSFULLY,
+      );
+    } catch (error) {
+      console.log("error in permanent delete user:", error);
       next(error);
     }
   };
