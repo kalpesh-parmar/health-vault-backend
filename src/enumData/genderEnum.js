@@ -1,5 +1,9 @@
-const { pgEnum } = require("drizzle-orm/pg-core");
-const genderValues=["male", "female"];
-const genderEnum = pgEnum("gender_enum", genderValues );
-
-module.exports = { genderEnum,genderValues };
+const genderType=Object.freeze({
+    MALE:'male',
+    FEMALE:'female'
+});
+const genderTypeValue=Object.values(genderType);
+module.exports={
+    genderType,
+    genderTypeValue
+};
