@@ -1,5 +1,5 @@
 paths:
-  /user/add:
+  /patient/add:
     post:
       security: []
       summary: Create user (Sign Up)
@@ -46,7 +46,7 @@ paths:
         201:
           description: User created successfully
 
-  /user/login:
+  /patient/login:
     post:
       summary: Login user
       tags:
@@ -73,7 +73,7 @@ paths:
         401:
           description: Invalid credentials
 
-  /user/list:
+  /patient/list:
     get:
       summary: Get all users
       tags:
@@ -82,7 +82,7 @@ paths:
         200:
           description: User list fetched successfully
 
-  /user/{id}:
+  /patient/{id}:
     get:
       summary: Get user by ID
       tags:
@@ -158,7 +158,7 @@ paths:
           description: User deleted successfully
         404:
           description: User not found
-  /user/permanentDelete/{id}:
+  /patient/permanentDelete/{id}:
     delete:
       summary: Permanent delete user
       tags:
@@ -174,3 +174,13 @@ paths:
           description: User permanently deleted successfully
         404:
           description: User not found
+  /patient/logout:
+    post:
+      summary: Logout user
+      tags:
+        - User
+      responses:
+        200:
+          description: Logout successful
+        404:
+          description: Session not found

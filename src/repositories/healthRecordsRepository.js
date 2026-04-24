@@ -10,7 +10,8 @@ class healthRecordsRepository {
   async permanentDeleteHealthRecord(id) {
     const result = await db
       .delete(healthRecords)
-      .where(eq(healthRecords.id, id));
+      .where(eq(healthRecords.id, id))
+      .returning();
     return result[0] || null;
   }
 }

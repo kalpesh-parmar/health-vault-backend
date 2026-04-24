@@ -9,7 +9,7 @@ const {
 } = require("drizzle-orm/pg-core");
 const { genderEnum } = require("../enumData/genderEnum");
 
-const User = pgTable("patient", {
+const Patient = pgTable("patient", {
   id: serial("id").primaryKey(),
   patientCode: varchar("patient_code", { length: 50 }).notNull().unique(),
   userName: varchar("user_name", { length: 255 }).notNull(),
@@ -24,4 +24,4 @@ const User = pgTable("patient", {
   softDelete: boolean("soft_delete").default(false).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
-module.exports ={ User};
+module.exports ={ Patient};

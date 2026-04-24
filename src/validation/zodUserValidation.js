@@ -21,7 +21,6 @@ const nameField = z
 
 const email = z
   .string(messageConstant.EMAIL_REQUIRED)
-  .email(messageConstant.VALID_EMAIL)
   .trim()
   .min(8, messageConstant.EMAIL_TOO_SHORT)
   .max(255, messageConstant.EMAIL_TOO_LONG)
@@ -82,10 +81,24 @@ const userSchema = z
   });
 //updated user schema for update operation
 const updateUserSchema = z.object({
-  userName: nameField.optional(),
+  userName: nameField.optional(), 
   password: password.optional(),
+  fullName: nameField.optional(),
   email: email.optional(),
-});
+  gender:genderZod .optional(),
+    dateOfBirth: dateOfBirth.optional(),
+    phone: phone.optional(),
+  })
+  .transform((data) => {
+    try {
+      return {
+        ...data,
+        age: calculateAge(data.dateOfBirth),
+      };
+    } catch (err) {
+      throw new Error("Age calculation failed ");
+    }
+  });
 const loginUserSchema = z.object({
   email: email,
   password: password,

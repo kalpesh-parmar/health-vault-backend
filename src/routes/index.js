@@ -3,10 +3,10 @@ const router = express.Router();
 
 // import all route files
 const sessionRoutes = require("./session");
-const userRoutes = require("./userRoutes");
+const patientRoutes = require("./patientRoutes");
 
 // use routes
 router.use("/session", sessionRoutes);
-router.use("/user", userRoutes);
+router.use("/patient", patientRoutes);
 
 module.exports = router;

@@ -6,7 +6,7 @@ const {
   boolean,
   timestamp,
 } = require("drizzle-orm/pg-core");
-const { User } = require("./User");
+const { User } = require("./patient");
 
 const healthRecords = pgTable("health_records", {
   id: serial("id").primaryKey(),

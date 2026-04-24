@@ -13,10 +13,10 @@ const {
   loginUserSchema,
 } = require("../validation/zodUserValidation");
 const { session } = require("../models/session");
-const { User } = require("../models/User");
+const { User } = require("../models/patient");
 const { db } = require("../config/db");
 const { GeneralResponse } = require("../helpers/genralResponse");
-const userRepository = require("../repositories/userRepository");
+const patientRepository = require("../repositories/patientRepository");
 const messageConstant = require("../constant/messageConstant");
 const jwt = require("jsonwebtoken");
 const zodValidateData = require("../validation/index");
@@ -26,24 +26,19 @@ const JwtUtils = require("../utils/jwtUtils");
 const sessionRepositoty = require("../repositories/sessionRepository");
 const documentRepository = require("../repositories/doucumentRepository");
 const healthRecordsRepository = require("../repositories/healthRecordsRepository");
-class userService {
-  //Login User
-  async loginUser(data) {
-    const { email, password } = data || {};
-    if (!email || !password) {
-      throw new InvalidRequestException(
-        messageConstant.EMAIL_PASSWORD_REQUIRED,
-      );
-    }
+const sessionRepository = require("../repositories/sessionRepository");
+class patientService {
+  //Login Patient
+  async loginPatient(data) {
     const validation = await zodValidateData(loginUserSchema, data);
     if (!validation.success) {
       throw new InvalidRequestException("Validation failed", validation.error);
     }
-    const userData = await userRepository.loginUser(email);
+    const userData = await patientRepository.loginPatient(validation.data.email,validation.data.password);
     if (!userData) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
-    const isMatch = await bcrypt.compare(password, userData.password);
+    const isMatch = await bcrypt.compare(validation.data.password, userData.password);
     if (!isMatch) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
@@ -53,43 +48,44 @@ class userService {
     return JwtUtils.generateToken(payload);
   }
 
-  // Create User
-  async createUser(data) {
-    data.patientCode = generateNumericPatientCode();
-    const validation = await zodValidateData(userSchema, data);
+  // Create Patient
+  async createPatient(data) {
+    const patientCode = await generateNumericPatientCode();
+    const userData = { ...data, patientCode };
+    const validation = await zodValidateData(userSchema, userData);
     if (!validation.success) {
       throw new InvalidRequestException("Validation failed", validation.error);
     }
     const validatedData = validation.data || {};
-    const existingUser = await userRepository.findUserByEmail(
+    const existingUser = await patientRepository.findPatientByEmail(
       validatedData.email,
     );
     if (existingUser) {
       throw new InvalidRequestException(messageConstant.EMAIL_ALREADY_EXISTS);
     }
     validatedData.password = await bcrypt.hash(validatedData.password, 10);
-    const newUser = await userRepository.createUser(validatedData);
+    const newUser = await patientRepository.createPatient(validatedData);
     return newUser;
   }
-  //get user by id
-  async getUserById(id) {
+  //get patient by id
+  async getPatientById(id) {
     if (!id) {
       throw new InvalidRequestException(messageConstant.USER_NOT_FOUND);
     }
-    return await userRepository.getUserById(id);
+    return await patientRepository.getPatientById(id);
     if (!result) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
     return result;
   }
 
-  //get user list
-  async getUserList() {
-    return await userRepository.getUserList();
+  //get patient list
+  async getPatientList() {
+    return await patientRepository.getPatientList();
   }
 
-  //update user by one filed
-  async updateUser(id, data) {
+  //update patient by one filed
+  async updatePatient(id, data) {
     if (!id) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
@@ -101,32 +97,49 @@ class userService {
     if (validatedData.password) {
       validatedData.password = await bcrypt.hash(validatedData.password, 10);
     }
-    const updatedUser = await userRepository.updateUser(id, validatedData);
+    const updatedUser = await patientRepository.updatePatient(id, validatedData);
     return updatedUser;
   }
 
-  //delete user by id
-  async deleteUser(id) {
+  //delete patient by id
+  async deletePatient(id) {
       if (!id) {
         throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
       }
-      const result = await userRepository.deleteUser(id);
+      const result = await patientRepository.deletePatient(id);
       if (!result) {
         throw new NotFoundException(messageConstant.USER_NOT_FOUND);
       }
     }
 
-  //permanent delete user by id
-  async permanentDeleteUser(id) {
+  //permanent delete patient by id
+  async permanentDeletePatient(id) {
     if (!id) {
       throw new InvalidRequestException(messageConstant.INVALID_REQUEST);
     }
     await sessionRepositoty.deleteSessionsByUserId(id);
     await documentRepository.permanentDeleteDocument(id);
     await healthRecordsRepository.permanentDeleteHealthRecord(id);
-    const result = await userRepository.permanentDeleteUser(id);
+    const result = await patientRepository.permanentDeletePatient(id);
+    return result;
+  }
+
+  // logout user
+  async logout(token) {
+    if (!token) {
+      throw new InvalidRequestException(messageConstant.INVALID_TOKEN); 
+    }
+    const decoded = JwtUtils.checkValidateToken(token);
+    const sessionId=decoded.session;
+    console.log(sessionId);
+    
+    const existing = await sessionRepository.findById(sessionId);
+    if (!existing) {
+      throw new InvalidRequestException(messageConstant.SESSION_NOT_FOUND);
+    }
+    const result = await sessionRepository.logout(sessionId);
     return result;
   }
 }
 
-module.exports = new userService();
+module.exports = new patientService();

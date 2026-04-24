@@ -9,7 +9,7 @@ const {
   date
 
 } = require("drizzle-orm/pg-core");
-const { User } = require("./User");
+const { User } = require("./patient");
 const { fileEnum } = require("../enumData/fileEnum");
 const { ocrStatus } = require("../enumData/ocrStatus");
 const { documentTypeEnum } = require("../enumData/documentType");

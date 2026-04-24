@@ -9,7 +9,5 @@ router.post("/", sessionController.createSession);
 // get session by id
 router.get("/:id", sessionController.getSessionById);
 
-// logout session
-router.post("/logout", sessionController.logout);
 
 module.exports = router;

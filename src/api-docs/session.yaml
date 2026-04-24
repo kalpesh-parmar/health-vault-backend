@@ -34,14 +34,3 @@ paths:
           description: Session fetched successfully
         404:
           description: Session not found
-
-  /session/logout:
-    post:
-      summary: Logout session
-      tags:
-        - Session
-      responses:
-        200:
-          description: Logout successful
-        404:
-          description: Session not found

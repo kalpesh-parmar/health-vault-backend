@@ -2,7 +2,7 @@ const { validate } = require("uuid");
 const messageConstant = require("../constant/messageConstant");
 const errorHandler = require("../excptions/globalHandling");
 const GeneralResponse = require("../helpers/genralResponse");
-const userService = require("../services/userService");
+const patientService = require("../services/patientService");
 const zodValidateData = require("../validation/index");
 const {
   userSchema,
@@ -10,25 +10,25 @@ const {
   updateUserSchema,
 } = require("../validation/zodUserValidation");
 
-class userController {
-  // User Login
-  loginUser = async (req, res, next) => {
+class patientController {
+  // Patient Login
+  loginPatient = async (req, res, next) => {
     try {
-      const result = await userService.loginUser(req?.body);
+      const result = await patientService.loginPatient(req?.body);
       return GeneralResponse.created(
         res,
         result,
         messageConstant.USER_LOGIN_SUCCESSFULLY,
       );
     } catch (error) {
-      console.log("error in login user:", error);
+      console.log("error in login patient:", error);
       next(error);
     }
   };
-  // Create User
-  createUser = async (req, res, next) => {
+  // Create Patient
+  createPatient = async (req, res, next) => {
     try {
-      const result = await userService.createUser(req?.body);
+      const result = await patientService.createPatient(req?.body);
       return GeneralResponse.created(
         res,
         result,
@@ -40,10 +40,10 @@ class userController {
     }
   };
 
-  // Get User by ID
-  getUserById = async (req, res, next) => {
+  // Get Patient by ID
+  getPatientById = async (req, res, next) => {
     try {
-      const result = await userService.getUserById(req?.params?.id);
+      const result = await patientService.getPatientById(req?.params?.id);
       return GeneralResponse.success(
         res,
         result,
@@ -55,14 +55,14 @@ class userController {
     }
   };
 
-  // Get User List
-  getUserList = async (req, res, next) => {
+  // Get Patient List
+  getPatientList = async (req, res, next) => {
     try {
-      const result = await userService.getUserList();
+      const result = await patientService.getPatientList();
       return GeneralResponse.success(
         res,
         result,
-        messageConstant.USER_LIST_FETCHED_SUCCESSFULLY,
+        messageConstant.USERS_LIST_FETCHED_SUCCESSFULLY,
       );
     } catch (error) {
       console.log("error in get user list:", error);
@@ -70,25 +70,25 @@ class userController {
     }
   };
 
-  // Update User
-  updateUser = async (req, res, next) => {
+  // Update Patient
+  updatePatient = async (req, res, next) => {
     try {
-      const result = await userService.updateUser(req?.params?.id, req?.body);
+      const result = await patientService.updatePatient(req?.params?.id, req?.body);
       return GeneralResponse.updated(
         res,
         result,
         messageConstant.USER_UPDATED_SUCCESSFULLY,
       );
     } catch (error) {
-      console.log("error in update user:", error);
+      console.log("error in update user :", error);
       next(error);
     }
   };
 
-  // Delete User
-  deleteUser = async (req, res, next) => {
+  // Delete Patient
+  deletePatient = async (req, res, next) => {
     try {
-      const result = await userService.deleteUser(req?.params?.id);
+      const result = await patientService.deletePatient(req?.params?.id);
       return GeneralResponse.success(
         res,
         result,
@@ -100,19 +100,37 @@ class userController {
     }
   };
 
-  // Permanent Delete User
-  permanentDeleteUser = async (req, res, next) => {
+  // Permanent Delete Patient
+  permanentDeletePatient = async (req, res, next) => {
     try {
-      const result = await userService.permanentDeleteUser(req?.params?.id);
+      const result = await patientService.permanentDeletePatient(req?.params?.id);
       return GeneralResponse.success(
         res,
         result,
         messageConstant.USER_PERMANENTLY_DELETED_SUCCESSFULLY,
       );
     } catch (error) {
-      console.log("error in permanent delete user:", error);
+      console.log("error in permanent delete patient:", error);
+      next(error);
+    }
+  };
+  // Logout Patient
+  logout = async (req, res, next) => {
+    try {
+      const token = req.headers?.authorization.split(" ")[1];
+      if (!token) {
+        throw new Error(messageConstant.INVALID_TOKEN);
+      }
+      const result = await patientService.logout(token);
+      return GeneralResponse.success(
+        res,
+        result,
+        messageConstant.LOGOUT_SUCCESS,
+      );
+    } catch (error) {
+      console.log("error in logout user:", error);
       next(error);
     }
   };
 }
-module.exports = new userController();
+module.exports = new patientController();

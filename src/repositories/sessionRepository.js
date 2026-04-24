@@ -50,7 +50,8 @@ class SessionRepository {
   async deleteSessionsByUserId(userId) {
     const result = await db
       .delete(session)
-      .where(eq(session.userId, userId));
+      .where(eq(session.userId, userId))
+      .returning();
        return result[0] || null;
     }
 }

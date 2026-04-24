@@ -39,24 +39,6 @@ class SessionController {
       next(error);
     }
   }
-  // logout session
-  async logout(req, res,next) {
-    try {
-      const token = req.headers?.authorization.split(" ")[1];
-      if (!token) {
-      throw new Error(MessageConstant.INVALID_TOKEN); 
-    }
-      const result = await sessionService.logoutSession(token);
-      return GeneralResponse.success(
-        res,
-        result,
-        MessageConstant.LOGOUT_SUCCESS,
-      );
-    } catch (error) {
-      console.log("error in logout:", error);
-      next(error);
-    }
-  }
 }
 
 module.exports = new SessionController();

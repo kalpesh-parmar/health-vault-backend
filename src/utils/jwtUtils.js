@@ -13,7 +13,7 @@ module.exports = class JwtUtils {
   };
 
   static checkValidateToken = (token) => {
-    return jwt.verify(tempToken, SECRET_KEY);
+    return jwt.verify(token, SECRET_KEY);
   };
 
   static checkExpireToken = (token) => {};

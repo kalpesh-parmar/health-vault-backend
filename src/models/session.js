@@ -7,7 +7,7 @@ const {
   integer,
 } = require("drizzle-orm/pg-core");
 
-const { User } = require("./User");
+const { User } = require("./patient");
 
 const session = pgTable("session", {
   id: serial("id").primaryKey(),
