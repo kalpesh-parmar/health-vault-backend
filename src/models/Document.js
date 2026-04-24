@@ -10,9 +10,10 @@ const {
 
 } = require("drizzle-orm/pg-core");
 const { User } = require("./patient");
-const { fileEnum } = require("../enumData/fileEnum");
-const { ocrStatus } = require("../enumData/ocrStatus");
-const { documentTypeEnum } = require("../enumData/documentType");
+const { fileEnum, fileTypeValue } = require("../enumData/fileEnum");
+const { ocrStatus, StatusType, StatusTypeVale } = require("../enumData/ocrStatus");
+const { documentTypeEnum, documentTypeValue } = require("../enumData/documentType");
+const { pgEnum } = require("drizzle-orm/pg-core");
 
 
 const Document = pgTable("documents", {
@@ -20,12 +21,14 @@ const Document = pgTable("documents", {
   userId: integer("user_id")
     .notNull()
     .references(() => User.id, { onDelete: "cascade" }),
-  documentType:documentTypeEnum("document_type").notNull(),
+  documentType:pgEnum("document_type", documentTypeValue).notNull(),
   fileName:varchar("file_name",{ length: 255 }).notNull(),
   fileStoragePath:text("file_path"),
-  fileType:fileEnum("file_types").notNull(),
+  fileType:pgEnum("file_type", fileTypeValue).notNull(),
   fileSize:integer("file_size"),
-  OCRStatus:ocrStatus("OCR_status").default("Pending").notNull(),
+  OCRStatus:pgEnum("status", StatusTypeVale)
+    .default(StatusType.PENDING)
+    .notNull(),
   ocrextractedText:text("OCR_extracted_text"),
   structuredExtractedData:varchar("structured_extracted_data"),
   reportDate:date("report_date"),
