@@ -30,7 +30,7 @@ const fileStoragePath= z.string().min(1, "Storage path is required");
 const ocrextractedText= z.string().optional().nullable();
 const structuredExtractedData= z.string().optional().nullable();
 const reportDate= z.coerce.date().optional().nullable();
-const hospitalName= z.string().min(1, messageConstant.HSP_NAME_REQUIRE);
+const hospitalName= z.string().min(1, messageConstant.HOSPITAL_NAME_REQUIRED);
 const doctorName= z.string().max(25,messageConstant.NAME_TOO_LONG);
 const remarks= z.string().optional().nullable();
 

@@ -9,6 +9,7 @@ const {
   loginUserSchema,
   updateUserSchema,
 } = require("../validation/zodUserValidation");
+const { InvalidRequestException } = require("../excptions/ApiError");
 
 class patientController {
   // Patient Login
@@ -119,7 +120,7 @@ class patientController {
     try {
       const token = req.headers?.authorization.split(" ")[1];
       if (!token) {
-        throw new Error(messageConstant.INVALID_TOKEN);
+        throw new InvalidRequestException(messageConstant.INVALID_TOKEN);
       }
       const result = await patientService.logout(token);
       return GeneralResponse.success(
