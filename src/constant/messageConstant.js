@@ -50,7 +50,7 @@ const messageConstant = {
   //VALIDATIORS
   VALID_EMAIL: "Please enter valid email",
   ENTER_VALID_GENDER:"Enter a valid gender",
-  HSP_NAME_REQUIRE:"Hospital name is required",
+  HOSPITAL_NAME_REQUIRED:"Hospital name is required",
   VALID_FILE_SIZE:"File size exceeds the 25MB limit. Please upload a smaller file.",
   ENTER_VALID_FILETYPE:"Please enter a valid file ",
   VALID_DOCUMENT:"Please enter valid document type",

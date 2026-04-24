@@ -8,7 +8,7 @@ const { checkValidateToken } = require("../utils/jwtUtils");
 class SessionService {
   // create session
   async createSession(data) {
-    if (!data.userId || data.userId === null || data.userId === undefined) {
+    if (!data||!data.userId) {
       throw new InvalidRequestException(messageConstant.USERID_REQUIRED);
     }
     return await sessionRepository.create(data);

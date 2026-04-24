@@ -6,7 +6,7 @@ const { eq, and } = require("drizzle-orm");
 class SessionRepository {
   async create(data) {
     const result = await db.insert(session).values(data).returning();
-    return result[0];
+    return result[0]??null;
   }
 
   //create user session
@@ -28,8 +28,9 @@ class SessionRepository {
     const result = await db
       .select()
       .from(session)
-      .where(and(eq(session.id, id), eq(session.softDelete, false)));
-      return result[0];
+      .where(and(eq(session.id, id), eq(session.softDelete, false)))
+      .limit(1);
+      return result?.[0]||null;
   }
 
   async logout(sessionId) {
@@ -44,7 +45,7 @@ class SessionRepository {
       .where(eq(session.id, sessionId))
       .returning();
 
-    return result[0];
+    return result[0]??null;
   }
 
   async deleteSessionsByUserId(userId) {

@@ -12,12 +12,16 @@ class patientRepository {
       .from(Patient)
       .where(eq(Patient.email, email))
       .limit(1);
-    return user[0];
+    return user[0] ?? null;
   }
 
   //Create User
   async createPatient(data) {
-    return await db.insert(Patient).values(data).returning();
+    const result= await db
+      .insert(Patient)
+      .values(data)
+      .returning();
+    return result[0]??null;
   }
 
   //get user by id if not delted
@@ -25,13 +29,18 @@ class patientRepository {
     const result = await db
       .select()
       .from(Patient)
-      .where(and(eq(Patient.id, id), eq(Patient.softDelete, false)));
-    return result[0];
+      .where(and(eq(Patient.id, id), eq(Patient.softDelete, false)))
+      .limit(1);
+    return result[0]??null;
   }
 
   //get all user
   async getPatientList() {
-    return await db.select().from(Patient).where(eq(Patient.softDelete, false));
+    const result= await db
+      .select()
+      .from(Patient)
+      .where(eq(Patient.softDelete, false));
+    return result[0] ?? null;
   }
 
   async updatePatient(id, data) {
@@ -44,7 +53,7 @@ class patientRepository {
       .where(and(eq(Patient.id, Number(id)), eq(Patient.softDelete, false)))
       .returning();
 
-    return result[0];
+    return result[0]??null;
   }
 
   //soft delete
@@ -58,7 +67,7 @@ class patientRepository {
       .where(and(eq(Patient.id, id), eq(Patient.softDelete, false)))
       .returning();
 
-    return result[0];
+    return result[0]??null;
   }
   async findPatientByEmail(email) {
     const user = await db
