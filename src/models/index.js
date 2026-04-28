@@ -1,14 +1,11 @@
-// index.js
-
-const { User } = require("./User");
+const { document } = require("./document");
+const { notification } = require("./notification");
+const { patient } = require("./patient");
 const { session } = require("./session");
-const { healthRecords } = require("./Health_Recode");
-const { Document } = require("./Document");
 
-// Export all tables in one place
 module.exports = {
-  User,
+  document,
+  notification,
+  patient,
   session,
-  healthRecords,
-  Document,
 };

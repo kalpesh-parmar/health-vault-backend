@@ -1,5 +1,5 @@
 node_modules/
 .env
-package-lock.json
-drizzle/
-
+coverage/
+dist/
+npm-debug.log*

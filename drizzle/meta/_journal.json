@@ -5,22 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1776836902452,
-      "tag": "0000_bent_spencer_smythe",
+      "when": 1777338000000,
+      "tag": "0000_enterprise_schema",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1776838575932,
-      "tag": "0001_huge_gertrude_yorkes",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1776838964341,
-      "tag": "0002_certain_mindworm",
+      "when": 1777338060000,
+      "tag": "0001_notifications",
       "breakpoints": true
     }
   ]

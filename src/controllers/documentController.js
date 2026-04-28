@@ -1,69 +1,49 @@
-const messageConstant = require("../constant/messageConstant");
-const errorHandler = require("../excptions/globalHandling");
-const GeneralResponse = require("../helpers/genralResponse");
+const { StatusCodes } = require("http-status-codes");
+
+const { messageConstants } = require("../constants/messageConstants");
+const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
 const documentService = require("../services/documentService");
-const zodValidateData=require("../validation/index");
-const{  documentSchema } = require("../validation/zodDocumentValidation");
 
-class documentController {
-  // Add Document
-  addDocument = async (req, res, next) => {
-    try {
-      const result = await documentService.createDocument(req?.body);
-      return GeneralResponse.created(
-        res,
-        result,
-        messageConstant.DOCUMENT_ADDED_SUCCESSFULLY,
-      );
-    } catch (error) {
-      console.log("error in addDocument:", error);
-      next(error);
-    }
-  };
-
-  // Get Document by ID
-  getDocumentById = async (req, res, next) => {
-    try {
-      const result = await documentService.getDocumentById(req?.params?.id);
-      return GeneralResponse.success(
-        res,
-        result,
-        messageConstant.DOCUMENT_FETCHED_SUCCESSFULLY,
-      );
-    } catch (error) {
-      console.log("error in getDocumentById:", error);
-      next(error);
-    }
-  };
-
-  // Get Document List
-  getDocumentList = async (req, res, next) => {
-    try {
-      const result = await documentService.getDocumentList();
-      return GeneralResponse.success(
-        res,
-        result,
-        messageConstant.DOCUMENT_LIST_FETCHED_SUCCESSFULLY,
-      );
-    } catch (error) {
-      console.log("error in getDocumentList:", error);
-      next(error);
-    }
-  };
-
-  // Delete Document
-  deleteDocument = async (req, res, next) => {
-    try {
-      const result = await documentService.deleteDocument(req?.params?.id);
-      return GeneralResponse.success(
-        res,
-        result,
-        messageConstant.DOCUMENT_DELETED_SUCCESSFULLY,
-      );
-    } catch (error) {
-      console.log("error in deleteDocument:", error);
-      next(error);
-    }
-  };
+async function addDocument(req, res) {
+  const result = await documentService.createDocument(req.auth.userId, req.body);
+  return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
-module.exports = new documentController();
+
+async function getDocumentById(req, res) {
+  const result = await documentService.getDocumentById(req.params.id, req.auth.userId);
+  return successResponse(res, result, messageConstants.DOCUMENT_FETCHED);
+}
+
+async function getDocumentList(req, res) {
+  const result = await documentService.getDocumentList(req.auth.userId, req.query);
+  return successResponse(res, result, messageConstants.DOCUMENT_LIST_FETCHED);
+}
+
+async function listDocuments(req, res) {
+  const result = await documentService.listDocuments(req.body);
+  return successResponse(res, result, messageConstants.DOCUMENT_FILTERED_LIST_FETCHED);
+}
+
+async function listDocumentsPaginated(req, res) {
+  const result = await documentService.listDocumentsPaginated(req.body);
+  return paginatedSuccessResponse(
+    res,
+    result.data,
+    result.page,
+    messageConstants.DOCUMENT_FILTERED_LIST_FETCHED,
+  );
+}
+
+async function deleteDocument(req, res) {
+  const result = await documentService.deleteDocument(req.params.id, req.auth.userId);
+  return successResponse(res, result, messageConstants.DOCUMENT_DELETED);
+}
+
+module.exports = {
+  addDocument,
+  deleteDocument,
+  getDocumentById,
+  getDocumentList,
+  listDocuments,
+  listDocumentsPaginated,
+};
