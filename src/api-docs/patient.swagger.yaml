@@ -1,0 +1,107 @@
+openapi: 3.0.0
+info:
+  title: Patient API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    UuidParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreatePatientRequest:
+      type: object
+      required: [userName, fullName, email, password, gender, dateOfBirth, phone]
+      properties:
+        userName: { type: string }
+        fullName: { type: string }
+        email: { type: string }
+        password: { type: string }
+        gender:
+          type: string
+          enum: [female, male]
+        dateOfBirth:
+          type: string
+          format: date
+        phone: { type: string }
+
+    UpdatePatientRequest:
+      type: object
+      properties:
+        userName: { type: string }
+        fullName: { type: string }
+
+paths:
+  /patient/add:
+    post:
+      tags: [Patient]
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePatientRequest"
+      responses:
+        "201": { description: Created }
+
+  /patient/list:
+    get:
+      tags: [Patient]
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: List }
+
+  /patient/{id}:
+    get:
+      tags: [Patient]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Found }
+
+    put:
+      tags: [Patient]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePatientRequest"
+      responses:
+        "200": { description: Updated }
+
+  /patient/soft-delete/{id}:
+    delete:
+      tags: [Patient]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Deleted }
+
+  /patient/hard-delete/{id}:
+    delete:
+      tags: [Patient]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Permanently deleted }

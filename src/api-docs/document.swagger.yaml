@@ -1,0 +1,185 @@
+openapi: 3.0.0
+info:
+  title: Document API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    UuidParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateDocumentRequest:
+      type: object
+      required: [documentType, fileName, fileStoragePath, s3Bucket, s3Key]
+      properties:
+        documentType: { type: string }
+        fileName: { type: string }
+        fileStoragePath: { type: string }
+        s3Bucket: { type: string }
+        s3Key: { type: string }
+    DocumentFilter:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string }
+        type: { type: string }
+        createdBy:
+          type: string
+          format: uuid
+        fileName: { type: string }
+        documentType: { type: string }
+        fileType: { type: string }
+        hospitalName: { type: string }
+        doctorName: { type: string }
+        search: { type: string }
+    DocumentSort:
+      type: object
+      additionalProperties: false
+      properties:
+        sortBy:
+          type: string
+          enum:
+            - title
+            - type
+            - createdBy
+            - fileName
+            - documentType
+            - fileType
+            - hospitalName
+            - doctorName
+            - reportDate
+            - createdAt
+            - updatedAt
+        orderBy:
+          type: string
+          enum: [asc, desc]
+    ListDocumentsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        filter:
+          $ref: "#/components/schemas/DocumentFilter"
+        sort:
+          $ref: "#/components/schemas/DocumentSort"
+    ListDocumentsPaginatedRequest:
+      type: object
+      additionalProperties: false
+      required: [page]
+      properties:
+        filter:
+          $ref: "#/components/schemas/DocumentFilter"
+        sort:
+          $ref: "#/components/schemas/DocumentSort"
+        page:
+          type: object
+          additionalProperties: false
+          required: [pageNumber, pageLimit]
+          properties:
+            pageNumber:
+              type: integer
+              minimum: 0
+              example: 0
+            pageLimit:
+              type: integer
+              minimum: 1
+              maximum: 100
+              example: 10
+
+paths:
+  /documents/add:
+    post:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDocumentRequest"
+      responses:
+        "201": { description: Created }
+
+  /documents/list:
+    post:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      summary: List documents with filter and sort
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListDocumentsRequest"
+            examples:
+              filterAndSort:
+                value:
+                  filter:
+                    search: blood
+                  sort:
+                    sortBy: title
+                    orderBy: asc
+      responses:
+        "200": { description: List }
+    get:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      responses:
+        "200": { description: List }
+
+  /documents/list-paginated:
+    post:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      summary: List documents with filter, sort, and 0-based pagination
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListDocumentsPaginatedRequest"
+            examples:
+              filterSortAndPage:
+                value:
+                  filter:
+                    search: blood
+                  page:
+                    pageNumber: 0
+                    pageLimit: 10
+                  sort:
+                    sortBy: createdAt
+                    orderBy: desc
+      responses:
+        "200": { description: Paginated list }
+
+  /documents/{id}:
+    get:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Found }
+
+    delete:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Deleted }
