@@ -15,6 +15,13 @@
       "when": 1777338060000,
       "tag": "0001_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777448159823,
+      "tag": "0002_jittery_spacker_dave",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,8 @@ const errorConstants = Object.freeze({
   FILE_SIZE_INVALID: "File size must be a positive number no larger than 25MB",
   FILE_TYPE_INVALID: "Please enter a valid file type",
   FULL_NAME_REQUIRED: "Full name is required",
+  FIRST_NAME_REQUIRED: "First name is required",
+  LAST_NAME_REQUIRED: "Last name is required",
   GENDER_INVALID: "Enter a valid gender",
   HOSPITAL_NAME_REQUIRED: "Hospital name is required",
   ID_INVALID: "Id must be a valid UUID",

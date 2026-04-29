@@ -50,20 +50,30 @@ const passwordField = z
   .refine((value) => numberRegex.test(value), errorConstants.PASSWORD_NUMBER_REQUIRED)
   .refine((value) => symbolRegex.test(value), errorConstants.PASSWORD_SYMBOL_REQUIRED);
 
-const dateOfBirthField = z.coerce.date({
-  invalid_type_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
-  required_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
-});
-
+// const dateOfBirthField = z.coerce.date({
+//   invalid_type_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
+//   required_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
+// });
+const ageField = z
+  .number({
+    required_error: errorConstants.AGE_REQUIRED,
+    invalid_type_error: errorConstants.AGE_INVALID,
+  })
+  .int()
+  .positive()
+  .max(150, errorConstants.AGE_INVALID);
 const phoneField = z
   .string({ required_error: errorConstants.PHONE_REQUIRED })
   .regex(/^\d{10}$/, errorConstants.PHONE_INVALID);
 
 const createPatientSchema = z
   .object({
-    dateOfBirth: dateOfBirthField,
+    // dateOfBirth: dateOfBirthField,
+    age: ageField,
     email: emailField,
-    fullName: nameField(errorConstants.FULL_NAME_REQUIRED),
+    firstName: nameField(errorConstants.FIRST_NAME_REQUIRED),
+    lastName: nameField(errorConstants.LAST_NAME_REQUIRED),
+    // fullName: nameField(errorConstants.FULL_NAME_REQUIRED),
     gender: z.enum(genderTypeValue, {
       invalid_type_error: errorConstants.GENDER_INVALID,
       required_error: errorConstants.GENDER_INVALID,
@@ -77,13 +87,16 @@ const createPatientSchema = z
   .transform((data) => ({
     ...data,
     age: calculateAge(data.dateOfBirth),
+    fullName: `${data.firstName} ${data.lastName}`,
   }));
 
 const updatePatientSchema = z
   .object({
-    dateOfBirth: dateOfBirthField.optional(),
+    // dateOfBirth: dateOfBirthField.optional(),
+    age: ageField.optional(),
     email: emailField.optional(),
-    fullName: nameField(errorConstants.FULL_NAME_REQUIRED).optional(),
+    firstName: nameField(errorConstants.FIRST_NAME_REQUIRED).optional(),
+    lastName: nameField(errorConstants.LAST_NAME_REQUIRED).optional(),
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
     phone: phoneField.optional(),
@@ -94,14 +107,14 @@ const updatePatientSchema = z
   .strict()
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)
   .transform((data) => {
-    if (!data.dateOfBirth) {
-      return data;
+    const updatedData = { ...data };
+    // if (data.dateOfBirth) {
+    //   updatedData.age = calculateAge(data.dateOfBirth);
+    // }
+    if (data.firstName && data.lastName) {
+      updatedData.fullName = `${data.firstName} ${data.lastName}`;
     }
-
-    return {
-      ...data,
-      age: calculateAge(data.dateOfBirth),
-    };
+    return updatedData;
   });
 
 const loginPatientSchema = z

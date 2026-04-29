@@ -14,8 +14,8 @@ const s3Client = new S3Client({
 });
 
 const s3Buckets = Object.freeze({
-  patientDocuments: env.patientDocumentsBucket,
-  userProfileImages: env.userProfileImagesBucket,
+  patientDocuments: env.PATIENT_DOCUMENTS_BUCKET,
+  userProfileImages: env.USER_PROFILE_IMAGES_BUCKET,
 });
 
 module.exports = {

@@ -111,6 +111,8 @@ function buildOrderClause(sort = {}) {
 
 class DocumentRepository {
   async create(data) {
+    console.log("data===", data);
+
     const result = await db.insert(document).values(data).returning();
     return result[0] || null;
   }

@@ -103,12 +103,27 @@ paths:
       security:
         - bearerAuth: []
       requestBody:
+        required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/CreateDocumentRequest"
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                documentType:
+                  type: string
       responses:
-        "201": { description: Created }
+        200:
+          description: File uploaded successfully
+
+        400:
+          description: Bad request
+        500:
+          description: Server error
 
   /documents/list:
     post:

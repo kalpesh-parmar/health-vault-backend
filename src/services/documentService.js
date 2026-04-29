@@ -1,5 +1,9 @@
+const { PutObjectCommand } = require("@aws-sdk/client-s3");
+require("dotenv").config();
+const { s3Client } = require("../configs/s3");
 const { errorConstants } = require("../constants/errorConstants");
-const { NotFoundException } = require("../exceptions/appError");
+const { messageConstants } = require("../constants/messageConstants");
+const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
 const {
   createDocumentSchema,
@@ -11,12 +15,38 @@ const {
 } = require("../validations");
 
 class DocumentService {
-  async createDocument(userId, payload) {
-    const data = await validateSchema(createDocumentSchema, payload);
+  async createDocument(userId, file, docType) {
+    console.log(userId);
+    console.log(docType.documentType);
+    console.log(file);
+
+    if (!file) {
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
+    }
+    if (!docType) {
+      throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
+    }
+    const fileKey = `${this.folder}/${Date.now()}-${file.originalname}`;
+    const filedata = new PutObjectCommand({
+      Bucket: process.env.AWS_BUCKET,
+      Key: fileKey,
+      Body: file.buffer,
+    });
+    const fileinfo = {
+      ContentType: file.mimetype,
+      fileName: file.originalname,
+      fileSize: file.size,
+      documentType: docType.documentType,
+    };
+    console.log(fileinfo);
+    await s3Client.send(filedata);
+    const validData = await validateSchema(createDocumentSchema, fileinfo);
+    console.log("validData", validData);
 
     return documentRepository.create({
-      ...data,
+      fileKey,
       userId,
+      validData,
     });
   }
 

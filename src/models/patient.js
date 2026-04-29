@@ -1,14 +1,14 @@
 const {
   boolean,
-  date,
   index,
   integer,
   pgEnum,
   pgTable,
   timestamp,
   uniqueIndex,
-  uuid,
+
   varchar,
+  serial,
 } = require("drizzle-orm/pg-core");
 
 const { genderTypeValue } = require("../enums/genderType");
@@ -20,9 +20,11 @@ const userStatusEnum = pgEnum("user_status", userStatusValues);
 const patient = pgTable(
   "patients",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
+    id: serial("id").primaryKey(),
     patientCode: varchar("patient_code", { length: 32 }).notNull().unique(),
     userName: varchar("user_name", { length: 255 }).notNull(),
+    firstName: varchar("first_name", { length: 255 }).notNull(),
+    lastName: varchar("last_name", { length: 255 }).notNull(),
     fullName: varchar("full_name", { length: 255 }).notNull(),
     email: varchar("email", { length: 255 }).notNull().unique(),
     password: varchar("password", { length: 255 }).notNull(),
@@ -35,7 +37,7 @@ const patient = pgTable(
     isVerified: boolean("is_verified").default(false).notNull(),
     otpVerifiedAt: timestamp("otp_verified_at"),
     gender: genderEnum("gender").notNull(),
-    dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
+    // dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
     age: integer("age").notNull(),
     phone: varchar("phone", { length: 20 }).notNull(),
     profileImageKey: varchar("profile_image_key", { length: 500 }),

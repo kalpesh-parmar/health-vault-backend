@@ -1,11 +1,10 @@
 const { StatusCodes } = require("http-status-codes");
-
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
 const documentService = require("../services/documentService");
 
 async function addDocument(req, res) {
-  const result = await documentService.createDocument(req.auth.userId, req.body);
+  const result = await documentService.createDocument(req.auth.userId, req.file, req.body);
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 
