@@ -69,10 +69,16 @@ async function resetPassword(req, res) {
   return successResponse(res, result, messageConstants.PASSWORD_RESET_SUCCESS);
 }
 
+async function getPatientProfile(req, res) {
+  const result = await patientService.getPatientProfile(req.auth.userId);
+  return successResponse(res, result, messageConstants.PATIENT_PROFILE_FETCHED);
+}
+
 module.exports = {
   createPatient,
   deletePatient,
   forgotPassword,
+  getPatientProfile,
   getPatientById,
   getPatientList,
   loginPatient,

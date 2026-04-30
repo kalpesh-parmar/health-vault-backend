@@ -38,11 +38,11 @@ class PatientRepository {
     return result[0] || null;
   }
 
-  async findById(id) {
+  async findById(userId) {
     const result = await db
       .select()
       .from(patient)
-      .where(and(eq(patient.id, id), eq(patient.softDelete, false)))
+      .where(and(eq(patient.id, userId), eq(patient.softDelete, false)))
       .limit(1);
 
     return result[0] || null;

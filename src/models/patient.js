@@ -6,9 +6,8 @@ const {
   pgTable,
   timestamp,
   uniqueIndex,
-
+  uuid,
   varchar,
-  serial,
 } = require("drizzle-orm/pg-core");
 
 const { genderTypeValue } = require("../enums/genderType");
@@ -20,7 +19,7 @@ const userStatusEnum = pgEnum("user_status", userStatusValues);
 const patient = pgTable(
   "patients",
   {
-    id: serial("id").primaryKey(),
+    id: uuid("id").defaultRandom().primaryKey(),
     patientCode: varchar("patient_code", { length: 32 }).notNull().unique(),
     userName: varchar("user_name", { length: 255 }).notNull(),
     firstName: varchar("first_name", { length: 255 }).notNull(),
