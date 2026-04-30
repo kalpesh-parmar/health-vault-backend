@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS "patients" (
   "is_verified" boolean DEFAULT false NOT NULL,
   "otp_verified_at" timestamp,
   "gender" "gender" NOT NULL,
-  "date_of_birth" date NOT NULL,
+  "date_of_birth" date,
   "age" integer NOT NULL,
   "phone" varchar(20) NOT NULL,
   "profile_image_key" varchar(500),

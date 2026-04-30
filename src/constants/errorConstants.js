@@ -25,6 +25,7 @@ const errorConstants = Object.freeze({
   SOMETHING_WENT_WRONG: "Something went wrong, please try again later",
   UNAUTHORIZED: "Unauthorized",
   VALIDATION_FAILED: "Validation failed",
+  USER_NAME_INVALID: "User name can only contain alphanumeric characters",
 
   DATE_OF_BIRTH_REQUIRED: "Date of birth is required",
   EMAIL_REQUIRED: "Email is required",

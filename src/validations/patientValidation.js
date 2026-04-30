@@ -11,18 +11,18 @@ const numberRegex = /[0-9]/;
 const symbolRegex = /[@$!%*?&]/;
 const alphabetsRegex = /^[A-Za-z\s]+$/;
 
-function calculateAge(dateOfBirth) {
-  const today = new Date();
-  const birthDate = new Date(dateOfBirth);
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
+// function calculateAge(dateOfBirth) {
+//   const today = new Date();
+//   const birthDate = new Date(dateOfBirth);
+//   let age = today.getFullYear() - birthDate.getFullYear();
+//   const monthDiff = today.getMonth() - birthDate.getMonth();
 
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age -= 1;
-  }
+//   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+//     age -= 1;
+//   }
 
-  return age;
-}
+//   return age;
+// }
 
 const nameField = (requiredError) =>
   z
@@ -66,6 +66,14 @@ const phoneField = z
   .string({ required_error: errorConstants.PHONE_REQUIRED })
   .regex(/^\d{10}$/, errorConstants.PHONE_INVALID);
 
+const usernameField = (requiredError) =>
+  z
+    .string({ required_error: requiredError })
+    .trim()
+    .min(2, errorConstants.NAME_TOO_SHORT)
+    .max(255, errorConstants.NAME_TOO_LONG)
+    .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
+
 const createPatientSchema = z
   .object({
     // dateOfBirth: dateOfBirthField,
@@ -81,15 +89,14 @@ const createPatientSchema = z
     password: passwordField,
     phone: phoneField,
     profileImageKey: z.string().trim().max(500).optional().nullable(),
-    userName: nameField(errorConstants.USER_NAME_REQUIRED),
+    userName: usernameField(errorConstants.USER_NAME_REQUIRED),
   })
   .strict()
   .transform((data) => ({
     ...data,
-    age: calculateAge(data.dateOfBirth),
+    // age: calculateAge(data.dateOfBirth),
     fullName: `${data.firstName} ${data.lastName}`,
   }));
-
 const updatePatientSchema = z
   .object({
     // dateOfBirth: dateOfBirthField.optional(),
@@ -102,7 +109,7 @@ const updatePatientSchema = z
     phone: phoneField.optional(),
     profileImageKey: z.string().trim().max(500).optional().nullable(),
     status: z.enum(userStatusValues).optional(),
-    userName: nameField(errorConstants.USER_NAME_REQUIRED).optional(),
+    userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)
