@@ -1,9 +1,9 @@
 const fileType = Object.freeze({
-  DOCX: "docx",
-  JPEG: "jpeg",
-  PDF: "pdf",
-  PNG: "png",
-  TXT: "txt",
+  DOCX: "application/document",
+  JPEG: "image/jpeg",
+  PDF: "application/pdf",
+  PNG: "image/png",
+  TXT: "text/plain",
 });
 
 const fileTypeValue = Object.values(fileType);

@@ -372,6 +372,20 @@ class PatientService {
 
     return sanitizePatient(updatedPatient);
   }
+
+  async getPatientProfile(userId) {
+    if (!userId) {
+      throw new UnauthorizedException(errorConstants.UNAUTHORIZED);
+    }
+    const params = await validateSchema(idParamSchema, { id: userId });
+    const existingPatient = await patientRepository.findById(params.id);
+
+    if (!existingPatient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    return existingPatient;
+  }
 }
 
 module.exports = new PatientService();
