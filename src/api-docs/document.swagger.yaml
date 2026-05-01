@@ -17,6 +17,12 @@ components:
       schema:
         type: string
         format: uuid
+    fileKeyParam:
+      in: query
+      name: fileKey
+      required: true
+      schema:
+        type: string
 
   schemas:
     CreateDocumentRequest:
@@ -110,12 +116,19 @@ paths:
               type: object
               required:
                 - file
+                - documentType
               properties:
                 file:
                   type: string
                   format: binary
                 documentType:
                   type: string
+                  enum:
+                    - family
+                    - medical_document
+                    - medication
+                    - insurance
+                    - other
       responses:
         200:
           description: File uploaded successfully
@@ -198,3 +211,31 @@ paths:
         - $ref: "#/components/parameters/UuidParam"
       responses:
         "200": { description: Deleted }
+
+  /documents/download-url:
+    get:
+      summary: Get download URL from S3
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/fileKeyParam"
+      responses:
+        "200":
+          description: Download URL fetched successfully
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /documents/delete:
+    delete:
+      summary: Delete file from S3 using file key
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/fileKeyParam"
+      responses:
+        "200":
+          description: File deleted successfully

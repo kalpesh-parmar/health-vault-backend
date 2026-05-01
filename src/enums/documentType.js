@@ -1,9 +1,9 @@
 const documentType = Object.freeze({
-  DISCHARGE_SUMMARY: "discharge_summary",
-  IMAGING_REPORT: "imaging_report",
-  LAB_REPORT: "lab_report",
+  FAMILY: "family",
+  MEDICAL_DOCUMENT: "medical_document",
+  MEDICATION: "medication",
+  INSURANCE: "insurance",
   OTHER: "other",
-  PRESCRIPTION: "prescription",
 });
 
 const documentTypeValue = Object.values(documentType);
