@@ -13,13 +13,13 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-  CREATE TYPE "document_type" AS ENUM ('discharge_summary', 'imaging_report', 'lab_report', 'other', 'prescription');
+  CREATE TYPE "document_type" AS ENUM ('family', 'medical_document', 'medication', 'insurance', 'other');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-  CREATE TYPE "file_type" AS ENUM ('docx', 'jpeg', 'pdf', 'png', 'txt');
+  CREATE TYPE "file_type" AS ENUM ('application/document', 'image/jpeg', 'application/pdf', 'image/png', 'text/plain');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
@@ -78,16 +78,16 @@ CREATE TABLE IF NOT EXISTS "documents" (
   "document_type" "document_type" NOT NULL,
   "file_name" varchar(255) NOT NULL,
   "file_path" text NOT NULL,
-  "s3_bucket" varchar(255) NOT NULL,
-  "s3_key" varchar(500) NOT NULL,
+  "s3_bucket" varchar(255),
+  "s3_key" varchar(500),
   "file_type" "file_type" NOT NULL,
   "file_size" integer NOT NULL,
-  "ocr_status" "ocr_status" DEFAULT 'pending' NOT NULL,
+  "ocr_status" "ocr_status" DEFAULT 'pending',
   "ocr_extracted_text" text,
   "structured_extracted_data" text,
   "report_date" date,
-  "hospital_name" varchar(255) NOT NULL,
-  "doctor_name" varchar(255) NOT NULL,
+  "hospital_name" varchar(255),
+  "doctor_name" varchar(255),
   "remarks" text,
   "soft_delete" boolean DEFAULT false NOT NULL,
   "deleted_at" timestamp,

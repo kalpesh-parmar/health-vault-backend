@@ -3,7 +3,7 @@ const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { documentTypeValue } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");
-const { ocrStatus, ocrStatusValue } = require("../enums/ocrStatus");
+// const { ocrStatus, ocrStatusValue } = require("../enums/ocrStatus");
 const maxFileSize = 25 * 1024 * 1024;
 const documentFilterSortKeys = [
   "createdAt",
@@ -21,7 +21,7 @@ const documentFilterSortKeys = [
 
 const createDocumentSchema = z
   .object({
-    doctorName: z.string().trim().min(1, errorConstants.FULL_NAME_REQUIRED).max(255),
+    // doctorName: z.string().trim().min(1, errorConstants.FULL_NAME_REQUIRED).max(255),
     documentType: z.enum(documentTypeValue, {
       invalid_type_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
       required_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
@@ -37,14 +37,14 @@ const createDocumentSchema = z
       invalid_type_error: errorConstants.FILE_TYPE_INVALID,
       required_error: errorConstants.FILE_TYPE_INVALID,
     }),
-    hospitalName: z.string().trim().min(1, errorConstants.HOSPITAL_NAME_REQUIRED).max(255),
-    ocrExtractedText: z.string().optional().nullable(),
-    ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.PENDING),
-    remarks: z.string().optional().nullable(),
-    reportDate: z.coerce.date().optional().nullable(),
+    // hospitalName: z.string().trim().min(1, errorConstants.HOSPITAL_NAME_REQUIRED).max(255),
+    // ocrExtractedText: z.string().optional().nullable(),
+    // ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.PENDING),
+    // remarks: z.string().optional().nullable(),
+    // reportDate: z.coerce.date().optional().nullable(),
     s3Bucket: z.string().trim().min(1).max(255),
     s3Key: z.string().trim().min(1).max(500),
-    structuredExtractedData: z.string().optional().nullable(),
+    // structuredExtractedData: z.string().optional().nullable(),
   })
   .strict();
 
@@ -106,9 +106,16 @@ const listDocumentsPaginatedSchema = listDocumentsFilterSortSchema
   })
   .strict();
 
+const downloadFileQuerySchema = z
+  .object({
+    fileKey: z.string().trim().min(1, errorConstants.FILE_KEY_REQUIRED),
+  })
+  .strict();
+
 module.exports = {
   createDocumentSchema,
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
+  downloadFileQuerySchema,
   listDocumentsQuerySchema,
 };
