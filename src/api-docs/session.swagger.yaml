@@ -1,0 +1,50 @@
+openapi: 3.0.0
+info:
+  title: Session API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    UuidParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateSessionRequest:
+      type: object
+      properties:
+        deviceToken:
+          type: string
+
+paths:
+  /session:
+    post:
+      tags: [Session]
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201": { description: Created }
+
+  /session/{id}:
+    get:
+      tags: [Session]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      responses:
+        "200": { description: Found }

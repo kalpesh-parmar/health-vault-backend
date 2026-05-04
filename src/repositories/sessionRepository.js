@@ -1,60 +1,89 @@
-const { any } = require("zod");
-const { db } = require("../config/db");
+const { and, eq, gt } = require("drizzle-orm");
+
+const { db } = require("../configs/db");
 const { session } = require("../models/session");
-const { eq, and } = require("drizzle-orm");
 
 class SessionRepository {
   async create(data) {
     const result = await db.insert(session).values(data).returning();
-    return result[0]??null;
+    return result[0] || null;
   }
 
-  //create user session
-  createSession = async ({ userId }) => {
-    const [sessionCreate] = await db
-      .insert(session)
-      .values({
-        userId,
-        loginTime: new Date(),
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-    return sessionCreate ?? null;
-  };
-  
   async findById(id) {
     const result = await db
       .select()
       .from(session)
       .where(and(eq(session.id, id), eq(session.softDelete, false)))
       .limit(1);
-      return result?.[0]||null;
+
+    return result[0] || null;
   }
 
-  async logout(sessionId) {
+  async findActiveById(id) {
+    const result = await db
+      .select()
+      .from(session)
+      .where(
+        and(
+          eq(session.id, id),
+          eq(session.isActive, true),
+          eq(session.softDelete, false),
+          gt(session.refreshTokenExpiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findActiveByRefreshTokenHash(refreshTokenHash) {
+    const result = await db
+      .select()
+      .from(session)
+      .where(
+        and(
+          eq(session.refreshTokenHash, refreshTokenHash),
+          eq(session.isActive, true),
+          eq(session.softDelete, false),
+          gt(session.refreshTokenExpiresAt, new Date()),
+        ),
+      )
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async rotateRefreshToken(id, data) {
     const result = await db
       .update(session)
       .set({
-        logoutTime: new Date(),
-        softDelete: true,
-        isActive: false,
+        ...data,
         updatedAt: new Date(),
       })
-      .where(eq(session.id, sessionId))
+      .where(and(eq(session.id, id), eq(session.softDelete, false)))
       .returning();
 
-    return result[0]??null;
+    return result[0] || null;
   }
 
-  async deleteSessionsByUserId(userId) {
+  async revokeById(id) {
     const result = await db
-      .delete(session)
-      .where(eq(session.userId, userId))
+      .update(session)
+      .set({
+        isActive: false,
+        logoutTime: new Date(),
+        softDelete: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(session.id, id))
       .returning();
-       return result[0] || null;
-    }
+
+    return result[0] || null;
+  }
+
+  async deleteByPatientId(userId) {
+    return db.delete(session).where(eq(session.userId, userId)).returning();
+  }
 }
 
 module.exports = new SessionRepository();
