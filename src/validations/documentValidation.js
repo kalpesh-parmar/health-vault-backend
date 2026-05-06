@@ -21,7 +21,7 @@ const documentFilterSortKeys = [
 
 const createDocumentSchema = z
   .object({
-    doctorName: z.string().trim().max(255),
+    doctorName: z.string().trim().max(255).nullable(),
     documentType: z.enum(documentTypeValue, {
       invalid_type_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
       required_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
@@ -37,14 +37,17 @@ const createDocumentSchema = z
       invalid_type_error: errorConstants.FILE_TYPE_INVALID,
       required_error: errorConstants.FILE_TYPE_INVALID,
     }),
-    hospitalName: z.string().trim().max(255),
-    ocrExtractedText: z.string().optional().nullable(),
+    hospitalName: z.string().trim().max(255).nullable(),
+    ocrExtractedText: z.record(z.any()).optional().nullable(),
     ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.PENDING),
     remarks: z.string().optional().nullable(),
-    reportDate: z.coerce.date().optional().nullable(),
+    reportDate: z.preprocess((val) => {
+      if (!val || val === "" || val === "Not Found") return null;
+      return val;
+    }, z.coerce.date().nullable().optional()),
     s3Bucket: z.string().trim().min(1).max(255),
     s3Key: z.string().trim().min(1).max(500),
-    structuredExtractedData: z.optional().nullable(),
+    structuredExtractedData: z.record(z.any()).optional().nullable(),
   })
   .strict();
 

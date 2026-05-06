@@ -120,8 +120,6 @@ function buildOrderClause(sort = {}) {
 
 class DocumentRepository {
   async create(data) {
-    console.log("data===", data);
-
     const result = await db.insert(document).values(data).returning();
     return result[0] || null;
   }
@@ -170,9 +168,11 @@ class DocumentRepository {
   async findAllByFilterSortAndPagination({ filter = {}, page, sort = {} }) {
     const conditions = buildFilterSortConditions(filter);
     const orderClause = buildOrderClause(sort);
-    const pageNumber = page.pageNumber || 1;
-    const limit = page.pageLimit || page.Size || 10;
-    const offset = (pageNumber - 1) * limit;
+    const pageNumber = page?.pageNumber ?? 1;
+    const pageLimit = page?.pageLimit ?? 10;
+
+    const offset = (pageNumber - 1) * pageLimit;
+    const limit = pageLimit;
 
     const data = await db
       .select()

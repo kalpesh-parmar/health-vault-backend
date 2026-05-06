@@ -18,6 +18,7 @@ const app = express();
 const server = http.createServer(app);
 const port = env.port;
 
+app.set("trust proxy", 1);
 app.use(helmetMiddleware);
 app.use(cors());
 app.use(apiRateLimiter);

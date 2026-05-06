@@ -1,9 +1,12 @@
 const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 require("dotenv").config();
+const axios = require("axios");
 const { s3Client } = require("../configs/s3");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
+const FormData = require("form-data");
+require("fs");
 const documentRepository = require("../repositories/documentRepository");
 const {
   createDocumentSchema,
@@ -14,8 +17,9 @@ const {
   validateSchema,
 } = require("../validations");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { extractTextFromImage } = require("../utils/ocrUtils");
-const { preprocessImage } = require("../utils/imagePreprocess");
+// const { extractTextFromImage } = require("../utils/ocrUtils");
+// const { preprocessImage } = require("../utils/imagePreprocess");
+// const { extractMedicalText } = require("../utils/medicalDataParser");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -35,13 +39,17 @@ class DocumentService {
     const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${fileKey}`;
 
     await s3Client.send(filedata);
+    const form = new FormData();
+    form.append("file", file.buffer, {
+      filename: file.originalname,
+      contentType: file.mimetype,
+    });
 
-    //ocr extract data
-    const text = extractTextFromImage(file.buffer);
-    console.log("text===", text);
-    const structure = preprocessImage(text);
-    console.log("structure==", structure);
+    const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", form, {
+      headers: form.getHeaders(),
+    });
 
+    const structuredData = ocrResponse.data.data;
     const fileinfo = {
       fileType: file.mimetype,
       fileStoragePath,
@@ -50,8 +58,13 @@ class DocumentService {
       documentType: docType.documentType,
       s3Bucket: filedata.input.Bucket,
       s3Key: filedata.input.Key,
+      ocrExtractedText: ocrResponse.data,
+      structuredExtractedData: structuredData,
+      hospitalName: structuredData.hospitalName,
+      doctorName: structuredData.doctorName,
+      reportDate: structuredData.reportDate,
+      remarks: structuredData.remarks,
     };
-
     const validData = await validateSchema(createDocumentSchema, fileinfo);
     return documentRepository.create({
       userId,

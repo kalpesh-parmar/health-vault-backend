@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS "documents" (
   "file_size" integer NOT NULL,
   "ocr_status" "ocr_status" DEFAULT 'pending',
   "ocr_extracted_text" text,
-  "structured_extracted_data" text,
+  "structured_extracted_data" jsondb,
   "report_date" date,
   "hospital_name" varchar(255),
   "doctor_name" varchar(255),

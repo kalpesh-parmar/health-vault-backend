@@ -15,6 +15,7 @@ const { documentTypeValue } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");
 const { ocrStatus, ocrStatusValue } = require("../enums/ocrStatus");
 const { patient } = require("./patient");
+const { json } = require("drizzle-orm/pg-core");
 
 const documentTypeEnum = pgEnum("document_type", documentTypeValue);
 const fileTypeEnum = pgEnum("file_type", fileTypeValue);
@@ -36,7 +37,7 @@ const document = pgTable(
     fileSize: integer("file_size").notNull(),
     ocrStatus: ocrStatusEnum("ocr_status").default(ocrStatus.PENDING),
     ocrExtractedText: text("ocr_extracted_text"),
-    structuredExtractedData: text("structured_extracted_data"),
+    structuredExtractedData: json("structured_extracted_data"),
     reportDate: date("report_date", { mode: "date" }),
     hospitalName: varchar("hospital_name", { length: 255 }),
     doctorName: varchar("doctor_name", { length: 255 }),
