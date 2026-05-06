@@ -103,9 +103,16 @@ class DocumentService {
     return documentRepository.findAllByFilterAndSort(data);
   }
 
-  async listDocumentsPaginated(payload) {
+  async listDocumentsPaginated(userId, payload) {
     const data = await validateSchema(listDocumentsPaginatedSchema, payload);
-    return documentRepository.findAllByFilterSortAndPagination(data);
+    const result = await documentRepository.findAllByFilterSortAndPagination({
+      ...data,
+      userId,
+    });
+    return {
+      items: result.data,
+      page: result.page,
+    };
   }
 
   async deleteDocument(id, userId) {

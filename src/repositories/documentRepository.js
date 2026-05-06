@@ -54,8 +54,12 @@ function buildDocumentFilters(filters = {}) {
   return and(...conditions);
 }
 
-function buildFilterSortConditions(filter = {}) {
+function buildFilterSortConditions(filter = {}, userId) {
   const conditions = [or(eq(document.softDelete, false), isNull(document.softDelete))];
+
+  if (userId) {
+    conditions.push(eq(document.userId, String(userId)));
+  }
 
   if (filter.title) {
     conditions.push(eq(document.fileName, filter.title));
@@ -79,10 +83,6 @@ function buildFilterSortConditions(filter = {}) {
 
   if (filter.fileType) {
     conditions.push(eq(document.fileType, filter.fileType));
-  }
-
-  if (filter.createdBy) {
-    conditions.push(eq(document.userId, filter.createdBy));
   }
 
   if (filter.hospitalName) {
@@ -165,8 +165,11 @@ class DocumentRepository {
       .orderBy(orderClause);
   }
 
-  async findAllByFilterSortAndPagination({ filter = {}, page, sort = {} }) {
-    const conditions = buildFilterSortConditions(filter);
+  async findAllByFilterSortAndPagination({ filter = {}, page, sort = {}, userId }) {
+    if (!userId) {
+      throw new Error("UserId is required");
+    }
+    const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
     const pageNumber = page?.pageNumber ?? 1;
     const pageLimit = page?.pageLimit ?? 10;
@@ -181,6 +184,8 @@ class DocumentRepository {
       .orderBy(orderClause)
       .limit(limit)
       .offset(offset);
+    console.log("data===", data);
+
     const totalRecordsResult = await db
       .select({ count: sql`count(*)` })
       .from(document)

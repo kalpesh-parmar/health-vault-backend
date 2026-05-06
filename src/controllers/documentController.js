@@ -24,10 +24,10 @@ async function listDocuments(req, res) {
 }
 
 async function listDocumentsPaginated(req, res) {
-  const result = await documentService.listDocumentsPaginated(req.body);
+  const result = await documentService.listDocumentsPaginated(req.auth.userId, req.body);
   return paginatedSuccessResponse(
     res,
-    result.data,
+    result.items,
     result.page,
     messageConstants.DOCUMENT_FILTERED_LIST_FETCHED,
   );
