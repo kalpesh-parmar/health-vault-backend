@@ -116,6 +116,11 @@ class DocumentRepository {
     const result = await db.insert(document).values(data).returning();
     return result[0] || null;
   }
+  async update(id, data) {
+    const result = await db.update(document).set(data).where(eq(document.id, id)).returning();
+
+    return result[0] || null;
+  }
 
   async findById(id) {
     const result = await db

@@ -21,32 +21,42 @@ const documentFilterSortKeys = [
 
 const createDocumentSchema = z
   .object({
-    doctorName: z.string().trim().max(255).nullable(),
-    documentType: z.enum(documentTypeValue, {
-      invalid_type_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
-      required_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
-    }),
-    fileName: z.string().trim().min(2, errorConstants.NAME_TOO_SHORT).max(255),
+    documentType: z
+      .enum(documentTypeValue, {
+        invalid_type_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
+        required_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
+      })
+      .optional(),
+    fileName: z.string().trim().min(2, errorConstants.NAME_TOO_SHORT).max(255).optional(),
     fileSize: z.coerce
       .number({ invalid_type_error: errorConstants.FILE_SIZE_INVALID })
       .int(errorConstants.FILE_SIZE_INVALID)
       .positive(errorConstants.FILE_SIZE_INVALID)
-      .max(maxFileSize, errorConstants.FILE_SIZE_INVALID),
-    fileStoragePath: z.string().trim().min(1, errorConstants.INVALID_REQUEST),
-    fileType: z.enum(fileTypeValue, {
-      invalid_type_error: errorConstants.FILE_TYPE_INVALID,
-      required_error: errorConstants.FILE_TYPE_INVALID,
-    }),
-    hospitalName: z.string().trim().max(255).nullable(),
+      .max(maxFileSize, errorConstants.FILE_SIZE_INVALID)
+      .optional(),
+    fileStoragePath: z.string().trim().min(1, errorConstants.INVALID_REQUEST).optional(),
+    fileType: z
+      .enum(fileTypeValue, {
+        invalid_type_error: errorConstants.FILE_TYPE_INVALID,
+        required_error: errorConstants.FILE_TYPE_INVALID,
+      })
+      .optional(),
+    s3Bucket: z.string().trim().min(1).max(255),
+    s3Key: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+const updateDocumentSchema = z
+  .object({
+    doctorName: z.string().trim().max(255).nullable().optional(),
+    hospitalName: z.string().trim().max(255).nullable().optional(),
     ocrExtractedText: z.record(z.any()).optional().nullable(),
-    ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.PENDING),
+    ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.IN_PROGRESS),
     remarks: z.string().optional().nullable(),
     reportDate: z.preprocess((val) => {
       if (!val || val === "" || val === "Not Found") return null;
       return val;
     }, z.coerce.date().nullable().optional()),
-    s3Bucket: z.string().trim().min(1).max(255),
-    s3Key: z.string().trim().min(1).max(500),
     structuredExtractedData: z.record(z.any()).optional().nullable(),
   })
   .strict();
@@ -121,4 +131,5 @@ module.exports = {
   listDocumentsPaginatedSchema,
   downloadFileQuerySchema,
   listDocumentsQuerySchema,
+  updateDocumentSchema,
 };

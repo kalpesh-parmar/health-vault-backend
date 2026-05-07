@@ -17,6 +17,8 @@ const {
 } = require("../validations");
 const s3service = require("./s3service");
 const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { ocrStatus } = require("../enums/ocrStatus");
+const { updateDocumentSchema } = require("../validations/documentValidation");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -29,7 +31,25 @@ class DocumentService {
 
     // upload file using s3 service
     const uploadedFile = await s3service.uploadFile(file);
-    // OCR API
+    const fileinfo = {
+      fileType: file.mimetype,
+      fileStoragePath: uploadedFile.fileStoragePath,
+      fileName: file.originalname,
+      fileSize: file.size,
+      documentType: docType.documentType,
+      s3Bucket: uploadedFile.bucket,
+      s3Key: uploadedFile.fileKey,
+    };
+
+    const validData = await validateSchema(createDocumentSchema, fileinfo);
+    const document = await documentRepository.create({
+      userId,
+      ...validData,
+    });
+    await documentRepository.update(document.id, {
+      ocrStatus: ocrStatus.IN_PROGRESS,
+    });
+    //ocr API
     const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", {
       fileKey: uploadedFile.fileKey,
       bucket: uploadedFile.bucket,
@@ -37,30 +57,19 @@ class DocumentService {
 
     const structuredData = ocrResponse.data.data;
 
-    const fileinfo = {
-      fileType: file.mimetype,
-      fileStoragePath: uploadedFile.fileStoragePath,
-      fileName: file.originalname,
-      fileSize: file.size,
-      documentType: docType.documentType,
-
-      s3Bucket: uploadedFile.bucket,
-      s3Key: uploadedFile.fileKey,
-
+    const ocrInfo = {
       ocrExtractedText: ocrResponse.data,
       structuredExtractedData: structuredData,
-
       hospitalName: structuredData.hospitalName,
       doctorName: structuredData.doctorName,
       reportDate: structuredData.reportDate,
       remarks: structuredData.remarks,
+      ocrStatus: ocrStatus.COMPLETED,
     };
+    const validOcr = await validateSchema(updateDocumentSchema, ocrInfo);
 
-    const validData = await validateSchema(createDocumentSchema, fileinfo);
-
-    return documentRepository.create({
-      userId,
-      ...validData,
+    return documentRepository.update(document.id, {
+      ...validOcr,
     });
   }
 
