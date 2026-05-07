@@ -13,8 +13,8 @@ def parse_medical_data(text):
 
 
 def extract_doctor(text):
-    match = re.search(r"(?:Dr\.?|Doctor|Physician|Consultant|Ref\.?\s*By)\s*[:\-]?\s*([A-Za-z\s\.]+)",text)
-    return "Dr. " + match.group(1).strip() if match else None
+    match = re.search(r"(?:Dr\.?|DR|Doctor|Physician|Consultant|Ref\.?\s*By)\s*[:\-]?\s*([A-Za-z\s\.]+)",text)
+    return match.group(1).strip() if match else None
 
 
 def extract_hospital(text):

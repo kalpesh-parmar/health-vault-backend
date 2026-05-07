@@ -1,33 +1,43 @@
-const { InvalidRequestException } = require("../exceptions/appError");
-const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const { PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
 const { s3Client } = require("../configs/s3");
-const documentService = require("./documentService");
-const { messageConstants } = require("../constants/messageConstants");
 
 class S3Service {
   constructor() {
-    this.bucket = process.env.AWS_BUCKET;
-    this.region = process.env.AWS_REGION;
-    this.folder = "patient_Document";
+    this.bucket = process.env.PATIENT_DOCUMENTS_BUCKET;
   }
 
-  // Upload file method
   async uploadFile(file) {
-    if (!file) {
-      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
-    }
-    const fileKey = `${this.folder}/${Date.now()}-${file.originalname}`;
+    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
+
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: fileKey,
       Body: file.buffer,
       ContentType: file.mimetype,
     });
+
     await s3Client.send(command);
-    await documentService.createDocument(command);
+
     return {
       fileKey,
+      bucket: this.bucket,
+      fileStoragePath: `https://${this.bucket}.s3.amazonaws.com/${fileKey}`,
     };
+  }
+
+  async generateSignedUrl(fileKey) {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: fileKey,
+      ResponseContentDisposition: "inline",
+    });
+
+    return await getSignedUrl(s3Client, command, {
+      expiresIn: 1800,
+    });
   }
 }
 

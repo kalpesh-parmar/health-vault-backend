@@ -1,39 +1,73 @@
-from fastapi import FastAPI, UploadFile, File
-import shutil
+from fastapi import FastAPI
+from pydantic import BaseModel
+from pathlib import Path
+from dotenv import load_dotenv
+import boto3
 import os
 from src.pythonService.ocr_service import extract_text
 from src.pythonService.parser import parse_medical_data
 from src.pythonService.text_utils import clean_text
 
 app = FastAPI()
+env_path = Path(__file__).resolve().parents[2] / ".env"
+
+print("ENV PATH =", env_path)
+
+load_dotenv(dotenv_path=env_path)
+
+print("AWS KEY =", os.getenv("AWS_ACCESS_KEY_ID"))
+print("AWS REGION =", os.getenv("AWS_REGION"))
+s3 = boto3.client("s3")
+
+
+class OCRRequest(BaseModel):
+    fileKey: str
+    bucket: str
+
 
 @app.post("/run-ocr")
-async def run_ocr(file: UploadFile = File(...)):
+async def run_ocr(payload: OCRRequest):
+
     try:
-        #  Save file temporarily
-        temp_path = f"temp_{file.filename}"
+        file_key = payload.fileKey
+        bucket = payload.bucket
 
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # local temp file
+        temp_path = f"temp_{os.path.basename(file_key)}"
 
-        #  Send file path to OCR
+        # download from s3
+        s3.download_file(
+            bucket,
+            file_key,
+            temp_path
+        )
+
+        # OCR
         ocr_result = extract_text(temp_path)
-        #convert list to string 
-        text = " ".join(ocr_result) if isinstance(ocr_result, list) else ocr_result
-        #clean text
-        cleaned_text = clean_text(text)
-        #parse structure data
-        structured_data = parse_medical_data(cleaned_text)
 
-        #  Delete temp file
+        text = (
+            " ".join(ocr_result)
+            if isinstance(ocr_result, list)
+            else ocr_result
+        )
+
+        cleaned_text = clean_text(text)
+
+        structured_data = parse_medical_data(
+            cleaned_text
+        )
+
+        # delete temp file
         os.remove(temp_path)
 
         return {
-    "success": True,
-    "data": structured_data
-    }
+            "success": True,
+            "data": structured_data
+        }
+
     except Exception as e:
         import traceback
+
         return {
             "success": False,
             "error": str(e),
