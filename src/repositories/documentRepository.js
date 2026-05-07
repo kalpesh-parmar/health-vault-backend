@@ -69,13 +69,6 @@ function buildFilterSortConditions(filter = {}, userId) {
     conditions.push(eq(document.fileName, filter.fileName));
   }
 
-  // if (filter.type) {
-  //   conditions.push(eq(document.documentType, filter.type));
-  // }
-
-  // if (filter.documentType) {
-  //   conditions.push(eq(document.documentType, filter.documentType));
-  // }
   const docType = filter.documentType || filter.type;
   if (docType) {
     conditions.push(eq(document.documentType, docType.trim()));
