@@ -30,6 +30,12 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
+CREATE TYPE "medication_type" AS ENUM ('TABLET','CAPSULE','SYRUP','DROP','INJECTION');
+
+CREATE TYPE "frequency_type" AS ENUM ('ONCE_DAILY','TWICE_DAILY','THREE_TIMES_DAILY','AS_NEEDED');
+
+CREATE TYPE food_type AS ENUM ('WITH_FOOD','BEFORE_FOOD','AFTER_FOOD','EMPTY_STOMACH');
+
 CREATE TABLE IF NOT EXISTS "patients" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "patient_code" varchar(32) NOT NULL UNIQUE,
@@ -99,6 +105,29 @@ CREATE TABLE IF NOT EXISTS "health_records" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "user_id" uuid NOT NULL REFERENCES "patients"("id") ON DELETE cascade,
   "record" text,
+  "soft_delete" boolean DEFAULT false NOT NULL,
+  "deleted_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "medications" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "patient_code" varchar(32) NOT NULL,
+  "medication_name" varchar(255) NOT NULL,
+  "medication_type" medication_type NOT NULL,
+  "prescribed_by" varchar(255),
+  "dose_per_intake" varchar(100),
+  "frequency" frequency_type NOT NULL,
+  "best_taken" text[],
+  "with_food" food_type,
+  "start_date" date NOT NULL,
+  "end_date" date,
+  "ongoing" boolean DEFAULT false NOT NULL,
+  "pills_remaining" integer DEFAULT 0,
+  "dose_reminders" boolean DEFAULT false,
+  "refill_alert" boolean DEFAULT false,
+  "notes" text,
   "soft_delete" boolean DEFAULT false NOT NULL,
   "deleted_at" timestamp,
   "created_at" timestamp DEFAULT now() NOT NULL,

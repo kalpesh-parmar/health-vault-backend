@@ -16,7 +16,7 @@ const { foodTypeValues } = require("../enums/foodType");
 
 const medicationTypeEnum = pgEnum("medication_type", medicationTypeValues);
 const frequencyEnum = pgEnum("frequency_type", frequencyTypeValues);
-const foodEnum = pgEnum("with_food", foodTypeValues);
+const foodEnum = pgEnum("food_type", foodTypeValues);
 // const bestTakenEnum=pgEnum("best_taken",bestTakenValues)
 
 const { patient } = require("./patient");
