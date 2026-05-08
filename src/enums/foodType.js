@@ -1,8 +1,8 @@
 const foodType = Object.freeze({
-  WITH_FOOD: "with_food",
-  BEFORE_FOOD: "before_food",
-  AFTER_FOOD: "after_food",
-  EMPTY_STOMACH: "empty_stomach",
+  WITH_FOOD: "WITH_FOOD",
+  BEFORE_FOOD: "BEFORE_FOOD",
+  AFTER_FOOD: " AFTER_FOOD",
+  EMPTY_STOMACH: "EMPTY_STOMACH",
 });
 
 const foodTypeValues = Object.values(foodType);

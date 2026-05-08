@@ -5,6 +5,7 @@ const {
   pgEnum,
   pgTable,
   timestamp,
+  date,
   // uniqueIndex,
   uuid,
   varchar,
@@ -28,6 +29,7 @@ const medication = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
+    patientCode: varchar("patient_code", { length: 32 }).notNull(),
     medicationName: varchar("medication_name", { length: 255 }).notNull(),
     medicationType: medicationTypeEnum("medication_type").notNull(),
     prescribedBy: varchar("prescribed_by", { length: 255 }),
@@ -35,8 +37,8 @@ const medication = pgTable(
     frequency: frequencyEnum("frequency").notNull(),
     bestTaken: varchar("best_taken", { length: 50 }).array(),
     withFood: foodEnum("with_food"),
-    startDate: timestamp("start_date").notNull(),
-    endDate: timestamp("end_date"),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date"),
     ongoing: boolean("ongoing").default(false).notNull(),
     pillsRemaining: integer("pills_remaining").default(0),
     doseReminders: boolean("dose_reminders").default(false),
@@ -44,7 +46,7 @@ const medication = pgTable(
     notes: varchar("notes", { length: 1000 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-    softDelete: timestamp("soft_delete").defaultNow().notNull(),
+    softDelete: boolean("soft_delete").default(false).notNull(),
   },
 
   (table) => [

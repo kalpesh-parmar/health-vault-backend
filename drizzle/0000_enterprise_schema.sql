@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS "health_records" (
 
 CREATE TABLE IF NOT EXISTS "medications" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "user_id" uuid NOT NULL REFERENCES "patients"("id") ON DELETE cascade,
   "patient_code" varchar(32) NOT NULL,
   "medication_name" varchar(255) NOT NULL,
   "medication_type" medication_type NOT NULL,

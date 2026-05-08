@@ -1,9 +1,9 @@
 const medictationType = Object.freeze({
-  TABLET: "tablet",
-  CAPSULE: "capsule",
-  SYRUP: "syrup",
-  DROP: "drop",
-  INJECTION: "injection",
+  TABLET: "TABLET",
+  CAPSULE: "CAPSULE",
+  SYRUP: "SYRUP",
+  DROP: "DROP",
+  INJECTION: "INJECTION",
 });
 
 const medicationTypeValues = Object.values(medictationType);
