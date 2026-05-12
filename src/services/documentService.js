@@ -105,6 +105,9 @@ class DocumentService {
   }
 
   async listDocumentsPaginated(userId, payload) {
+    if (!userId) {
+      throw new InvalidRequestException(errorConstants.USER_NOT_FOUND);
+    }
     const data = await validateSchema(listDocumentsPaginatedSchema, payload);
     const result = await documentRepository.findAllByFilterSortAndPagination({
       ...data,

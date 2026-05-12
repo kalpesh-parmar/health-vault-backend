@@ -164,9 +164,6 @@ class DocumentRepository {
   }
 
   async findAllByFilterSortAndPagination({ filter = {}, page, sort = {}, userId }) {
-    if (!userId) {
-      throw new Error("UserId is required");
-    }
     const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
     const pageNumber = page?.pageNumber ?? 1;
