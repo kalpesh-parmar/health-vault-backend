@@ -5,18 +5,20 @@ from dotenv import load_dotenv
 import boto3
 import os
 from src.pythonService.ocr_service import extract_text
-from src.pythonService.parser import parse_medical_data
 from src.pythonService.text_utils import clean_text
+from src.pythonService.graphParser import extract_graph_data
+# import google.generativeai as genai
+
+# genai.configure(
+#     api_key=os.getenv("CHATBOT_API_KEY")
+# )
+# model = genai.GenerativeModel(
+#     "gemini-2.5-flash"
+# )
 
 app = FastAPI()
 env_path = Path(__file__).resolve().parents[2] / ".env"
-
-print("ENV PATH =", env_path)
-
 load_dotenv(dotenv_path=env_path)
-
-print("AWS KEY =", os.getenv("AWS_ACCESS_KEY_ID"))
-print("AWS REGION =", os.getenv("AWS_REGION"))
 s3 = boto3.client("s3")
 
 
@@ -44,7 +46,6 @@ async def run_ocr(payload: OCRRequest):
 
         # OCR
         ocr_result = extract_text(temp_path)
-
         text = (
             " ".join(ocr_result)
             if isinstance(ocr_result, list)
@@ -52,17 +53,16 @@ async def run_ocr(payload: OCRRequest):
         )
 
         cleaned_text = clean_text(text)
-
-        structured_data = parse_medical_data(
-            cleaned_text
-        )
+        graph_data = extract_graph_data(temp_path)
+        # structured_data = parse_medical_data(cleaned_text)
 
         # delete temp file
         os.remove(temp_path)
 
         return {
-            "success": True,
-            "data": structured_data
+            "success": True,    
+            "ocr_text": cleaned_text,
+            "graphs":graph_data
         }
 
     except Exception as e:

@@ -19,6 +19,8 @@ const s3service = require("./s3service");
 const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { ocrStatus } = require("../enums/ocrStatus");
 const { updateDocumentSchema } = require("../validations/documentValidation");
+const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt");
+const model = require("../configs/aiConfig");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -49,21 +51,31 @@ class DocumentService {
     await documentRepository.update(document.id, {
       ocrStatus: ocrStatus.IN_PROGRESS,
     });
+
     //ocr API
     const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", {
       fileKey: uploadedFile.fileKey,
       bucket: uploadedFile.bucket,
     });
+    const fullText = ocrResponse.data.ocr_text;
+    const graph = ocrResponse.data.graphs;
 
-    const structuredData = ocrResponse.data.data;
+    const prompt = medicalPrompt(fullText, graph);
+
+    const cleanText = cleanOCRText(prompt);
+
+    const structuredData = await model.generateContent(cleanText);
+    const responseText = structuredData.response.text();
+    const cleanData = cleanOCRText(responseText);
+    const jsonData = JSON.parse(cleanData);
 
     const ocrInfo = {
       ocrExtractedText: ocrResponse.data,
-      structuredExtractedData: structuredData,
-      hospitalName: structuredData.hospitalName,
-      doctorName: structuredData.doctorName,
-      reportDate: structuredData.reportDate,
-      remarks: structuredData.remarks,
+      structuredExtractedData: jsonData,
+      hospitalName: jsonData.hospital?.name,
+      doctorName: jsonData.doctor?.name,
+      reportDate: jsonData.report?.reportDate,
+      remarks: jsonData.remarks,
       ocrStatus: ocrStatus.COMPLETED,
     };
     const validOcr = await validateSchema(updateDocumentSchema, ocrInfo);
@@ -80,7 +92,6 @@ class DocumentService {
     if (!existingDocument || existingDocument.userId !== userId) {
       throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
     }
-
     return existingDocument;
   }
 
