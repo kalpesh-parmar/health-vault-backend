@@ -67,6 +67,15 @@ const errorConstants = Object.freeze({
   USER_NAME_REQUIRED: "User name is required",
   VALID_DOCUMENT_TYPE_REQUIRED: "Please enter a valid document type",
   VALID_EMAIL_REQUIRED: "Please enter a valid email",
+  DOSE_REQUIRED: "Dose per intake is required",
+  INVALID_NUMBER: "Invalid number",
+  DOSE_POSITIVE: "Dose must be greater than 0",
+  REMAINING_PILLS_INVALID: "Remaining pills cannot exceed total pills",
+  DOSE_GREATER_THAN_PILLS: "Dose per intake cannot exceed remaining pills",
+  INVALID_END_DATE: "End date must be after start date",
+  INVALID_DATE_FORMAT: "Invalid date format",
+  ONE_TIME_IS_REQUIRED: "At least one time required",
+  USER_NOT_FOUND: "User not found",
 });
 
 module.exports = { errorConstants };

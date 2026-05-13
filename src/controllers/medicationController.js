@@ -1,9 +1,6 @@
 const { StatusCodes } = require("http-status-codes");
-
 const { messageConstants } = require("../constants/messageConstants");
-
 const { successResponse, paginatedSuccessResponse } = require("../helpers/generalResponse");
-
 const medicationService = require("../services/medicationService");
 
 //create medication
@@ -15,7 +12,6 @@ async function createMedication(req, res) {
 }
 
 //updated medication
-
 async function updateMedication(req, res) {
   const result = await medicationService.updateMedication(req.params.id, req.auth.userId, req.body);
 
@@ -23,7 +19,6 @@ async function updateMedication(req, res) {
 }
 
 //deleted medication
-
 async function deleteMedication(req, res) {
   const result = await medicationService.deleteMedication(req.params.id, req.auth.userId);
 
@@ -31,7 +26,6 @@ async function deleteMedication(req, res) {
 }
 
 //get medication by id
-
 async function getMedicationById(req, res) {
   const result = await medicationService.getMedicationById(req.params.id, req.auth.userId);
 
@@ -40,13 +34,11 @@ async function getMedicationById(req, res) {
 
 //get mediaction list
 async function getMedicationList(req, res) {
-  const result = await medicationService.getMedicationList(req.auth.userId);
-
+  const result = await medicationService.getMedicationList();
   return successResponse(res, result, messageConstants.MEDICATION_LIST_FETCHED);
 }
 
 //filtered list
-
 async function listMedications(req, res) {
   const result = await medicationService.listMedications(req.body);
 
@@ -54,9 +46,8 @@ async function listMedications(req, res) {
 }
 
 //pagination list
-
 async function listMedicationsPaginated(req, res) {
-  const result = await medicationService.listMedicationsPaginated(req.body);
+  const result = await medicationService.listMedicationsPaginated(req.body, req.auth.userId);
 
   return paginatedSuccessResponse(
     res,

@@ -9,6 +9,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      bearerFormat: JWT
 
   parameters:
     UuidParam:
@@ -49,9 +50,26 @@ components:
       type: string
       enum:
         - MORNING
-        - AFTERNOON
+        - NOON
         - EVENING
         - NIGHT
+
+    MedicationTime:
+      type: object
+      required:
+        - time
+        - period
+
+      properties:
+        time:
+          type: string
+          example: "08:00"
+
+        period:
+          type: string
+          enum:
+            - AM
+            - PM
 
     CreateMedicationRequest:
       type: object
@@ -59,8 +77,11 @@ components:
       required:
         - medicationName
         - medicationType
+        - dosePerIntake
         - frequency
+        - medicationTime
         - startDate
+        - totalPills
 
       properties:
         medicationName:
@@ -72,19 +93,39 @@ components:
 
         prescribedBy:
           type: string
+          nullable: true
           example: Dr. Smith
 
         dosePerIntake:
-          type: string
-          example: 500mg
+          type: integer
+          minimum: 1
+          example: 1
 
         frequency:
           $ref: "#/components/schemas/FrequencyType"
 
+        medicationTime:
+          type: array
+          minItems: 1
+
+          items:
+            $ref: "#/components/schemas/MedicationTime"
+
+          example:
+            - time: "08:00"
+              period: AM
+            - time: "08:00"
+              period: PM
+
         bestTaken:
           type: array
+
           items:
             $ref: "#/components/schemas/BestTakenType"
+
+          example:
+            - MORNING
+            - NIGHT
 
         withFood:
           $ref: "#/components/schemas/FoodType"
@@ -92,33 +133,39 @@ components:
         startDate:
           type: string
           format: date
-          example: 2026-05-08
+          example: 2026-05-12
 
         endDate:
           type: string
           format: date
           nullable: true
-          example: 2026-06-01
+          example: 2026-05-20
 
         ongoing:
           type: boolean
+          default: false
           example: false
 
-        pillsRemaining:
+        totalPills:
           type: integer
-          example: 10
+          minimum: 0
+          example: 30
 
         doseReminders:
           type: boolean
+          default: false
           example: true
 
         refillAlert:
           type: boolean
+          default: false
           example: true
 
         notes:
           type: string
-          example: Take after lunch
+          nullable: true
+          maxLength: 1000
+          example: Take after food
 
     UpdateMedicationRequest:
       type: object
@@ -132,15 +179,24 @@ components:
 
         prescribedBy:
           type: string
+          nullable: true
 
         dosePerIntake:
-          type: string
+          type: integer
+          minimum: 1
 
         frequency:
           $ref: "#/components/schemas/FrequencyType"
 
+        medicationTime:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/MedicationTime"
+
         bestTaken:
           type: array
+
           items:
             $ref: "#/components/schemas/BestTakenType"
 
@@ -151,16 +207,12 @@ components:
           type: string
           format: date
 
-        endDate:
-          type: string
-          format: date
-          nullable: true
-
         ongoing:
           type: boolean
 
-        pillsRemaining:
+        totalPills:
           type: integer
+          minimum: 0
 
         doseReminders:
           type: boolean
@@ -170,6 +222,7 @@ components:
 
         notes:
           type: string
+          nullable: true
 
     MedicationFilter:
       type: object
@@ -196,11 +249,11 @@ components:
         sortBy:
           type: string
           enum:
+            - createdAt
             - medicationName
             - medicationType
             - frequency
             - startDate
-            - createdAt
             - updatedAt
 
         sortOrder:
@@ -241,9 +294,6 @@ components:
     ListMedicationPaginatedRequest:
       type: object
 
-      required:
-        - page
-
       properties:
         filter:
           $ref: "#/components/schemas/MedicationFilter"
@@ -283,6 +333,9 @@ paths:
         "401":
           description: Unauthorized
 
+        "404":
+          description: Patient not found
+
   /medications/{id}:
     get:
       tags:
@@ -299,6 +352,12 @@ paths:
       responses:
         "200":
           description: Medication fetched successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
 
     put:
       tags:
@@ -324,6 +383,15 @@ paths:
         "200":
           description: Medication updated successfully
 
+        "400":
+          description: Bad request
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
     delete:
       tags:
         - Medication
@@ -340,12 +408,18 @@ paths:
         "200":
           description: Medication deleted successfully
 
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
   /medications/list:
     get:
       tags:
         - Medication
 
-      summary: Get all medication list
+      summary: Get all medications list
 
       security:
         - bearerAuth: []
@@ -354,11 +428,14 @@ paths:
         "200":
           description: Medication list fetched successfully
 
+        "401":
+          description: Unauthorized
+
     post:
       tags:
         - Medication
 
-      summary: Filter medication list
+      summary: Filter medication list for logged-in user
 
       security:
         - bearerAuth: []
@@ -375,7 +452,7 @@ paths:
               filterSearch:
                 value:
                   filter:
-                    search: TABLET
+                    search: para
 
                   sort:
                     sortBy: createdAt
@@ -383,14 +460,21 @@ paths:
 
       responses:
         "200":
-          description: Filtered medication list
+          description: Filtered medication list fetched successfully
+
+        "401":
+          description: Unauthorized
 
   /medications/list-paginated:
     post:
       tags:
         - Medication
 
-      summary: Filter medication list with pagination
+      summary: Paginated medication list for logged-in user
+
+      description: >
+        Returns only medications belonging to the authenticated user
+        based on JWT token userId.
 
       security:
         - bearerAuth: []
@@ -419,4 +503,10 @@ paths:
 
       responses:
         "200":
-          description: Paginated medication list
+          description: Paginated medication list fetched successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: User not found

@@ -1,15 +1,6 @@
 const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
-
 const { db } = require("../configs/db");
-
 const { medication } = require("../models/medication");
-
-// const medicationSortColumns = Object.freeze({
-//   createdAt: medication.createdAt,
-//   medicationName: medication.medicationName,
-//   startDate: medication.startDate,
-//   updatedAt: medication.updatedAt,
-// });
 
 const filterSortColumnMap = Object.freeze({
   createdAt: medication.createdAt,
@@ -20,8 +11,12 @@ const filterSortColumnMap = Object.freeze({
   updatedAt: medication.updatedAt,
 });
 
-function buildMedicationFilters(filters = {}) {
+function buildMedicationFilters(filters = {}, userId) {
   const conditions = [eq(medication.softDelete, false)];
+
+  if (userId) {
+    conditions.push(eq(medication.userId, String(userId)));
+  }
 
   if (filters.patientCode) {
     conditions.push(eq(medication.patientCode, filters.patientCode));
@@ -94,8 +89,8 @@ class MedicationRepository {
     };
   }
 
-  async findAllWithPagination({ filter = {}, page = {}, sort = {} }) {
-    const where = buildMedicationFilters(filter);
+  async findAllWithPagination({ filter = {}, page = {}, sort = {}, userId }) {
+    const where = buildMedicationFilters(filter, userId);
     const orderClause = buildOrderClause(sort);
     const pageLimit = page.pageLimit || 10;
     const pageNumber = page.pageNumber || 1;
@@ -125,11 +120,8 @@ class MedicationRepository {
     };
   }
 
-  async findAll(userId) {
-    const result = await db
-      .select()
-      .from(medication)
-      .where(and(eq(medication.userId, userId), eq(medication.softDelete, false)));
+  async findAll() {
+    const result = await db.select().from(medication).where(eq(medication.softDelete, false));
 
     return result;
   }
@@ -144,6 +136,13 @@ class MedicationRepository {
       .returning();
 
     return result[0] || null;
+  }
+
+  async findAllActive() {
+    return db
+      .select()
+      .from(medication)
+      .where(and(eq(medication.softDelete, false)));
   }
 
   async softDeleteById(id) {

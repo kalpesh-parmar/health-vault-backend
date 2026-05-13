@@ -7,6 +7,7 @@ const router = express.Router();
 
 //create
 router.post("/create", verifyToken, medicationController.createMedication);
+
 //list of all data
 router.get("/list", verifyToken, medicationController.getMedicationList);
 

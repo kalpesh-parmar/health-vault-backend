@@ -1,13 +1,10 @@
 const { z } = require("zod");
 
 const { errorConstants } = require("../constants/errorConstants");
-
 const { foodTypeValues } = require("../enums/foodType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
 const { bestTakenValues } = require("../enums/bestTakenType");
-
-/* ---------------- COMMON FIELDS ---------------- */
 
 const medicationNameField = z
   .string({
@@ -24,15 +21,20 @@ const prescribedByField = z
   .optional()
   .nullable();
 
-const doseField = z.string().trim().max(100, errorConstants.DOSE_LONG).optional().nullable();
+const doseField = z
+  .number({
+    required_error: errorConstants.DOSE_REQUIRED,
+    invalid_type_error: errorConstants.INVALID_NUMBER,
+  })
+  .int()
+  .positive(errorConstants.DOSE_POSITIVE);
 
 const dateField = z.coerce.date({
   invalid_type_error: errorConstants.INVALID_DATE,
   required_error: errorConstants.DATE_REQUIRED,
 });
 
-/* ---------------- CREATE SCHEMA ---------------- */
-
+//CREATE SCHEMA
 const createMedicationSchema = z
   .object({
     medicationName: medicationNameField,
@@ -42,13 +44,28 @@ const createMedicationSchema = z
       invalid_type_error: errorConstants.INVALID_TYPE,
     }),
 
-    prescribedBy: prescribedByField,
+    prescribedBy: prescribedByField.optional(),
 
     dosePerIntake: doseField,
 
     frequency: z.enum(frequencyTypeValues, {
       required_error: errorConstants.FREQUENCY_REQUIRED,
+      invalid_type_error: errorConstants.INVALID_TYPE,
     }),
+
+    medicationTime: z
+      .array(
+        z.object({
+          time: z.string({
+            required_error: errorConstants.TIME_REQUIRED,
+          }),
+
+          period: z.enum(["AM", "PM"], {
+            required_error: errorConstants.PERIOD_REQUIRED,
+          }),
+        }),
+      )
+      .min(1, errorConstants.ONE_REQUIRED),
 
     bestTaken: z.array(z.enum(bestTakenValues)).min(1, errorConstants.ONE_REQUIRED).optional(),
 
@@ -60,7 +77,12 @@ const createMedicationSchema = z
 
     ongoing: z.boolean().default(false),
 
-    pillsRemaining: z.number().int().min(0, errorConstants.NOT_NEGATIVE).optional(),
+    totalPills: z
+      .number({
+        required_error: errorConstants.TOTAL_PILLS_REQUIRED,
+      })
+      .int()
+      .min(0, errorConstants.NOT_NEGATIVE),
 
     doseReminders: z.boolean().default(false),
 
@@ -69,35 +91,30 @@ const createMedicationSchema = z
     notes: z.string().trim().max(1000).optional().nullable(),
   })
   .strict()
-  .refine(
-    (data) => {
-      if (data.ongoing && data.endDate) {
-        return false;
+  .superRefine((data, ctx) => {
+    if (data.totalPills !== undefined && data.dosePerIntake > data.totalPills) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dosePerIntake"],
+        message: errorConstants.DOSE_GREATER_THAN_PILLS,
+      });
+    }
+
+    if (!data.ongoing && data.endDate) {
+      const start = new Date(data.startDate);
+      const end = new Date(data.endDate);
+
+      if (end < start) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["endDate"],
+          message: errorConstants.END_DATE_INVALID,
+        });
       }
+    }
+  });
 
-      return true;
-    },
-    {
-      message: errorConstants.END_DATE_NULL,
-      path: ["endDate"],
-    },
-  )
-  .refine(
-    (data) => {
-      if (!data.ongoing && !data.endDate) {
-        return false;
-      }
-
-      return true;
-    },
-    {
-      message: errorConstants.END_DATE_REQUIRED,
-      path: ["endDate"],
-    },
-  );
-
-/* ---------------- UPDATE SCHEMA ---------------- */
-
+//UPDATE SCHEMA
 const updateMedicationSchema = z
   .object({
     medicationName: medicationNameField.optional(),
@@ -106,9 +123,24 @@ const updateMedicationSchema = z
 
     prescribedBy: prescribedByField,
 
-    dosePerIntake: doseField,
+    dosePerIntake: doseField.optional(),
 
     frequency: z.enum(frequencyTypeValues).optional(),
+
+    medicationTime: z
+      .array(
+        z.object({
+          time: z.string({
+            required_error: errorConstants.TIME_REQUIRED,
+          }),
+
+          period: z.enum(["AM", "PM"], {
+            required_error: errorConstants.PERIOD_REQUIRED,
+          }),
+        }),
+      )
+      .min(1, errorConstants.ONE_REQUIRED)
+      .optional(),
 
     bestTaken: z.array(z.enum(bestTakenValues)).optional(),
 
@@ -116,13 +148,13 @@ const updateMedicationSchema = z
 
     startDate: dateField.optional(),
 
-    endDate: dateField.optional().nullable(),
-
     ongoing: z.boolean().optional(),
 
-    pillsRemaining: z.number().int().min(0).optional(),
+    totalPills: z.number().int().min(0).optional(),
 
     doseReminders: z.boolean().optional(),
+
+    remainingPills: z.number().int().min(0).optional(),
 
     refillAlert: z.boolean().optional(),
 
@@ -130,18 +162,14 @@ const updateMedicationSchema = z
   })
   .strict();
 
-/* ---------------- LIST QUERY SCHEMA ---------------- */
-
+//LIST QUERY SCHEMA
 const listMedicationQuerySchema = z
   .object({
     filter: z
       .object({
         patientCode: z.string().trim().optional(),
-
         medicationType: z.enum(medicationTypeValues).optional(),
-
         frequency: z.enum(frequencyTypeValues).optional(),
-
         search: z.string().trim().optional(),
       })
       .optional(),
