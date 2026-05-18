@@ -1,0 +1,1 @@
+ALTER TABLE "medications" RENAME COLUMN "total_pills" TO "total_quantity";

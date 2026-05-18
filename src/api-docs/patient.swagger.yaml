@@ -23,6 +23,11 @@ components:
       type: object
       required: [userName, fullName, email, password, gender, age, phone]
       properties:
+        profilePicture:
+          type: string
+          format: binary
+          nullable: true
+          description: Optional profile picture upload
         userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
@@ -43,6 +48,11 @@ components:
     UpdatePatientRequest:
       type: object
       properties:
+        profilePicture:
+          type: string
+          format: binary
+          nullable: true
+          description: Optional profile picture upload
         userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
@@ -53,12 +63,58 @@ paths:
       tags: [Patient]
       security: []
       requestBody:
+        required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/CreatePatientRequest"
+              type: object
+
+              required:
+                - userName
+                - firstName
+                - lastName
+                - email
+                - password
+                - gender
+                - age
+                - phone
+
+              properties:
+                profilePicture:
+                  type: string
+                  format: binary
+                  description: Optional profile picture upload
+
+                userName:
+                  type: string
+
+                firstName:
+                  type: string
+
+                lastName:
+                  type: string
+
+                email:
+                  type: string
+
+                password:
+                  type: string
+
+                gender:
+                  type: string
+                  enum: [female, male]
+
+                age:
+                  type: integer
+                  minimum: 0
+                  maximum: 120
+
+                phone:
+                  type: string
+
       responses:
-        "201": { description: Created }
+        "201":
+          description: Created
 
   /patient/list:
     get:
@@ -86,7 +142,7 @@ paths:
         - $ref: "#/components/parameters/UuidParam"
       requestBody:
         content:
-          application/json:
+          multipart/form-data:
             schema:
               $ref: "#/components/schemas/UpdatePatientRequest"
       responses:

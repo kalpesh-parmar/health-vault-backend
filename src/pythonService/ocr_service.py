@@ -1,6 +1,6 @@
 from paddleocr import PaddleOCR
 
-ocr = PaddleOCR( lang='en')
+ocr = PaddleOCR( use_angle_cls=True, lang='en')
 
 def extract_text(file_path):
     result = ocr.ocr(file_path, cls=True)

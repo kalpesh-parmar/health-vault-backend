@@ -1,9 +1,15 @@
+const { env } = require("./env");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const genAi = new GoogleGenerativeAI(process.env.CHATBOT_API_KEY);
-
-const model = genAi.getGenerativeModel({
-  model: "gemini-2.5-flash-lite",
+// const AI_CONFIG = {
+//   OLLAMA_URL:env.ollamaUrl,
+//   MODELS: {
+//     OCR: env.ocrModel,
+//     CHAT: env.chatModel,
+//     CODE: env.codeModel,
+//     VISION: env.visionModel,}, };
+const generativeAi = new GoogleGenerativeAI(env.apiKey);
+const model = generativeAi.getGenerativeModel({
+  model: "gemini-2.5-flash",
 });
-
-module.exports = model;
+module.exports = { model };

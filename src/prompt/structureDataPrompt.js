@@ -1,181 +1,88 @@
-const medicalPrompt = (full_text, graphs) =>
-  `
-You are a highly advanced AI medical document extraction system.
+const medicalPrompt = (ocrText, graphSummary = "") => `
+You are a medical OCR extraction AI.
 
-Your task is to analyze OCR-extracted medical report text and graph/chart data and convert it into structured medical JSON.
+Convert the medical OCR text into valid JSON.
 
-IMPORTANT RULES:
+Rules:
 - Return ONLY valid JSON
-- Do NOT return markdown
-- Do NOT use \`\`\`
-- Do NOT add explanation
-- Do NOT add notes outside JSON
-- Do NOT hallucinate values
-- If value is missing return null
-- Preserve medical accuracy
-- Detect medical context intelligently
-- Detect tabular data logically
-- Detect graph/chart trends logically
-- Maintain consistent JSON structure
+- No markdown
+- No explanation
+- Use null if value missing
+- Keep exact medical values
+- Keep units exactly
 
-ANALYSIS REQUIREMENTS:
+Extract:
+details based on json format required
 
-1. Extract Hospital Information
-- hospitalName
-- hospitalAddress
-- hospitalContact
-- labName
-
-2. Extract Patient Information
-- patientName
-- age
-- gender
-- patientId
-- referredBy
-- registrationNumber
-
-3. Extract Doctor Information
-- doctorName
-- specialization
-
-4. Extract Report Information
-- reportType
-- reportDate
-- collectionDate
-- reportStatus
-
-5. Extract Medical Parameters
-For every detected parameter extract:
-- name
-- value
-- unit
-- referenceRange
-- status (Low/Normal/High/Critical)
-- category
-
-6. Detect Abnormal Findings
-- abnormalParameters
-- criticalObservations
-
-7. Extract Clinical Information
-- diagnosis
-- symptoms
-- observations
-- conclusion
-- remarks
-- recommendations
-
-8. Extract Medicines
-- medicineName
-- dosage
-- frequency
-
-9. Detect Tables
-Convert table-like OCR into structured arrays.
-
-10. Graph/Chart Analysis
-Analyze graph/chart data logically.
-
-If graph exists:
-- identify graph type
-- identify trend
-- identify increasing/decreasing values
-- identify abnormalities
-- generate medical observation summary
-
-Examples:
-- ECG trend
-- Sugar level trend
-- Heart rate variation
-- Blood pressure trend
-- Cholesterol trend
-
-11. ECG Analysis
-If ECG-like data exists:
-- detect rhythm
-- detect abnormalities
-- detect rate patterns
-- generate ECG observations
-
-12. Confidence Scoring
-Add confidence score from 0-100 for extracted data quality.
-
-RETURN JSON FORMAT EXACTLY LIKE THIS:
+JSON FORMAT:
 
 {
-  "hospital": {
-    "name": null,
-    "address": null,
-    "contact": null,
-    "labName": null
-  },
   "patient": {
     "name": null,
     "age": null,
-    "gender": null,
-    "patientId": null,
-    "registrationNumber": null
+    "gender": null
   },
+
   "doctor": {
-    "name": null,
-    "specialization": null,
-    "referredBy": null
+    "name": null
   },
+
+  "hospital": {
+    "name": null
+  },
+
   "report": {
-    "reportType": null,
-    "reportDate": null,
-    "collectionDate": null,
-    "reportStatus": null
+    "type": null,
+    "date": null
   },
+
   "parameters": [
     {
       "name": null,
       "value": null,
       "unit": null,
-      "referenceRange": null,
-      "status": null,
-      "category": null
+      "status": null
     }
   ],
-  "abnormalFindings": [],
-  "criticalObservations": [],
+
+  "medicines": [
+    {
+      "name": null,
+      "dosage": null,
+      "frequency": null
+    }
+  ],
+
   "diagnosis": [],
-  "symptoms": [],
-  "medicines": [],
-  "remarks": null,
-  "conclusion": null,
-  "recommendations": [],
-  "tables": [],
+
+  "observations": [],
+
   "graphs": [
     {
-      "graphType": null,
+      "type": null,
       "observation": null,
-      "trend": null,
-      "abnormality": null
+      "trend": null
     }
-  ],
-  "ecgAnalysis": {
-    "rhythm": null,
-    "heartRate": null,
-    "interpretation": null, 
-    "abnormalities": []
-  },
-  "documentConfidence": null
+  ]
 }
 
 OCR TEXT:
-${full_text}
+${ocrText}
 
-GRAPH DATA:
-${JSON.stringify(graphs)}
+GRAPH SUMMARY:
+${graphSummary}
 
-Return ONLY valid JSON.
+Return ONLY JSON.
 `;
 const cleanOCRText = (data) => {
-  return data
-    .replace(/\s+/g, " ")
-    .replace(/[^\x20-\x7E\n]/g, "")
-    .replace(/```json|```/g, "")
-    .trim();
+  return (
+    data
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      // .replace(/\s+/g, " ")
+      // .replace(/[_]{2,}/g, "")
+      // .replace(/[^\w\s.,:%()/+-]/g, "")
+      .trim()
+  );
 };
 module.exports = { medicalPrompt, cleanOCRText };

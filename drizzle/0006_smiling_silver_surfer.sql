@@ -1,0 +1,1 @@
+ALTER TABLE "medications" RENAME COLUMN "with_food" TO "food_frequency";

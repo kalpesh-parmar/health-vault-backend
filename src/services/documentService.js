@@ -20,7 +20,8 @@ const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { ocrStatus } = require("../enums/ocrStatus");
 const { updateDocumentSchema } = require("../validations/documentValidation");
 const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt");
-const model = require("../configs/aiConfig");
+// const ollamaService = require("./ollamaService");
+const { model } = require("../configs/aiConfig");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -59,12 +60,18 @@ class DocumentService {
     });
     const fullText = ocrResponse.data.ocr_text;
     const graph = ocrResponse.data.graphs;
+    console.log("fullText===", fullText);
+    console.log("graph===", graph);
+    // const data={fullText,graph};
 
+    // const cleanText = cleanOCRText(data);
     const prompt = medicalPrompt(fullText, graph);
+    console.log(prompt);
 
-    const cleanText = cleanOCRText(prompt);
+    // const structuredData = await ollamaService.generate(prompt);
+    const structuredData = await model.generateContent(prompt);
+    console.log("structuredData===", structuredData);
 
-    const structuredData = await model.generateContent(cleanText);
     const responseText = structuredData.response.text();
     const cleanData = cleanOCRText(responseText);
     const jsonData = JSON.parse(cleanData);
@@ -78,6 +85,8 @@ class DocumentService {
       remarks: jsonData.remarks,
       ocrStatus: ocrStatus.COMPLETED,
     };
+    console.log("ocrInfo==", ocrInfo);
+
     const validOcr = await validateSchema(updateDocumentSchema, ocrInfo);
 
     return documentRepository.update(document.id, {

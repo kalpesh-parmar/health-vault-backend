@@ -14,6 +14,9 @@ const pool = new Pool({
   idleTimeoutMillis: env.dbIdleTimeoutMs,
   max: env.dbPoolMax,
 });
+const vectorPool = new Pool({
+  connectionString: process.env.VECTOR_DB_URL,
+});
 
 const db = drizzle(pool);
 
@@ -21,4 +24,4 @@ pool.on("error", (error) => {
   console.error("Unexpected database client error", error);
 });
 
-module.exports = { db, pool };
+module.exports = { db, pool, vectorPool };

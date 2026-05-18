@@ -18,7 +18,9 @@ const env = Object.freeze({
   appUrl: process.env.APP_URL || "http://localhost:3000",
   awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
   awsRegion: process.env.AWS_REGION || "us-east-1",
+  apiKey: process.env.CHATBOT_API_KEY,
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  chatbotAPIKey: process.env.CHATBOT_API_KEY,
   databaseUrl: process.env.DATABASE_URL,
   dbIdleTimeoutMs: numberFromEnv("DB_IDLE_TIMEOUT_MS", 30000),
   dbPoolMax: numberFromEnv("DB_POOL_MAX", 10),
@@ -44,6 +46,11 @@ const env = Object.freeze({
   smtpPort: numberFromEnv("SMTP_PORT", 587),
   smtpSecure: booleanFromEnv("SMTP_SECURE", false),
   smtpUser: process.env.SMTP_USER,
+  ollamaUrl: process.env.OLLAMA_URL,
+  ocrModel: process.env.OCR_MODEL,
+  chatModel: process.env.CHAT_MODEL,
+  codeModel: process.env.CODE_MODEL,
+  visionModel: process.env.VISION_MODEL,
   userProfileImagesBucket: process.env.USER_PROFILE_IMAGES_BUCKET || "user-profile-images",
 });
 

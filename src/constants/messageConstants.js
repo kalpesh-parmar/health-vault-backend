@@ -25,10 +25,20 @@ const messageConstants = Object.freeze({
   PASSWORD_RESET_SUCCESS: "Password reset successfully",
   SESSION_CREATED: "Session created successfully",
   SESSION_FETCHED: "Session fetched successfully",
+  SUMMARY_CREATED: "Summary generated succesfully",
   TOKEN_REFRESHED: "Token refreshed successfully",
   PATIENT_PROFILE_FETCHED: "Patient profile fetched successfully",
   FILE_IS_REQUIRED: "File is required",
   DOCUMENT_DOWNLOAD_URL_FETCHED: "Document signed URL  fetched successfully",
+  // DOCUMENT_DOWNLOAD_URL_FETCHED: "Document download URL fetched successfully",
+
+  //medication
+  MEDICATION_CREATED: "Medication created successfully",
+  MEDICATION_UPDATED: "Medication updated successfully",
+  MEDICATION_DELETED: "Medication deleted successfully",
+  MEDICATION_FETCHED: "Medication fetched successfully",
+  MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
+  MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
 });
 
 module.exports = { messageConstants };
