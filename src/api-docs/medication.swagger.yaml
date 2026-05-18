@@ -1,0 +1,655 @@
+openapi: 3.0.0
+
+info:
+  title: Medication API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    UuidParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    MedicationType:
+      type: string
+      enum:
+        - TABLET
+        - CAPSULE
+        - SYRUP
+        - DROP
+        - INJECTION
+
+    FrequencyType:
+      type: string
+      enum:
+        - ONCE_DAILY
+        - TWICE_DAILY
+        - THREE_TIMES_DAILY
+        - AS_NEEDED
+
+    FoodType:
+      type: string
+      enum:
+        - BEFORE_FOOD
+        - AFTER_FOOD
+
+    BestTakenType:
+      type: string
+      enum:
+        - MORNING
+        - NOON
+        - NIGHT
+        - CUSTOM
+
+    MedicationUnit:
+      type: string
+      enum:
+        - PILLS
+        - ML
+        - DROPS
+        - UNITS
+
+    MedicationTime:
+      type: object
+      required:
+        - time
+        - period
+
+      properties:
+        time:
+          type: string
+          example: "08:00"
+
+        period:
+          type: string
+          enum:
+            - AM
+            - PM
+
+    Medication:
+      type: object
+
+      properties:
+        id:
+          type: string
+          format: uuid
+
+        userId:
+          type: string
+          format: uuid
+
+        patientCode:
+          type: string
+          maxLength: 32
+          example: PAT001
+
+        medicationName:
+          type: string
+          maxLength: 255
+          example: Paracetamol
+
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+        prescribedBy:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: Dr. Smith
+
+        dosePerIntake:
+          type: integer
+          minimum: 1
+          example: 1
+
+        frequency:
+          $ref: "#/components/schemas/FrequencyType"
+
+        medicationTime:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/MedicationTime"
+
+        bestTaken:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/BestTakenType"
+
+        foodFrequency:
+          $ref: "#/components/schemas/FoodType"
+
+        startDate:
+          type: string
+          format: date
+          example: 2026-05-12
+
+        endDate:
+          type: string
+          format: date
+          nullable: true
+          example: 2026-05-20
+
+        ongoing:
+          type: boolean
+          default: false
+
+        totalQuantity:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 30
+
+        remainingQuantity:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 25
+
+        doseReminders:
+          type: boolean
+          default: false
+
+        unit:
+          $ref: "#/components/schemas/MedicationUnit"
+
+        reminderBeforeMinutes:
+          type: integer
+          default: 5
+          example: 10
+
+        dailyConsumption:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 2
+
+        refillAlert:
+          type: boolean
+          default: false
+
+        notes:
+          type: string
+          nullable: true
+          maxLength: 1000
+          example: Take after food
+
+        createdAt:
+          type: string
+          format: date-time
+
+        updatedAt:
+          type: string
+          format: date-time
+
+        softDelete:
+          type: boolean
+          default: false
+
+    CreateMedicationRequest:
+      type: object
+
+      required:
+        - medicationName
+        - medicationType
+        - frequency
+        - startDate
+        - unit
+
+      properties:
+        medicationName:
+          type: string
+          maxLength: 255
+          example: Paracetamol
+
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+        prescribedBy:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: Dr. Smith
+
+        dosePerIntake:
+          type: integer
+          minimum: 1
+          example: 1
+
+        frequency:
+          $ref: "#/components/schemas/FrequencyType"
+
+        medicationTime:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/MedicationTime"
+
+          example:
+            - time: "08:00"
+              period: AM
+            - time: "08:00"
+              period: PM
+
+        bestTaken:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/BestTakenType"
+
+          example:
+            - MORNING
+            - NIGHT
+
+        foodFrequency:
+          $ref: "#/components/schemas/FoodType"
+
+        startDate:
+          type: string
+          format: date
+          example: 2026-05-12
+
+        ongoing:
+          type: boolean
+          default: false
+          example: false
+
+        totalQuantity:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 30
+
+        doseReminders:
+          type: boolean
+          default: false
+          example: true
+
+        unit:
+          $ref: "#/components/schemas/MedicationUnit"
+
+        reminderBeforeMinutes:
+          type: integer
+          default: 5
+          example: 10
+
+        refillAlert:
+          type: boolean
+          default: false
+          example: true
+
+        notes:
+          type: string
+          nullable: true
+          maxLength: 1000
+          example: Take after food
+
+    UpdateMedicationRequest:
+      type: object
+
+      properties:
+        medicationName:
+          type: string
+          maxLength: 255
+
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+        prescribedBy:
+          type: string
+          nullable: true
+          maxLength: 255
+
+        dosePerIntake:
+          type: integer
+          minimum: 1
+
+        frequency:
+          $ref: "#/components/schemas/FrequencyType"
+
+        medicationTime:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/MedicationTime"
+
+        bestTaken:
+          type: array
+
+          items:
+            $ref: "#/components/schemas/BestTakenType"
+
+        foodFrequency:
+          $ref: "#/components/schemas/FoodType"
+
+        startDate:
+          type: string
+          format: date
+
+        ongoing:
+          type: boolean
+          example: true
+
+        totalQuantity:
+          type: integer
+          minimum: 0
+
+        doseReminders:
+          type: boolean
+
+        reminderBeforeMinutes:
+          type: integer
+          default: 5
+          example: 10
+
+        unit:
+          $ref: "#/components/schemas/MedicationUnit"
+
+        refillAlert:
+          type: boolean
+
+        notes:
+          type: string
+          nullable: true
+          maxLength: 1000
+
+    MedicationFilter:
+      type: object
+
+      properties:
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+        frequency:
+          $ref: "#/components/schemas/FrequencyType"
+
+        ongoing:
+          type: boolean
+
+        refillAlert:
+          type: boolean
+
+        search:
+          type: string
+          example: para
+
+    MedicationSort:
+      type: object
+
+      properties:
+        sortBy:
+          type: string
+          enum:
+            - createdAt
+            - medicationName
+            - medicationType
+            - frequency
+            - startDate
+            - updatedAt
+
+        sortOrder:
+          type: string
+          enum:
+            - asc
+            - desc
+
+    MedicationPagination:
+      type: object
+
+      required:
+        - pageNumber
+        - pageLimit
+
+      properties:
+        pageNumber:
+          type: integer
+          minimum: 1
+          example: 1
+
+        pageLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 10
+
+    ListMedicationRequest:
+      type: object
+
+      properties:
+        filter:
+          $ref: "#/components/schemas/MedicationFilter"
+
+        sort:
+          $ref: "#/components/schemas/MedicationSort"
+
+    ListMedicationPaginatedRequest:
+      type: object
+
+      properties:
+        filter:
+          $ref: "#/components/schemas/MedicationFilter"
+
+        sort:
+          $ref: "#/components/schemas/MedicationSort"
+
+        page:
+          $ref: "#/components/schemas/MedicationPagination"
+
+paths:
+  /medications/create:
+    post:
+      tags:
+        - Medication
+
+      summary: Create medication
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: true
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMedicationRequest"
+
+      responses:
+        "201":
+          description: Medication created successfully
+
+        "400":
+          description: Bad request
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Patient not found
+
+  /medications/{id}:
+    get:
+      tags:
+        - Medication
+
+      summary: Get medication by ID
+
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+
+      responses:
+        "200":
+          description: Medication fetched successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
+    put:
+      tags:
+        - Medication
+
+      summary: Update medication
+
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+
+      requestBody:
+        required: true
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMedicationRequest"
+
+      responses:
+        "200":
+          description: Medication updated successfully
+
+        "400":
+          description: Bad request
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
+    delete:
+      tags:
+        - Medication
+
+      summary: Delete medication
+
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+
+      responses:
+        "200":
+          description: Medication deleted successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
+  /medications/list:
+    get:
+      tags:
+        - Medication
+
+      summary: Get all medications list
+
+      security:
+        - bearerAuth: []
+
+      responses:
+        "200":
+          description: Medication list fetched successfully
+
+        "401":
+          description: Unauthorized
+
+    post:
+      tags:
+        - Medication
+
+      summary: Filter medication list for logged-in user
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: false
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListMedicationRequest"
+
+            examples:
+              filterSearch:
+                value:
+                  filter:
+                    search: para
+
+                  sort:
+                    sortBy: createdAt
+                    sortOrder: desc
+
+      responses:
+        "200":
+          description: Filtered medication list fetched successfully
+
+        "401":
+          description: Unauthorized
+
+  /medications/list-paginated:
+    post:
+      tags:
+        - Medication
+
+      summary: Paginated medication list for logged-in user
+
+      description: >
+        Returns only medications belonging to the authenticated user
+        based on JWT token userId.
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: true
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListMedicationPaginatedRequest"
+
+            examples:
+              filterSortPagination:
+                value:
+                  filter:
+                    medicationType: TABLET
+
+                  sort:
+                    sortBy: createdAt
+                    sortOrder: desc
+
+                  page:
+                    pageNumber: 1
+                    pageLimit: 10
+
+      responses:
+        "200":
+          description: Paginated medication list fetched successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: User not found

@@ -1,0 +1,1 @@
+ALTER TABLE "medications" ADD COLUMN "reminder_before_minutes" integer DEFAULT 5 NOT NULL;

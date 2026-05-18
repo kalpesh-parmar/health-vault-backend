@@ -24,6 +24,12 @@ const {
   testSendNotificationSchema,
   userIdBodySchema,
 } = require("./notificationValidation");
+const {
+  createMedicationSchema,
+  updateMedicationSchema,
+  listMedicationQuerySchema,
+} = require("./medicationValidation");
+
 const { createSessionSchema } = require("./sessionValidation");
 
 function formatZodIssues(error) {
@@ -70,4 +76,7 @@ module.exports = {
   userIdBodySchema,
   validateSchema,
   verifyOtpSchema,
+  createMedicationSchema,
+  updateMedicationSchema,
+  listMedicationQuerySchema,
 };

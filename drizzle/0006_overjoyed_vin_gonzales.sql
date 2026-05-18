@@ -1,0 +1,1 @@
+ALTER TABLE "documents" ALTER COLUMN "structured_extracted_data" SET DATA TYPE json;

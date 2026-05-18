@@ -1,0 +1,101 @@
+openapi: 3.0.0
+
+info:
+  title: AI Chatbot API
+  version: 1.0.0
+  description: API for generating AI summaries from uploaded medical documents using Gemini AI.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  schemas:
+    GenerateSummaryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - documentId
+      properties:
+        message:
+          type: string
+          example: "what medicine i should take?"
+        documentId:
+          type: string
+          format: uuid
+          example: "7f4c3f2e-7c1a-4f45-9d6e-3d8f2f1b1234"
+
+    GenerateSummaryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+
+        message:
+          type: string
+          example: AI summary generated successfully
+
+        data:
+          type: object
+          properties:
+            message:
+              type: string
+            documentId:
+              type: string
+              format: uuid
+
+            aiSummary:
+              type: string
+              example: >
+                Patient shows elevated glucose levels which may indicate diabetes.
+                Blood pressure is slightly elevated. Clinical consultation is recommended.
+
+paths:
+  /chatbot/summary:
+    post:
+      tags:
+        - AI Chatbot
+
+      summary: Generate AI summary from document
+
+      description: |
+        Generate medical report summary using Gemini AI
+        based on uploaded document OCR text.
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateSummaryRequest"
+
+            examples:
+              generateSummary:
+                value:
+                  message: "what medicine i should take?"
+                  documentId: "7f4c3f2e-7c1a-4f45-9d6e-3d8f2f1b1234"
+
+      responses:
+        "200":
+          description: AI summary generated successfully
+
+        "400":
+          description: Bad request
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Document not found
+
+        "429":
+          description: Gemini API rate limit exceeded
+
+        "500":
+          description: Internal server error

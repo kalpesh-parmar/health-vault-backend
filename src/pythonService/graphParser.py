@@ -12,35 +12,42 @@ def extract_graph_data(image_path):
 
     height, width = image.shape[:2]
 
-    # simple detection logic
-    # example: detect large dark lines
-
     gray = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2GRAY
     )
-
-    edges = cv2.Canny(
+    _, thresh = cv2.threshold(
         gray,
-        50,
-        150
+        150,
+        255,
+        cv2.THRESH_BINARY_INV
     )
-
-    lines = cv2.HoughLinesP(
-        edges,
-        1,
-        np.pi / 180,
-        threshold=100,
-        minLineLength=100,
-        maxLineGap=10
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
     )
+    points=[]
 
-    if lines is not None:
+    for contour in contours:
 
+        area = cv2.contourArea(contour)
+
+        if area < 100:
+            continue
+
+        for point in contour:
+
+            x, y = point[0]
+
+            points.append({
+                "x": int(x),
+                "y": int(height - y)
+            })
         graph_data.append({
-            "type": "possible_graph",
-            "observation":
-            "Graphical/chart structure detected"
+            "type": "graph",
+            "coordinates": points,
+            "width": width,
+            "height": height
         })
-
     return graph_data
