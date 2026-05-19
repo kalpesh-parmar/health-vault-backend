@@ -37,6 +37,10 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
+const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { s3Client } = require("../configs/s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { messageConstants } = require("../constants/messageConstants");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -174,8 +178,31 @@ class PatientService {
     };
   }
 
-  async createPatient(payload) {
-    const data = await validateSchema(createPatientSchema, payload);
+  async createPatient(file, payload) {
+    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
+    const filedata = new PutObjectCommand({
+      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
+      Key: fileKey,
+      Body: file.buffer,
+    });
+    await s3Client.send(filedata);
+    const fileName = file.originalname;
+    console.log("fileName==", fileName);
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
+      Key: fileKey,
+      // force browser to download file
+      ResponseContentDisposition: `attachment; filename="${fileName}"`,
+    });
+    const profileImageKey = await getSignedUrl(s3Client, command);
+    const s3Key = command.input.Key;
+
+    const reqData = { profileImageKey, s3Key, ...payload };
+    console.log("fileInfo", reqData);
+    const data = await validateSchema(createPatientSchema, reqData);
+    console.log("data===", data);
+
     const existingPatient = await patientRepository.findByEmail(data.email);
 
     if (existingPatient) {
@@ -192,6 +219,18 @@ class PatientService {
     });
 
     return sanitizePatient(createdPatient);
+  }
+  async profilePicDelete(fileKey) {
+    if (!fileKey) {
+      throw new InvalidRequestException(errorConstants.FILE_KEY_REQUIRED);
+    }
+
+    const command = new DeleteObjectCommand({
+      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
+      Key: fileKey,
+    });
+    await s3Client.send(command);
+    return { message: messageConstants.PROFILE_PICTURE_DELETED };
   }
 
   async getPatientById(id) {
@@ -217,9 +256,29 @@ class PatientService {
     };
   }
 
-  async updatePatient(id, payload) {
+  async updatePatient(id, file, payload) {
     const params = await validateSchema(idParamSchema, { id });
-    const data = await validateSchema(updatePatientSchema, payload);
+    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
+    const filedata = new PutObjectCommand({
+      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
+      Key: fileKey,
+      Body: file.buffer,
+    });
+    await s3Client.send(filedata);
+    const fileName = file.originalname;
+    console.log("fileName==", fileName);
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
+      Key: fileKey,
+      // force browser to download file
+      ResponseContentDisposition: `attachment; filename="${fileName}"`,
+    });
+    const profileImageKey = await getSignedUrl(s3Client, command);
+    console.log("url===", profileImageKey);
+
+    const reqData = { profileImageKey, ...payload };
+    const data = await validateSchema(updatePatientSchema, reqData);
 
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(

@@ -15,8 +15,14 @@ async function refreshToken(req, res) {
 }
 
 async function createPatient(req, res) {
-  const result = await patientService.createPatient(req.body);
+  const result = await patientService.createPatient(req.file, req.body);
+  console.log("reqBody===", req.body);
+
   return successResponse(res, result, messageConstants.PATIENT_CREATED, StatusCodes.CREATED);
+}
+async function profilePicDelete(req, res) {
+  const result = await patientService.profilePicDelete(req.body);
+  return successResponse(res, result, messageConstants.PROFILE_PICTURE_DELETED);
 }
 
 async function getPatientById(req, res) {
@@ -30,7 +36,7 @@ async function getPatientList(req, res) {
 }
 
 async function updatePatient(req, res) {
-  const result = await patientService.updatePatient(req.params.id, req.body);
+  const result = await patientService.updatePatient(req.params.id, req.file, req.body);
   return successResponse(res, result, messageConstants.PATIENT_UPDATED);
 }
 
@@ -76,6 +82,7 @@ async function getPatientProfile(req, res) {
 
 module.exports = {
   createPatient,
+  profilePicDelete,
   deletePatient,
   forgotPassword,
   getPatientProfile,

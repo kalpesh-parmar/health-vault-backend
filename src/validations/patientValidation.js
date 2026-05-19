@@ -54,14 +54,21 @@ const passwordField = z
 //   invalid_type_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
 //   required_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
 // });
-const ageField = z
-  .number({
-    required_error: errorConstants.AGE_REQUIRED,
-    invalid_type_error: errorConstants.AGE_INVALID,
-  })
-  .int()
-  .positive()
-  .max(150, errorConstants.AGE_INVALID);
+const ageField = z.preprocess(
+  (val) => {
+    if (typeof val === "string") return Number(val);
+    return val;
+  },
+  z
+    .number({
+      required_error: errorConstants.AGE_REQUIRED,
+      invalid_type_error: errorConstants.AGE_INVALID,
+    })
+    .int()
+    .positive()
+    .max(150, errorConstants.AGE_INVALID),
+);
+
 const phoneField = z
   .string({ required_error: errorConstants.PHONE_REQUIRED })
   .regex(/^\d{10}$/, errorConstants.PHONE_INVALID);
@@ -73,7 +80,8 @@ const usernameField = (requiredError) =>
     .min(2, errorConstants.NAME_TOO_SHORT)
     .max(255, errorConstants.NAME_TOO_LONG)
     .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
-
+const profileImageKey = z.string().trim().optional().nullable();
+const s3Key = z.string().trim().min(1).max(500);
 const createPatientSchema = z
   .object({
     // dateOfBirth: dateOfBirthField,
@@ -86,9 +94,10 @@ const createPatientSchema = z
       invalid_type_error: errorConstants.GENDER_INVALID,
       required_error: errorConstants.GENDER_INVALID,
     }),
+    s3Key: s3Key,
     password: passwordField,
     phone: phoneField,
-    profileImageKey: z.string().trim().max(500).optional().nullable(),
+    profileImageKey: profileImageKey,
     userName: usernameField(errorConstants.USER_NAME_REQUIRED),
   })
   .strict()
@@ -107,7 +116,7 @@ const updatePatientSchema = z
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
     phone: phoneField.optional(),
-    profileImageKey: z.string().trim().max(500).optional().nullable(),
+    profileImageKey: profileImageKey,
     status: z.enum(userStatusValues).optional(),
     userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
   })
