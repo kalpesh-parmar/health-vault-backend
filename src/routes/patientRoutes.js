@@ -5,7 +5,7 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const upload = multer({ dest: "uploads/" });
 const router = express.Router();
 
-router.post("/add", upload.single("profilePicture"), patientController.createPatient);
+router.post("/add", patientController.createPatient);
 router.get("/list", verifyToken, patientController.getPatientList);
 router.get("/profile", verifyToken, patientController.getPatientProfile);
 router.get("/:id", verifyToken, patientController.getPatientById);

@@ -15,7 +15,7 @@ async function refreshToken(req, res) {
 }
 
 async function createPatient(req, res) {
-  const result = await patientService.createPatient(req.file, req.body);
+  const result = await patientService.createPatient(req.body);
   return successResponse(res, result, messageConstants.PATIENT_CREATED, StatusCodes.CREATED);
 }
 
