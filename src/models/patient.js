@@ -41,7 +41,6 @@ const patient = pgTable(
     age: integer("age").notNull(),
     phone: varchar("phone", { length: 20 }).notNull(),
     profileImageKey: text("profile_image_key"),
-    s3Key: varchar("s3_key", { length: 500 }),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

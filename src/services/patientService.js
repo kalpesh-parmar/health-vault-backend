@@ -37,10 +37,10 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-const { s3Client } = require("../configs/s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { messageConstants } = require("../constants/messageConstants");
+// const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+// const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const s3service = require("./s3service");
+const { folderType } = require("../enums/s3Folder");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -179,29 +179,12 @@ class PatientService {
   }
 
   async createPatient(file, payload) {
-    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
-    const filedata = new PutObjectCommand({
-      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
-      Key: fileKey,
-      Body: file.buffer,
-    });
-    await s3Client.send(filedata);
-    const fileName = file.originalname;
-    console.log("fileName==", fileName);
+    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
+    const profileImageKey = uploadFile.fileKey;
 
-    const command = new GetObjectCommand({
-      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
-      Key: fileKey,
-      // force browser to download file
-      ResponseContentDisposition: `attachment; filename="${fileName}"`,
-    });
-    const profileImageKey = await getSignedUrl(s3Client, command);
-    const s3Key = command.input.Key;
-
-    const reqData = { profileImageKey, s3Key, ...payload };
-    console.log("fileInfo", reqData);
+    const reqData = { profileImageKey, ...payload };
     const data = await validateSchema(createPatientSchema, reqData);
-    console.log("data===", data);
+    const signedUrl = await s3service.getSignedFileUrl(profileImageKey);
 
     const existingPatient = await patientRepository.findByEmail(data.email);
 
@@ -218,19 +201,10 @@ class PatientService {
       status: USER_STATUS.ACTIVE,
     });
 
-    return sanitizePatient(createdPatient);
-  }
-  async profilePicDelete(fileKey) {
-    if (!fileKey) {
-      throw new InvalidRequestException(errorConstants.FILE_KEY_REQUIRED);
-    }
-
-    const command = new DeleteObjectCommand({
-      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
-      Key: fileKey,
-    });
-    await s3Client.send(command);
-    return { message: messageConstants.PROFILE_PICTURE_DELETED };
+    return {
+      signedUrl: signedUrl,
+      patientData: sanitizePatient(createdPatient),
+    };
   }
 
   async getPatientById(id) {
@@ -258,25 +232,9 @@ class PatientService {
 
   async updatePatient(id, file, payload) {
     const params = await validateSchema(idParamSchema, { id });
-    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
-    const filedata = new PutObjectCommand({
-      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
-      Key: fileKey,
-      Body: file.buffer,
-    });
-    await s3Client.send(filedata);
-    const fileName = file.originalname;
-    console.log("fileName==", fileName);
+    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
 
-    const command = new GetObjectCommand({
-      Bucket: process.env.USER_PROFILE_IMAGES_BUCKET,
-      Key: fileKey,
-      // force browser to download file
-      ResponseContentDisposition: `attachment; filename="${fileName}"`,
-    });
-    const profileImageKey = await getSignedUrl(s3Client, command);
-    console.log("url===", profileImageKey);
-
+    const profileImageKey = uploadFile.fileKey;
     const reqData = { profileImageKey, ...payload };
     const data = await validateSchema(updatePatientSchema, reqData);
 
@@ -302,8 +260,11 @@ class PatientService {
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-
-    return sanitizePatient(updatedPatient);
+    const signedurl = await s3service.getSignedFileUrl(profileImageKey);
+    return {
+      signedUrl: signedurl,
+      patientData: sanitizePatient(updatedPatient),
+    };
   }
 
   async deletePatient(id) {
