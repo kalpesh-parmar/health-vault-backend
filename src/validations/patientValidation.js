@@ -81,7 +81,6 @@ const usernameField = (requiredError) =>
     .max(255, errorConstants.NAME_TOO_LONG)
     .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
 const profileImageKey = z.string().trim().optional().nullable();
-const s3Key = z.string().trim().min(1).max(500);
 const createPatientSchema = z
   .object({
     // dateOfBirth: dateOfBirthField,
@@ -94,7 +93,6 @@ const createPatientSchema = z
       invalid_type_error: errorConstants.GENDER_INVALID,
       required_error: errorConstants.GENDER_INVALID,
     }),
-    s3Key: s3Key,
     password: passwordField,
     phone: phoneField,
     profileImageKey: profileImageKey,

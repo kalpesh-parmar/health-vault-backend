@@ -1,6 +1,4 @@
-const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 require("dotenv").config();
-const { s3Client } = require("../configs/s3");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
@@ -13,7 +11,8 @@ const {
   listDocumentsQuerySchema,
   validateSchema,
 } = require("../validations");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const s3service = require("./s3service");
+const { folderType } = require("../enums/s3Folder");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -22,16 +21,8 @@ class DocumentService {
     if (!docType) {
       throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
     }
-    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
-    const filedata = new PutObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-      Body: file.buffer,
-    });
-
-    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${fileKey}`;
-
-    await s3Client.send(filedata);
+    const uploadFile = await s3service.uploadFile(file, folderType.DOCUMENT_UPLOAD);
+    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${uploadFile.fileKey}`;
 
     const fileinfo = {
       fileType: file.mimetype,
@@ -39,8 +30,8 @@ class DocumentService {
       fileName: file.originalname,
       fileSize: file.size,
       documentType: docType.documentType,
-      s3Bucket: filedata.input.Bucket,
-      s3Key: filedata.input.Key,
+      s3Bucket: uploadFile.input.Bucket,
+      s3Key: uploadFile.fileKey,
     };
 
     const validData = await validateSchema(createDocumentSchema, fileinfo);
@@ -98,37 +89,23 @@ class DocumentService {
   }
 
   // download document from s3 bucket using file key
-  async getDownloadUrl(fileKey, fileName = "document") {
+  async getDownloadUrl(fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
     }
-
-    const command = new GetObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-
-      // force browser to download file
-      ResponseContentDisposition: `attachment; filename="${fileName}"`,
-    });
-
-    const url = await getSignedUrl(s3Client, command, {
-      expiresIn: 600, // 10 minutes
-    });
-
-    return url;
+    const url = await s3service.getSignedFileUrl(fileKey);
+    return {
+      signedUrl: url,
+    };
   }
 
   //delete document from s3 bucket using file key
-  async deleteFile(fileKey) {
+  async deleteFile(userId, fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
     }
-
-    const command = new DeleteObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-    });
-    await s3Client.send(command);
+    await s3service.deleteFile(fileKey);
+    await documentRepository.deleteByPatientId(userId);
     return { message: messageConstants.DOCUMENT_DELETED };
   }
 }
