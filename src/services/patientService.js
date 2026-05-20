@@ -37,6 +37,10 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
+// const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+// const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const s3service = require("./s3service");
+const { folderType } = require("../enums/s3Folder");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -175,9 +179,13 @@ class PatientService {
   }
 
   async createPatient(file, payload) {
-    const profileImageKey = file ? file.path : null;
+    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
+    const profileImageKey = uploadFile.fileKey;
+
     const reqData = { profileImageKey, ...payload };
     const data = await validateSchema(createPatientSchema, reqData);
+    const signedUrl = await s3service.getSignedFileUrl(profileImageKey);
+
     const existingPatient = await patientRepository.findByEmail(data.email);
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
@@ -193,7 +201,10 @@ class PatientService {
     });
     console.log("patientData====", createdPatient);
 
-    return sanitizePatient(createdPatient);
+    return {
+      signedUrl: signedUrl,
+      patientData: sanitizePatient(createdPatient),
+    };
   }
 
   async getPatientById(id) {
@@ -221,9 +232,11 @@ class PatientService {
 
   async updatePatient(id, file, payload) {
     const params = await validateSchema(idParamSchema, { id });
-    const profileImageKey = file ? file.path : null;
-    const updatePatient = { profileImageKey, ...payload };
-    const data = await validateSchema(updatePatientSchema, updatePatient);
+    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
+
+    const profileImageKey = uploadFile.fileKey;
+    const reqData = { profileImageKey, ...payload };
+    const data = await validateSchema(updatePatientSchema, reqData);
 
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
@@ -247,8 +260,11 @@ class PatientService {
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-
-    return sanitizePatient(updatedPatient);
+    const signedurl = await s3service.getSignedFileUrl(profileImageKey);
+    return {
+      signedUrl: signedurl,
+      patientData: sanitizePatient(updatedPatient),
+    };
   }
 
   async deletePatient(id) {

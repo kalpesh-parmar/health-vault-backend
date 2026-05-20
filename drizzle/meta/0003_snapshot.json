@@ -1,5 +1,6 @@
 {
   "id": "d6edd580-19c1-49cd-9780-cbb1ce779147",
+  "id": "e22539fc-6565-4963-aa9d-9587e0783acf",
   "prevId": "2cad669f-deba-4e52-9c5c-0ec345ef2f63",
   "version": "7",
   "dialect": "postgresql",
@@ -472,7 +473,7 @@
         },
         "profile_image_key": {
           "name": "profile_image_key",
-          "type": "varchar(500)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

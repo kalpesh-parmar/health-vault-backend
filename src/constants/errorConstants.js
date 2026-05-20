@@ -12,6 +12,7 @@ const errorConstants = Object.freeze({
   DOSE_LONG: "Dose is too long",
   NAME_SHORT: "Medication name too short",
   NAME_LONG: "Medication name too long",
+  FILE_KEY_REQUIRED: "File key required",
   ACCOUNT_BLOCKED: "Account is blocked",
   ACCOUNT_INACTIVE: "Account is inactive",
   // USER_NOT_FOUND: "User not found",

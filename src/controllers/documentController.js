@@ -46,7 +46,7 @@ async function getDownloadFile(req, res) {
 
 async function deleteFile(req, res) {
   const { fileKey } = req.query;
-  const result = await documentService.deleteFile(fileKey);
+  const result = await documentService.deleteFile(req.auth.userId, fileKey);
   return successResponse(res, result, messageConstants.DOCUMENT_DELETED);
 }
 

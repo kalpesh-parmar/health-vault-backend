@@ -28,6 +28,8 @@
       "version": "7",
       "when": 1778491348438,
       "tag": "0003_black_retro_girl",
+      "when": 1779174504760,
+      "tag": "0003_third_moonstone",
       "breakpoints": true
     },
     {
@@ -35,6 +37,8 @@
       "version": "7",
       "when": 1778577060398,
       "tag": "0004_fancy_metal_master",
+      "when": 1779180478760,
+      "tag": "0004_nostalgic_tyrannus",
       "breakpoints": true
     },
     {
@@ -70,6 +74,8 @@
       "version": "7",
       "when": 1779105684682,
       "tag": "0009_yielding_dormammu",
+      "when": 1779259521096,
+      "tag": "0005_flippant_bromley",
       "breakpoints": true
     }
   ]

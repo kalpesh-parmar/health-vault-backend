@@ -1,6 +1,8 @@
 {
   "id": "f1dafb79-18af-409f-9c9f-1809e11e940c",
   "prevId": "8ecdc7a8-2718-44f5-acd5-62a34ebd5c99",
+  "id": "ead655b5-d334-48af-93e5-c83f83552ae9",
+  "prevId": "2e512d18-ce86-4c00-9b54-27ff3c19b4ba",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -702,7 +704,7 @@
         },
         "profile_image_key": {
           "name": "profile_image_key",
-          "type": "varchar(500)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

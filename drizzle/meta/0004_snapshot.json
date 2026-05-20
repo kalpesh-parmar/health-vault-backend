@@ -1,6 +1,8 @@
 {
   "id": "2259dfc9-481e-45db-b11b-16e9c06e46d0",
   "prevId": "d6edd580-19c1-49cd-9780-cbb1ce779147",
+  "id": "2e512d18-ce86-4c00-9b54-27ff3c19b4ba",
+  "prevId": "e22539fc-6565-4963-aa9d-9587e0783acf",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -702,6 +704,12 @@
         },
         "profile_image_key": {
           "name": "profile_image_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "s3_key": {
+          "name": "s3_key",
           "type": "varchar(500)",
           "primaryKey": false,
           "notNull": false

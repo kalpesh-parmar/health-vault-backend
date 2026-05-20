@@ -1,6 +1,5 @@
 require("dotenv").config();
 const axios = require("axios");
-const { s3Client } = require("../configs/s3");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
@@ -16,12 +15,12 @@ const {
   validateSchema,
 } = require("../validations");
 const s3service = require("./s3service");
-const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { ocrStatus } = require("../enums/ocrStatus");
 const { updateDocumentSchema } = require("../validations/documentValidation");
 const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt");
 // const ollamaService = require("./ollamaService");
 const { model } = require("../configs/aiConfig");
+const { folderType } = require("../enums/s3Folder");
 class DocumentService {
   async createDocument(userId, file, docType) {
     if (!file) {
@@ -31,17 +30,18 @@ class DocumentService {
     if (!docType) {
       throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
     }
+    const uploadFile = await s3service.uploadFile(file, folderType.DOCUMENT_UPLOAD);
+    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${uploadFile.fileKey}`;
 
     // upload file using s3 service
-    const uploadedFile = await s3service.uploadFile(file);
     const fileinfo = {
       fileType: file.mimetype,
-      fileStoragePath: uploadedFile.fileStoragePath,
+      fileStoragePath: fileStoragePath,
       fileName: file.originalname,
       fileSize: file.size,
       documentType: docType.documentType,
-      s3Bucket: uploadedFile.bucket,
-      s3Key: uploadedFile.fileKey,
+      s3Bucket: uploadFile.input.Bucket,
+      s3Key: uploadFile.fileKey,
     };
 
     const validData = await validateSchema(createDocumentSchema, fileinfo);
@@ -55,8 +55,8 @@ class DocumentService {
 
     //ocr API
     const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", {
-      fileKey: uploadedFile.fileKey,
-      bucket: uploadedFile.bucket,
+      fileKey: uploadFile.fileKey,
+      bucket: uploadFile.bucket,
     });
     const fullText = ocrResponse.data.ocr_text;
     const graph = ocrResponse.data.graphs;
@@ -157,24 +157,19 @@ class DocumentService {
     }
 
     // use s3 service here
-    const signedUrl = await s3service.generateSignedUrl(fileKey);
-
+    const url = await s3service.getSignedFileUrl(fileKey);
     return {
-      downloadUrl: signedUrl,
+      signedUrl: url,
     };
   }
 
   //delete document from s3 bucket using file key
-  async deleteFile(fileKey) {
+  async deleteFile(userId, fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
     }
-
-    const command = new DeleteObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-    });
-    await s3Client.send(command);
+    await s3service.deleteFile(fileKey);
+    await documentRepository.deleteByPatientId(userId);
     return { message: messageConstants.DOCUMENT_DELETED };
   }
 }

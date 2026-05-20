@@ -12,6 +12,7 @@ const {
 
 const { genderTypeValue } = require("../enums/genderType");
 const { USER_STATUS, userStatusValues } = require("../enums/userStatus.enum");
+const { text } = require("drizzle-orm/pg-core");
 
 const genderEnum = pgEnum("gender", genderTypeValue);
 const userStatusEnum = pgEnum("user_status", userStatusValues);
@@ -39,7 +40,7 @@ const patient = pgTable(
     // dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
     age: integer("age").notNull(),
     phone: varchar("phone", { length: 20 }).notNull(),
-    profileImageKey: varchar("profile_image_key", { length: 500 }),
+    profileImageKey: text("profile_image_key"),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
