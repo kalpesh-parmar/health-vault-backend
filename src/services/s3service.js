@@ -20,16 +20,24 @@ class S3Service {
       throw new InvalidRequestException("Folder is required");
     }
     const fileKey = `${folder}/${Date.now()}-${file.originalname}`;
+    const fileStoragePath = `https://${this.bucket}.s3.amazonaws.com/${fileKey}`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: fileKey,
       Body: file.buffer,
       ContentType: file.mimetype,
     });
+
     await s3Client.send(command);
     // await documentService.createDocument(command);
     return {
       fileKey,
+      fileType: file.mimetype,
+      fileStoragePath,
+      fileName: file.originalname,
+      fileSize: file.size,
+      s3Bucket: this.bucket,
+      s3Key: fileKey,
     };
   }
   //  Generate Signed URL

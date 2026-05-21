@@ -23,11 +23,11 @@ components:
       type: object
       required: [userName, fullName, email, password, gender, age, phone]
       properties:
-        profilePicture:
+        profileImageKey:
           type: string
-          format: binary
           nullable: true
-          description: Optional profile picture upload
+          description: S3 uploaded profile image file key
+          example: profile_image/171637282-image.png
         userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
@@ -48,9 +48,8 @@ components:
     UpdatePatientRequest:
       type: object
       properties:
-        profilePicture:
+        profileImageKey:
           type: string
-          format: binary
           nullable: true
           description: Optional profile picture upload
         userName: { type: string }
@@ -62,60 +61,24 @@ paths:
     post:
       tags: [Patient]
       security: []
+      summary: Create patient
+      description: Create patient using uploaded profile image fileKey
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
-              type: object
-
-              required:
-                - userName
-                - firstName
-                - lastName
-                - email
-                - password
-                - gender
-                - age
-                - phone
-
-              properties:
-                profilePicture:
-                  type: string
-                  format: binary
-                  description: Optional profile picture upload
-
-                userName:
-                  type: string
-
-                firstName:
-                  type: string
-
-                lastName:
-                  type: string
-
-                email:
-                  type: string
-
-                password:
-                  type: string
-
-                gender:
-                  type: string
-                  enum: [female, male]
-
-                age:
-                  type: integer
-                  minimum: 0
-                  maximum: 120
-
-                phone:
-                  type: string
+              $ref: "#/components/schemas/CreatePatientRequest"
 
       responses:
         "201":
-          description: Created
+          description: Patient created successfully
 
+        "400":
+          description: Invalid request
+
+        "409":
+          description: Email already exists
   /patient/list:
     get:
       tags: [Patient]
@@ -142,7 +105,7 @@ paths:
         - $ref: "#/components/parameters/UuidParam"
       requestBody:
         content:
-          multipart/form-data:
+          application/json:
             schema:
               $ref: "#/components/schemas/UpdatePatientRequest"
       responses:

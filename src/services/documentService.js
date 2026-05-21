@@ -4,7 +4,6 @@ const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
 const {
-  createDocumentSchema,
   idParamSchema,
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
@@ -12,32 +11,14 @@ const {
   validateSchema,
 } = require("../validations");
 const s3service = require("./s3service");
-const { folderType } = require("../enums/s3Folder");
 class DocumentService {
-  async createDocument(userId, file, docType) {
-    if (!file) {
-      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
-    }
+  async createDocument(userId, docType) {
     if (!docType) {
       throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
     }
-    const uploadFile = await s3service.uploadFile(file, folderType.DOCUMENT_UPLOAD);
-    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${uploadFile.fileKey}`;
-
-    const fileinfo = {
-      fileType: file.mimetype,
-      fileStoragePath,
-      fileName: file.originalname,
-      fileSize: file.size,
-      documentType: docType.documentType,
-      s3Bucket: uploadFile.input.Bucket,
-      s3Key: uploadFile.fileKey,
-    };
-
-    const validData = await validateSchema(createDocumentSchema, fileinfo);
     return documentRepository.create({
       userId,
-      ...validData,
+      docType,
     });
   }
 
