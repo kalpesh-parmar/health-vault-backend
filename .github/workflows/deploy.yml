@@ -78,7 +78,6 @@ jobs:
             AWS_REGION=aws-region:latest
             AWS_ACCESS_KEY_ID=aws-access-key-id:latest
             AWS_SECRET_ACCESS_KEY=aws-secret-access-key:latest
-            FIREBASE_CREDENTIALS_BASE64=firebase-credentials-base64:latest
             PATIENT_DOCUMENTS_BUCKET=patient-documents-bucket:latest
             USER_PROFILE_IMAGES_BUCKET=user-profile-images-bucket:latest
 
