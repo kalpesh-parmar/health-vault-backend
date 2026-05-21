@@ -34,7 +34,8 @@ async function getMedicationById(req, res) {
 
 //get mediaction list
 async function getMedicationList(req, res) {
-  const result = await medicationService.getMedicationList();
+  const userId = req.auth.userId;
+  const result = await medicationService.getMedicationList(userId);
   return successResponse(res, result, messageConstants.MEDICATION_LIST_FETCHED);
 }
 
