@@ -85,7 +85,6 @@ jobs:
           env_vars: |
             APP_NAME=Health Vault
             APP_URL=https://health-vault-api.run.app
-            PORT=8080
             NODE_ENV=production
             DB_POOL_MAX=10
             DB_IDLE_TIMEOUT_MS=30000
