@@ -11,7 +11,6 @@ const {
 } = require("../validations");
 
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
-
 class MedicationService {
   // create
   async createMedication(userId, payload) {
@@ -76,8 +75,8 @@ class MedicationService {
   }
 
   //get list
-  async getMedicationList() {
-    const medications = await medicationRepository.findAll();
+  async getMedicationList(userId) {
+    const medications = await medicationRepository.findAll(userId);
 
     return medications;
   }

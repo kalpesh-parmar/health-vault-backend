@@ -120,8 +120,11 @@ class MedicationRepository {
     };
   }
 
-  async findAll() {
-    const result = await db.select().from(medication).where(eq(medication.softDelete, false));
+  async findAll(userId) {
+    const result = await db
+      .select()
+      .from(medication)
+      .where(and(eq(medication.softDelete, false), eq(medication.userId, String(userId))));
 
     return result;
   }
