@@ -51,13 +51,13 @@ jobs:
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
 
-      - name: Run Drizzle Migrations
-        run: |
-          DATABASE_URL=$(gcloud secrets versions access latest \
-            --secret=database-url \
-            --project=${{ env.PROJECT_ID }})
-          echo "::add-mask::$DATABASE_URL"
-          DATABASE_URL=$DATABASE_URL npx drizzle-kit migrate
+      # - name: Run Drizzle Migrations
+      #   run: |
+      #     DATABASE_URL=$(gcloud secrets versions access latest \
+      #       --secret=database-url \
+      #       --project=${{ env.PROJECT_ID }})
+      #     echo "::add-mask::$DATABASE_URL"
+      #     DATABASE_URL=$DATABASE_URL npx drizzle-kit migrate
 
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
