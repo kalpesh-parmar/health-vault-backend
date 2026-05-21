@@ -1,3 +1,8 @@
+CREATE TYPE "public"."document_type" AS ENUM('family', 'medical_document', 'medication', 'insurance', 'other');--> statement-breakpoint
+CREATE TYPE "public"."file_type" AS ENUM('application/document', 'image/jpeg', 'application/pdf', 'image/png', 'text/plain');--> statement-breakpoint
+CREATE TYPE "public"."ocr_status" AS ENUM('completed', 'failed', 'in_progress', 'pending');--> statement-breakpoint
+CREATE TYPE "public"."user_status" AS ENUM('ACTIVE', 'BLOCKED', 'INACTIVE');--> statement-breakpoint
+CREATE TYPE "public"."gender" AS ENUM('female', 'male');--> statement-breakpoint
 CREATE TABLE "documents" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,

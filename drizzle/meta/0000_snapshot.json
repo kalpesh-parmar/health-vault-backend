@@ -1,5 +1,5 @@
 {
-  "id": "7f3b7a49-7f23-426d-804d-8124cc0db3c9",
+  "id": "cd93b3fc-922b-4701-befd-93d206e2b6b9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -809,7 +809,57 @@
       "isRLSEnabled": false
     }
   },
-  "enums": {},
+  "enums": {
+    "public.document_type": {
+      "name": "document_type",
+      "schema": "public",
+      "values": [
+        "family",
+        "medical_document",
+        "medication",
+        "insurance",
+        "other"
+      ]
+    },
+    "public.file_type": {
+      "name": "file_type",
+      "schema": "public",
+      "values": [
+        "application/document",
+        "image/jpeg",
+        "application/pdf",
+        "image/png",
+        "text/plain"
+      ]
+    },
+    "public.ocr_status": {
+      "name": "ocr_status",
+      "schema": "public",
+      "values": [
+        "completed",
+        "failed",
+        "in_progress",
+        "pending"
+      ]
+    },
+    "public.user_status": {
+      "name": "user_status",
+      "schema": "public",
+      "values": [
+        "ACTIVE",
+        "BLOCKED",
+        "INACTIVE"
+      ]
+    },
+    "public.gender": {
+      "name": "gender",
+      "schema": "public",
+      "values": [
+        "female",
+        "male"
+      ]
+    }
+  },
   "schemas": {},
   "sequences": {},
   "roles": {},
