@@ -67,6 +67,8 @@ jobs:
 
           image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
+          secrets_update_strategy: overwrite
+
           secrets: |
             DATABASE_URL=database-url:latest
             JWT_SECRET=jwt-secret:latest
