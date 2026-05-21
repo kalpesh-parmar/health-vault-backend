@@ -1,0 +1,118 @@
+name: Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SERVICE_NAME: health-vault-api
+  REGION: us-central1
+  PROJECT_ID: health-vault-prod
+  REPOSITORY: health-vault-repo
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: "${{ secrets.GCP_SA_KEY }}"
+
+      - name: Setup GCloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker Authentication
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Docker Image
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+
+          docker build -t "$IMAGE" .
+
+          docker push "$IMAGE"
+
+      - name: Run Drizzle Migrations
+        run: |
+          DATABASE_URL=$(gcloud secrets versions access latest \
+            --secret=database-url \
+            --project=${{ env.PROJECT_ID }})
+
+          echo "::add-mask::$DATABASE_URL"
+
+          DATABASE_URL=$DATABASE_URL npx drizzle-kit migrate
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+
+          image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+          secrets: |
+            DATABASE_URL=database-url:latest
+            JWT_SECRET=jwt-secret:latest
+            JWT_ISSUER=jwt-issuer:latest
+            SMTP_PASSWORD=smtp-password:latest
+            EMAIL_FROM=email-from:latest
+            SMTP_HOST=smtp-host:latest
+            SMTP_PORT=smtp-port:latest
+            AWS_REGION=aws-region:latest
+            AWS_ACCESS_KEY_ID=aws-access-key-id:latest
+            AWS_SECRET_ACCESS_KEY=aws-secret-access-key:latest
+            FIREBASE_CREDENTIALS_BASE64=firebase-credentials-base64:latest
+            PATIENT_DOCUMENTS_BUCKET=patient-documents-bucket:latest
+            USER_PROFILE_IMAGES_BUCKET=user-profile-images-bucket:latest
+
+          env_vars: |
+            APP_NAME=Health Vault
+            APP_URL=https://health-vault-api.run.app
+            PORT=8080
+            NODE_ENV=production
+            DB_POOL_MAX=10
+            DB_IDLE_TIMEOUT_MS=30000
+            JWT_ACCESS_EXPIRES_IN=15m
+            JWT_REFRESH_EXPIRES_IN=7d
+            MAX_LOGIN_ATTEMPTS=3
+            OTP_EXPIRY_MINUTES=10
+            PASSWORD_RESET_WINDOW_MINUTES=15
+            EMAIL_ENABLED=false
+            SMTP_SECURE=false
+            RATE_LIMIT_WINDOW_MS=900000
+            RATE_LIMIT_MAX=100
+
+      - name: Get Cloud Run URL
+        id: deploy-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)')
+
+          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+
+      - name: Deployment Success
+        run: |
+          echo "Application deployed successfully"
+          echo "Service URL: $SERVICE_URL"
