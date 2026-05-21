@@ -18,7 +18,7 @@ permissions:
 env:
   SERVICE_NAME: health-vault-api
   REGION: us-central1
-  PROJECT_ID: health-vault-prod
+  PROJECT_ID: health-vault-dev
   REPOSITORY: health-vault-repo
 
 jobs:
