@@ -40,7 +40,6 @@ const emailService = require("./emailService");
 // const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 // const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const s3service = require("./s3service");
-const { folderType } = require("../enums/s3Folder");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -178,20 +177,13 @@ class PatientService {
     };
   }
 
-  async createPatient(file, payload) {
-    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
-    const profileImageKey = uploadFile.fileKey;
-
-    const reqData = { profileImageKey, ...payload };
+  async createPatient(payload) {
+    const reqData = { payload };
     const data = await validateSchema(createPatientSchema, reqData);
-    const signedUrl = await s3service.getSignedFileUrl(profileImageKey);
-
     const existingPatient = await patientRepository.findByEmail(data.email);
-
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
     }
-
     const password = await bcrypt.hash(data.password, 10);
     const patientCode = await createUniquePatientCode();
     const createdPatient = await patientRepository.create({
@@ -202,7 +194,6 @@ class PatientService {
     });
 
     return {
-      signedUrl: signedUrl,
       patientData: sanitizePatient(createdPatient),
     };
   }
@@ -230,39 +221,37 @@ class PatientService {
     };
   }
 
-  async updatePatient(id, file, payload) {
+  async updatePatient(id, payload) {
     const params = await validateSchema(idParamSchema, { id });
-    const uploadFile = await s3service.uploadFile(file, folderType.PATIENT_PROFILE);
-
-    const profileImageKey = uploadFile.fileKey;
-    const reqData = { profileImageKey, ...payload };
-    const data = await validateSchema(updatePatientSchema, reqData);
-
+    const data = await validateSchema(updatePatientSchema, payload);
+    const existingPatient = await patientRepository.findById(id);
+    if (
+      payload.profileImageKey &&
+      existingPatient.profileImageKey &&
+      payload.profileImageKey !== existingPatient.profileImageKey
+    ) {
+      await s3service.deleteFile(existingPatient.profileImageKey);
+    }
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
         data.email,
         params.id,
       );
-
       if (patientWithEmail) {
         throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
       }
     }
 
-    const updateData = { ...data };
-
-    if (updateData.password) {
-      updateData.password = await bcrypt.hash(updateData.password, 10);
+    if (data.password) {
+      data.password = await bcrypt.hash(data.password, 10);
     }
 
-    const updatedPatient = await patientRepository.updateById(params.id, updateData);
+    const updatedPatient = await patientRepository.updateById(params.id, data);
 
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const signedurl = await s3service.getSignedFileUrl(profileImageKey);
     return {
-      signedUrl: signedurl,
       patientData: sanitizePatient(updatedPatient),
     };
   }

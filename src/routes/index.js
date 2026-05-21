@@ -7,6 +7,7 @@ const sessionRoutes = require("./sessionRoutes");
 const authRoutes = require("./authRoutes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
+const s3Routes = require("./s3Routes");
 
 const router = express.Router();
 
@@ -24,6 +25,7 @@ router.use("/auth", authRoutes);
 router.use("/documents", documentRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/session", sessionRoutes);
+router.use("/s3-file-upload", s3Routes);
 router.use("/patient", patientRoutes);
 
 module.exports = router;
