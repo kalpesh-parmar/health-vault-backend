@@ -105,7 +105,6 @@ components:
     ListDocumentsRequest:
       type: object
       additionalProperties: false
-
       properties:
         filter:
           $ref: "#/components/schemas/DocumentFilter"

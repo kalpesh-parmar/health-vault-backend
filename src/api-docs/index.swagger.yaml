@@ -1,0 +1,17 @@
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: "Health check"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "OK"
