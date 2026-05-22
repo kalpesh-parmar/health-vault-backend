@@ -178,8 +178,8 @@ class PatientService {
   }
 
   async createPatient(payload) {
-    const reqData = { payload };
-    const data = await validateSchema(createPatientSchema, reqData);
+    // const reqData = { payload };
+    const data = await validateSchema(createPatientSchema, payload);
     const existingPatient = await patientRepository.findByEmail(data.email);
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
