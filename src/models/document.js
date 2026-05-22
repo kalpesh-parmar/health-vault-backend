@@ -55,4 +55,4 @@ const document = pgTable(
   ],
 );
 
-module.exports = { document };
+module.exports = { document, documentTypeEnum, fileTypeEnum, ocrStatusEnum };

@@ -94,4 +94,7 @@ const medication = pgTable(
 
 module.exports = {
   medication,
+  medicationTypeEnum,
+  frequencyEnum,
+  foodEnum,
 };

@@ -62,15 +62,11 @@ class MedicationRepository {
   }
 
   async findById(id) {
-    // console.log("id", id);
     const result = await db
       .select()
       .from(medication)
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .limit(1);
-
-    console.log("DB RESULT:", result);
-
     return result[0] || null;
   }
   async findAllWithFilters({ filter = {}, sort = {}, userId }) {
