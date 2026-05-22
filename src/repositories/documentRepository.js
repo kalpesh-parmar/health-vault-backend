@@ -187,7 +187,6 @@ class DocumentRepository {
       .orderBy(orderClause)
       .limit(limit)
       .offset(offset);
-
     const totalRecordsResult = await db
       .select({ count: sql`count(*)` })
       .from(document)

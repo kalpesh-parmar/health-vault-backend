@@ -61,4 +61,5 @@ const patient = pgTable(
 module.exports = {
   patient,
   userStatusEnum,
+  genderEnum,
 };
