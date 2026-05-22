@@ -1,22 +1,23 @@
 const { messageConstants } = require("../constants/messageConstants");
-const { S3Key_folder_map } = require("../enums/uploadType");
+const { folderType } = require("../enums/s3Folder");
 const { InvalidRequestException } = require("../exceptions/appError");
 const s3service = require("./s3service");
 
 class uploadFileService {
   async uploadFile(file, uploadType) {
-    const folder = S3Key_folder_map[uploadType];
+    console.log("uploadType", uploadType);
+
+    const folder = folderType[uploadType];
+    console.log("folder==", folder);
+
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
     }
     if (!folder) {
       throw new InvalidRequestException(messageConstants.INVALID_UPLOAD_TYPE);
     }
-    const fileKey = `${folder}/${Date.now()}-${file.originalname}`;
-
-    await s3service.uploadFile(file, fileKey);
-
-    return { fileKey };
+    const upload = await s3service.uploadFile(file, folder);
+    return { upload };
   }
 
   async deleteFile(fileKey) {
@@ -24,7 +25,6 @@ class uploadFileService {
       throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED);
     }
     await s3service.deleteFile(fileKey);
-
     return { message: messageConstants.FILE_DELETED };
   }
 

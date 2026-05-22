@@ -29,7 +29,7 @@ const document = pgTable(
       .references(() => patient.id, { onDelete: "cascade" }),
     documentType: documentTypeEnum("document_type").notNull(),
     fileName: varchar("file_name", { length: 255 }).notNull(),
-    fileStoragePath: text("file_path").notNull(),
+    filePath: text("file_path").notNull(),
     s3Bucket: varchar("s3_bucket", { length: 255 }),
     s3Key: varchar("s3_key", { length: 500 }),
     fileType: fileTypeEnum("file_type").notNull(),

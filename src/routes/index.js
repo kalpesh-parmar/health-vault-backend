@@ -9,6 +9,7 @@ const chatbotRoutes = require("./chatbotApi.Routes");
 const medicationRoutes = require("./medicationRoutes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
+const s3Routes = require("./s3Routes");
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ router.use("/documents", documentRoutes);
 router.use("/medications", medicationRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/session", sessionRoutes);
+router.use("/s3-file-upload", s3Routes);
 router.use("/patient", patientRoutes);
 router.use("/chatbot", chatbotRoutes);
 module.exports = router;

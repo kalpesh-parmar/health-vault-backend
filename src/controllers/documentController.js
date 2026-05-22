@@ -4,7 +4,9 @@ const { paginatedSuccessResponse, successResponse } = require("../helpers/genera
 const documentService = require("../services/documentService");
 
 async function addDocument(req, res) {
-  const result = await documentService.createDocument(req.auth.userId, req.file, req.body);
+  const result = await documentService.createDocument(req.auth.userId, req.body);
+  console.log("req.body===", req.body);
+
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 
@@ -19,7 +21,7 @@ async function getDocumentList(req, res) {
 }
 
 async function listDocuments(req, res) {
-  const result = await documentService.listDocuments(req.body);
+  const result = await documentService.listDocuments(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.DOCUMENT_FILTERED_LIST_FETCHED);
 }
 

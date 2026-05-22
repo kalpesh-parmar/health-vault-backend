@@ -7,7 +7,6 @@ const { NotFoundException, InvalidRequestException } = require("../exceptions/ap
 require("fs");
 const documentRepository = require("../repositories/documentRepository");
 const {
-  createDocumentSchema,
   idParamSchema,
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
@@ -16,61 +15,41 @@ const {
 } = require("../validations");
 const s3service = require("./s3service");
 const { ocrStatus } = require("../enums/ocrStatus");
-const { updateDocumentSchema } = require("../validations/documentValidation");
+const { updateDocumentSchema, createDocumentSchema } = require("../validations/documentValidation");
 const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt");
-// const ollamaService = require("./ollamaService");
 const { model } = require("../configs/aiConfig");
-const { folderType } = require("../enums/s3Folder");
 class DocumentService {
-  async createDocument(userId, file, docType) {
-    if (!file) {
-      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
-    }
+  async createDocument(userId, payload) {
+    console.log("payload==", payload);
 
-    if (!docType) {
-      throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
-    }
-    const uploadFile = await s3service.uploadFile(file, folderType.DOCUMENT_UPLOAD);
-    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${uploadFile.fileKey}`;
-
-    // upload file using s3 service
-    const fileinfo = {
-      fileType: file.mimetype,
-      fileStoragePath: fileStoragePath,
-      fileName: file.originalname,
-      fileSize: file.size,
-      documentType: docType.documentType,
-      s3Bucket: uploadFile.input.Bucket,
-      s3Key: uploadFile.fileKey,
+    const validData = await validateSchema(createDocumentSchema, payload);
+    const insertData = {
+      userId: userId,
+      documentType: validData.documentType,
+      fileName: validData.fileName,
+      fileSize: validData.fileSize,
+      filePath: validData.filePath,
+      fileType: validData.fileType,
+      s3Bucket: validData.s3Bucket,
+      s3Key: validData.s3Key,
     };
 
-    const validData = await validateSchema(createDocumentSchema, fileinfo);
-    const document = await documentRepository.create({
-      userId,
-      ...validData,
-    });
+    const document = await documentRepository.create(insertData);
     await documentRepository.update(document.id, {
       ocrStatus: ocrStatus.IN_PROGRESS,
     });
 
     //ocr API
     const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", {
-      fileKey: uploadFile.fileKey,
-      bucket: uploadFile.bucket,
+      fileKey: validData.s3Key,
+      bucket: validData.s3Bucket,
     });
     const fullText = ocrResponse.data.ocr_text;
     const graph = ocrResponse.data.graphs;
-    console.log("fullText===", fullText);
-    console.log("graph===", graph);
-    // const data={fullText,graph};
 
-    // const cleanText = cleanOCRText(data);
     const prompt = medicalPrompt(fullText, graph);
-    console.log(prompt);
 
-    // const structuredData = await ollamaService.generate(prompt);
     const structuredData = await model.generateContent(prompt);
-    console.log("structuredData===", structuredData);
 
     const responseText = structuredData.response.text();
     const cleanData = cleanOCRText(responseText);
@@ -85,8 +64,6 @@ class DocumentService {
       remarks: jsonData.remarks,
       ocrStatus: ocrStatus.COMPLETED,
     };
-    console.log("ocrInfo==", ocrInfo);
-
     const validOcr = await validateSchema(updateDocumentSchema, ocrInfo);
 
     return documentRepository.update(document.id, {
@@ -106,6 +83,8 @@ class DocumentService {
 
   async getDocumentList(userId, payload) {
     const filters = await validateSchema(listDocumentsQuerySchema, payload);
+    console.log("filters ", filters);
+
     const { rows, total } = await documentRepository.findAll({
       ...filters,
       userId,
@@ -119,9 +98,12 @@ class DocumentService {
     };
   }
 
-  async listDocuments(payload) {
+  async listDocuments(userId, payload) {
     const data = await validateSchema(listDocumentsFilterSortSchema, payload || {});
-    return documentRepository.findAllByFilterAndSort(data);
+    return documentRepository.findAllByFilterAndSort({
+      userId,
+      ...data,
+    });
   }
 
   async listDocumentsPaginated(userId, payload) {

@@ -34,7 +34,7 @@ const createDocumentSchema = z
       .positive(errorConstants.FILE_SIZE_INVALID)
       .max(maxFileSize, errorConstants.FILE_SIZE_INVALID)
       .optional(),
-    fileStoragePath: z.string().trim().min(1, errorConstants.INVALID_REQUEST).optional(),
+    filePath: z.string().trim().min(1, errorConstants.INVALID_REQUEST).optional(),
     fileType: z
       .enum(fileTypeValue, {
         invalid_type_error: errorConstants.FILE_TYPE_INVALID,

@@ -21,7 +21,7 @@ const errorConstants = Object.freeze({
   DOCUMENT_NOT_FOUND: "Document not found",
   EMAIL_ALREADY_EXISTS: "Email already exists",
   EMAIL_NOT_CONFIGURED: "Email service is not configured",
-  INVALID_CREDENTIALS: "Invalid email or password",
+  INVALID_CREDENTIALS: "Invalid email",
   INVALID_OTP: "Invalid OTP",
   INVALID_REFRESH_TOKEN: "Invalid refresh token",
   INVALID_REQUEST: "Invalid request",

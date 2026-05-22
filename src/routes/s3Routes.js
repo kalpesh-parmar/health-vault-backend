@@ -6,8 +6,8 @@ const { upload } = require("../middlewares/upload");
 
 const router = express.Router();
 
-router.post("/upload", upload.single("profilePicture"), s3Controller.uploadFile);
-router.delete("/delete", verifyToken, s3Controller.fileDelete);
-router.get("/get-url", verifyToken, s3Controller.getSignedUrl);
+router.post("/upload", upload.single("file"), s3Controller.uploadFile);
+router.get("/getUrl", verifyToken, s3Controller.getSignedUrl);
+router.delete("/hard-delete", verifyToken, s3Controller.deleteFile);
 
 module.exports = router;

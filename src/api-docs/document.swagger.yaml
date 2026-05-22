@@ -27,13 +27,45 @@ components:
   schemas:
     CreateDocumentRequest:
       type: object
-      required: [documentType, fileName, fileStoragePath, s3Bucket, s3Key]
+      required:
+        - documentType
+        - s3Key
+        - fileName
+        - fileType
+        - fileSize
+        - s3Bucket
+        - filePath
       properties:
-        documentType: { type: string }
-        fileName: { type: string }
-        fileStoragePath: { type: string }
-        s3Bucket: { type: string }
-        s3Key: { type: string }
+        documentType:
+          type: string
+          enum:
+            - family
+            - medical_document
+            - medication
+            - insurance
+            - other
+        s3Key:
+          type: string
+          example: uploads/17123-report.pdf
+
+        fileName:
+          type: string
+          example: blood-report.pdf
+
+        fileType:
+          type: string
+          example: application/pdf
+
+        fileSize:
+          type: integer
+          example: 204800
+
+        s3Bucket:
+          type: string
+          example: patient-documents
+        fileStoragePath:
+          type: string
+          example: https://${bucket}.s3.amazonaws.com/${uploads/17123-report.pdf}
     DocumentFilter:
       type: object
       additionalProperties: false
@@ -73,14 +105,17 @@ components:
     ListDocumentsRequest:
       type: object
       additionalProperties: false
+
       properties:
         filter:
           $ref: "#/components/schemas/DocumentFilter"
         sort:
           $ref: "#/components/schemas/DocumentSort"
+
     ListDocumentsPaginatedRequest:
       type: object
       additionalProperties: false
+
       required: [page]
       properties:
         filter:
@@ -111,24 +146,9 @@ paths:
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
-              type: object
-              required:
-                - file
-                - documentType
-              properties:
-                file:
-                  type: string
-                  format: binary
-                documentType:
-                  type: string
-                  enum:
-                    - family
-                    - medical_document
-                    - medication
-                    - insurance
-                    - other
+              $ref: "#/components/schemas/CreateDocumentRequest"
       responses:
         200:
           description: File uploaded successfully

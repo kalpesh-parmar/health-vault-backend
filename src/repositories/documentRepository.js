@@ -25,8 +25,11 @@ const filterSortColumnMap = Object.freeze({
   updatedAt: document.updatedAt,
 });
 
-function buildDocumentFilters(filters = {}) {
-  const conditions = [or(eq(document.softDelete, false), isNull(document.softDelete))];
+function buildDocumentFilters(filters = {}, userId) {
+  const conditions = [
+    eq(document.userId, userId),
+    or(eq(document.softDelete, false), isNull(document.softDelete)),
+  ];
 
   if (filters.userId) {
     conditions.push(eq(document.userId, filters.userId));
@@ -55,7 +58,10 @@ function buildDocumentFilters(filters = {}) {
 }
 
 function buildFilterSortConditions(filter = {}, userId) {
-  const conditions = [or(eq(document.softDelete, false), isNull(document.softDelete))];
+  const conditions = [
+    eq(document.userId, userId),
+    or(eq(document.softDelete, false), isNull(document.softDelete)),
+  ];
 
   if (userId) {
     conditions.push(eq(document.userId, String(userId)));
@@ -132,10 +138,12 @@ class DocumentRepository {
     return result[0] || null;
   }
 
-  async findAll(filters = {}) {
+  async findAll({ userId, ...filters }) {
+    console.log("userId===", filters);
+
     const sortColumn = documentSortColumns[filters.sortBy] || document.createdAt;
     const orderBy = filters.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
-    const where = buildDocumentFilters(filters);
+    const where = buildDocumentFilters(filters, userId);
 
     const rows = await db
       .select()
@@ -152,8 +160,8 @@ class DocumentRepository {
     };
   }
 
-  async findAllByFilterAndSort({ filter = {}, sort = {} }) {
-    const conditions = buildFilterSortConditions(filter);
+  async findAllByFilterAndSort({ filter = {}, sort = {}, userId }) {
+    const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
 
     return db

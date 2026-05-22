@@ -1,24 +1,22 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const s3Service = require("../services/s3service");
+const uploadFileService = require("../services/uploadFileService");
 
 async function uploadFile(req, res) {
-  const result = await s3Service.uploadFile(req.file, req.body);
+  const result = await uploadFileService.uploadFile(req.file, req.body.uploadType);
   return successResponse(res, result, messageConstants.FILE_UPLOADED);
 }
-
-async function fileDelete(req, res) {
-  const result = await s3Service.deleteFile(req.file, req.body);
-  return successResponse(res, result, messageConstants.FILE_DELETED);
-}
-
 async function getSignedUrl(req, res) {
-  const result = await s3Service.getSignedFileUrl();
+  const result = await uploadFileService.getSignedUrl(req.query.fileKey);
   return successResponse(res, result, messageConstants.FILE_FETCHED);
+}
+async function deleteFile(req, res) {
+  const result = await uploadFileService.deleteFile(req.query);
+  return successResponse(res, result, messageConstants.FILE_DELETED);
 }
 
 module.exports = {
   uploadFile,
-  fileDelete,
   getSignedUrl,
+  deleteFile,
 };
