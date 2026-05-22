@@ -41,7 +41,7 @@ async function getMedicationList(req, res) {
 
 //filtered list
 async function listMedications(req, res) {
-  const result = await medicationService.listMedications(req.body);
+  const result = await medicationService.listMedications(req.body, req.auth.userId);
 
   return successResponse(res, result, messageConstants.MEDICATION_FILTERED_LIST_FETCHED);
 }
