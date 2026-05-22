@@ -14,6 +14,7 @@ const messageConstants = Object.freeze({
   NOTIFICATION_SENT: "Notification sent successfully",
   OTP_SENT: "OTP sent successfully",
   OTP_VERIFIED: "OTP verified successfully",
+  PROFILE_PICTURE_DELETED: "Profile picture deleted successfully",
   PATIENT_CREATED: "Patient created successfully",
   PATIENT_DELETED: "Patient deleted successfully",
   PATIENT_FETCHED: "Patient fetched successfully",

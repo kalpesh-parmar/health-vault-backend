@@ -1,5 +1,6 @@
 const errorConstants = Object.freeze({
   ACCESS_DENIED: "Access denied",
+  FILE_KEY_REQUIRED: "File key required",
   ACCOUNT_BLOCKED: "Account is blocked",
   ACCOUNT_INACTIVE: "Account is inactive",
   ALREADY_EXISTS: "Already exists",
