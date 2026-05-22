@@ -74,8 +74,8 @@ class MedicationRepository {
     return result[0] || null;
   }
 
-  async findAllWithFilters({ filter = {}, sort = {} }) {
-    const where = buildMedicationFilters(filter);
+  async findAllWithFilters({ filter = {}, sort = {}, userId }) {
+    const where = buildMedicationFilters(filter, userId);
 
     const orderClause = buildOrderClause(sort);
 

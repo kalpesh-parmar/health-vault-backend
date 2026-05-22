@@ -82,10 +82,13 @@ class MedicationService {
   }
 
   // filter list
-  async listMedications(payload) {
+  async listMedications(payload, userId) {
     const filters = await validateSchema(listMedicationQuerySchema, payload || {});
 
-    const result = await medicationRepository.findAllWithFilters(filters);
+    const result = await medicationRepository.findAllWithFilters({
+      ...filters,
+      userId,
+    });
 
     return result;
   }
