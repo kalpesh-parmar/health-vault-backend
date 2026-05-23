@@ -37,8 +37,6 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-// const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-// const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const s3service = require("./s3service");
 
 async function createUniquePatientCode() {
@@ -178,7 +176,6 @@ class PatientService {
   }
 
   async createPatient(payload) {
-    // const reqData = { payload };
     const data = await validateSchema(createPatientSchema, payload);
     const existingPatient = await patientRepository.findByEmail(data.email);
     if (existingPatient) {

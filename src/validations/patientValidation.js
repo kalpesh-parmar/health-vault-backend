@@ -93,8 +93,8 @@ const createPatientSchema = z
       required_error: errorConstants.GENDER_INVALID,
     }),
     password: passwordField,
-    profileImageKey: profileImageKey,
     phone: phoneField,
+    profileImageKey: profileImageKey,
     userName: usernameField(errorConstants.USER_NAME_REQUIRED),
   })
   .strict()

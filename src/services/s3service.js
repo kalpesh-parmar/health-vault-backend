@@ -8,7 +8,6 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 class S3Service {
   constructor() {
     this.bucket = process.env.PATIENT_DOCUMENTS_BUCKET;
-    this.region = process.env.AWS_REGION;
   }
 
   // Upload file method
@@ -29,7 +28,6 @@ class S3Service {
     });
 
     await s3Client.send(command);
-    // await documentService.createDocument(command);
     return {
       fileKey,
       fileType: file.mimetype,
