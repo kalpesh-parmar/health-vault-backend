@@ -30,6 +30,16 @@ const {
   listMedicationQuerySchema,
 } = require("./medicationValidation");
 
+const {
+  createReminderSchema,
+  completeReminderSchema,
+  missedReminderSchema,
+  skippedReminderSchema,
+  snoozeReminderSchema,
+  completeRefillAlertSchema,
+  snoozeRefillAlertSchema,
+} = require("./reminderValidation");
+
 const { createSessionSchema } = require("./sessionValidation");
 
 function formatZodIssues(error) {
@@ -79,4 +89,11 @@ module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  createReminderSchema,
+  completeReminderSchema,
+  missedReminderSchema,
+  skippedReminderSchema,
+  snoozeReminderSchema,
+  completeRefillAlertSchema,
+  snoozeRefillAlertSchema,
 };

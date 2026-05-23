@@ -29,6 +29,27 @@ const messageConstants = Object.freeze({
   PATIENT_PROFILE_FETCHED: "Patient profile fetched successfully",
   FILE_IS_REQUIRED: "File is required",
   DOCUMENT_DOWNLOAD_URL_FETCHED: "Document download URL fetched successfully",
+
+  //medication
+  MEDICATION_CREATED: "Medication created successfully",
+  MEDICATION_DELETED: "Medication deleted successfully",
+  MEDICATION_FETCHED: "Medication fetched successfully",
+  MEDICATION_LIST_FETCHED: "Medication list fetched successfully",
+  MEDICATION_UPDATED: "Medication updated successfully",
+  MEDICATION_FILTERED_LIST_FETCHED: "Medication filtered list fetched successfully",
+  MEDICATION_REMINDER_LIST_FETCHED: "Medication reminder list fetched successfully",
+  MEDICATION_REMINDER_FETCHED: "Medication reminder fetched successfully",
+  MEDICATION_REMINDER_DELETED: "Medication reminder deleted successfully",
+  MEDICATION_OCCURRENCES_FETCHED: "Medication occurrences fetched successfully",
+  MEDICATION_REMINDER_COMPLETED: "Medication reminder marked as completed",
+  MEDICATION_REMINDER_SKIPPED: "Medication reminder marked as skipped",
+  MEDICATION_REMINDER_MISSED: "Medication reminder marked as missed",
+  EDICATION_REMINDER_SKIPPED: "Medication reminder marked as skipped",
+  MEDICATION_REMINDER_SNOOZED: "Medication reminder snoozed",
+  REFILL_ALERTS_FETCHED: "Refill alerts fetched successfully",
+  TODAY_REFILL_ALERTS_FETCHED: "Today's refill alerts fetched successfully",
+  REFILL_ALERT_COMPLETED: "Refill alert marked as completed",
+  REFILL_ALERT_SNOOZED: "Refill alert snoozed", 
 });
 
 module.exports = { messageConstants };

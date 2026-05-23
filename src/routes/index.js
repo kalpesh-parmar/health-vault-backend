@@ -6,6 +6,7 @@ const patientRoutes = require("./patientRoutes");
 const sessionRoutes = require("./sessionRoutes");
 const authRoutes = require("./authRoutes");
 const medicationRoutes = require("./medicationRoutes");
+const medicationReminderRoutes = require("./medicationReminderRoutes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 
@@ -27,5 +28,5 @@ router.use("/medications", medicationRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/session", sessionRoutes);
 router.use("/patient", patientRoutes);
-
+router.use("/medication-reminders", medicationReminderRoutes);
 module.exports = router;

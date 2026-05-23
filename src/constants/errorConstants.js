@@ -54,6 +54,9 @@ const errorConstants = Object.freeze({
   USER_NAME_REQUIRED: "User name is required",
   VALID_DOCUMENT_TYPE_REQUIRED: "Please enter a valid document type",
   VALID_EMAIL_REQUIRED: "Please enter a valid email",
+  MEDICATION_NOT_FOUND: "Medication not found",
+  MEDICATION_REMINDER_NOT_FOUND: "Medication reminder not found", 
+  
 });
 
 module.exports = { errorConstants };

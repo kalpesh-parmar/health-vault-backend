@@ -15,6 +15,13 @@
       "when": 1779449939268,
       "tag": "0001_sweet_garia",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779514747413,
+      "tag": "0002_tired_raider",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,8 @@ const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes");
 
+require("./corn/generateOccurrencesCron");
+require("./corn/sendReminderCron");
 const app = express();
 const server = http.createServer(app);
 const port = env.port;
