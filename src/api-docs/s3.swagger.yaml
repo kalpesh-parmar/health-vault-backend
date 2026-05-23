@@ -1,0 +1,110 @@
+openapi: 3.0.0
+
+info:
+  title: S3 File Upload API
+  version: 1.0.0
+  description: APIs for uploading, retrieving, and deleting files from S3 bucket
+
+servers:
+  - url: http://localhost:3000/api
+
+paths:
+  /file/upload:
+    post:
+      summary: Upload file to S3
+      description: Uploads file to S3 bucket and returns fileKey
+      tags:
+        - File Upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - uploadType
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+                uploadType:
+                  type: string
+                  enum:
+                    - PATIENT_DOCUMENT
+                    - PATIENT_PROFILE
+                  description: Type of upload to decide folder
+      responses:
+        "200":
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileKey:
+                    type: string
+                    example: patient/profile/17000012345-image.png
+        "400":
+          description: Invalid request
+
+  /file/getUrl:
+    get:
+      summary: Get signed URL for file
+      description: Returns temporary public access URL for private S3 file
+      tags:
+        - File Upload
+      parameters:
+        - in: query
+          name: fileKey
+          required: true
+          schema:
+            type: string
+          description: S3 file key
+          example: patient/profile/17000012345-image.png
+      responses:
+        "200":
+          description: Signed URL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: https://bucket.s3.amazonaws.com/xyz?signature=abc
+        "400":
+          description: Missing fileKey
+
+  /file/hard-delete:
+    delete:
+      summary: Delete file from S3
+      description: Deletes file from S3 bucket using fileKey
+      tags:
+        - File Upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileKey
+              properties:
+                fileKey:
+                  type: string
+                  example: patient/profile/17000012345-image.png
+      responses:
+        "200":
+          description: File deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        "400":
+          description: Invalid fileKey

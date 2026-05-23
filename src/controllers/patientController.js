@@ -18,6 +18,10 @@ async function createPatient(req, res) {
   const result = await patientService.createPatient(req.body);
   return successResponse(res, result, messageConstants.PATIENT_CREATED, StatusCodes.CREATED);
 }
+async function profilePicDelete(req, res) {
+  const result = await patientService.profilePicDelete(req.body);
+  return successResponse(res, result, messageConstants.PROFILE_PICTURE_DELETED);
+}
 
 async function getPatientById(req, res) {
   const result = await patientService.getPatientById(req.params.id);
@@ -76,6 +80,7 @@ async function getPatientProfile(req, res) {
 
 module.exports = {
   createPatient,
+  profilePicDelete,
   deletePatient,
   forgotPassword,
   getPatientProfile,
