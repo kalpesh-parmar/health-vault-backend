@@ -9,9 +9,6 @@ const { getPromptByIntent } = require("./aiService/promptFinder");
 
 class chatbotService {
   async generateSummary(userId, data) {
-    // console.log("documentId==", docId);
-    // console.log("userId===",userId);
-
     const { documentId } = data;
     const { message } = data;
     const existingData = await documentRepository.findById(documentId);
@@ -19,8 +16,6 @@ class chatbotService {
     if (!existingData || existingData.userId != userId)
       throw new InvalidRequestException(errorConstants.DOCUMENT_NOT_FOUND);
 
-    // const docData = existingData.ocrExtractedText;
-    // console.log("documentData===", docData);
     //detect Intent
     const intent = await detectIntent(message);
     //find suitable prompt
@@ -29,13 +24,10 @@ class chatbotService {
       ocrText: existingData.ocrExtractedText,
       message,
     });
-    // const prompt=buildSummaryPrompt(message,docData);
     const result = await model.generateContent(prompt);
     const response = result.response.text();
-    // console.log("response==",response);
 
     const cleanResponse = cleanOCRText(response);
-    // const parsedResponse = JSON.parse(cleanResponse);
 
     return chatbotRepository.createSummary({
       userId,

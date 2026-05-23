@@ -1,9 +1,82 @@
 {
-  "id": "007f9189-4a16-4aee-bd0b-177370eccbef",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "5e57a57a-6e53-4427-9a11-39c4a264a3ec",
+  "prevId": "cd93b3fc-922b-4701-befd-93d206e2b6b9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.AI_Summary": {
+      "name": "AI_Summary",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_message": {
+          "name": "user_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "AI_summary_data": {
+          "name": "AI_summary_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "soft_delete": {
+          "name": "soft_delete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "AI_Summary_user_id_patients_id_fk": {
+          "name": "AI_Summary_user_id_patients_id_fk",
+          "tableFrom": "AI_Summary",
+          "tableTo": "patients",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.documents": {
       "name": "documents",
       "schema": "",
@@ -44,13 +117,13 @@
           "name": "s3_bucket",
           "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "s3_key": {
           "name": "s3_key",
           "type": "varchar(500)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "file_type": {
           "name": "file_type",
@@ -70,7 +143,7 @@
           "type": "ocr_status",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "default": "'pending'"
         },
         "ocr_extracted_text": {
@@ -81,7 +154,7 @@
         },
         "structured_extracted_data": {
           "name": "structured_extracted_data",
-          "type": "text",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -95,13 +168,13 @@
           "name": "hospital_name",
           "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "doctor_name": {
           "name": "doctor_name",
           "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "remarks": {
           "name": "remarks",
@@ -235,8 +308,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.health_records": {
-      "name": "health_records",
+    "public.medications": {
+      "name": "medications",
       "schema": "",
       "columns": {
         "id": {
@@ -252,11 +325,149 @@
           "primaryKey": false,
           "notNull": true
         },
-        "record": {
-          "name": "record",
-          "type": "text",
+        "patient_code": {
+          "name": "patient_code",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "medication_name": {
+          "name": "medication_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "medication_type": {
+          "name": "medication_type",
+          "type": "medication_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prescribed_by": {
+          "name": "prescribed_by",
+          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
+        },
+        "dose_per_intake": {
+          "name": "dose_per_intake",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "frequency": {
+          "name": "frequency",
+          "type": "frequency_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "medication_times": {
+          "name": "medication_times",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "best_taken": {
+          "name": "best_taken",
+          "type": "varchar(50)[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "food_frequency": {
+          "name": "food_frequency",
+          "type": "food_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_date": {
+          "name": "end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ongoing": {
+          "name": "ongoing",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "total_quantity": {
+          "name": "total_quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "remaining_quantity": {
+          "name": "remaining_quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "dose_reminders": {
+          "name": "dose_reminders",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "unit": {
+          "name": "unit",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "daily_consumption": {
+          "name": "daily_consumption",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "refill_alert": {
+          "name": "refill_alert",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "reminder_before_minutes": {
+          "name": "reminder_before_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 5
+        },
+        "notes": {
+          "name": "notes",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         },
         "soft_delete": {
           "name": "soft_delete",
@@ -264,12 +475,117 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        }
+      },
+      "indexes": {
+        "medications_patient_code_idx": {
+          "name": "medications_patient_code_idx",
+          "columns": [
+            {
+              "expression": "patient_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp",
+        "medications_name_idx": {
+          "name": "medications_name_idx",
+          "columns": [
+            {
+              "expression": "medication_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "medications_start_date_idx": {
+          "name": "medications_start_date_idx",
+          "columns": [
+            {
+              "expression": "start_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "medications_user_id_patients_id_fk": {
+          "name": "medications_user_id_patients_id_fk",
+          "tableFrom": "medications",
+          "tableTo": "patients",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.notifications": {
+      "name": "notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "is_read": {
+          "name": "is_read",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -287,8 +603,8 @@
         }
       },
       "indexes": {
-        "health_records_user_id_idx": {
-          "name": "health_records_user_id_idx",
+        "notifications_user_id_idx": {
+          "name": "notifications_user_id_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -302,11 +618,26 @@
           "method": "btree",
           "with": {}
         },
-        "health_records_soft_delete_idx": {
-          "name": "health_records_soft_delete_idx",
+        "notifications_is_read_idx": {
+          "name": "notifications_is_read_idx",
           "columns": [
             {
-              "expression": "soft_delete",
+              "expression": "is_read",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notifications_created_at_idx": {
+          "name": "notifications_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -318,21 +649,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "health_records_user_id_patients_id_fk": {
-          "name": "health_records_user_id_patients_id_fk",
-          "tableFrom": "health_records",
-          "tableTo": "patients",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -358,6 +675,18 @@
         },
         "user_name": {
           "name": "user_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_name": {
+          "name": "first_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_name": {
+          "name": "last_name",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
@@ -439,12 +768,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "date_of_birth": {
-          "name": "date_of_birth",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
         "age": {
           "name": "age",
           "type": "integer",
@@ -459,7 +782,7 @@
         },
         "profile_image_key": {
           "name": "profile_image_key",
-          "type": "varchar(500)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -796,7 +1119,87 @@
       "isRLSEnabled": false
     }
   },
-  "enums": {},
+  "enums": {
+    "public.document_type": {
+      "name": "document_type",
+      "schema": "public",
+      "values": [
+        "family",
+        "medical_document",
+        "medication",
+        "insurance",
+        "other"
+      ]
+    },
+    "public.file_type": {
+      "name": "file_type",
+      "schema": "public",
+      "values": [
+        "application/document",
+        "image/jpeg",
+        "application/pdf",
+        "image/png",
+        "text/plain",
+        "image/jpg"
+      ]
+    },
+    "public.ocr_status": {
+      "name": "ocr_status",
+      "schema": "public",
+      "values": [
+        "completed",
+        "failed",
+        "in_progress",
+        "pending"
+      ]
+    },
+    "public.medication_type": {
+      "name": "medication_type",
+      "schema": "public",
+      "values": [
+        "TABLET",
+        "CAPSULE",
+        "SYRUP",
+        "DROP",
+        "INJECTION"
+      ]
+    },
+    "public.frequency_type": {
+      "name": "frequency_type",
+      "schema": "public",
+      "values": [
+        "ONCE_DAILY",
+        "TWICE_DAILY",
+        "THREE_TIMES_DAILY",
+        "AS_NEEDED"
+      ]
+    },
+    "public.food_type": {
+      "name": "food_type",
+      "schema": "public",
+      "values": [
+        "BEFORE_FOOD",
+        "AFTER_FOOD"
+      ]
+    },
+    "public.user_status": {
+      "name": "user_status",
+      "schema": "public",
+      "values": [
+        "ACTIVE",
+        "BLOCKED",
+        "INACTIVE"
+      ]
+    },
+    "public.gender": {
+      "name": "gender",
+      "schema": "public",
+      "values": [
+        "female",
+        "male"
+      ]
+    }
+  },
   "schemas": {},
   "sequences": {},
   "roles": {},

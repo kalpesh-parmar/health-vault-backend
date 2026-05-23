@@ -1,1 +1,0 @@
-ALTER TABLE "AI_Summary" ALTER COLUMN "AI_summary_data" SET DATA TYPE jsonb;

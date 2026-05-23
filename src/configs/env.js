@@ -38,7 +38,7 @@ const env = Object.freeze({
   otpExpiryMinutes: numberFromEnv("OTP_EXPIRY_MINUTES", 10),
   passwordResetWindowMinutes: numberFromEnv("PASSWORD_RESET_WINDOW_MINUTES", 15),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
-  port: numberFromEnv("PORT", 3000),
+  port: numberFromEnv("PORT", 8000),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 100),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
   smtpHost: process.env.SMTP_HOST,

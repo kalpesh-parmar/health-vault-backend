@@ -1,1 +1,0 @@
-ALTER TABLE "patients" ADD COLUMN "s3_key" varchar(500);

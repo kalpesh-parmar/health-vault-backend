@@ -1,1 +1,0 @@
-ALTER TABLE "AI_Summary" ADD COLUMN "user_message" text;

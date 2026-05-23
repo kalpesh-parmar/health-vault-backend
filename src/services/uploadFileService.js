@@ -5,10 +5,7 @@ const s3service = require("./s3service");
 
 class uploadFileService {
   async uploadFile(file, uploadType) {
-    console.log("uploadType", uploadType);
-
     const folder = folderType[uploadType];
-    console.log("folder==", folder);
 
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
