@@ -5,8 +5,6 @@ const documentService = require("../services/documentService");
 
 async function addDocument(req, res) {
   const result = await documentService.createDocument(req.auth.userId, req.body);
-  console.log("req.body===", req.body);
-
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 

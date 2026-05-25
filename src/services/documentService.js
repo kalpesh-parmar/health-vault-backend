@@ -3,7 +3,6 @@ const axios = require("axios");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
-// const FormData = require("form-data");
 require("fs");
 const documentRepository = require("../repositories/documentRepository");
 const {
@@ -20,8 +19,6 @@ const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt")
 const { model } = require("../configs/aiConfig");
 class DocumentService {
   async createDocument(userId, payload) {
-    console.log("payload==", payload);
-
     const validData = await validateSchema(createDocumentSchema, payload);
     const insertData = {
       userId: userId,
@@ -83,7 +80,6 @@ class DocumentService {
 
   async getDocumentList(userId, payload) {
     const filters = await validateSchema(listDocumentsQuerySchema, payload);
-    console.log("filters ", filters);
 
     const { rows, total } = await documentRepository.findAll({
       ...filters,
