@@ -189,7 +189,6 @@ class PatientService {
       password,
       status: USER_STATUS.ACTIVE,
     });
-    console.log("patientData====", createdPatient);
 
     return {
       patientData: sanitizePatient(createdPatient),
@@ -293,13 +292,12 @@ class PatientService {
 
   async requestOtp(payload, templateName = "otpVerification") {
     const data = await validateSchema(emailOnlySchema, payload);
-    console.log("data===", data);
 
     const existingPatient = await patientRepository.findByEmail(data.email);
 
-    // if (!existingPatient) {
-    //   throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
-    // }
+    if (!existingPatient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
 
     assertPatientCanAuthenticate(data);
 

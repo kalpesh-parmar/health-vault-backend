@@ -36,7 +36,7 @@ function buildDocumentFilters(filters = {}, userId) {
   }
 
   if (filters.documentType) {
-    conditions.push(ilike(document.documentType, filters.documentType.trim()));
+    conditions.push(document.documentType.eq(filters.documentType.trim()));
   }
 
   if (filters.fileType) {
@@ -86,6 +86,9 @@ function buildFilterSortConditions(filter = {}, userId) {
 
   if (filter.hospitalName) {
     conditions.push(eq(document.hospitalName, filter.hospitalName));
+  }
+  if (filter.createdBy) {
+    conditions.push(eq(document.userId, filter.createdBy));
   }
 
   if (filter.doctorName) {
@@ -139,8 +142,6 @@ class DocumentRepository {
   }
 
   async findAll({ userId, ...filters }) {
-    console.log("userId===", filters);
-
     const sortColumn = documentSortColumns[filters.sortBy] || document.createdAt;
     const orderBy = filters.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
     const where = buildDocumentFilters(filters, userId);

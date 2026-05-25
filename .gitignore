@@ -4,8 +4,5 @@ coverage/
 dist/
 npm-debug.log*
 venv/
-<<<<<<< HEAD
 __pycache__/
 *.pyc
-=======
->>>>>>> a39edfe5a56f6e6c42497dc2b4957a5766e0993d
