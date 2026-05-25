@@ -23,6 +23,11 @@ components:
       type: object
       required: [userName, fullName, email, password, gender, age, phone]
       properties:
+        profileImageKey:
+          type: string
+          nullable: true
+          description: S3 uploaded profile image file key
+          example: profile_image/171637282-image.png
         userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
@@ -43,6 +48,10 @@ components:
     UpdatePatientRequest:
       type: object
       properties:
+        profileImageKey:
+          type: string
+          nullable: true
+          description: Optional profile picture upload
         userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
@@ -52,14 +61,24 @@ paths:
     post:
       tags: [Patient]
       security: []
+      summary: Create patient
+      description: Create patient using uploaded profile image fileKey
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/CreatePatientRequest"
-      responses:
-        "201": { description: Created }
 
+      responses:
+        "201":
+          description: Patient created successfully
+
+        "400":
+          description: Invalid request
+
+        "409":
+          description: Email already exists
   /patient/list:
     get:
       tags: [Patient]

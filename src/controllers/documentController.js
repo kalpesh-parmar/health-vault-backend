@@ -4,7 +4,7 @@ const { paginatedSuccessResponse, successResponse } = require("../helpers/genera
 const documentService = require("../services/documentService");
 
 async function addDocument(req, res) {
-  const result = await documentService.createDocument(req.auth.userId, req.file, req.body);
+  const result = await documentService.createDocument(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 
@@ -19,15 +19,15 @@ async function getDocumentList(req, res) {
 }
 
 async function listDocuments(req, res) {
-  const result = await documentService.listDocuments(req.body);
+  const result = await documentService.listDocuments(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.DOCUMENT_FILTERED_LIST_FETCHED);
 }
 
 async function listDocumentsPaginated(req, res) {
-  const result = await documentService.listDocumentsPaginated(req.body);
+  const result = await documentService.listDocumentsPaginated(req.auth.userId, req.body);
   return paginatedSuccessResponse(
     res,
-    result.data,
+    result.items,
     result.page,
     messageConstants.DOCUMENT_FILTERED_LIST_FETCHED,
   );
@@ -46,7 +46,7 @@ async function getDownloadFile(req, res) {
 
 async function deleteFile(req, res) {
   const { fileKey } = req.query;
-  const result = await documentService.deleteFile(fileKey);
+  const result = await documentService.deleteFile(req.auth.userId, fileKey);
   return successResponse(res, result, messageConstants.DOCUMENT_DELETED);
 }
 

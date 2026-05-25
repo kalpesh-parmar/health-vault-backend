@@ -1,52 +1,70 @@
-const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 require("dotenv").config();
-const { s3Client } = require("../configs/s3");
+const axios = require("axios");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
+require("fs");
 const documentRepository = require("../repositories/documentRepository");
 const {
-  createDocumentSchema,
   idParamSchema,
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
   listDocumentsQuerySchema,
   validateSchema,
 } = require("../validations");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const s3service = require("./s3service");
+const { ocrStatus } = require("../enums/ocrStatus");
+const { updateDocumentSchema, createDocumentSchema } = require("../validations/documentValidation");
+const { medicalPrompt, cleanOCRText } = require("../prompt/structureDataPrompt");
+const { model } = require("../configs/aiConfig");
 class DocumentService {
-  async createDocument(userId, file, docType) {
-    if (!file) {
-      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
-    }
-    if (!docType) {
-      throw new InvalidRequestException(messageConstants.DOCUMENT_TYPE_IS_REQUIRED);
-    }
-    const fileKey = `uploads/${Date.now()}-${file.originalname}`;
-    const filedata = new PutObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-      Body: file.buffer,
-    });
-
-    const fileStoragePath = `https://${process.env.PATIENT_DOCUMENTS_BUCKET}.s3.amazonaws.com/${fileKey}`;
-
-    await s3Client.send(filedata);
-
-    const fileinfo = {
-      fileType: file.mimetype,
-      fileStoragePath,
-      fileName: file.originalname,
-      fileSize: file.size,
-      documentType: docType.documentType,
-      s3Bucket: filedata.input.Bucket,
-      s3Key: filedata.input.Key,
+  async createDocument(userId, payload) {
+    const validData = await validateSchema(createDocumentSchema, payload);
+    const insertData = {
+      userId: userId,
+      documentType: validData.documentType,
+      fileName: validData.fileName,
+      fileSize: validData.fileSize,
+      filePath: validData.filePath,
+      fileType: validData.fileType,
+      s3Bucket: validData.s3Bucket,
+      s3Key: validData.s3Key,
     };
 
-    const validData = await validateSchema(createDocumentSchema, fileinfo);
-    return documentRepository.create({
-      userId,
-      ...validData,
+    const document = await documentRepository.create(insertData);
+    await documentRepository.update(document.id, {
+      ocrStatus: ocrStatus.IN_PROGRESS,
+    });
+
+    //ocr API
+    const ocrResponse = await axios.post("http://127.0.0.1:8000/run-ocr", {
+      fileKey: validData.s3Key,
+      bucket: validData.s3Bucket,
+    });
+    const fullText = ocrResponse.data.ocr_text;
+    const graph = ocrResponse.data.graphs;
+
+    const prompt = medicalPrompt(fullText, graph);
+
+    const structuredData = await model.generateContent(prompt);
+
+    const responseText = structuredData.response.text();
+    const cleanData = cleanOCRText(responseText);
+    const jsonData = JSON.parse(cleanData);
+
+    const ocrInfo = {
+      ocrExtractedText: ocrResponse.data,
+      structuredExtractedData: jsonData,
+      hospitalName: jsonData.hospital?.name,
+      doctorName: jsonData.doctor?.name,
+      reportDate: jsonData.report?.reportDate,
+      remarks: jsonData.remarks,
+      ocrStatus: ocrStatus.COMPLETED,
+    };
+    const validOcr = await validateSchema(updateDocumentSchema, ocrInfo);
+
+    return documentRepository.update(document.id, {
+      ...validOcr,
     });
   }
 
@@ -57,12 +75,12 @@ class DocumentService {
     if (!existingDocument || existingDocument.userId !== userId) {
       throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
     }
-
     return existingDocument;
   }
 
   async getDocumentList(userId, payload) {
     const filters = await validateSchema(listDocumentsQuerySchema, payload);
+
     const { rows, total } = await documentRepository.findAll({
       ...filters,
       userId,
@@ -76,14 +94,27 @@ class DocumentService {
     };
   }
 
-  async listDocuments(payload) {
+  async listDocuments(userId, payload) {
     const data = await validateSchema(listDocumentsFilterSortSchema, payload || {});
-    return documentRepository.findAllByFilterAndSort(data);
+    return documentRepository.findAllByFilterAndSort({
+      userId,
+      ...data,
+    });
   }
 
-  async listDocumentsPaginated(payload) {
+  async listDocumentsPaginated(userId, payload) {
+    if (!userId) {
+      throw new InvalidRequestException(errorConstants.USER_NOT_FOUND);
+    }
     const data = await validateSchema(listDocumentsPaginatedSchema, payload);
-    return documentRepository.findAllByFilterSortAndPagination(data);
+    const result = await documentRepository.findAllByFilterSortAndPagination({
+      ...data,
+      userId,
+    });
+    return {
+      items: result.data,
+      page: result.page,
+    };
   }
 
   async deleteDocument(id, userId) {
@@ -98,37 +129,25 @@ class DocumentService {
   }
 
   // download document from s3 bucket using file key
-  async getDownloadUrl(fileKey, fileName = "document") {
+  async getDownloadUrl(fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
     }
 
-    const command = new GetObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-
-      // force browser to download file
-      ResponseContentDisposition: `attachment; filename="${fileName}"`,
-    });
-
-    const url = await getSignedUrl(s3Client, command, {
-      expiresIn: 600, // 10 minutes
-    });
-
-    return url;
+    // use s3 service here
+    const url = await s3service.getSignedFileUrl(fileKey);
+    return {
+      signedUrl: url,
+    };
   }
 
   //delete document from s3 bucket using file key
-  async deleteFile(fileKey) {
+  async deleteFile(userId, fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
     }
-
-    const command = new DeleteObjectCommand({
-      Bucket: process.env.PATIENT_DOCUMENTS_BUCKET,
-      Key: fileKey,
-    });
-    await s3Client.send(command);
+    await s3service.deleteFile(fileKey);
+    await documentRepository.deleteByPatientId(userId);
     return { message: messageConstants.DOCUMENT_DELETED };
   }
 }

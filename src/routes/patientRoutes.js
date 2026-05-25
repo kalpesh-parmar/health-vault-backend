@@ -1,5 +1,4 @@
 const express = require("express");
-
 const patientController = require("../controllers/patientController");
 const { verifyToken } = require("../middlewares/authMiddleware");
 

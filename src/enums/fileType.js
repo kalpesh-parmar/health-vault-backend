@@ -4,6 +4,7 @@ const fileType = Object.freeze({
   PDF: "application/pdf",
   PNG: "image/png",
   TXT: "text/plain",
+  JPG: "image/jpg",
 });
 
 const fileTypeValue = Object.values(fileType);

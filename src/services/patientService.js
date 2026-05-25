@@ -37,6 +37,7 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
+const s3service = require("./s3service");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -177,11 +178,9 @@ class PatientService {
   async createPatient(payload) {
     const data = await validateSchema(createPatientSchema, payload);
     const existingPatient = await patientRepository.findByEmail(data.email);
-
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
     }
-
     const password = await bcrypt.hash(data.password, 10);
     const patientCode = await createUniquePatientCode();
     const createdPatient = await patientRepository.create({
@@ -191,7 +190,9 @@ class PatientService {
       status: USER_STATUS.ACTIVE,
     });
 
-    return sanitizePatient(createdPatient);
+    return {
+      patientData: sanitizePatient(createdPatient),
+    };
   }
 
   async getPatientById(id) {
@@ -220,31 +221,36 @@ class PatientService {
   async updatePatient(id, payload) {
     const params = await validateSchema(idParamSchema, { id });
     const data = await validateSchema(updatePatientSchema, payload);
-
+    const existingPatient = await patientRepository.findById(id);
+    if (
+      payload.profileImageKey &&
+      existingPatient.profileImageKey &&
+      payload.profileImageKey !== existingPatient.profileImageKey
+    ) {
+      await s3service.deleteFile(existingPatient.profileImageKey);
+    }
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
         data.email,
         params.id,
       );
-
       if (patientWithEmail) {
         throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
       }
     }
 
-    const updateData = { ...data };
-
-    if (updateData.password) {
-      updateData.password = await bcrypt.hash(updateData.password, 10);
+    if (data.password) {
+      data.password = await bcrypt.hash(data.password, 10);
     }
 
-    const updatedPatient = await patientRepository.updateById(params.id, updateData);
+    const updatedPatient = await patientRepository.updateById(params.id, data);
 
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-
-    return sanitizePatient(updatedPatient);
+    return {
+      patientData: sanitizePatient(updatedPatient),
+    };
   }
 
   async deletePatient(id) {
@@ -286,13 +292,14 @@ class PatientService {
 
   async requestOtp(payload, templateName = "otpVerification") {
     const data = await validateSchema(emailOnlySchema, payload);
+
     const existingPatient = await patientRepository.findByEmail(data.email);
 
     if (!existingPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    assertPatientCanAuthenticate(existingPatient);
+    assertPatientCanAuthenticate(data);
 
     const now = new Date();
     const otp = generateOtp();
@@ -302,7 +309,7 @@ class PatientService {
       otpSendDateTime: now,
       otpVerifiedAt: null,
     });
-    await emailService.sendOtpEmail(updatedPatient, otp, templateName);
+    await emailService.sendOtpEmail(data, otp, templateName);
 
     return {
       expiresAt: updatedPatient.otpExpiredDateTime,

@@ -1,4 +1,4 @@
-const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, or, sql, isNull } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
@@ -25,15 +25,18 @@ const filterSortColumnMap = Object.freeze({
   updatedAt: document.updatedAt,
 });
 
-function buildDocumentFilters(filters = {}) {
-  const conditions = [eq(document.softDelete, false)];
+function buildDocumentFilters(filters = {}, userId) {
+  const conditions = [
+    eq(document.userId, userId),
+    or(eq(document.softDelete, false), isNull(document.softDelete)),
+  ];
 
   if (filters.userId) {
     conditions.push(eq(document.userId, filters.userId));
   }
 
   if (filters.documentType) {
-    conditions.push(eq(document.documentType, filters.documentType));
+    conditions.push(document.documentType.eq(filters.documentType.trim()));
   }
 
   if (filters.fileType) {
@@ -54,8 +57,15 @@ function buildDocumentFilters(filters = {}) {
   return and(...conditions);
 }
 
-function buildFilterSortConditions(filter = {}) {
-  const conditions = [eq(document.softDelete, false)];
+function buildFilterSortConditions(filter = {}, userId) {
+  const conditions = [
+    eq(document.userId, userId),
+    or(eq(document.softDelete, false), isNull(document.softDelete)),
+  ];
+
+  if (userId) {
+    conditions.push(eq(document.userId, String(userId)));
+  }
 
   if (filter.title) {
     conditions.push(eq(document.fileName, filter.title));
@@ -65,24 +75,20 @@ function buildFilterSortConditions(filter = {}) {
     conditions.push(eq(document.fileName, filter.fileName));
   }
 
-  if (filter.type) {
-    conditions.push(eq(document.documentType, filter.type));
-  }
-
-  if (filter.documentType) {
-    conditions.push(eq(document.documentType, filter.documentType));
+  const docType = filter.documentType || filter.type;
+  if (docType) {
+    conditions.push(eq(document.documentType, docType.trim()));
   }
 
   if (filter.fileType) {
     conditions.push(eq(document.fileType, filter.fileType));
   }
 
-  if (filter.createdBy) {
-    conditions.push(eq(document.userId, filter.createdBy));
-  }
-
   if (filter.hospitalName) {
     conditions.push(eq(document.hospitalName, filter.hospitalName));
+  }
+  if (filter.createdBy) {
+    conditions.push(eq(document.userId, filter.createdBy));
   }
 
   if (filter.doctorName) {
@@ -97,6 +103,7 @@ function buildFilterSortConditions(filter = {}) {
         ilike(document.hospitalName, search),
         ilike(document.doctorName, search),
         ilike(document.remarks, search),
+        ilike(sql`${document.documentType}::text`, search),
       ),
     );
   }
@@ -106,14 +113,21 @@ function buildFilterSortConditions(filter = {}) {
 
 function buildOrderClause(sort = {}) {
   const sortColumn = filterSortColumnMap[sort.sortBy] || document.createdAt;
+  if (sort.sortBy === "documentType") {
+    return sort.orderBy === "desc" ? desc(sql`${sortColumn}::text`) : asc(sql`${sortColumn}::text`);
+  }
+
   return sort.orderBy === "desc" ? desc(sortColumn) : asc(sortColumn);
 }
 
 class DocumentRepository {
   async create(data) {
-    console.log("data===", data);
-
     const result = await db.insert(document).values(data).returning();
+    return result[0] || null;
+  }
+  async update(id, data) {
+    const result = await db.update(document).set(data).where(eq(document.id, id)).returning();
+
     return result[0] || null;
   }
 
@@ -127,10 +141,10 @@ class DocumentRepository {
     return result[0] || null;
   }
 
-  async findAll(filters = {}) {
+  async findAll({ userId, ...filters }) {
     const sortColumn = documentSortColumns[filters.sortBy] || document.createdAt;
     const orderBy = filters.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
-    const where = buildDocumentFilters(filters);
+    const where = buildDocumentFilters(filters, userId);
 
     const rows = await db
       .select()
@@ -147,8 +161,8 @@ class DocumentRepository {
     };
   }
 
-  async findAllByFilterAndSort({ filter = {}, sort = {} }) {
-    const conditions = buildFilterSortConditions(filter);
+  async findAllByFilterAndSort({ filter = {}, sort = {}, userId }) {
+    const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
 
     return db
@@ -158,11 +172,14 @@ class DocumentRepository {
       .orderBy(orderClause);
   }
 
-  async findAllByFilterSortAndPagination({ filter = {}, page, sort = {} }) {
-    const conditions = buildFilterSortConditions(filter);
+  async findAllByFilterSortAndPagination({ filter = {}, page, sort = {}, userId }) {
+    const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
-    const offset = page.pageNumber * page.pageLimit;
-    const limit = page.pageLimit;
+    const pageNumber = page?.pageNumber ?? 1;
+    const pageLimit = page?.pageLimit ?? 10;
+
+    const offset = (pageNumber - 1) * pageLimit;
+    const limit = pageLimit;
 
     const data = await db
       .select()

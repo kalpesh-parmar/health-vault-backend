@@ -2,13 +2,12 @@ const express = require("express");
 
 const documentController = require("../controllers/documentController");
 const { verifyToken } = require("../middlewares/authMiddleware");
-const { upload } = require("../middlewares/upload");
 const { validateRequest } = require("../middlewares/validateRequest");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
 
 const router = express.Router();
 
-router.post("/add", verifyToken, upload.single("file"), documentController.addDocument);
+router.post("/add", verifyToken, documentController.addDocument);
 
 //download document from s3 bucket using file key
 router.get(
