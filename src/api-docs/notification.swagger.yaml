@@ -195,11 +195,7 @@ paths:
     get:
       tags: [Notification]
       summary: Get unread notification count
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UserIdRequest"
+      security:
+        - bearerAuth: []
       responses:
         "200": { description: Badge count fetched }

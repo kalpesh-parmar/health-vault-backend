@@ -3,7 +3,7 @@ const { paginatedSuccessResponse, successResponse } = require("../helpers/genera
 const notificationApiService = require("../services/notificationApiService");
 
 async function testSend(req, res) {
-  const result = await notificationApiService.testSend(req.body);
+  const result = await notificationApiService.testSend(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.NOTIFICATION_SENT);
 }
 
@@ -38,7 +38,7 @@ async function deleteNotification(req, res) {
 }
 
 async function badgeCount(req, res) {
-  const result = await notificationApiService.badgeCount(req.body);
+  const result = await notificationApiService.badgeCount(req.auth.userId);
   return successResponse(res, result, messageConstants.NOTIFICATION_BADGE_COUNT_FETCHED);
 }
 

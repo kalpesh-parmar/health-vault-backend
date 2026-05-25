@@ -11,9 +11,9 @@ const {
 } = require("../validations");
 
 class NotificationApiService {
-  async testSend(payload) {
+  async testSend(userId, payload) {
     const data = await validateSchema(testSendNotificationSchema, payload);
-    return notificationRepository.create(data);
+    return await notificationRepository.create(data);
   }
 
   async list(payload) {
@@ -54,9 +54,7 @@ class NotificationApiService {
   }
 
   async badgeCount(payload) {
-    const data = await validateSchema(userIdBodySchema, payload);
-    const count = await notificationRepository.getUnreadCount(data.userId);
-
+    const count = await notificationRepository.getUnreadCount(payload);
     return { count };
   }
 }
