@@ -1,0 +1,1 @@
+ALTER TABLE "medications" ADD COLUMN "is_reminder" boolean DEFAULT false;

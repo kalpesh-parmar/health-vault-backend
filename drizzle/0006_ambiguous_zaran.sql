@@ -1,0 +1,3 @@
+ALTER TABLE "medication_reminder_occurrences" ADD COLUMN "medication_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "medication_reminder_occurrences" ADD CONSTRAINT "medication_reminder_occurrences_medication_id_medications_id_fk" FOREIGN KEY ("medication_id") REFERENCES "public"."medications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "occurrence_medication_idx" ON "medication_reminder_occurrences" USING btree ("medication_id");

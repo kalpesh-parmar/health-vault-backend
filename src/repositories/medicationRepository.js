@@ -62,7 +62,6 @@ function buildOrderClause(sort = {}) {
 }
 
 class MedicationRepository {
-
   // CREATE
   async create(data) {
     const result = await db.insert(medication).values(data).returning();
@@ -87,7 +86,6 @@ class MedicationRepository {
     return result[0] || null;
   }
 
-
   // FIND ALL FILTERS
   async findAllWithFilters({ filter = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
@@ -109,7 +107,6 @@ class MedicationRepository {
       total: Number(totalRows[0]?.total || 0),
     };
   }
-
 
   // PAGINATION
   async findAllWithPagination({ filter = {}, page = {}, sort = {}, userId }) {
@@ -169,7 +166,6 @@ class MedicationRepository {
       );
   }
 
-
   // UPDATE BY ID
   async updateById(id, payload) {
     const result = await db
@@ -191,76 +187,29 @@ class MedicationRepository {
     return result[0] || null;
   }
 
-
   // FIND ALL ACTIVE
   async findAllActive() {
     return db.select().from(medication).where(eq(medication.softDelete, false));
   }
 
-
   // REDUCE QUANTITY
   async reduceQuantity(medicationId, quantity = 1) {
     const existingMedication = await this.findById(medicationId);
-
     if (!existingMedication) {
       return null;
     }
-
     const updatedQuantity = Math.max(
       0,
-
       Number(existingMedication.remainingQuantity) - Number(quantity),
     );
-
     const result = await db
       .update(medication)
       .set({
         remainingQuantity: updatedQuantity,
-
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(medication.id, medicationId),
-
-          eq(medication.softDelete, false),
-        ),
-      )
+      .where(and(eq(medication.id, medicationId), eq(medication.softDelete, false)))
       .returning();
-
-    return result[0] || null;
-  }
-
-
-
-  // ADD QUANTITY
-  async addQuantity(medicationId, quantity = 0) {
-    const existingMedication = await this.findById(medicationId);
-
-    if (!existingMedication) {
-      return null;
-    }
-
-    const updatedQuantity = Number(existingMedication.remainingQuantity) + Number(quantity);
-
-    const result = await db
-      .update(medication)
-      .set({
-        remainingQuantity: updatedQuantity,
-
-        totalQuantity: Number(existingMedication.totalQuantity) + Number(quantity),
-
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(medication.id, medicationId),
-
-          eq(medication.softDelete, false),
-        ),
-      )
-      .returning();
-
     return result[0] || null;
   }
 

@@ -1,66 +1,54 @@
-const { eq, and } = require("drizzle-orm");
+const { eq, and, asc } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medicationReminder } = require("../models/medicationReminder");
-const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
+const { medication } = require("../models/medication");
 
 class MedicationReminderRepository {
-  
-  // CREATE
   async create(payload) {
     const result = await db.insert(medicationReminder).values(payload).returning();
-
     return result[0];
   }
-  // FIND ALL
+
   async findAll(userId) {
     return db
-      .select()
-      .from(medicationReminderOccurrence)
-      .innerJoin(
-        medicationReminder,
-        eq(medicationReminderOccurrence.reminderId, medicationReminder.id),
-      )
+      .select({
+        id: medicationReminder.id,
+        patientId: medicationReminder.patientId,
+        medicationId: medicationReminder.medicationId,
+        medicationName: medication.medicationName,
+        medicationType: medication.medicationType,
+        reminderBeforeMinutes: medicationReminder.reminderBeforeMinutes,
+        afterReminderMinutes: medicationReminder.afterReminderMinutes,
+        refillAlertBeforeDays: medicationReminder.refillAlertBeforeDays,
+        dosePerIntake: medicationReminder.dosePerIntake,
+        routineBase: medicationReminder.routineBase,
+        medicationTime: medicationReminder.medicationTime,
+        active: medicationReminder.active,
+        createdAt: medicationReminder.createdAt,
+        updatedAt: medicationReminder.updatedAt,
+      })
+      .from(medicationReminder)
+      .leftJoin(medication, eq(medicationReminder.medicationId, medication.id))
       .where(
         and(
           eq(medicationReminder.patientId, userId),
-          eq(medicationReminderOccurrence.softDelete, false),
+
+          eq(medicationReminder.softDelete, false),
         ),
-      );
+      )
+      .orderBy(asc(medicationReminder.createdAt));
   }
-  
-  // FIND BY ID
+
   async findById(id) {
     const result = await db
       .select()
       .from(medicationReminder)
-      .where(
-        and(
-          eq(medicationReminder.id, id),
+      .where(and(eq(medicationReminder.id, id), eq(medicationReminder.softDelete, false)))
+      .limit(1);
 
-          eq(medicationReminder.softDelete, false),
-        ),
-      );
-
-    return result[0];
+    return result[0] || null;
   }
 
-  // FIND BY MEDICATION ID
-  async findByMedicationId(medicationId) {
-    const result = await db
-      .select()
-      .from(medicationReminder)
-      .where(
-        and(
-          eq(medicationReminder.medicationId, medicationId),
-
-          eq(medicationReminder.softDelete, false),
-        ),
-      );
-
-    return result[0];
-  }
-
-  // UPDATE
   async updateById(id, payload) {
     const result = await db
       .update(medicationReminder)
@@ -72,21 +60,33 @@ class MedicationReminderRepository {
       .where(eq(medicationReminder.id, id))
       .returning();
 
-    return result[0];
+    return result[0] || null;
   }
 
-  // SOFT DELETE
   async softDelete(id) {
     return db
       .update(medicationReminder)
       .set({
         active: false,
-
         softDelete: true,
-
         updatedAt: new Date(),
       })
       .where(eq(medicationReminder.id, id));
+  }
+
+  async findByMedicationId(medicationId) {
+    const result = await db
+      .select()
+      .from(medicationReminder)
+      .where(
+        and(
+          eq(medicationReminder.medicationId, medicationId),
+          eq(medicationReminder.softDelete, false),
+        ),
+      )
+      .limit(1);
+
+    return result[0] || null;
   }
 }
 

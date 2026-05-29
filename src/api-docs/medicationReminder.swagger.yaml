@@ -1,5 +1,4 @@
 openapi: 3.0.0
-
 info:
   title: Medication Reminder API
   version: 1.0.0
@@ -12,7 +11,7 @@ components:
       bearerFormat: JWT
 
   parameters:
-    UuidParam:
+    ReminderIdParam:
       in: path
       name: id
       required: true
@@ -21,29 +20,14 @@ components:
         format: uuid
 
   schemas:
-    ReminderType:
-      type: string
-      enum:
-        - BEFORE_MEDICATION
-        - AFTER_MEDICATION
-        - REFILL_ALERT
-
     ReminderOccurrenceStatus:
       type: string
       enum:
         - PENDING
-        - SENT
         - COMPLETED
-        - MISSED
-        - SKIPPED
-        - SNOOZED
 
     ReminderTime:
       type: object
-
-      required:
-        - time
-        - period
 
       properties:
         time:
@@ -72,8 +56,13 @@ components:
           type: string
           format: uuid
 
-        type:
-          $ref: "#/components/schemas/ReminderType"
+        medicationName:
+          type: string
+          example: Paracetamol
+
+        medicationType:
+          type: string
+          example: TABLET
 
         reminderBeforeMinutes:
           type: integer
@@ -90,6 +79,10 @@ components:
         dosePerIntake:
           type: integer
           example: 1
+
+        routineBase:
+          type: string
+          example: ONCE_DAILY
 
         medicationTime:
           type: array
@@ -109,10 +102,6 @@ components:
           type: string
           format: date-time
 
-        softDelete:
-          type: boolean
-          example: false
-
     MedicationReminderOccurrence:
       type: object
 
@@ -125,17 +114,30 @@ components:
           type: string
           format: uuid
 
-        type:
-          $ref: "#/components/schemas/ReminderType"
+        medicationId:
+          type: string
+          format: uuid
+
+        medicationName:
+          type: string
+          example: Paracetamol
+
+        medicationType:
+          type: string
+          example: TABLET
 
         status:
           $ref: "#/components/schemas/ReminderOccurrenceStatus"
 
-        scheduledAt:
+        actualMedicationTime:
           type: string
           format: date-time
 
-        actualMedicationTime:
+        beforeReminderTime:
+          type: string
+          format: date-time
+
+        afterReminderTime:
           type: string
           format: date-time
 
@@ -144,28 +146,16 @@ components:
           nullable: true
           format: date-time
 
-        snoozeUntil:
-          type: string
-          nullable: true
-          format: date-time
-
-        quantityConsumed:
-          type: integer
-          example: 1
-
         notificationSent:
           type: boolean
           example: false
 
-        responseMessage:
+        notificationSentAt:
           type: string
           nullable: true
-
-        createdAt:
-          type: string
           format: date-time
 
-        updatedAt:
+        createdAt:
           type: string
           format: date-time
 
@@ -182,66 +172,133 @@ components:
 
         reminderBeforeMinutes:
           type: integer
-          minimum: 1
+          minimum: 0
+          default: 5
           example: 5
 
         afterReminderMinutes:
           type: integer
           minimum: 1
+          default: 10
           example: 10
 
         refillAlertBeforeDays:
           type: integer
           minimum: 1
+          default: 1
           example: 1
 
-    CompleteReminderRequest:
+    ListOccurrencesRequest:
+      type: object
+
+      properties:
+        filter:
+          type: object
+
+          properties:
+            status:
+              $ref: "#/components/schemas/ReminderOccurrenceStatus"
+
+            startDate:
+              type: string
+              format: date
+
+            endDate:
+              type: string
+              format: date
+
+            medicationName:
+              type: string
+              example: Paracetamol
+
+            medicationType:
+              type: string
+              example: TABLET
+
+            date:
+              type: string
+              format: date
+              example: "2026-05-28"
+
+        sort:
+          type: object
+
+          properties:
+            sortBy:
+              type: string
+
+              enum:
+                - actualMedicationTime
+                - completedAt
+                - createdAt
+                - status
+
+              default: actualMedicationTime
+
+            sortOrder:
+              type: string
+
+              enum:
+                - asc
+                - desc
+
+              default: asc
+
+        page:
+          type: object
+
+          properties:
+            pageNumber:
+              type: integer
+              default: 1
+              example: 1
+
+            pageLimit:
+              type: integer
+              default: 10
+              example: 10
+
+    UpdateOccurrenceRequest:
       type: object
 
       required:
-        - medicationId
+        - status
 
       properties:
-        medicationId:
+        status:
           type: string
-          format: uuid
-
-        quantity:
-          type: integer
-          minimum: 1
-          example: 1
-
-    SnoozeReminderRequest:
-      type: object
-
-      properties:
-        minutes:
-          type: integer
-          minimum: 1
-          default: 10
-          example: 15
+          enum:
+            - COMPLETED
 
 paths:
   /medication-reminders/create:
     post:
       tags:
         - Medication Reminder
+
       summary: Create medication reminder
+
       security:
         - bearerAuth: []
+
       requestBody:
         required: true
+
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateReminderRequest"
+
       responses:
         "201":
-          description: Reminder created successfully
+          description: Medication reminder created successfully
+
         "400":
-          description: Bad request
+          description: Validation error
+
         "401":
           description: Unauthorized
+
         "404":
           description: Medication not found
 
@@ -249,209 +306,134 @@ paths:
     get:
       tags:
         - Medication Reminder
-      summary: Get all reminders
+
+      summary: Get all main reminders
+
       security:
         - bearerAuth: []
+
       responses:
         "200":
-          description: Reminder list fetched successfully
+          description: Main reminders fetched successfully
+
         "401":
           description: Unauthorized
 
-  /medication-reminders/{id}:
+  /medication-reminders/occurrences:
     get:
       tags:
-        - Medication Reminder
-      summary: Get reminder by ID
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
-      responses:
-        "200":
-          description: Reminder fetched successfully
-        "401":
-          description: Unauthorized
-        "404":
-          description: Reminder not found
+        - Medication Reminder Occurrence
 
-    delete:
-      tags:
-        - Medication Reminder
-      summary: Delete reminder
+      summary: Get all sub reminder occurrences
+
       security:
         - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
+
       responses:
         "200":
-          description: Reminder deleted successfully
+          description: All occurrences fetched successfully
+
         "401":
           description: Unauthorized
-        "404":
-          description: Reminder not found
+
+  /medication-reminders/occurrences/list:
+    post:
+      tags:
+        - Medication Reminder Occurrence
+
+      summary: Filter reminder occurrences
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: false
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListOccurrencesRequest"
+
+      responses:
+        "200":
+          description: Reminder occurrences fetched successfully
+
+        "400":
+          description: Validation error
+
+        "401":
+          description: Unauthorized
 
   /medication-reminders/occurrences/today:
     get:
       tags:
         - Medication Reminder Occurrence
-      summary: Get today reminder occurrences
+
+      summary: Get today occurrences
+
       security:
         - bearerAuth: []
+
       responses:
         "200":
           description: Today occurrences fetched successfully
+
         "401":
           description: Unauthorized
 
-  /medication-reminders/occurrence/{id}/complete:
+  /medication-reminders/occurrences/{id}:
     patch:
       tags:
         - Medication Reminder Occurrence
-      summary: Complete reminder occurrence
+
+      summary: Update occurrence status
+
       security:
         - bearerAuth: []
+
       parameters:
-        - $ref: "#/components/parameters/UuidParam"
+        - $ref: "#/components/parameters/ReminderIdParam"
+
       requestBody:
         required: true
+
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CompleteReminderRequest"
+              $ref: "#/components/schemas/UpdateOccurrenceRequest"
+
       responses:
         "200":
-          description: Reminder marked as completed
+          description: Medication occurrence updated successfully
+
         "400":
-          description: Bad request
+          description: Validation error
+
         "401":
           description: Unauthorized
-        "404":
-          description: Reminder occurrence not found
 
-  /medication-reminders/occurrence/{id}/missed:
-    patch:
+        "404":
+          description: Occurrence not found
+
+  /medication-reminders/{id}:
+    delete:
       tags:
-        - Medication Reminder Occurrence
-      summary: Mark reminder occurrence as missed
+        - Medication Reminder
+
+      summary: Soft delete medication reminder
+
       security:
         - bearerAuth: []
+
       parameters:
-        - $ref: "#/components/parameters/UuidParam"
+        - $ref: "#/components/parameters/ReminderIdParam"
+
       responses:
         "200":
-          description: Reminder marked as missed
+          description: Medication reminder deleted successfully
+
         "401":
           description: Unauthorized
+
         "404":
-          description: Reminder occurrence not found
-
-  /medication-reminders/occurrence/{id}/skipped:
-    patch:
-      tags:
-        - Medication Reminder Occurrence
-      summary: Skip reminder occurrence
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
-      responses:
-        "200":
-          description: Reminder skipped successfully
-        "401":
-          description: Unauthorized
-        "404":
-          description: Reminder occurrence not found
-
-  /medication-reminders/occurrence/{id}/snooze:
-    patch:
-      tags:
-        - Medication Reminder Occurrence
-      summary: Snooze reminder occurrence
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SnoozeReminderRequest"
-      responses:
-        "200":
-          description: Reminder snoozed successfully
-        "400":
-          description: Bad request
-        "401":
-          description: Unauthorized
-        "404":
-          description: Reminder occurrence not found
-
-  /medication-reminders/refill-alerts:
-    get:
-      tags:
-        - Refill Alert
-      summary: Get all refill alerts
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Refill alerts fetched successfully
-        "401":
-          description: Unauthorized
-
-  /medication-reminders/refill-alerts/today:
-    get:
-      tags:
-        - Refill Alert
-      summary: Get today refill alerts
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Today refill alerts fetched successfully
-        "401":
-          description: Unauthorized
-
-  /medication-reminders/occurrence/{id}/refill-completed:
-    patch:
-      tags:
-        - Refill Alert
-      summary: Complete refill alert
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
-      responses:
-        "200":
-          description: Refill alert completed successfully
-        "401":
-          description: Unauthorized
-        "404":
-          description: Refill alert not found
-
-  /medication-reminders/occurrence/{id}/refill-snooze:
-    patch:
-      tags:
-        - Refill Alert
-      summary: Snooze refill alert
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/UuidParam"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SnoozeReminderRequest"
-      responses:
-        "200":
-          description: Refill alert snoozed successfully
-        "400":
-          description: Bad request
-        "401":
-          description: Unauthorized
-        "404":
-          description: Refill alert not found
+          description: Reminder not found

@@ -1,36 +1,9 @@
-const {
-  pgTable,
-  uuid,
-  timestamp,
-  integer,
-  varchar,
-  boolean,
-  pgEnum,
-  index,
-  json,
-} = require("drizzle-orm/pg-core");
-
+const { pgTable, uuid, timestamp, integer, boolean, index, json } = require("drizzle-orm/pg-core");
 const { medication } = require("./medication");
 const { patient } = require("./patient");
-
-const {
-  reminderTypeValues,
-} = require("../enums/reminderType");
-
-const {
-  reminderStatusValues,
-} = require("../enums/reminderStatus");
-
-const reminderTypeEnum = pgEnum(
-  "reminder_type",
-  reminderTypeValues
-);
-
-const reminderStatusEnum = pgEnum(
-  "reminder_status",
-  reminderStatusValues
-);
-
+const { frequencyType } = require("../enums/frequencyType");
+const { pgEnum } = require("drizzle-orm/pg-core");
+const frequencyTypeEnum = pgEnum("frequency", frequencyType);
 const medicationReminder = pgTable(
   "medication_reminders",
   {
@@ -48,47 +21,19 @@ const medicationReminder = pgTable(
       })
       .notNull(),
 
-    type: reminderTypeEnum("type").notNull(),
+    reminderBeforeMinutes: integer("reminder_before_minutes").default(5).notNull(),
 
-    status: reminderStatusEnum("status")
-      .default("ACTIVE")
-      .notNull(),
+    afterReminderMinutes: integer("after_reminder_minutes").default(10).notNull(),
 
-    reminderBeforeMinutes: integer(
-      "reminder_before_minutes"
-    )
-      .default(5)
-      .notNull(),
-
-    afterReminderMinutes: integer(
-      "after_reminder_minutes"
-    )
-      .default(10)
-      .notNull(),
-
-    refillAlertBeforeDays: integer(
-      "refill_alert_before_days"
-    )
-      .default(2)
-      .notNull(),
+    refillAlertBeforeDays: integer("refill_alert_before_days").default(2).notNull(),
 
     dosePerIntake: integer("dose_per_intake"),
 
-    frequency: varchar("frequency", {
-      length: 50,
-    }),
+    routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
 
     medicationTime: json("medication_times"),
 
-    timezone: varchar("timezone", {
-      length: 100,
-    })
-      .default("Asia/Kolkata")
-      .notNull(),
-
-    active: boolean("active")
-      .default(true)
-      .notNull(),
+    active: boolean("active").default(true).notNull(),
 
     createdAt: timestamp("created_at", {
       withTimezone: true,
@@ -102,28 +47,16 @@ const medicationReminder = pgTable(
       .defaultNow()
       .notNull(),
 
-    softDelete: boolean("soft_delete")
-      .default(false)
-      .notNull(),
+    softDelete: boolean("soft_delete").default(false).notNull(),
   },
 
   (table) => [
-    index("medication_reminders_patient_idx").on(
-      table.patientId
-    ),
-
-    index("medication_reminders_medication_idx").on(
-      table.medicationId
-    ),
-
-    index("medication_reminders_type_idx").on(
-      table.type
-    ),
-  ]
+    index("medication_reminders_patient_idx").on(table.patientId),
+    index("medication_reminders_medication_idx").on(table.medicationId),
+  ],
 );
 
 module.exports = {
   medicationReminder,
-  reminderTypeEnum,
-  reminderStatusEnum,
+  frequencyTypeEnum
 };

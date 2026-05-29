@@ -1,0 +1,1 @@
+ALTER TABLE "medication_reminders" ADD COLUMN "routineBase" "routineBase" DEFAULT 'ONCE_DAILY' NOT NULL;

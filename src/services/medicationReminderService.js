@@ -1,194 +1,132 @@
 const { errorConstants } = require("../constants/errorConstants");
-const { reminderType } = require("../enums/reminderType");
-const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
 const { NotFoundException } = require("../exceptions/appError");
+const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
 const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
+const generateReminderOccurrences = require("../utils/reminderOccurrenceGenerator");
 const {
   validateSchema,
   createReminderSchema,
-  completeReminderSchema,
-  missedReminderSchema,
-  skippedReminderSchema,
-  snoozeReminderSchema,
-  completeRefillAlertSchema,
-  snoozeRefillAlertSchema,
-  idParamSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
 } = require("../validations");
-
 class MedicationReminderService {
-  // CREATE REMINDER
-  async createReminder(userId, payload) {
-    const validData = await validateSchema(createReminderSchema, payload);
+  //create
+  async createReminder(userId, data) {
+    // VALIDATE REQUEST
+    const validData = await validateSchema(createReminderSchema, data);
+    // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
     // CREATE MAIN REMINDER
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
       medicationId: medication.id,
-      type: reminderType.BEFORE_MEDICATION,
-      reminderBeforeMinutes: validData.reminderBeforeMinutes || 5,
-      afterReminderMinutes: validData.afterReminderMinutes || 10,
-      refillAlertBeforeDays: validData.refillAlertBeforeDays || 1,
+      reminderBeforeMinutes: validData.reminderBeforeMinutes || medication.reminderBeforeMinutes,
+      afterReminderMinutes: validData.afterReminderMinutes,
+      refillAlertBeforeDays: validData.refillAlertBeforeDays,
       dosePerIntake: medication.dosePerIntake,
-      frequency: medication.frequency,
+      routineBase: medication.frequency,
       medicationTime: medication.medicationTime,
       active: true,
     });
 
     // GENERATE OCCURRENCES
-    const occurrences = this.generateOccurrences(reminder, medication);
-    // SAVE OCCURRENCES
-    if (occurrences.length) {
+    const occurrences = generateReminderOccurrences(reminder, medication);
+
+    // BULK CREATE OCCURRENCES
+    if (occurrences.length > 0) {
       await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
     }
+
     return reminder;
   }
-
-  // GET ALL REMINDERS
+  //get all reminders
   async getAllReminders(userId) {
     return medicationReminderRepository.findAll(userId);
   }
-
-  // GET REMINDER BY ID
-  async getReminderById(id, userId) {
-    const params = await validateSchema(idParamSchema, { id });
-    const reminder = await medicationReminderOccurrenceRepository.findById(params.id);
-    if (!reminder || String(reminder.medication_reminders.patientId) !== String(userId)) {
-      throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
-    }
-    return reminder;
+  //get all sub remiders
+  async getAllOccurrences(userId) {
+    return medicationReminderOccurrenceRepository.findAllOccurrences(userId);
   }
 
-  // DELETE REMINDER
-  async deleteReminder(id, userId) {
-    const params = await validateSchema(idParamSchema, { id });
-    const reminder = await medicationReminderRepository.findById(params.id);
-    if (!reminder || String(reminder.patientId) !== String(userId)) {
-      throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
-    }
-    // SOFT DELETE MAIN REMINDER
-    await medicationReminderRepository.softDelete(params.id);
-    // SOFT DELETE OCCURRENCES
-    await medicationReminderOccurrenceRepository.softDeleteByReminderId(params.id);
-
-    return true;
-  }
-
-  // GET TODAY OCCURRENCES
+  // get today occurrences
   async getTodayOccurrences(userId) {
     return medicationReminderOccurrenceRepository.findTodayOccurrences(userId);
   }
 
-  // COMPLETE REMINDER
-  async completeReminder(occurrenceId, userId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    const validData = await validateSchema(completeReminderSchema, payload);
-    const occurrence = await medicationReminderOccurrenceRepository.findById(occurrenceId);
-    if (!occurrence || String(occurrence.medicationReminder.patientId) !== String(userId)) {
-      throw new NotFoundException(errorConstants.REMINDER_OCCURRENCE_NOT_FOUND);
+  //filter
+  async getOccurrences(userId, data) {
+    // VALIDATE FILTER REQUEST
+    const filters = await validateSchema(listOccurrencesQuerySchema, data);
+    const occurrences = await medicationReminderOccurrenceRepository.getOccurrences(
+      userId,
+      filters,
+    );
+    return {
+      occurrences,
+      page: {
+        pageNumber: filters?.page?.pageNumber || 1,
+        pageLimit: filters?.page?.pageLimit || 10,
+      },
+    };
+  }
+  // UPDATE
+  async updateOccurrence(id, userId, data) {
+    // VALIDATE REQUEST
+    const validData = await validateSchema(updateOccurrenceSchema, data);
+
+    // FIND OCCURRENCE
+    const occurrence = await medicationReminderOccurrenceRepository.findById(id);
+
+    if (!occurrence || String(occurrence.patientId) !== String(userId)) {
+      throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_NOT_FOUND);
     }
 
-    // COMPLETE REMINDER
-    await medicationReminderOccurrenceRepository.completeReminder(occurrenceId, {
-      ...validData,
-      completedAt: new Date(),
+    // ALREADY COMPLETED
+    if (occurrence.status === reminderOccurrenceStatus.COMPLETED) {
+      throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_ALREADY_COMPLETED);
+    }
+
+    // UPDATE OCCURRENCE
+    await medicationReminderOccurrenceRepository.update(id, {
+      status: validData.status,
+      completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
     });
 
-    // REDUCE MEDICATION QUANTITY
-    const medicationId = occurrence.medicationReminder.medicationId;
-    const dose = occurrence.medicationReminder.dosePerIntake || 1;
-    await medicationRepository.reduceQuantity(medicationId, dose);
-    return true;
-  }
-  // MARK AS MISSED
-  async missedReminder(occurrenceId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    await validateSchema(missedReminderSchema, payload);
-    await medicationReminderOccurrenceRepository.updateStatus(
-      occurrenceId,
-      reminderOccurrenceStatus.MISSED,
-      {
-        missedAt: new Date(),
-      },
-    );
+    // REDUCE QUANTITY ONLY ON COMPLETED
+    if (validData.status === reminderOccurrenceStatus.COMPLETED) {
+      const medication = await medicationRepository.findById(occurrence.medicationId);
+
+      if (medication) {
+        await medicationRepository.reduceQuantity(
+          occurrence.medicationId,
+          medication.dosePerIntake || 1,
+        );
+      }
+    }
 
     return true;
   }
 
-  // MARK AS SKIPPED
-  async skippedReminder(occurrenceId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    await validateSchema(skippedReminderSchema, payload);
-    await medicationReminderOccurrenceRepository.updateStatus(
-      occurrenceId,
-      reminderOccurrenceStatus.SKIPPED,
-      {
-        skippedAt: new Date(),
-      },
-    );
+  //delete reminder
+  async deleteReminder(id, userId) {
+    const reminder = await medicationReminderRepository.findById(id);
+
+    if (!reminder || String(reminder.patientId) !== String(userId)) {
+      throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
+    }
+
+    // SOFT DELETE MAIN REMINDER
+    await medicationReminderRepository.softDelete(id);
+
+    // SOFT DELETE OCCURRENCES
+    await medicationReminderOccurrenceRepository.softDeleteByReminderId(id);
 
     return true;
   }
 
-  // SNOOZE REMINDER
-  async snoozeReminder(occurrenceId, userId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    const validData = await validateSchema(snoozeReminderSchema, payload);
-    const snoozeUntil = new Date(Date.now() + validData.minutes * 60000);
-    await medicationReminderOccurrenceRepository.updateStatus(
-      occurrenceId,
-      reminderOccurrenceStatus.SNOOZED,
-      {
-        snoozeUntil,
-        snoozeCount: 1,
-      },
-    );
-
-    return true;
-  }
-
-  // GET REFILL ALERTS
-  async getRefillAlerts(userId) {
-    return medicationReminderOccurrenceRepository.findRefillAlerts(userId);
-  }
-  // GET TODAY REFILL ALERTS
-  async getTodayRefillAlerts(userId) {
-    return medicationReminderOccurrenceRepository.findTodayRefillAlerts(userId);
-  }
-
-  // COMPLETE REFILL ALERT
-  async completeRefillAlert(occurrenceId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    await validateSchema(completeRefillAlertSchema, payload);
-    await medicationReminderOccurrenceRepository.updateStatus(
-      occurrenceId,
-      reminderOccurrenceStatus.COMPLETED,
-      {
-        completedAt: new Date(),
-      },
-    );
-
-    return true;
-  }
-
-  // SNOOZE REFILL ALERT
-  async snoozeRefillAlert(occurrenceId, userId, payload) {
-    await validateSchema(idParamSchema, { id: occurrenceId });
-    const validData = await validateSchema(snoozeRefillAlertSchema, payload);
-    const snoozeUntil = new Date(Date.now() + validData.minutes * 60000);
-    await medicationReminderOccurrenceRepository.updateStatus(
-      occurrenceId,
-      reminderOccurrenceStatus.SNOOZED,
-      {
-        snoozeUntil,
-      },
-    );
-
-    return true;
-  }
-
-  // VALIDATE MEDICATION OWNERSHIP
+  //validated mediction ownship
   async validateMedicationOwnership(medicationId, userId) {
     const medication = await medicationRepository.findById(medicationId);
 
@@ -197,74 +135,6 @@ class MedicationReminderService {
     }
 
     return medication;
-  }
-
-  // GENERATE OCCURRENCES
-  generateOccurrences(reminder, medication) {
-    const occurrences = [];
-    const medicationTimes = medication.medicationTime || [];
-    const currentDate = new Date(medication.startDate);
-    const endDate = new Date(medication.endDate);
-    while (currentDate <= endDate) {
-      for (const timeObj of medicationTimes) {
-        const [hours, minutes] = timeObj.time.split(":");
-
-        // ACTUAL MEDICATION TIME
-        const medicationDateTime = new Date(currentDate);
-
-        medicationDateTime.setHours(Number(hours));
-        medicationDateTime.setMinutes(Number(minutes));
-        medicationDateTime.setSeconds(0);
-
-        // BEFORE REMINDER
-        const beforeTime = new Date(
-          medicationDateTime.getTime() - reminder.reminderBeforeMinutes * 60000,
-        );
-
-        occurrences.push({
-          reminderId: reminder.id,
-          type: reminderType.BEFORE_MEDICATION,
-          status: reminderOccurrenceStatus.PENDING,
-          scheduledAt: beforeTime,
-          actualMedicationTime: medicationDateTime,
-        });
-
-        // AFTER REMINDER
-        const afterTime = new Date(
-          medicationDateTime.getTime() + reminder.afterReminderMinutes * 60000,
-        );
-
-        occurrences.push({
-          reminderId: reminder.id,
-          type: reminderType.AFTER_MEDICATION,
-          status: reminderOccurrenceStatus.PENDING,
-          scheduledAt: afterTime,
-          actualMedicationTime: medicationDateTime,
-        });
-      }
-
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // REFILL ALERT
-    if (medication.refillAlert) {
-      const refillDate = new Date(medication.endDate);
-
-      refillDate.setDate(refillDate.getDate() - reminder.refillAlertBeforeDays);
-
-      refillDate.setHours(9);
-      refillDate.setMinutes(0);
-      refillDate.setSeconds(0);
-
-      occurrences.push({
-        reminderId: reminder.id,
-        type: reminderType.REFILL_ALERT,
-        status: reminderOccurrenceStatus.PENDING,
-        scheduledAt: refillDate,
-      });
-    }
-
-    return occurrences;
   }
 }
 
