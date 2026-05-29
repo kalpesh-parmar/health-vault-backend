@@ -1,3 +1,4 @@
+// const { notificationType } = require("../enums/notificationType");
 const { reminderType } = require("../enums/reminderType");
 const notificationService = require("./notificationService");
 
@@ -6,7 +7,8 @@ class ReminderNotificationService {
   async sendReminderNotification(occurrence) {
     try {
       let payload = null;
-      switch (occurrence.type) {
+
+      switch (occurrence.occurrence.type) {
         // BEFORE MEDICATION
         case reminderType.BEFORE_MEDICATION:
           payload = this.sendBeforeMedicationReminder(occurrence);
@@ -21,107 +23,70 @@ class ReminderNotificationService {
           break;
 
         default:
-          console.log("❌ Unknown reminder type");
+          console.log(" Unknown reminder type");
       }
-      await notificationService.sendToUser(occurrence.userId, payload);
+      await notificationService.sendToUser(occurrence.patientId, payload);
     } catch (error) {
-      console.error("❌ sendReminderNotification error:", error);
+      console.error(" sendReminderNotification error:", error);
     }
   }
   // BEFORE MEDICATION REMINDER
   sendBeforeMedicationReminder(occurrence) {
-    console.log("💊 BEFORE MEDICATION REMINDER");
+    console.log(" BEFORE MEDICATION REMINDER");
     return {
-      occurrenceId: occurrence.id,
+      occurrenceId: occurrence.occurrence.id,
       title: "Medication Reminder",
       body: "Your medication time is coming soon.",
       data: {
         type: reminderType.BEFORE_MEDICATION,
-        scheduledAt: occurrence.scheduledAt,
       },
     };
   }
 
   // AFTER MEDICATION REMINDER
   sendAfterMedicationReminder(occurrence) {
-    console.log("💊 AFTER MEDICATION REMINDER");
+    console.log(" AFTER MEDICATION REMINDER");
     return {
-      occurrenceId: occurrence.id,
-      title: "Did you take your medication?",
+      occurrenceId: occurrence.occurrence.id,
+      title: "Did you take your medicine?",
       body: "Please confirm your medication status.",
       data: {
         type: reminderType.AFTER_MEDICATION,
-        actions: ["COMPLETE", "MISSED", "SKIPPED", "SNOOZE"],
-        scheduledAt: occurrence.scheduledAt,
+        // actions: ["COMPLETE", "MISSED", "SKIPPED", "SNOOZE"],
       },
     };
   }
-
   // REFILL ALERT REMINDER
 
   sendRefillAlertReminder(occurrence) {
-    console.log("💊 REFILL ALERT REMINDER");
-
+    console.log(" REFILL ALERT REMINDER");
     return {
-      occurrenceId: occurrence.id,
+      occurrenceId: occurrence.occurrence.id,
       title: "Medication Refill Alert",
       body: "Your medication stock may finish soon.",
       data: {
         type: reminderType.REFILL_ALERT,
-        scheduledAt: occurrence.scheduledAt,
       },
     };
   }
 
-  //
-  // SEND PUSH NOTIFICATION
-  //
-  async sendPushNotification(userId, notificationData) {
+  async sendOverdueNotification(occurrence) {
     try {
-      //
-      // TODO:
-      // FIREBASE FCM LOGIC
-      //
-
-      console.log("📲 Push notification sent");
-
-      console.log({
-        userId,
-
-        notificationData,
-      });
-
-      return true;
+      console.log(" OVERDUE REMINDER");
+      const payload = {
+        occurrenceId: occurrence.occurrence.id,
+        title: "Medication Overdue",
+        body: "You missed your medication time.",
+        data: {
+          type: "OVERDUE_REMINDER",
+          // medicationId: occurrence.occurrence.medicationId,
+          // occurrenceId: occurrence.occurrence.id,
+          // actions: ["COMPLETE", "SKIP"],
+        },
+      };
+      await notificationService.sendToUser(occurrence.patientId, payload);
     } catch (error) {
-      console.error("❌ Push notification error:", error);
-
-      return false;
-    }
-  }
-
-  //
-  // SEND SOCKET EVENT
-  //
-  async sendSocketEvent(userId, event, payload) {
-    try {
-      //
-      // TODO:
-      // SOCKET.IO LOGIC
-      //
-
-      console.log("🔌 Socket event sent");
-
-      console.log({
-        userId,
-        event,
-        payload,
-      });
-
-      return true;
-    } catch (error) {
-      console.error("❌ Socket event error:", error);
-
-      return false;
+      console.error(" sendOverdueNotification error:", error);
     }
   }
 }

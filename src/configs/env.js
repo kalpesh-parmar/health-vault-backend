@@ -19,6 +19,7 @@ const env = Object.freeze({
   awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
   awsRegion: process.env.AWS_REGION || "us-east-1",
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  cronDisable: process.env.CRON_DISABLE,
   databaseUrl: process.env.DATABASE_URL,
   dbIdleTimeoutMs: numberFromEnv("DB_IDLE_TIMEOUT_MS", 30000),
   dbPoolMax: numberFromEnv("DB_POOL_MAX", 10),

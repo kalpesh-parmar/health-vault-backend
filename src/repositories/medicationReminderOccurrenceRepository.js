@@ -29,7 +29,7 @@ class MedicationReminderOccurrenceRepository {
     return result[0];
   }
   // UPDATE STATUS
-  async updateStatus(id, status, extra = {}) {
+  async updateStatus(id, status, notificationSent, extra = {}) {
     return db
       .update(medicationReminderOccurrence)
       .set({
@@ -123,12 +123,20 @@ class MedicationReminderOccurrenceRepository {
       );
   }
 
-
   // FIND PENDING REMINDERS
   async findPendingReminders(pendingStatuses) {
     return db
-      .select()
+      .select({
+        // all fields from occurrence
+        occurrence: medicationReminderOccurrence,
+        // patientId from medicationReminder
+        patientId: medicationReminder.patientId,
+      })
       .from(medicationReminderOccurrence)
+      .innerJoin(
+        medicationReminder,
+        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
+      )
       .where(
         and(
           or(...pendingStatuses.map((status) => eq(medicationReminderOccurrence.status, status))),

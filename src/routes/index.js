@@ -9,6 +9,7 @@ const medicationRoutes = require("./medicationRoutes");
 const medicationReminderRoutes = require("./medicationReminderRoutes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
+const cronRoutes = require("./cronRoutes");
 
 const router = express.Router();
 
@@ -29,4 +30,5 @@ router.use("/notifications", notificationRoutes);
 router.use("/session", sessionRoutes);
 router.use("/patient", patientRoutes);
 router.use("/medication-reminders", medicationReminderRoutes);
+router.use("/cron", cronRoutes);
 module.exports = router;

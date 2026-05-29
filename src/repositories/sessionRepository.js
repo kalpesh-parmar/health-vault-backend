@@ -96,10 +96,10 @@ class SessionRepository {
           eq(session.userId, userId),
           eq(session.isActive, true),
           eq(session.softDelete, false),
-          gt(session.refreshTokenExpiresAt, new Date()),
+          // gt(session.refreshTokenExpiresAt, new Date()),
         ),
       );
-    return result[0] || null;
+    return result;
   }
 }
 

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."occurrence_status" ADD VALUE 'OVERDUE';

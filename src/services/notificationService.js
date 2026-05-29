@@ -1,18 +1,23 @@
 const { getFirebaseMessaging } = require("../configs/firebase");
+const { errorConstants } = require("../constants/errorConstants");
+const { InvalidRequestException } = require("../exceptions/appError");
 const notificationRepository = require("../repositories/notificationRepository");
 const sessionRepository = require("../repositories/sessionRepository");
 
 class NotificationService {
   async sendToUser(userId, payload) {
     try {
-      //getDeiveTokens for user
+      //getDeviceTokens for user
       const session = await sessionRepository.getTokenById(userId);
+
       const token = session.map((s) => s.deviceToken).filter(Boolean);
       if (!token.length) {
-        console.log("⚠️ No active device tokens for user:", userId);
-        return false;
+        throw new InvalidRequestException(errorConstants.NO_DEVICE_TOKEN);
       }
       const message = getFirebaseMessaging();
+      if (!message) {
+        throw new InvalidRequestException(errorConstants.FIREBASE_MESSAGING_NOT_CONNECTED);
+      }
       //send notification to all device
       for (const tokens of token) {
         await message.send({
@@ -20,7 +25,7 @@ class NotificationService {
           data: payload.data || {},
           notification: {
             title: payload.title || "Health Vault Notification",
-            body: payload.body || "",
+            body: payload.body,
           },
         });
       }
@@ -33,8 +38,8 @@ class NotificationService {
       console.log("notification Send successfully");
       return data;
     } catch (error) {
-      console.error("❌ NotificationService error:", error);
-      return false;
+      console.error(" NotificationService error:", error);
+      throw new InvalidRequestException(errorConstants.NOTIFICATION_FAILED);
     }
   }
 

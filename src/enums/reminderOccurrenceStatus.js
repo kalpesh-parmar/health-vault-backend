@@ -5,6 +5,7 @@ const reminderOccurrenceStatus = Object.freeze({
   MISSED: "MISSED",
   SKIPPED: "SKIPPED",
   SNOOZED: "SNOOZED",
+  OVERDUE: "OVERDUE",
 });
 
 const reminderOccurrenceStatusValues = Object.values(reminderOccurrenceStatus);
