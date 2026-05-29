@@ -4,14 +4,18 @@ info:
   version: 1.0.0
 
 components:
-  parameters:
-    UuidParam:
-      in: path
-      name: id
-      required: true
-      schema:
-        type: string
-        format: uuid
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  # parameters:
+  #   UuidParam:
+  #     in: path
+  #     name: id
+  #     required: true
+  #     schema:
+  #       type: string
+  #       format: uuid
   schemas:
     NotificationPayload:
       type: object
@@ -19,11 +23,7 @@ components:
     TestSendNotificationRequest:
       type: object
       additionalProperties: false
-      required: [userId]
       properties:
-        userId:
-          type: string
-          example: user-123
         title:
           type: string
           example: Test notification
@@ -92,16 +92,14 @@ components:
     UserIdRequest:
       type: object
       additionalProperties: false
-      required: [userId]
       properties:
-        userId:
-          type: string
-          example: user-123
 
 paths:
   /notifications/test-send:
     post:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: Send test notification
       requestBody:
         required: true
@@ -115,6 +113,8 @@ paths:
   /notifications/list:
     post:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: List notifications (filter + search + sort)
       requestBody:
         required: false
@@ -126,7 +126,7 @@ paths:
               list:
                 value:
                   filter:
-                    userId: user-123
+                    # userId: user-123
                     isRead: false
                     search: appointment
                   sort:
@@ -138,6 +138,8 @@ paths:
   /notifications/list-paginated:
     post:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: List notifications (filter + search + sort + pagination)
       requestBody:
         required: true
@@ -149,7 +151,7 @@ paths:
               paginated:
                 value:
                   filter:
-                    userId: user-123
+                    # userId: user-123
                     isRead: false
                   page:
                     pageNumber: 0
@@ -163,6 +165,8 @@ paths:
   /notifications/mark-read/{id}:
     put:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: Mark notification as read
       parameters:
         - $ref: "#/components/parameters/UuidParam"
@@ -172,19 +176,17 @@ paths:
   /notifications/mark-all-read:
     put:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: Mark all notifications as read
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UserIdRequest"
       responses:
         "200": { description: All notifications marked as read }
 
   /notifications/{id}:
     delete:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: Delete notification
       parameters:
         - $ref: "#/components/parameters/UuidParam"

@@ -5,14 +5,15 @@ const { notification } = require("../models/notification");
 
 const sortMap = Object.freeze({
   createdAt: notification.createdAt,
+  createdBy: notification.userId,
   title: notification.title,
 });
 
-function buildConditions(filter = {}) {
+function buildConditions(filter = {}, userId) {
   const conditions = [];
 
-  if (filter.userId) {
-    conditions.push(eq(notification.userId, filter.userId));
+  if (userId) {
+    conditions.push(eq(notification.userId, userId));
   }
 
   if (filter.isRead !== undefined) {
@@ -43,8 +44,11 @@ class NotificationRepository {
     return result[0] || null;
   }
 
-  async list({ filter = {}, sort = {} }) {
-    const conditions = buildConditions(filter);
+  async list({ filter = {}, sort = {}, userId }) {
+    const conditions = buildConditions(filter, userId);
+    if (userId) {
+      conditions.push(eq(notification.userId, userId));
+    }
     const orderClause = buildOrderClause(sort);
 
     return db
@@ -54,8 +58,8 @@ class NotificationRepository {
       .orderBy(orderClause);
   }
 
-  async listPaginated({ filter = {}, page, sort = {} }) {
-    const conditions = buildConditions(filter);
+  async listPaginated({ filter = {}, page, sort = {}, userId }) {
+    const conditions = buildConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
     const offset = page.pageNumber * page.pageLimit;
 

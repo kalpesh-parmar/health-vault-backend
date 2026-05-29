@@ -84,6 +84,23 @@ class SessionRepository {
   async deleteByPatientId(userId) {
     return db.delete(session).where(eq(session.userId, userId)).returning();
   }
+
+  async getTokenById(userId) {
+    const result = await db
+      .select({
+        deviceToken: session.deviceToken,
+      })
+      .from(session)
+      .where(
+        and(
+          eq(session.userId, userId),
+          eq(session.isActive, true),
+          eq(session.softDelete, false),
+          // gt(session.refreshTokenExpiresAt, new Date()),
+        ),
+      );
+    return result;
+  }
 }
 
 module.exports = new SessionRepository();

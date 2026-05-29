@@ -21,9 +21,8 @@ components:
   schemas:
     CreatePatientRequest:
       type: object
-      required: [userName, fullName, email, password, gender, age, phone]
+      required: [fullName, email, password, gender, dateOfBirth, phone]
       properties:
-        userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
         email: { type: string }
@@ -31,19 +30,18 @@ components:
         gender:
           type: string
           enum: [female, male]
-        age:
-          type: integer
-          minimum: 0
-          maximum: 120
-        # dateOfBirth:
-        #   type: string
-        #   format: date
+        # age:
+        #   type: integer
+        #   minimum: 0
+        #   maximum: 120
+        dateOfBirth:
+          type: string
+          format: date
         phone: { type: string }
 
     UpdatePatientRequest:
       type: object
       properties:
-        userName: { type: string }
         firstName: { type: string }
         lastName: { type: string }
 

@@ -3,17 +3,19 @@ const { paginatedSuccessResponse, successResponse } = require("../helpers/genera
 const notificationApiService = require("../services/notificationApiService");
 
 async function testSend(req, res) {
-  const result = await notificationApiService.testSend(req.body);
+  const result = await notificationApiService.testSend(req.auth.userId, req.body);
+  console.log(("req.body:===", req.body));
+
   return successResponse(res, result, messageConstants.NOTIFICATION_SENT);
 }
 
 async function list(req, res) {
-  const result = await notificationApiService.list(req.body);
+  const result = await notificationApiService.list(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.NOTIFICATION_LIST_FETCHED);
 }
 
 async function listPaginated(req, res) {
-  const result = await notificationApiService.listPaginated(req.body);
+  const result = await notificationApiService.listPaginated(req.auth.userId, req.body);
   return paginatedSuccessResponse(
     res,
     result.data,
@@ -23,17 +25,17 @@ async function listPaginated(req, res) {
 }
 
 async function markRead(req, res) {
-  const result = await notificationApiService.markRead(req.params);
+  const result = await notificationApiService.markRead(req.auth.userId, req.body);
   return successResponse(res, result, messageConstants.NOTIFICATION_MARKED_READ);
 }
 
 async function markAllRead(req, res) {
-  const result = await notificationApiService.markAllRead(req.body);
+  const result = await notificationApiService.markAllRead(req.auth.userId);
   return successResponse(res, result, messageConstants.NOTIFICATION_MARKED_ALL_READ);
 }
 
 async function deleteNotification(req, res) {
-  const result = await notificationApiService.delete(req.params);
+  const result = await notificationApiService.delete(req.auth.userId, req.params);
   return successResponse(res, result, messageConstants.NOTIFICATION_DELETED);
 }
 

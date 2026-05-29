@@ -3,10 +3,13 @@ const errorConstants = Object.freeze({
   ACCOUNT_BLOCKED: "Account is blocked",
   ACCOUNT_INACTIVE: "Account is inactive",
   ALREADY_EXISTS: "Already exists",
+  CANT_BE_FUTURE_DATE: "Date of birth cannot be in the future",
   DATABASE_URL_REQUIRED: "DATABASE_URL is required",
+  NO_DEVICE_TOKEN: "No active device tokens for user",
   DOCUMENT_NOT_FOUND: "Document not found",
   EMAIL_ALREADY_EXISTS: "Email already exists",
   EMAIL_NOT_CONFIGURED: "Email service is not configured",
+  FIREBASE_MESSAGING_NOT_CONNECTED: "Firebase messaging service is not configured",
   INVALID_CREDENTIALS: "Invalid email or password",
   INVALID_OTP: "Invalid OTP",
   INVALID_REFRESH_TOKEN: "Invalid refresh token",
@@ -23,6 +26,7 @@ const errorConstants = Object.freeze({
   ROUTE_NOT_FOUND: "Route not found",
   SESSION_NOT_FOUND: "Session not found",
   SOMETHING_WENT_WRONG: "Something went wrong, please try again later",
+  NOTIFICATION_FAILED: "Failed to send notification",
   UNAUTHORIZED: "Unauthorized",
   VALIDATION_FAILED: "Validation failed",
   USER_NAME_INVALID: "User name can only contain alphanumeric characters",
@@ -55,6 +59,8 @@ const errorConstants = Object.freeze({
   USER_NAME_REQUIRED: "User name is required",
   VALID_DOCUMENT_TYPE_REQUIRED: "Please enter a valid document type",
   VALID_EMAIL_REQUIRED: "Please enter a valid email",
+  MEDICATION_NOT_FOUND: "Medication not found",
+  MEDICATION_REMINDER_NOT_FOUND: "Medication reminder not found",
 });
 
 module.exports = { errorConstants };
