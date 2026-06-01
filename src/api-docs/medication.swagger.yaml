@@ -146,6 +146,10 @@ components:
           type: boolean
           default: false
 
+        isReminder:
+          type: boolean
+          default: false
+
         totalQuantity:
           type: integer
           minimum: 0
@@ -284,6 +288,11 @@ components:
           type: integer
           default: 5
           example: 10
+
+        isReminder:
+          type: boolean
+          default: false
+          example: true
 
         refillAlert:
           type: boolean

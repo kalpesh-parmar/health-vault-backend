@@ -52,6 +52,7 @@ const messageConstants = Object.freeze({
   REFILL_ALERT_SNOOZED: "Refill alert snoozed",
   MEDICATION_REMINDER_CREATED: "Medication reminder created successfully",
   MEDICATION_OCCURRENCE_UPDATED: "Medication occurrence updated successfully",
+  MEDICTION_SUMMARY: "Medication summary fetched successfully",
 });
 
 module.exports = { messageConstants };

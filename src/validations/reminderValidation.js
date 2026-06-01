@@ -4,22 +4,16 @@ const {
   reminderOccurrenceStatusValues,
 } = require("../enums/reminderOccurrenceStatus");
 
-
 const createReminderSchema = z
   .object({
     medicationId: z.string().uuid(),
-    reminderBeforeMinutes: z.number().int().min(0).default(5),
-    afterReminderMinutes: z.number().int().min(1).default(10),
-    refillAlertBeforeDays: z.number().int().min(1).default(1),
     active: z.boolean().optional(),
   })
   .strict();
 
-
-
 const updateOccurrenceSchema = z
   .object({
-    status: z.literal(reminderOccurrenceStatus.COMPLETED),
+    status: z.literal(reminderOccurrenceStatus.COMPLETED).optional(),
   })
   .strict();
 
@@ -32,6 +26,7 @@ const listOccurrencesQuerySchema = z
         endDate: z.string().trim().optional(),
         medicationName: z.string().trim().optional(),
         medicationType: z.string().trim().optional(),
+        isOverdue: z.boolean().optional(),
       })
       .optional(),
 

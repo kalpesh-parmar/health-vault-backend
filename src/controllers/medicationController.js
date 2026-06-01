@@ -60,6 +60,7 @@ async function listMedicationsPaginated(req, res) {
   );
 }
 
+
 module.exports = {
   createMedication,
   updateMedication,
@@ -68,4 +69,5 @@ module.exports = {
   getMedicationList,
   listMedications,
   listMedicationsPaginated,
+
 };

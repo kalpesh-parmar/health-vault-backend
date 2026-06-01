@@ -40,22 +40,22 @@ class MedicationService {
 
   // UPDATE MEDICATION
   async updateMedication(id, userId, payload) {
-    // VALIDATE REQUEST
     const validData = await validateSchema(updateMedicationSchema, payload);
-    // FIND MEDICATION
+
     const existingMedication = await medicationRepository.findById(id);
+
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
-    // MERGE UPDATED VALUES
+
     const updatedPayload = {
       ...existingMedication,
       ...validData,
     };
-    // RECALCULATE VALUES
+
     const { endDate, remainingQuantity, dailyConsumption, unit } =
       calculateMedicationValues(updatedPayload);
-    // UPDATE MEDICATION
+
     const updatedMedication = await medicationRepository.updateById(id, {
       ...validData,
       endDate,
@@ -66,33 +66,65 @@ class MedicationService {
 
     const reminder = await medicationReminderRepository.findByMedicationId(id);
 
-    if (reminder) {
-      // UPDATE MAIN REMINDER
-      await medicationReminderRepository.updateById(reminder.id, {
+    if (!reminder) {
+      return updatedMedication;
+    }
+
+    const onlyQuantityUpdated =
+      Object.keys(validData).length === 1 && validData.totalQuantity !== undefined;
+
+    // REFILL FLOW
+    if (onlyQuantityUpdated) {
+      const addedQuantity =
+        Number(validData.totalQuantity) - Number(existingMedication.totalQuantity);
+
+      if (addedQuantity > 0) {
+        const lastOccurrence =
+          await medicationReminderOccurrenceRepository.findLastOccurrenceByReminderId(reminder.id);
+
+        if (lastOccurrence) {
+          const refillMedication = {
+            ...updatedMedication,
+            totalQuantity: addedQuantity,
+          };
+
+          const nextDate = new Date(lastOccurrence.actualMedicationTime);
+
+          nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+
+          const occurrences = generateReminderOccurrences(reminder, refillMedication, nextDate);
+
+          if (occurrences.length > 0) {
+            await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
+          }
+        }
+      }
+
+      return updatedMedication;
+    }
+    // MEDICATION UPDATE FLOW
+    await medicationReminderRepository.updateById(reminder.id, {
+      dosePerIntake: updatedMedication.dosePerIntake,
+      routineBase: updatedMedication.frequency,
+      medicationTime: updatedMedication.medicationTime,
+      updatedAt: new Date(),
+    });
+
+    await medicationReminderOccurrenceRepository.softDeleteFutureOccurrences(reminder.id);
+
+    const occurrences = generateReminderOccurrences(
+      {
+        ...reminder,
         dosePerIntake: updatedMedication.dosePerIntake,
         routineBase: updatedMedication.frequency,
         medicationTime: updatedMedication.medicationTime,
-        updatedAt: new Date(),
-      });
+      },
+      updatedMedication,
+      new Date(),
+    );
 
-      // SOFT DELETE OLD OCCURRENCES
-      await medicationReminderOccurrenceRepository.softDeleteByReminderId(reminder.id);
-
-      // REGENERATE NEW OCCURRENCES
-      const occurrences = generateReminderOccurrences(
-        {
-          ...reminder,
-          dosePerIntake: updatedMedication.dosePerIntake,
-          routineBase: updatedMedication.frequency,
-          medicationTime: updatedMedication.medicationTime,
-        },
-        updatedMedication,
-      );
-
-      // SAVE NEW OCCURRENCES
-      if (occurrences.length > 0) {
-        await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
-      }
+    if (occurrences.length > 0) {
+      await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
     }
 
     return updatedMedication;
@@ -163,6 +195,7 @@ class MedicationService {
 
     return true;
   }
+  
 }
 
 module.exports = new MedicationService();

@@ -44,7 +44,9 @@ const medicationReminderOccurrence = pgTable(
 
     completedAt: timestamp("completed_at"),
 
-    isFollowUp: boolean("is_follow_up").default(false),
+    isOverdue: boolean("is_overdue").default(false),
+
+    refillReminderTime: timestamp("refill_reminder_time"),
 
     createdAt: timestamp("created_at", {
       withTimezone: true,

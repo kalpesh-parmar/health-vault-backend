@@ -57,7 +57,7 @@ const medication = pgTable(
     unit: medicationUnitType("unit").notNull(),
     dailyConsumption: integer("daily_consumption").default(0).notNull(),
     refillAlert: boolean("refill_alert").default(false),
-    isRemider: boolean("is_reminder").default(false),
+    isReminder: boolean("is_reminder").default(false),
     reminderBeforeMinutes: integer("reminder_before_minutes").default(5).notNull(),
     notes: varchar("notes", {
       length: 1000,
@@ -79,4 +79,5 @@ module.exports = {
   medicationTypeEnum,
   frequencyEnum,
   foodEnum,
+  mediactionUnitValues,
 };

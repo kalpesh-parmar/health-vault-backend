@@ -1,0 +1,1 @@
+ALTER TABLE "medication_reminder_occurrences" ADD COLUMN "refill_reminder_time" timestamp;

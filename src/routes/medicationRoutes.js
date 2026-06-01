@@ -19,7 +19,7 @@ router.post("/list", verifyToken, medicationController.listMedications);
 //get by id
 router.get("/:id", verifyToken, medicationController.getMedicationById);
 
-//updated user
+//updated
 router.put("/:id", verifyToken, medicationController.updateMedication);
 
 //delted user

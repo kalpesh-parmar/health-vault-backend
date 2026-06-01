@@ -34,7 +34,6 @@ async function getAllOccurrences(req, res) {
 //filter occurrences
 async function getOccurrences(req, res) {
   const result = await medicationReminderService.getOccurrences(req.auth.userId, req.body);
-
   return successResponse(res, result, messageConstants.MEDICATION_OCCURRENCES_FETCHED);
 }
 //updated
@@ -53,6 +52,14 @@ async function getTodayOccurrences(req, res) {
 
   return successResponse(res, result, messageConstants.MEDICATION_OCCURRENCES_FETCHED);
 }
+// medication summary
+async function getMedicationSummary(req, res) {
+  const userId = req.auth.userId;
+
+  const result = await medicationReminderService.getMedicationSummary(userId, req.query);
+
+  return successResponse(res, result, messageConstants.MEDICTION_SUMMARY);
+}
 
 module.exports = {
   createReminder,
@@ -62,4 +69,5 @@ module.exports = {
   getOccurrences,
   updateOccurrence,
   getTodayOccurrences,
+  getMedicationSummary,
 };
