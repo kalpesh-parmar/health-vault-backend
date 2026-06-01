@@ -3,7 +3,6 @@ require("dotenv").config({ quiet: true });
 const http = require("http");
 const cors = require("cors");
 const express = require("express");
-
 const { pool } = require("./configs/db");
 const { env } = require("./configs/env");
 const { apiRateLimiter, helmetMiddleware } = require("./configs/security");
@@ -11,7 +10,7 @@ const swaggerDocs = require("./configs/swagger");
 const { errorConstants } = require("./constants/errorConstants");
 const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
-const routes = require("./routes");
+const routes = require("./routes/index");
 const cronService = require("./services/cronService");
 const cronRegisterHandler = require("./configs/cronConfig");
 

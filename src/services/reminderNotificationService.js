@@ -1,31 +1,24 @@
-// const { notificationType } = require("../enums/notificationType");
-const { reminderType } = require("../enums/reminderType");
+const { notificationType } = require("../enums/notificationType");
+const { reminderTypes } = require("../enums/reminderTypes");
 const notificationService = require("./notificationService");
 
 class ReminderNotificationService {
   // MAIN SEND NOTIFICATION
-  async sendReminderNotification(occurrence) {
+  async sendReminderNotification(occurrence, type) {
     try {
       let payload = null;
 
-      switch (occurrence.occurrence.type) {
-        // BEFORE MEDICATION
-        case reminderType.BEFORE_MEDICATION:
-          payload = this.sendBeforeMedicationReminder(occurrence);
-          break;
-        // AFTER MEDICATION
-        case reminderType.AFTER_MEDICATION:
-          payload = this.sendAfterMedicationReminder(occurrence);
-          break;
-        // REFILL ALERT
-        case reminderType.REFILL_ALERT:
-          payload = this.sendRefillAlertReminder(occurrence);
-          break;
-
-        default:
-          console.log(" Unknown reminder type");
+      if (type === reminderTypes.BEFORE) {
+        payload = this.sendBeforeMedicationReminder(occurrence);
+      } else if (type === reminderTypes.AFTER) {
+        payload = this.sendAfterMedicationReminder(occurrence);
+      } else if (type === reminderTypes.REFILL) {
+        payload = this.sendRefillAlertReminder(occurrence);
+      } else {
+        console.log(" Unknown reminder type");
+        return;
       }
-      await notificationService.sendToUser(occurrence.patientId, payload);
+      await notificationService.sendToUser(occurrence.patientId || occurrence.userId, payload);
     } catch (error) {
       console.error(" sendReminderNotification error:", error);
     }
@@ -38,7 +31,7 @@ class ReminderNotificationService {
       title: "Medication Reminder",
       body: "Your medication time is coming soon.",
       data: {
-        type: reminderType.BEFORE_MEDICATION,
+        type: notificationType.MEDICATION_REMINDER,
       },
     };
   }
@@ -51,8 +44,7 @@ class ReminderNotificationService {
       title: "Did you take your medicine?",
       body: "Please confirm your medication status.",
       data: {
-        type: reminderType.AFTER_MEDICATION,
-        // actions: ["COMPLETE", "MISSED", "SKIPPED", "SNOOZE"],
+        type: notificationType.MEDICATION_REMINDER,
       },
     };
   }
@@ -61,11 +53,11 @@ class ReminderNotificationService {
   sendRefillAlertReminder(occurrence) {
     console.log(" REFILL ALERT REMINDER");
     return {
-      occurrenceId: occurrence.occurrence.id,
+      medicationId: occurrence.occurrence.id,
       title: "Medication Refill Alert",
       body: "Your medication stock may finish soon.",
       data: {
-        type: reminderType.REFILL_ALERT,
+        type: notificationType.REFILL_ALERT,
       },
     };
   }
@@ -78,10 +70,7 @@ class ReminderNotificationService {
         title: "Medication Overdue",
         body: "You missed your medication time.",
         data: {
-          type: "OVERDUE_REMINDER",
-          // medicationId: occurrence.occurrence.medicationId,
-          // occurrenceId: occurrence.occurrence.id,
-          // actions: ["COMPLETE", "SKIP"],
+          type: notificationType.OVERDUE_REMINDER,
         },
       };
       await notificationService.sendToUser(occurrence.patientId, payload);

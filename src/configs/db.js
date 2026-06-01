@@ -1,7 +1,6 @@
 const { drizzle } = require("drizzle-orm/node-postgres");
 const { Pool } = require("pg");
 const { env } = require("./env");
-
 require("dotenv").config({ quiet: true });
 
 if (!env.databaseUrl) {
@@ -12,9 +11,9 @@ const pool = new Pool({
   connectionString: env.databaseUrl,
   idleTimeoutMillis: env.dbIdleTimeoutMs,
   max: env.dbPoolMax,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  // ssl: {
+  //   rejectUnauthorized: false,
+  // },
 });
 
 const db = drizzle(pool);

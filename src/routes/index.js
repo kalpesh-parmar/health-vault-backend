@@ -5,17 +5,14 @@ const notificationRoutes = require("./notificationRoutes");
 const patientRoutes = require("./patientRoutes");
 const sessionRoutes = require("./sessionRoutes");
 const authRoutes = require("./authRoutes");
-// const medicationRoutes = require("./medicationRoutes");
 const medicationReminderRoutes = require("./medicationReminderRoutes");
-// const { messageConstants } = require("../constants/messageConstants");
-// const { successResponse } = require("../helpers/generalResponse");
 const cronRoutes = require("./cronRoutes");
+const medicationRoutes = require("./medicationRoutes");
 const { db } = require("../configs/db");
 const { StatusCodes } = require("http-status-codes");
+const routes = express.Router();
 
-const router = express.Router();
-
-router.get("/health", async (_req, res) => {
+routes.get("/health", async (_req, res) => {
   try {
     // Test database connection
     await db.$client.query("SELECT 1");
@@ -35,11 +32,13 @@ router.get("/health", async (_req, res) => {
     });
   }
 });
-router.use("/auth", authRoutes);
-router.use("/documents", documentRoutes);
-router.use("/notifications", notificationRoutes);
-router.use("/session", sessionRoutes);
-router.use("/patient", patientRoutes);
-router.use("/medication-reminders", medicationReminderRoutes);
-router.use("/cron", cronRoutes);
-module.exports = router;
+routes.use("/auth", authRoutes);
+routes.use("/documents", documentRoutes);
+routes.use("/notifications", notificationRoutes);
+routes.use("/session", sessionRoutes);
+routes.use("/patient", patientRoutes);
+routes.use("/medications", medicationRoutes);
+routes.use("/medication-reminders", medicationReminderRoutes);
+routes.use("/cron", cronRoutes);
+
+module.exports = routes;

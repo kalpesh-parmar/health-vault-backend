@@ -97,6 +97,7 @@ function buildFilterSortConditions(filter = {}) {
         ilike(document.hospitalName, search),
         ilike(document.doctorName, search),
         ilike(document.remarks, search),
+        ilike(sql`${document.documentType}::text`, search),
       ),
     );
   }
