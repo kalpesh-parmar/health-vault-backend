@@ -4,7 +4,6 @@ const { successResponse, paginatedSuccessResponse } = require("../helpers/genera
 const medicationService = require("../services/medicationService");
 
 //create medication
-
 async function createMedication(req, res) {
   const result = await medicationService.createMedication(req.auth.userId, req.body);
 
@@ -59,7 +58,16 @@ async function listMedicationsPaginated(req, res) {
     messageConstants.MEDICATION_FILTERED_LIST_FETCHED,
   );
 }
+// refill medication
+async function refillMedication(req, res) {
+  const result = await medicationService.refillMedication(
+    req.params.id,
+    req.auth.userId,
+    req.body,
+  );
 
+  return successResponse(res, result, messageConstants.MEDICATION_REFILLED);
+}
 
 module.exports = {
   createMedication,
@@ -69,5 +77,5 @@ module.exports = {
   getMedicationList,
   listMedications,
   listMedicationsPaginated,
-
+  refillMedication,
 };

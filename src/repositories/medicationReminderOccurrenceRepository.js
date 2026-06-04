@@ -31,9 +31,6 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -62,9 +59,6 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -167,12 +161,7 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
-        notificationSent: medicationReminderOccurrence.notificationSent,
-        notificationSentAt: medicationReminderOccurrence.notificationSentAt,
         createdAt: medicationReminderOccurrence.createdAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -257,6 +246,7 @@ class MedicationReminderOccurrenceRepository {
           eq(medicationReminderOccurrence.reminderId, reminderId),
           eq(medicationReminderOccurrence.softDelete, false),
           eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
+          eq(medicationReminderOccurrence.isOverdue, false),
           gte(medicationReminderOccurrence.actualMedicationTime, new Date()),
         ),
       );
@@ -336,6 +326,7 @@ class MedicationReminderOccurrenceRepository {
       }
     );
   }
+
 }
 
 module.exports = new MedicationReminderOccurrenceRepository();

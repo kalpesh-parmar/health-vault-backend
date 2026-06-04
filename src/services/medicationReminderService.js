@@ -23,12 +23,9 @@ class MedicationReminderService {
       patientId: userId,
       medicationId: medication.id,
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
-      afterReminderMinutes: 10,
-      refillAlertBeforeDays: 2,
       dosePerIntake: medication.dosePerIntake,
       routineBase: medication.frequency,
       medicationTime: medication.medicationTime,
-      active: true,
     });
 
     // GENERATE OCCURRENCES
@@ -65,7 +62,7 @@ class MedicationReminderService {
     const validData = await validateSchema(updateOccurrenceSchema, data);
     const occurrence = await medicationReminderOccurrenceRepository.findById(id);
 
-    if (!occurrence || String(occurrence.patientId) !== String(userId)) {
+    if (!occurrence || String(occurrence.patientId) !== String(userId)) { 
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_NOT_FOUND);
     }
 
@@ -74,11 +71,12 @@ class MedicationReminderService {
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_ALREADY_COMPLETED);
     }
 
-    // UPDATE OCCURRENCE
-    await medicationReminderOccurrenceRepository.update(id, {
+    const updatePayload = {
       status: validData.status,
       completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
-    });
+    };
+
+    await medicationReminderOccurrenceRepository.update(id, updatePayload);
 
     if (validData.status === reminderOccurrenceStatus.COMPLETED) {
       const medication = await medicationRepository.findById(occurrence.medicationId);
@@ -90,6 +88,7 @@ class MedicationReminderService {
         );
       }
     }
+
     return true;
   }
 

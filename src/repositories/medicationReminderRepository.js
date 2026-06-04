@@ -17,13 +17,9 @@ class MedicationReminderRepository {
         medicationId: medicationReminder.medicationId,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
-        reminderBeforeMinutes: medicationReminder.reminderBeforeMinutes,
-        afterReminderMinutes: medicationReminder.afterReminderMinutes,
-        refillAlertBeforeDays: medicationReminder.refillAlertBeforeDays,
         dosePerIntake: medicationReminder.dosePerIntake,
         routineBase: medicationReminder.routineBase,
         medicationTime: medicationReminder.medicationTime,
-        active: medicationReminder.active,
         createdAt: medicationReminder.createdAt,
         updatedAt: medicationReminder.updatedAt,
       })
@@ -67,7 +63,6 @@ class MedicationReminderRepository {
     return db
       .update(medicationReminder)
       .set({
-        active: false,
         softDelete: true,
         updatedAt: new Date(),
       })
@@ -85,7 +80,6 @@ class MedicationReminderRepository {
         ),
       )
       .limit(1);
-
     return result[0] || null;
   }
 }
