@@ -1,6 +1,7 @@
-const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, or, sql, lte } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
+const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
 
 const filterSortColumnMap = Object.freeze({
   createdAt: medication.createdAt,
@@ -236,13 +237,21 @@ class MedicationRepository {
   //findMedicationsForRefillAlert
   async findMedicationsForRefillAlert(refillAlert) {
     const result = db
-      .select()
+      .select({
+        medication: medication,
+        reminder: medicationReminderOccurrence,
+      })
       .from(medication)
+      .innerJoin(
+        medicationReminderOccurrence,
+        eq(medication.id, medicationReminderOccurrence.medicationId),
+      )
       .where(
         and(
-          // eq(medication.isReminder,isReminder),
           eq(medication.softDelete, false),
           eq(medication.refillAlert, refillAlert),
+          sql`${medicationReminderOccurrence.refillReminderTime} IS NOT NULL`,
+          lte(medicationReminderOccurrence.refillReminderTime, new Date()),
         ),
       );
     return result;

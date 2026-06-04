@@ -59,7 +59,7 @@ const testSendNotificationSchema = z
       .trim()
       .min(1, errorConstants.INVALID_REQUEST)
       .default("This is a test notification."),
-    data: z.record(z.string()).optional().nullable(),
+    data: z.record(z.any()).optional().nullable(),
     title: z.string().trim().min(1, errorConstants.INVALID_REQUEST).default("Test notification"),
     // userId: z.string().trim().min(1, errorConstants.INVALID_REQUEST),
   })

@@ -146,6 +146,10 @@ components:
           type: boolean
           default: false
 
+        isReminder:
+          type: boolean
+          default: false
+
         totalQuantity:
           type: integer
           minimum: 0

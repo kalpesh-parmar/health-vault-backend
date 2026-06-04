@@ -20,14 +20,18 @@ class NotificationService {
       }
       //send notification to all device
       for (const tokens of token) {
-        await message.send({
-          token: tokens,
-          data: payload.data || {},
-          notification: {
-            title: payload.title || "Health Vault Notification",
-            body: payload.body,
-          },
-        });
+        try {
+          await message.send({
+            token: tokens,
+            data: payload.data || {},
+            notification: {
+              title: payload.title || "Health Vault Notification",
+              body: payload.body,
+            },
+          });
+        } catch (tokenError) {
+          console.error(`Failed to send notification to token: ${tokens}`, tokenError);
+        }
       }
       const data = await notificationRepository.create({
         userId,

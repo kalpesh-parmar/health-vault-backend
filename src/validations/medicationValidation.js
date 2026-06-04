@@ -149,8 +149,9 @@ const createMedicationSchema = z
       .int()
       .min(0, errorConstants.NOT_NEGATIVE),
 
-    isReminder: z.boolean().default(false),
     doseReminders: z.boolean().default(false),
+
+    isReminder: z.boolean().default(false),
 
     reminderBeforeMinutes: z
       .number({
@@ -245,7 +246,6 @@ const updateMedicationSchema = z
       .default(5),
 
     remainingQuantity: z.number().int().min(0).optional(),
-
     refillAlert: z.boolean().optional(),
 
     notes: z.string().trim().max(1000).optional().nullable(),

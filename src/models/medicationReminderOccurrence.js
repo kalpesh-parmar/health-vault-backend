@@ -44,7 +44,6 @@ const medicationReminderOccurrence = pgTable(
 
     afterNotificationSent: boolean("after_notification_sent").default(false).notNull(),
     afterNotificationSentAt: timestamp("after_notification_sent_at"),
-    refillRemindertime: timestamp("refill_reminder_time"),
     overdueNotificationSent: boolean("overdue_notification_sent").default(false).notNull(),
 
     overdueNotificationSentAt: timestamp("overdue_notification_sent_at"),
@@ -52,6 +51,8 @@ const medicationReminderOccurrence = pgTable(
     completedAt: timestamp("completed_at"),
 
     isOverdue: boolean("is_overdue").default(false),
+
+    refillReminderTime: timestamp("refill_reminder_time"),
 
     createdAt: timestamp("created_at", {
       withTimezone: true,

@@ -1,8 +1,17 @@
 const { notificationType } = require("../enums/notificationType");
+const Mustache = require("mustache");
 const { reminderTypes } = require("../enums/reminderTypes");
 const notificationService = require("./notificationService");
+const { convertToISTTime } = require("../utils/reminderOccurrenceGenerator");
 
 class ReminderNotificationService {
+  ReminderNotificationService(data) {
+    return {
+      medicine_time: data.occurrence.actualMedicationTime.toISOString(),
+      medicineName: data.medication.medicationName,
+      localTime: convertToISTTime(data.occurrence.actualMedicationTime),
+    };
+  }
   // MAIN SEND NOTIFICATION
   async sendReminderNotification(occurrence, type) {
     try {
@@ -18,46 +27,57 @@ class ReminderNotificationService {
         console.log(" Unknown reminder type");
         return;
       }
-      await notificationService.sendToUser(occurrence.patientId || occurrence.userId, payload);
+      await notificationService.sendToUser(occurrence.medication.userId, payload);
     } catch (error) {
       console.error(" sendReminderNotification error:", error);
     }
   }
+
   // BEFORE MEDICATION REMINDER
-  sendBeforeMedicationReminder(occurrence) {
+  sendBeforeMedicationReminder(data) {
     console.log(" BEFORE MEDICATION REMINDER");
+    const variable = this.ReminderNotificationService(data);
+    const template = "Upcoming dose {{medicineName}}. Be ready at {{localTime}}!";
     return {
-      occurrenceId: occurrence.occurrence.id,
+      // occurrenceId: occurrence.occurrence.id,
       title: "Medication Reminder",
-      body: "Your medication time is coming soon.",
+      body: Mustache.render(template, variable),
       data: {
-        type: notificationType.MEDICATION_REMINDER,
+        type: notificationType.BEFORE_MEDICATION_REMINDER,
+        ...variable,
       },
     };
   }
 
   // AFTER MEDICATION REMINDER
-  sendAfterMedicationReminder(occurrence) {
+  sendAfterMedicationReminder(data) {
     console.log(" AFTER MEDICATION REMINDER");
+    const variable = this.ReminderNotificationService(data);
+    const template = `Did you take your {{medicineName}} at {{localTime}}?`;
     return {
-      occurrenceId: occurrence.occurrence.id,
-      title: "Did you take your medicine?",
-      body: "Please confirm your medication status.",
+      // occurrenceId: occurrence.occurrence.id,
+      title: "Medication Check-In",
+      body: Mustache.render(template, variable),
       data: {
-        type: notificationType.MEDICATION_REMINDER,
+        type: notificationType.AFTER_MEDICATION_REMINDER,
+        ...variable,
       },
     };
   }
   // REFILL ALERT REMINDER
 
-  sendRefillAlertReminder(occurrence) {
+  sendRefillAlertReminder(data) {
+    // console.log("occurrence:==", data);
     console.log(" REFILL ALERT REMINDER");
+    const variable = this.ReminderNotificationService(data);
+    const template = "{{medicineName}} may be running low. Consider refilling soon.";
     return {
-      medicationId: occurrence.occurrence.id,
-      title: "Medication Refill Alert",
-      body: "Your medication stock may finish soon.",
+      // medicationId: occurrence.medication.id,
+      title: "Refill Reminder",
+      body: Mustache.render(template, variable),
       data: {
         type: notificationType.REFILL_ALERT,
+        ...variable,
       },
     };
   }
@@ -65,15 +85,18 @@ class ReminderNotificationService {
   async sendOverdueNotification(occurrence) {
     try {
       console.log(" OVERDUE REMINDER");
-      const payload = {
-        occurrenceId: occurrence.occurrence.id,
+      const variable = this.ReminderNotificationService(occurrence);
+      const template = `You may have missed your {{medicineName}} dose at {{localTime}}`;
+      let payload = {
         title: "Medication Overdue",
-        body: "You missed your medication time.",
+        body: Mustache.render(template, variable),
         data: {
-          type: notificationType.OVERDUE_REMINDER,
+          type: notificationType.FOLLOW_UP_MEDICATION_REMINDER,
+          ...variable,
         },
       };
-      await notificationService.sendToUser(occurrence.patientId, payload);
+
+      await notificationService.sendToUser(occurrence.medication.userId, payload);
     } catch (error) {
       console.error(" sendOverdueNotification error:", error);
     }

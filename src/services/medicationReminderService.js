@@ -4,7 +4,7 @@ const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus"
 const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
-const generateReminderOccurrences = require("../utils/reminderOccurrenceGenerator");
+const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const {
   validateSchema,
   createReminderSchema,
@@ -22,9 +22,9 @@ class MedicationReminderService {
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
       medicationId: medication.id,
-      reminderBeforeMinutes: validData.reminderBeforeMinutes || medication.reminderBeforeMinutes,
-      afterReminderMinutes: validData.afterReminderMinutes,
-      refillAlertBeforeDays: validData.refillAlertBeforeDays,
+      reminderBeforeMinutes: medication.reminderBeforeMinutes,
+      afterReminderMinutes: 10,
+      refillAlertBeforeDays: 2,
       dosePerIntake: medication.dosePerIntake,
       routineBase: medication.frequency,
       medicationTime: medication.medicationTime,
@@ -57,26 +57,12 @@ class MedicationReminderService {
 
   //filter
   async getOccurrences(userId, data) {
-    // VALIDATE FILTER REQUEST
     const filters = await validateSchema(listOccurrencesQuerySchema, data);
-    const occurrences = await medicationReminderOccurrenceRepository.getOccurrences(
-      userId,
-      filters,
-    );
-    return {
-      occurrences,
-      page: {
-        pageNumber: filters?.page?.pageNumber || 1,
-        pageLimit: filters?.page?.pageLimit || 10,
-      },
-    };
+    return medicationReminderOccurrenceRepository.getOccurrences(userId, filters);
   }
   // UPDATE
   async updateOccurrence(id, userId, data) {
-    // VALIDATE REQUEST
     const validData = await validateSchema(updateOccurrenceSchema, data);
-
-    // FIND OCCURRENCE
     const occurrence = await medicationReminderOccurrenceRepository.findById(id);
 
     if (!occurrence || String(occurrence.patientId) !== String(userId)) {
@@ -94,7 +80,6 @@ class MedicationReminderService {
       completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
     });
 
-    // REDUCE QUANTITY ONLY ON COMPLETED
     if (validData.status === reminderOccurrenceStatus.COMPLETED) {
       const medication = await medicationRepository.findById(occurrence.medicationId);
 
@@ -105,7 +90,6 @@ class MedicationReminderService {
         );
       }
     }
-
     return true;
   }
 
@@ -135,6 +119,15 @@ class MedicationReminderService {
     }
 
     return medication;
+  }
+
+  // MEDICATION SUMMARY
+  async getMedicationSummary(userId, filters = {}) {
+    if (!userId) {
+      throw new NotFoundException(errorConstants.USER_NOT_FOUND);
+    }
+
+    return medicationReminderOccurrenceRepository.getMedicationSummary(userId, filters);
   }
 }
 

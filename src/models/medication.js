@@ -79,4 +79,5 @@ module.exports = {
   medicationUnitType,
   frequencyEnum,
   foodEnum,
+  mediactionUnitValues,
 };

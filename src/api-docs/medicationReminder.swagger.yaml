@@ -170,24 +170,34 @@ components:
           type: string
           format: uuid
 
-        reminderBeforeMinutes:
-          type: integer
-          minimum: 0
-          default: 5
-          example: 5
+    UpdateOccurrenceRequest:
+      type: object
+      required:
+        - status
 
-        afterReminderMinutes:
-          type: integer
-          minimum: 1
-          default: 10
-          example: 10
+      properties:
+        status:
+          $ref: "#/components/schemas/ReminderOccurrenceStatus"
 
-        refillAlertBeforeDays:
-          type: integer
-          minimum: 1
-          default: 1
-          example: 1
+    ReminderSummaryResponse:
+      type: object
 
+      properties:
+        total:
+          type: integer
+          example: 120
+
+        pending:
+          type: integer
+          example: 70
+
+        completed:
+          type: integer
+          example: 35
+
+        overdue:
+          type: integer
+          example: 15
     ListOccurrencesRequest:
       type: object
 
@@ -219,6 +229,10 @@ components:
               type: string
               format: date
               example: "2026-05-28"
+
+            isOverdue:
+              type: boolean
+              example: false
 
         sort:
           type: object
@@ -258,17 +272,13 @@ components:
               default: 10
               example: 10
 
-    UpdateOccurrenceRequest:
-      type: object
+              totalRecords:
+                type: integer
+                example: 57
 
-      required:
-        - status
-
-      properties:
-        status:
-          type: string
-          enum:
-            - COMPLETED
+              totalPages:
+                type: integer
+                example: 6
 
 paths:
   /medication-reminders/create:
@@ -332,6 +342,48 @@ paths:
       responses:
         "200":
           description: All occurrences fetched successfully
+
+        "401":
+          description: Unauthorized
+
+  /medication-reminders/occurrences/summary:
+    get:
+      tags:
+        - Medication Reminder Occurrence
+
+      summary: Get reminder occurrence summary counts
+
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - in: query
+          name: date
+          required: false
+          schema:
+            type: string
+            format: date
+          example: "2026-05-30"
+
+        - in: query
+          name: startDate
+          required: false
+          schema:
+            type: string
+            format: date
+          example: "2026-05-01"
+
+        - in: query
+          name: endDate
+          required: false
+          schema:
+            type: string
+            format: date
+          example: "2026-05-30"
+
+      responses:
+        "200":
+          description: Reminder summary fetched successfully
 
         "401":
           description: Unauthorized
