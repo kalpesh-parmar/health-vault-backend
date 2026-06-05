@@ -8,11 +8,11 @@ const {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  refillMedicationSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
-const { reminderType } = require("../enums/reminderType");
-const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
+const generateReminderOccurrences = require("../utils/reminderOccurrenceGenerator");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -22,137 +22,100 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, remainingQuantity, dailyConsumption } = calculateMedicationValues(validData);
+
+    const { endDate, dailyConsumption, unit } = calculateMedicationValues(validData);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
       ...validData,
       endDate,
-      remainingQuantity,
       dailyConsumption,
+      remainingQuantity: validData.totalQuantity,
+      unit,
     });
-    // CREATE REMINDER
-    const reminder = await medicationReminderRepository.create({
-      patientId: userId,
-      medicationId: medication.id,
-      type: reminderType.BEFORE_MEDICATION,
-      reminderBeforeMinutes: 5,
-      afterReminderMinutes: 10,
-      refillAlertBeforeDays: 1,
-      dosePerIntake: medication.dosePerIntake,
-      frequency: medication.frequency,
-      medicationTime: medication.medicationTime,
-      active: true,
-    });
-    // GENERATE OCCURRENCES
-    const occurrences = [];
-    const medicationTimes = medication.medicationTime || [];
-    const startDate = new Date(medication.startDate);
-    const finalDate = new Date(medication.endDate);
-    while (startDate <= finalDate) {
-      for (const timeObj of medicationTimes) {
-        const [hours, minutes] = timeObj.time.split(":");
-        // MEDICATION TIME
-        const medicationDateTime = new Date(startDate);
-        medicationDateTime.setHours(Number(hours));
-        medicationDateTime.setMinutes(Number(minutes));
-        medicationDateTime.setSeconds(0);
-        // BEFORE REMINDER
-        occurrences.push({
-          reminderId: reminder.id,
-          type: reminderType.BEFORE_MEDICATION,
-          status: reminderOccurrenceStatus.PENDING,
-          scheduledAt: new Date(medicationDateTime.getTime() - 5 * 60000),
-          actualMedicationTime: medicationDateTime,
-        });
-        // AFTER REMINDER
-        occurrences.push({
-          reminderId: reminder.id,
-          type: reminderType.AFTER_MEDICATION,
-          status: reminderOccurrenceStatus.PENDING,
-          scheduledAt: new Date(medicationDateTime.getTime() + 10 * 60000),
-          actualMedicationTime: medicationDateTime,
-        });
-      }
-      // NEXT DAY
-      startDate.setDate(startDate.getDate() + 1);
-    }
-    // SAVE OCCURRENCES
-    if (occurrences.length) {
-      await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
-    }
     return medication;
   }
 
-  // UPDATE MEDICATION
+  //update medication
   async updateMedication(id, userId, payload) {
     const validData = await validateSchema(updateMedicationSchema, payload);
     const existingMedication = await medicationRepository.findById(id);
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+    const reminder = await medicationReminderRepository.findByMedicationId(id);
     const updatedPayload = {
       ...existingMedication,
-
       ...validData,
     };
-    const { endDate, remainingQuantity, dailyConsumption, unit } =
-      calculateMedicationValues(updatedPayload);
+
+    let totalQuantity = Number(existingMedication.totalQuantity);
+    let remainingQuantity = Number(existingMedication.remainingQuantity);
+
+    // Calculate consumed quantity based on existing total and remaining values
+    const consumedQuantity =
+      Number(existingMedication.totalQuantity) - Number(existingMedication.remainingQuantity);
+
+    //new total remaining quantity = total Quantity - consumed quantity
+    if (validData.totalQuantity !== undefined) {
+      totalQuantity = Number(validData.totalQuantity);
+      remainingQuantity = Math.max(0, totalQuantity - consumedQuantity);
+    }
+
+    const medicationDataForCalculation = {
+      ...updatedPayload,
+      totalQuantity,
+      remainingQuantity,
+    };
+
+    // Recalculate endDate, dailyConsumption and unit based on updated data
+    const { endDate, dailyConsumption, unit } = calculateMedicationValues(
+      medicationDataForCalculation,
+      new Date(),
+    );
+
     const updatedMedication = await medicationRepository.updateById(id, {
       ...validData,
-      endDate,
+      totalQuantity,
       remainingQuantity,
+      endDate,
       dailyConsumption,
       unit,
     });
-    const reminder = await medicationReminderRepository.findByMedicationId(id);
-    if (reminder) {
-      //UPDATE REMINDER
-      await medicationReminderRepository.updateById(reminder.id, {
-        dosePerIntake: updatedMedication.dosePerIntake,
-        frequency: updatedMedication.frequency,
-        medicationTime: updatedMedication.medicationTime,
-      });
-      // SOFT DELETE OLD OCCURRENCES
-      await medicationReminderOccurrenceRepository.softDeleteByReminderId(reminder.id);
-      // REGENERATE OCCURRENCES
-      const occurrences = [];
-      const medicationTimes = updatedMedication.medicationTime || [];
-      const startDate = new Date(updatedMedication.startDate);
-      const finalDate = new Date(updatedMedication.endDate);
 
-      while (startDate <= finalDate) {
-        for (const timeObj of medicationTimes) {
-          const [hours, minutes] = timeObj.time.split(":");
-          const medicationDateTime = new Date(startDate);
-          medicationDateTime.setHours(Number(hours));
-          medicationDateTime.setMinutes(Number(minutes));
-          medicationDateTime.setSeconds(0);
-          // BEFORE
-          occurrences.push({
-            reminderId: reminder.id,
-            type: reminderType.BEFORE_MEDICATION,
-            status: reminderOccurrenceStatus.PENDING,
-            scheduledAt: new Date(medicationDateTime.getTime() - 5 * 60000),
-            actualMedicationTime: medicationDateTime,
-          });
-
-          occurrences.push({
-            reminderId: reminder.id,
-            type: reminderType.AFTER_MEDICATION,
-            status: reminderOccurrenceStatus.PENDING,
-            scheduledAt: new Date(medicationDateTime.getTime() + 10 * 60000),
-            actualMedicationTime: medicationDateTime,
-          });
-        }
-        // NEXT DAY
-        startDate.setDate(startDate.getDate() + 1);
-      }
-      // SAVE OCCURRENCES
-      if (occurrences.length) {
-        await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
-      }
+    if (!reminder) {
+      return updatedMedication;
     }
+
+    await medicationReminderRepository.updateById(reminder.id, {
+      routineBase: validData.frequency ?? reminder.routineBase,
+      medicationTime: validData.medicationTime ?? reminder.medicationTime,
+      dosePerIntake: validData.dosePerIntake ?? reminder.dosePerIntake,
+      reminderBeforeMinutes: validData.reminderBeforeMinutes ?? reminder.reminderBeforeMinutes,
+    });
+
+    const updatedReminder = await medicationReminderRepository.findByMedicationId(id);
+
+    //remove all future occurrences of the reminder, and generate again based on new medication data and reminder data
+    await medicationReminderOccurrenceRepository.softDeleteFutureOccurrences(updatedReminder.id);
+
+    //refetch medication to get updated endDate and dailyConsumption values
+    const latestMedication = await medicationRepository.findById(id);
+    //generate occurrences from current date, so that past reminders will not be generated again
+    const occurrences = generateReminderOccurrences(updatedReminder, latestMedication, new Date(), {
+      skipPastOccurrences: true,
+    });
+
+    if (occurrences.length) {
+      await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
+      const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
+      const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
+      await medicationRepository.updateById(id, {
+        endDate: endDateOnly,
+      });
+      updatedMedication.endDate = recalculatedEndDate;
+    }
+
     return updatedMedication;
   }
   // GET MEDICATION BY ID
@@ -162,7 +125,6 @@ class MedicationService {
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
-
     return existingMedication;
   }
 
@@ -174,10 +136,8 @@ class MedicationService {
   // FILTER LIST
   async listMedications(payload, userId) {
     const filters = await validateSchema(listMedicationQuerySchema, payload || {});
-
     return medicationRepository.findAllWithFilters({
       ...filters,
-
       userId,
     });
   }
@@ -187,12 +147,9 @@ class MedicationService {
     if (!userId) {
       throw new NotFoundException(errorConstants.USER_NOT_FOUND);
     }
-
     const filters = await validateSchema(listMedicationQuerySchema, payload);
-
     return medicationRepository.findAllWithPagination({
       ...filters,
-
       userId,
     });
   }
@@ -201,21 +158,85 @@ class MedicationService {
   async deleteMedication(id, userId) {
     // FIND MEDICATION
     const existingMedication = await medicationRepository.findById(id);
+
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+
     // SOFT DELETE MEDICATION
     await medicationRepository.softDeleteById(id);
+
     // FIND REMINDER
     const reminder = await medicationReminderRepository.findByMedicationId(id);
+
     if (reminder) {
       // SOFT DELETE REMINDER
       await medicationReminderRepository.softDelete(reminder.id);
+
       // SOFT DELETE OCCURRENCES
       await medicationReminderOccurrenceRepository.softDeleteByReminderId(reminder.id);
     }
 
     return true;
+  }
+
+  // REFILL MEDICATION
+  async refillMedication(id, userId, payload) {
+    const { quantity } = await validateSchema(refillMedicationSchema, payload);
+    const medication = await medicationRepository.findById(id);
+
+    if (!medication || String(medication.userId) !== String(userId)) {
+      throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
+    }
+
+    const reminder = await medicationReminderRepository.findByMedicationId(id);
+
+    if (!reminder) {
+      throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
+    }
+
+    const newRemainingQuantity = Number(medication.remainingQuantity || 0) + Number(quantity);
+
+    const newTotalQuantity = Number(medication.totalQuantity || 0) + Number(quantity);
+
+    // Find last generated occurrence
+    const lastOccurrence =
+      await medicationReminderOccurrenceRepository.findLastOccurrenceByReminderId(reminder.id);
+
+    let endDate = medication.endDate;
+
+    if (lastOccurrence) {
+      const refillDays = Math.ceil(Number(quantity) / Number(medication.dailyConsumption));
+      endDate = new Date(lastOccurrence.actualMedicationTime);
+      endDate.setUTCDate(endDate.getUTCDate() + refillDays);
+    }
+
+    const updatedMedication = await medicationRepository.updateById(id, {
+      remainingQuantity: newRemainingQuantity,
+      totalQuantity: newTotalQuantity,
+      endDate,
+    });
+
+    if (!lastOccurrence) {
+      return updatedMedication;
+    }
+
+    const startFromDate = new Date(lastOccurrence.actualMedicationTime);
+
+    startFromDate.setUTCDate(startFromDate.getUTCDate() + 1);
+
+    const reminderMedication = {
+      ...updatedMedication,
+      totalQuantity: quantity,
+    };
+
+    const occurrences = generateReminderOccurrences(reminder, reminderMedication, startFromDate);
+
+    if (occurrences.length) {
+      await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
+    }
+
+    return updatedMedication;
   }
 }
 

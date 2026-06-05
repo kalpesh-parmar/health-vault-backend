@@ -28,16 +28,13 @@ const {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  refillMedicationSchema,
 } = require("./medicationValidation");
 
 const {
   createReminderSchema,
-  completeReminderSchema,
-  missedReminderSchema,
-  skippedReminderSchema,
-  snoozeReminderSchema,
-  completeRefillAlertSchema,
-  snoozeRefillAlertSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
 } = require("./reminderValidation");
 
 const { createSessionSchema } = require("./sessionValidation");
@@ -90,10 +87,7 @@ module.exports = {
   updateMedicationSchema,
   listMedicationQuerySchema,
   createReminderSchema,
-  completeReminderSchema,
-  missedReminderSchema,
-  skippedReminderSchema,
-  snoozeReminderSchema,
-  completeRefillAlertSchema,
-  snoozeRefillAlertSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
+  refillMedicationSchema,
 };

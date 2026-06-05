@@ -71,6 +71,27 @@
       "when": 1779973096382,
       "tag": "0009_absent_justice",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780635311817,
+      "tag": "0010_absurd_roland_deschain",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780635423410,
+      "tag": "0011_soft_nomad",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780635541815,
+      "tag": "0012_hard_doctor_doom",
+      "breakpoints": true
     }
   ]
 }

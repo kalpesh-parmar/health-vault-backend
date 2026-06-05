@@ -1,154 +1,212 @@
-const { eq, and, lte, or, sql } = require("drizzle-orm");
+const { eq, and, sql, gte, lte, asc, desc } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
 const { medicationReminder } = require("../models/medicationReminder");
-const { reminderType } = require("../enums/reminderType");
-
+const { medication } = require("../models/medication");
+const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
 class MedicationReminderOccurrenceRepository {
-  // BULK CREATE
   async bulkCreate(payload) {
     return db.insert(medicationReminderOccurrence).values(payload).returning();
   }
-
-  // FIND BY ID
   async findById(id) {
     const result = await db
       .select()
       .from(medicationReminderOccurrence)
-      .innerJoin(
-        medicationReminder,
-        eq(medicationReminderOccurrence.reminderId, medicationReminder.id),
-      )
       .where(
         and(
           eq(medicationReminderOccurrence.id, id),
           eq(medicationReminderOccurrence.softDelete, false),
         ),
-      );
-
-    return result[0];
-  }
-  // UPDATE STATUS
-  async updateStatus(id, status, notificationSent, extra = {}) {
-    return db
-      .update(medicationReminderOccurrence)
-      .set({
-        status,
-
-        updatedAt: new Date(),
-
-        ...extra,
-      })
-      .where(eq(medicationReminderOccurrence.id, id));
-  }
-  // TODAY OCCURRENCES
-  async findTodayOccurrences(userId) {
-    return db
-      .select()
-      .from(medicationReminderOccurrence)
-      .innerJoin(
-        medicationReminder,
-        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
       )
-      .where(
-        and(
-          eq(medicationReminder.patientId, userId),
+      .limit(1);
 
-          // occurrence not deleted
-          eq(medicationReminderOccurrence.softDelete, false),
-
-          // main reminder not deleted
-          eq(medicationReminder.softDelete, false),
-
-          sql`
-          DATE(${medicationReminderOccurrence.scheduledAt})
-          =
-          CURRENT_DATE
-        `,
-        ),
-      );
-  }
-  // REFILL ALERTS
-  async findRefillAlerts(userId) {
-    return db
-      .select()
-      .from(medicationReminderOccurrence)
-      .innerJoin(
-        medicationReminder,
-
-        eq(
-          medicationReminder.id,
-
-          medicationReminderOccurrence.reminderId,
-        ),
-      )
-      .where(
-        and(
-          eq(medicationReminder.patientId, userId),
-
-          eq(medicationReminderOccurrence.type, reminderType.REFILL_ALERT),
-
-          eq(medicationReminderOccurrence.softDelete, false),
-        ),
-      );
-  }
-  // TODAY REFILL ALERTS
-  async findTodayRefillAlerts(userId) {
-    return db
-      .select()
-      .from(medicationReminderOccurrence)
-      .innerJoin(
-        medicationReminder,
-
-        eq(
-          medicationReminder.id,
-
-          medicationReminderOccurrence.reminderId,
-        ),
-      )
-      .where(
-        and(
-          eq(medicationReminder.patientId, userId),
-
-          eq(medicationReminderOccurrence.type, reminderType.REFILL_ALERT),
-
-          eq(medicationReminderOccurrence.softDelete, false),
-
-          sql`
-            DATE(${medicationReminderOccurrence.scheduledAt})
-            =
-            CURRENT_DATE
-          `,
-        ),
-      );
+    return result[0] || null;
   }
 
-  // FIND PENDING REMINDERS
-  async findPendingReminders(pendingStatuses) {
+  async findAllOccurrences(userId) {
     return db
       .select({
-        // all fields from occurrence
-        occurrence: medicationReminderOccurrence,
-        // patientId from medicationReminder
-        patientId: medicationReminder.patientId,
+        id: medicationReminderOccurrence.id,
+        reminderId: medicationReminderOccurrence.reminderId,
+        medicationId: medicationReminderOccurrence.medicationId,
+        status: medicationReminderOccurrence.status,
+        actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
+        completedAt: medicationReminderOccurrence.completedAt,
+        medicationName: medication.medicationName,
+        medicationType: medication.medicationType,
+        isOverdue: medicationReminderOccurrence.isOverdue,
       })
       .from(medicationReminderOccurrence)
       .innerJoin(
         medicationReminder,
         eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
       )
+      .innerJoin(medication, eq(medication.id, medicationReminder.medicationId))
       .where(
         and(
-          or(...pendingStatuses.map((status) => eq(medicationReminderOccurrence.status, status))),
-
+          eq(medicationReminder.patientId, userId),
           eq(medicationReminderOccurrence.softDelete, false),
-
-          lte(medicationReminderOccurrence.scheduledAt, new Date()),
         ),
-      );
+      )
+      .orderBy(asc(medicationReminderOccurrence.actualMedicationTime));
   }
 
-  // SOFT DELETE BY REMINDER ID
+  async findTodayOccurrences(userId) {
+    return db
+      .select({
+        id: medicationReminderOccurrence.id,
+        reminderId: medicationReminderOccurrence.reminderId,
+        medicationId: medicationReminderOccurrence.medicationId,
+        status: medicationReminderOccurrence.status,
+        actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
+        completedAt: medicationReminderOccurrence.completedAt,
+        medicationName: medication.medicationName,
+        medicationType: medication.medicationType,
+        isOverdue: medicationReminderOccurrence.isOverdue,
+      })
+      .from(medicationReminderOccurrence)
+      .innerJoin(
+        medicationReminder,
+        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
+      )
+      .innerJoin(medication, eq(medication.id, medicationReminder.medicationId))
+      .where(
+        and(
+          eq(medicationReminder.patientId, userId),
+          eq(medicationReminderOccurrence.softDelete, false),
+
+          // only today's date
+          sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = CURRENT_DATE`,
+        ),
+      )
+      .orderBy(asc(medicationReminderOccurrence.actualMedicationTime));
+  }
+
+  async getOccurrences(userId, payload) {
+    const filter = payload?.filter || {};
+    const sort = payload?.sort || {};
+    const pageData = payload?.page || {};
+
+    const { status, startDate, endDate, medicationName, medicationType, date, isOverdue } = filter;
+    const page = pageData.pageNumber || 1;
+    const limit = pageData.pageLimit || 10;
+    const offset = (page - 1) * limit;
+
+    const conditions = [
+      eq(medicationReminder.patientId, userId),
+      eq(medicationReminderOccurrence.softDelete, false),
+    ];
+
+    if (status) {
+      conditions.push(eq(medicationReminderOccurrence.status, status));
+    }
+
+    if (startDate) {
+      conditions.push(gte(medicationReminderOccurrence.actualMedicationTime, new Date(startDate)));
+    }
+
+    if (endDate) {
+      conditions.push(
+        lte(medicationReminderOccurrence.actualMedicationTime, new Date(`${endDate}T23:59:59`)),
+      );
+    }
+
+    if (medicationName) {
+      conditions.push(sql`${medication.medicationName} ILIKE ${"%" + medicationName + "%"}`);
+    }
+
+    if (medicationType) {
+      conditions.push(eq(medication.medicationType, medicationType));
+    }
+
+    if (date) {
+      conditions.push(sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${date}`);
+    }
+
+    if (isOverdue) {
+      conditions.push(eq(medicationReminderOccurrence.isOverdue, isOverdue));
+    }
+
+    const sortFieldMap = {
+      actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
+      completedAt: medicationReminderOccurrence.completedAt,
+      createdAt: medicationReminderOccurrence.createdAt,
+      status: medicationReminderOccurrence.status,
+    };
+
+    const sortColumn =
+      sortFieldMap[sort?.sortBy] || medicationReminderOccurrence.actualMedicationTime;
+
+    // GET TOTAL RECORDS
+    const totalResult = await db
+      .select({
+        count: sql`COUNT(*)`.mapWith(Number),
+      })
+      .from(medicationReminderOccurrence)
+      .innerJoin(
+        medicationReminder,
+        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
+      )
+      .innerJoin(medication, eq(medication.id, medicationReminder.medicationId))
+      .where(and(...conditions));
+
+    const totalRecords = totalResult[0]?.count || 0;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    // GET PAGINATED DATA
+    const occurrences = await db
+      .select({
+        id: medicationReminderOccurrence.id,
+        reminderId: medicationReminderOccurrence.reminderId,
+        medicationId: medicationReminderOccurrence.medicationId,
+        status: medicationReminderOccurrence.status,
+        actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
+        completedAt: medicationReminderOccurrence.completedAt,
+        createdAt: medicationReminderOccurrence.createdAt,
+        medicationName: medication.medicationName,
+        medicationType: medication.medicationType,
+        isOverdue: medicationReminderOccurrence.isOverdue,
+      })
+      .from(medicationReminderOccurrence)
+      .innerJoin(
+        medicationReminder,
+        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
+      )
+      .innerJoin(medication, eq(medication.id, medicationReminder.medicationId))
+      .where(and(...conditions))
+      .orderBy(sort?.sortOrder === "desc" ? desc(sortColumn) : asc(sortColumn))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      occurrences,
+      pagination: {
+        pageNumber: page,
+        pageLimit: limit,
+        totalRecords,
+        totalPages,
+      },
+    };
+  }
+
+  async update(id, payload) {
+    const result = await db
+      .update(medicationReminderOccurrence)
+      .set({
+        ...payload,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(medicationReminderOccurrence.id, id),
+          eq(medicationReminderOccurrence.softDelete, false),
+        ),
+      )
+      .returning();
+
+    return result[0] || null;
+  }
+
   async softDeleteByReminderId(reminderId) {
     return db
       .update(medicationReminderOccurrence)
@@ -158,6 +216,115 @@ class MedicationReminderOccurrenceRepository {
         updatedAt: new Date(),
       })
       .where(eq(medicationReminderOccurrence.reminderId, reminderId));
+  }
+
+  async findLastOccurrenceByReminderId(reminderId) {
+    const result = await db
+      .select()
+      .from(medicationReminderOccurrence)
+      .where(
+        and(
+          eq(medicationReminderOccurrence.reminderId, reminderId),
+          eq(medicationReminderOccurrence.softDelete, false),
+        ),
+      )
+      .orderBy(desc(medicationReminderOccurrence.actualMedicationTime))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async softDeleteFutureOccurrences(reminderId) {
+    return db
+      .update(medicationReminderOccurrence)
+      .set({
+        softDelete: true,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(medicationReminderOccurrence.reminderId, reminderId),
+          eq(medicationReminderOccurrence.softDelete, false),
+          eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
+          eq(medicationReminderOccurrence.isOverdue, false),
+          gte(medicationReminderOccurrence.actualMedicationTime, new Date()),
+        ),
+      );
+  }
+
+  async getMedicationSummary(userId, filters = {}) {
+    const conditions = [
+      eq(medicationReminderOccurrence.patientId, userId),
+      eq(medicationReminderOccurrence.softDelete, false),
+    ];
+
+    // Single Date Filter
+    if (filters.date) {
+      conditions.push(
+        sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${filters.date}`,
+      );
+    }
+
+    // Date Range Filter
+    if (filters.startDate) {
+      conditions.push(
+        gte(medicationReminderOccurrence.actualMedicationTime, new Date(filters.startDate)),
+      );
+    }
+
+    if (filters.endDate) {
+      conditions.push(
+        lte(
+          medicationReminderOccurrence.actualMedicationTime,
+          new Date(`${filters.endDate}T23:59:59`),
+        ),
+      );
+    }
+
+    const result = await db
+      .select({
+        total: sql`COUNT(*)`.mapWith(Number),
+
+        pending: sql`
+        COUNT(
+          CASE
+            WHEN ${medicationReminderOccurrence.status} = 'PENDING'
+            AND ${medicationReminderOccurrence.isOverdue} = false
+            THEN 1
+          END
+        )
+      `.mapWith(Number),
+
+        completed: sql`
+        COUNT(
+          CASE
+            WHEN ${medicationReminderOccurrence.status} = 'COMPLETED'
+            THEN 1
+          END
+        )
+      `.mapWith(Number),
+
+        overdue: sql`
+        COUNT(
+          CASE
+            WHEN ${medicationReminderOccurrence.isOverdue} = true
+            AND ${medicationReminderOccurrence.status} = 'PENDING'
+            THEN 1
+          END
+        )
+      `.mapWith(Number),
+      })
+      .from(medicationReminderOccurrence)
+      .where(and(...conditions));
+
+    return (
+      result[0] || {
+        total: 0,
+        pending: 0,
+        completed: 0,
+        overdue: 0,
+      }
+    );
   }
 }
 
