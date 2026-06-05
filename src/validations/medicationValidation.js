@@ -5,7 +5,7 @@ const { foodTypeValues } = require("../enums/foodType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
 const { bestTakenValues } = require("../enums/bestTakenType");
-const { mediactionUnitValues } = require("../enums/medicationUnit");
+// const { mediactionUnitValues } = require("../enums/medicationUnit");
 
 const medicationNameField = z
   .string({
@@ -125,10 +125,10 @@ const createMedicationSchema = z
     foodFrequency: z.enum(foodTypeValues).optional(),
     startDate: dateField,
     endDate: dateField.optional().nullable(),
-    unit: z.enum(mediactionUnitValues, {
-      required_error: errorConstants.UNIT_REQUIRED,
-      invalid_type_error: errorConstants.INVALID_UNIT,
-    }),
+    // unit: z.enum(mediactionUnitValues, {
+    //   required_error: errorConstants.UNIT_REQUIRED,
+    //   invalid_type_error: errorConstants.INVALID_UNIT,
+    // }),
 
     ongoing: z.boolean().default(false),
     totalQuantity: z
@@ -175,7 +175,7 @@ const createMedicationSchema = z
 const updateMedicationSchema = z
   .object({
     medicationName: medicationNameField.optional(),
-    medicationType: z.enum(medicationTypeValues).optional(),
+    // medicationType: z.enum(medicationTypeValues).optional(),
     prescribedBy: prescribedByField,
     dosePerIntake: doseField.optional(),
     frequency: z.enum(frequencyTypeValues).optional(),
@@ -194,15 +194,15 @@ const updateMedicationSchema = z
       .min(1, errorConstants.ONE_REQUIRED)
       .optional(),
     bestTaken: z.array(z.enum(bestTakenValues)).optional(),
-    foodFrequency: z.enum(foodTypeValues).optional(),
-    startDate: dateField.optional(),
+    // foodFrequency: z.enum(foodTypeValues).optional(),
+    // startDate: dateField.optional(),
     ongoing: z.boolean().optional(),
     totalQuantity: z.number().int().min(0).optional(),
-    unit: z
-      .enum(mediactionUnitValues, {
-        invalid_type_error: errorConstants.INVALID_UNIT,
-      })
-      .optional(),
+    // unit: z
+    //   .enum(mediactionUnitValues, {
+    //     invalid_type_error: errorConstants.INVALID_UNIT,
+    //   })
+    //   .optional(),
     reminderBeforeMinutes: z
       .number({
         invalid_type_error: errorConstants.INVALID_NUMBER,
