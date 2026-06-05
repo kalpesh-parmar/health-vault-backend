@@ -1,25 +1,25 @@
 const moment = require("moment-timezone");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
+const { env } = require("../configs/env");
 
-function generateReminderOccurrences(reminder, medication, startFromDate = null) {
+function generateReminderOccurrences(reminder, medication, startFromDate = null, options = {}) {
   const occurrences = [];
   const medicationTimes = medication.medicationTime || [];
   const userTimezone = medication.timezone || "Asia/Kolkata";
+  const { skipPastOccurrences = false } = options;
+
+  const now = new Date();
   const currentDate = startFromDate ? new Date(startFromDate) : new Date(medication.startDate);
   currentDate.setUTCHours(0, 0, 0, 0);
-
   const endDate = calculateMedicationEndDate(medication);
-
+  const availableQuantity = Number(medication.remainingQuantity ?? medication.totalQuantity ?? 0);
   let consumedQuantity = 0;
 
-  while (currentDate <= endDate) {
+  while (availableQuantity === 0 || consumedQuantity < availableQuantity) {
     for (const timeObj of medicationTimes) {
       const dosePerIntake = Number(medication.dosePerIntake || 1);
 
-      const totalQuantity = Number(medication.totalQuantity || 0);
-
-      // Stop generation when quantity is exhausted
-      if (totalQuantity > 0 && consumedQuantity + dosePerIntake > totalQuantity) {
+      if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
         return occurrences;
       }
 
@@ -27,7 +27,6 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null)
 
       const period = timeObj.period.toUpperCase();
 
-      // Convert AM/PM to 24-hour format
       if (period === "PM" && hours !== 12) {
         hours += 12;
       }
@@ -50,31 +49,29 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null)
 
       const actualMedicationTime = localDateTime.clone().utc().toDate();
 
-      const beforeReminderTime = new Date(
-        actualMedicationTime.getTime() - reminder.reminderBeforeMinutes * 60000,
-      );
-      const afterReminderTime = new Date(
-        actualMedicationTime.getTime() + reminder.afterReminderMinutes * 60000,
-      );
+      if (skipPastOccurrences && actualMedicationTime < now) {
+        continue;
+      }
 
-      const refillReminderTime = reminder.refillAlertBeforeDays
-        ? new Date(endDate.getTime() - reminder.refillAlertBeforeDays * 24 * 60 * 60000)
-        : null;
       occurrences.push({
         reminderId: reminder.id,
         medicationId: medication.id,
         patientId: medication.userId,
         status: reminderOccurrenceStatus.PENDING,
         actualMedicationTime,
-        beforeReminderTime,
-        afterReminderTime,
-        refillReminderTime,
+        beforeReminderTime: beforeReminderTime(
+          actualMedicationTime,
+          reminder.beforeReminderMinutes,
+        ),
+        afterReminderTime: afterReminderTime(actualMedicationTime),
+        refillReminderTime: refillTime(endDate),
         notificationSent: false,
         notificationSentAt: null,
         completedAt: null,
         isOverdue: false,
         softDelete: false,
       });
+
       consumedQuantity += dosePerIntake;
     }
 
@@ -87,37 +84,50 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null)
 function calculateMedicationEndDate(medication) {
   if (medication.endDate) {
     const end = new Date(medication.endDate);
-
     end.setUTCHours(23, 59, 59, 999);
-
     return end;
   }
 
   const startDate = new Date(medication.startDate);
-
   startDate.setUTCHours(0, 0, 0, 0);
-
   const medicationTimes = medication.medicationTime || [];
-
   const dailyConsumption = medicationTimes.length * Number(medication.dosePerIntake || 1);
-
   const totalDays =
-    dailyConsumption > 0 ? Math.floor(Number(medication.totalQuantity || 0) / dailyConsumption) : 0;
-
+    dailyConsumption > 0 ? Math.ceil(Number(medication.totalQuantity || 0) / dailyConsumption) : 0;
   const calculatedEndDate = new Date(startDate);
-
-  calculatedEndDate.setUTCDate(calculatedEndDate.getUTCDate() + totalDays);
-
+  calculatedEndDate.setUTCDate(calculatedEndDate.getUTCDate() + totalDays - 1);
   calculatedEndDate.setUTCHours(23, 59, 59, 999);
-
   return calculatedEndDate;
 }
-function beforeReminderTime(actualTime, reminderBeforeMinutes) {
-  return new Date(actualTime.getTime() - reminderBeforeMinutes * 60000);
+// function beforeReminderTime(actualTime, reminderBeforeMinutes) {
+//   return new Date(actualTime.getTime() - reminderBeforeMinutes * 60000);
+// }
+
+function beforeReminderTime(actualMedicationTime, reminderBeforeMinutes) {
+  if (!reminderBeforeMinutes) {
+    return null;
+  }
+  return new Date(actualMedicationTime.getTime() - reminderBeforeMinutes * 60 * 1000);
 }
 
-function afterReminderTime(actualTime, afterReminderMinutes) {
-  return new Date(actualTime.getTime() + afterReminderMinutes * 60000);
+function afterReminderTime(actualMedicationTime) {
+  return new Date(
+    actualMedicationTime.getTime() + env.afterReminderNotificationMinutes * 60 * 1000,
+  );
+}
+
+function refillTime(endDate) {
+  if (!env.refillAlertBeforeDays) {
+    return null;
+  }
+  const end = new Date(endDate);
+  end.setUTCHours(23, 59, 59, 999);
+  return new Date(end.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
+}
+
+function isSameMinute(date1, date2) {
+  if (!date1 || !date2) return false;
+  return Math.floor(date1.getTime() / 60000) === Math.floor(date2.getTime() / 60000);
 }
 
 function convertToISTTime(date) {
@@ -131,7 +141,10 @@ function convertToISTTime(date) {
 
 module.exports = {
   generateReminderOccurrences,
+  calculateMedicationEndDate,
   beforeReminderTime,
   afterReminderTime,
+  refillTime,
+  isSameMinute,
   convertToISTTime,
 };

@@ -2,8 +2,13 @@
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
 const medicationRepository = require("../repositories/medicationRepository");
-const { beforeReminderTime, afterReminderTime } = require("../utils/reminderOccurrenceGenerator");
-const { env } = require("../configs/env");
+const {
+  beforeReminderTime,
+  afterReminderTime,
+  isSameMinute,
+} = require("../utils/reminderOccurrenceGenerator");
+const reminderNotificationService = require("./reminderNotificationService");
+const { reminderTypes } = require("../enums/reminderTypes");
 class ReminderService {
   constructor() {
     this.refillReminderFlag = true;
@@ -27,23 +32,21 @@ class ReminderService {
           occurrence.actualMedicationTime,
           medication.reminderBeforeMinutes,
         );
-        // console.log("beforeTime==",beforeTime);
-        const afterTime = afterReminderTime(
-          occurrence.actualMedicationTime,
-          env.reminderAfterMinutes,
-        );
+
+        const afterTime = afterReminderTime(occurrence.actualMedicationTime);
 
         // 1. Send Main Reminder Notification
-        if (!occurrence.notificationSent && now >= beforeTime) {
-          // await reminderNotificationService.sendReminderNotification(
-          //   reminder,
-          //   reminderTypes.BEFORE,
-          // );
+        if (beforeTime && isSameMinute(now, beforeTime)) {
+          await reminderNotificationService.sendReminderNotification(
+            reminder,
+            reminderTypes.BEFORE,
+          );
           this.refillReminderFlag = true;
           console.log("Sent Before reminder notification for occurrence:", occurrence.id);
         }
         //MARK AS FOLLOW UP TRUE AFTER ACTUAL MEDICATION TIME
         if (
+          !occurrence.isOverdue &&
           now >= new Date(occurrence.actualMedicationTime) &&
           occurrence.status == reminderOccurrenceStatus.PENDING
         ) {
@@ -56,11 +59,10 @@ class ReminderService {
         // 2. Send after Notification
         if (
           occurrence.isOverdue &&
-          // !occurrence.afterNotificationSent &&
           occurrence.status == reminderOccurrenceStatus.PENDING &&
-          now >= new Date(afterTime)
+          isSameMinute(now, afterTime)
         ) {
-          // await reminderNotificationService.sendReminderNotification(reminder, reminderTypes.AFTER);
+          await reminderNotificationService.sendReminderNotification(reminder, reminderTypes.AFTER);
           console.log("Sent notification after medication time for occurrence:", occurrence.id);
         }
 
@@ -69,9 +71,9 @@ class ReminderService {
           // occurrence.afterNotificationSent &&
           !occurrence.overdueNotificationSent &&
           occurrence.status === reminderOccurrenceStatus.PENDING &&
-          now >= new Date(afterTime.getTime() + 30 * 60 * 1000)
+          isSameMinute(now, new Date(afterTime.getTime() + 30 * 60 * 1000))
         ) {
-          // await reminderNotificationService.sendOverdueNotification(reminder);
+          await reminderNotificationService.sendOverdueNotification(reminder);
           console.log("sent Followup notification to occurence:", occurrence.id);
         }
       } catch (err) {
@@ -105,10 +107,10 @@ class ReminderService {
       seenMedicationIds.add(medicationId);
 
       try {
-        // await reminderNotificationService.sendReminderNotification(
-        //   medication,
-        //   reminderTypes.REFILL,
-        // );
+        await reminderNotificationService.sendReminderNotification(
+          medication,
+          reminderTypes.REFILL,
+        );
         await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
         console.log(`Refill alert sent for medication ${medicationId}`);
       } catch (err) {

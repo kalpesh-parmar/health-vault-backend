@@ -91,6 +91,7 @@ const errorConstants = Object.freeze({
   NOON_TIME_INVALID: "Noon time should be between 12:00 PM and 5:00 PM",
   NIGHT_TIME_INVALID: "Night time should be between 7:00 PM and 11:00 PM",
   ONE_REQUIRED: "At least one value is required",
+  QUANTITY_REQUIRED: "Quantity is required",
 });
 
 module.exports = { errorConstants };

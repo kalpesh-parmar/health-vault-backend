@@ -146,10 +146,6 @@ components:
           type: boolean
           default: false
 
-        isReminder:
-          type: boolean
-          default: false
-
         totalQuantity:
           type: integer
           minimum: 0
@@ -161,10 +157,6 @@ components:
           minimum: 0
           default: 0
           example: 25
-
-        doseReminders:
-          type: boolean
-          default: false
 
         unit:
           $ref: "#/components/schemas/MedicationUnit"
@@ -179,10 +171,6 @@ components:
           minimum: 0
           default: 0
           example: 2
-
-        refillAlert:
-          type: boolean
-          default: false
 
         notes:
           type: string
@@ -210,7 +198,6 @@ components:
         - medicationType
         - frequency
         - startDate
-        - unit
 
       properties:
         medicationName:
@@ -276,16 +263,6 @@ components:
           default: 0
           example: 30
 
-        isReminder:
-          type: boolean
-          default: false
-          example: false
-
-        doseReminders:
-          type: boolean
-          default: false
-          example: true
-
         unit:
           $ref: "#/components/schemas/MedicationUnit"
 
@@ -293,11 +270,6 @@ components:
           type: integer
           default: 5
           example: 10
-
-        refillAlert:
-          type: boolean
-          default: false
-          example: true
 
         notes:
           type: string
@@ -355,24 +327,27 @@ components:
           type: integer
           minimum: 0
 
-        doseReminders:
-          type: boolean
-
         reminderBeforeMinutes:
           type: integer
           default: 5
           example: 10
 
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
-
-        refillAlert:
-          type: boolean
-
         notes:
           type: string
           nullable: true
           maxLength: 1000
+
+    RefillMedicationRequest:
+      type: object
+      required:
+        - quantity
+
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+          example: 10
+          description: Quantity being added during refill
 
     MedicationFilter:
       type: object
@@ -385,9 +360,6 @@ components:
           $ref: "#/components/schemas/FrequencyType"
 
         ongoing:
-          type: boolean
-
-        refillAlert:
           type: boolean
 
         search:
@@ -559,6 +531,45 @@ paths:
       responses:
         "200":
           description: Medication deleted successfully
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Medication not found
+
+  /medications/refill/{id}:
+    post:
+      tags:
+        - Medication
+
+      summary: Refill medication quantity
+
+      description: >
+        Adds new quantity to an existing medication,
+      security:
+        - bearerAuth: []
+
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+
+      requestBody:
+        required: true
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefillMedicationRequest"
+
+            example:
+              quantity: 10
+
+      responses:
+        "200":
+          description: Medication refilled successfully
+
+        "400":
+          description: Invalid quantity
 
         "401":
           description: Unauthorized

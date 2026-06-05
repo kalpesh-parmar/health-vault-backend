@@ -20,27 +20,15 @@ const medicationReminder = pgTable(
         onDelete: "cascade",
       })
       .notNull(),
-
-    reminderBeforeMinutes: integer("reminder_before_minutes").default(5).notNull(),
-
-    afterReminderMinutes: integer("after_reminder_minutes").default(10).notNull(),
-
-    refillAlertBeforeDays: integer("refill_alert_before_days").default(2).notNull(),
-
     dosePerIntake: integer("dose_per_intake"),
-
     routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
-
+    refillReminderTime: timestamp("refill_reminder_time"),
     medicationTime: json("medication_times"),
-
-    active: boolean("active").default(true).notNull(),
-
     createdAt: timestamp("created_at", {
       withTimezone: true,
     })
       .defaultNow()
       .notNull(),
-
     updatedAt: timestamp("updated_at", {
       withTimezone: true,
     })

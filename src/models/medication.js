@@ -52,12 +52,9 @@ const medication = pgTable(
     ongoing: boolean("ongoing").default(false).notNull(),
     totalQuantity: integer("total_quantity").default(0),
     remainingQuantity: integer("remaining_quantity").default(0),
-    doseReminders: boolean("dose_reminders").default(false),
     unit: medicationUnitType("unit").notNull(),
     dailyConsumption: integer("daily_consumption").default(0).notNull(),
-    refillAlert: boolean("refill_alert").default(false),
-    isReminder: boolean("is_reminder").default(false),
-    reminderBeforeMinutes: integer("reminder_before_minutes").default(5).notNull(),
+    reminderBeforeMinutes: integer("reminder_before_minutes"),
     notes: varchar("notes", {
       length: 1000,
     }),

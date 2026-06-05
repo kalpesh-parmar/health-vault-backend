@@ -7,7 +7,6 @@ const {
 const createReminderSchema = z
   .object({
     medicationId: z.string().uuid(),
-    active: z.boolean().optional(),
   })
   .strict();
 

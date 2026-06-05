@@ -4,7 +4,7 @@ const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus"
 const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
-const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
+const { generateReminderOccurrences, refillTime } = require("../utils/reminderOccurrenceGenerator");
 const {
   validateSchema,
   createReminderSchema,
@@ -18,17 +18,17 @@ class MedicationReminderService {
     const validData = await validateSchema(createReminderSchema, data);
     // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
+    //refill reminder time
+    const refillReminderTime = refillTime(medication.endDate);
     // CREATE MAIN REMINDER
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
       medicationId: medication.id,
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
-      afterReminderMinutes: 10,
-      refillAlertBeforeDays: 2,
       dosePerIntake: medication.dosePerIntake,
       routineBase: medication.frequency,
       medicationTime: medication.medicationTime,
-      active: true,
+      refillReminderTime: refillReminderTime,
     });
 
     // GENERATE OCCURRENCES
@@ -74,11 +74,12 @@ class MedicationReminderService {
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_ALREADY_COMPLETED);
     }
 
-    // UPDATE OCCURRENCE
-    await medicationReminderOccurrenceRepository.update(id, {
+    const updatePayload = {
       status: validData.status,
       completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
-    });
+    };
+
+    await medicationReminderOccurrenceRepository.update(id, updatePayload);
 
     if (validData.status === reminderOccurrenceStatus.COMPLETED) {
       const medication = await medicationRepository.findById(occurrence.medicationId);
@@ -90,6 +91,7 @@ class MedicationReminderService {
         );
       }
     }
+
     return true;
   }
 

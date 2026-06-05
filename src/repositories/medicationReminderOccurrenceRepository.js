@@ -37,23 +37,6 @@ class MedicationReminderOccurrenceRepository {
           or(...pendingStatuses.map((status) => eq(medicationReminderOccurrence.status, status))),
 
           eq(medicationReminderOccurrence.softDelete, false),
-
-          or(
-            and(
-              eq(medicationReminderOccurrence.notificationSent, false),
-              lte(medicationReminderOccurrence.beforeReminderTime, new Date()),
-            ),
-
-            and(
-              eq(medicationReminderOccurrence.afterNotificationSent, false),
-              lte(medicationReminderOccurrence.afterReminderTime, new Date()),
-            ),
-
-            and(
-              eq(medicationReminderOccurrence.overdueNotificationSent, false),
-              sql`${medicationReminderOccurrence.afterNotificationSentAt} IS NOT NULL`,
-            ),
-          ),
         ),
       );
   }
@@ -65,9 +48,6 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -96,9 +76,6 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -201,12 +178,7 @@ class MedicationReminderOccurrenceRepository {
         medicationId: medicationReminderOccurrence.medicationId,
         status: medicationReminderOccurrence.status,
         actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
-        beforeReminderTime: medicationReminderOccurrence.beforeReminderTime,
-        afterReminderTime: medicationReminderOccurrence.afterReminderTime,
-        refillReminderTime: medicationReminderOccurrence.refillReminderTime,
         completedAt: medicationReminderOccurrence.completedAt,
-        notificationSent: medicationReminderOccurrence.notificationSent,
-        notificationSentAt: medicationReminderOccurrence.notificationSentAt,
         createdAt: medicationReminderOccurrence.createdAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
@@ -291,6 +263,7 @@ class MedicationReminderOccurrenceRepository {
           eq(medicationReminderOccurrence.reminderId, reminderId),
           eq(medicationReminderOccurrence.softDelete, false),
           eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
+          eq(medicationReminderOccurrence.isOverdue, false),
           gte(medicationReminderOccurrence.actualMedicationTime, new Date()),
         ),
       );

@@ -68,14 +68,6 @@ components:
           type: integer
           example: 5
 
-        afterReminderMinutes:
-          type: integer
-          example: 10
-
-        refillAlertBeforeDays:
-          type: integer
-          example: 1
-
         dosePerIntake:
           type: integer
           example: 1
@@ -89,10 +81,6 @@ components:
 
           items:
             $ref: "#/components/schemas/ReminderTime"
-
-        active:
-          type: boolean
-          example: true
 
         createdAt:
           type: string
@@ -133,24 +121,7 @@ components:
           type: string
           format: date-time
 
-        beforeReminderTime:
-          type: string
-          format: date-time
-
-        afterReminderTime:
-          type: string
-          format: date-time
-
         completedAt:
-          type: string
-          nullable: true
-          format: date-time
-
-        notificationSent:
-          type: boolean
-          example: false
-
-        notificationSentAt:
           type: string
           nullable: true
           format: date-time

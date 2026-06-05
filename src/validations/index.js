@@ -28,6 +28,7 @@ const {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  refillMedicationSchema,
 } = require("./medicationValidation");
 
 const {
@@ -88,4 +89,5 @@ module.exports = {
   createReminderSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
+  refillMedicationSchema,
 };

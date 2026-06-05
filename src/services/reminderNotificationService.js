@@ -3,6 +3,7 @@ const Mustache = require("mustache");
 const { reminderTypes } = require("../enums/reminderTypes");
 const notificationService = require("./notificationService");
 const { convertToISTTime } = require("../utils/reminderOccurrenceGenerator");
+const { notificationConstant } = require("../constants/notificationConstants");
 
 class ReminderNotificationService {
   ReminderNotificationService(data) {
@@ -37,11 +38,10 @@ class ReminderNotificationService {
   sendBeforeMedicationReminder(data) {
     console.log(" BEFORE MEDICATION REMINDER");
     const variable = this.ReminderNotificationService(data);
-    const template = "Upcoming dose {{medicineName}}. Be ready at {{localTime}}!";
     return {
       // occurrenceId: occurrence.occurrence.id,
-      title: "Medication Reminder",
-      body: Mustache.render(template, variable),
+      title: notificationConstant.BEFORE_REMINDER,
+      body: Mustache.render(notificationConstant.BEFORE_MEDICATION_TEMPLATE, variable),
       data: {
         type: notificationType.BEFORE_MEDICATION_REMINDER,
         ...variable,
@@ -53,11 +53,10 @@ class ReminderNotificationService {
   sendAfterMedicationReminder(data) {
     console.log(" AFTER MEDICATION REMINDER");
     const variable = this.ReminderNotificationService(data);
-    const template = `Did you take your {{medicineName}} at {{localTime}}?`;
     return {
       // occurrenceId: occurrence.occurrence.id,
-      title: "Medication Check-In",
-      body: Mustache.render(template, variable),
+      title: notificationConstant.AFTER_REMINDER,
+      body: Mustache.render(notificationConstant.AFTER_MEDICATION_TEMPLATE, variable),
       data: {
         type: notificationType.AFTER_MEDICATION_REMINDER,
         ...variable,
@@ -70,11 +69,10 @@ class ReminderNotificationService {
     // console.log("occurrence:==", data);
     console.log(" REFILL ALERT REMINDER");
     const variable = this.ReminderNotificationService(data);
-    const template = "{{medicineName}} may be running low. Consider refilling soon.";
     return {
       // medicationId: occurrence.medication.id,
-      title: "Refill Reminder",
-      body: Mustache.render(template, variable),
+      title: notificationConstant.REFILL_REMINDER,
+      body: Mustache.render(notificationConstant.REFILL_ALERT_TEMPLATE, variable),
       data: {
         type: notificationType.REFILL_ALERT,
         ...variable,
@@ -86,10 +84,9 @@ class ReminderNotificationService {
     try {
       console.log(" OVERDUE REMINDER");
       const variable = this.ReminderNotificationService(occurrence);
-      const template = `You may have missed your {{medicineName}} dose at {{localTime}}`;
       let payload = {
-        title: "Medication Overdue",
-        body: Mustache.render(template, variable),
+        title: notificationConstant.FOLLOW_UP_REMINDER,
+        body: Mustache.render(notificationConstant.FOLLOW_UP_TEMPLATE, variable),
         data: {
           type: notificationType.FOLLOW_UP_MEDICATION_REMINDER,
           ...variable,
