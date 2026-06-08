@@ -1,6 +1,6 @@
 const moment = require("moment-timezone");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
-const env = require("../configs/env");
+const { env } = require("../configs/env");
 
 function generateReminderOccurrences(reminder, medication, startFromDate = null, options = {}) {
   const occurrences = [];
@@ -64,7 +64,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
           reminder.beforeReminderMinutes,
         ),
         afterReminderTime: afterReminderTime(actualMedicationTime),
-        refillReminderTime: refillReminderTime(endDate),
+        refillReminderTime: refillTime(endDate),
         notificationSent: false,
         notificationSentAt: null,
         completedAt: null,
@@ -113,10 +113,12 @@ function afterReminderTime(actualMedicationTime) {
   );
 }
 
-function refillReminderTime(endDate) {
+function refillTime(endDate) {
   if (!env.refillAlertBeforeDays) {
     return null;
   }
+  const end = new Date(endDate);
+  end.setUTCHours(23, 59, 59, 999);
   return new Date(endDate.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
 }
 
@@ -125,5 +127,5 @@ module.exports = {
   calculateMedicationEndDate,
   beforeReminderTime,
   afterReminderTime,
-  refillReminderTime,
+  refillTime,
 };

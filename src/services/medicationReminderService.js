@@ -4,7 +4,10 @@ const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus"
 const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
-const generateReminderOccurrences = require("../utils/reminderOccurrenceGenerator");
+const {
+  generateReminderOccurrences,
+  refillTime,
+} = require("../utils/reminderOccurrenceGenerator");
 const {
   validateSchema,
   createReminderSchema,
@@ -19,6 +22,7 @@ class MedicationReminderService {
     // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
     // CREATE MAIN REMINDER
+    const refillReminderTime = refillTime(medication.endDate);
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
       medicationId: medication.id,
@@ -26,6 +30,8 @@ class MedicationReminderService {
       dosePerIntake: medication.dosePerIntake,
       routineBase: medication.frequency,
       medicationTime: medication.medicationTime,
+      refillReminderTime:refillReminderTime,
+      
     });
 
     // GENERATE OCCURRENCES
@@ -62,7 +68,7 @@ class MedicationReminderService {
     const validData = await validateSchema(updateOccurrenceSchema, data);
     const occurrence = await medicationReminderOccurrenceRepository.findById(id);
 
-    if (!occurrence || String(occurrence.patientId) !== String(userId)) { 
+    if (!occurrence || String(occurrence.patientId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_NOT_FOUND);
     }
 

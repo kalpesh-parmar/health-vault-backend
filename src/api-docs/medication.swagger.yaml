@@ -136,12 +136,6 @@ components:
           format: date
           example: 2026-05-12
 
-        endDate:
-          type: string
-          format: date
-          nullable: true
-          example: 2026-05-20
-
         ongoing:
           type: boolean
           default: false
@@ -152,25 +146,12 @@ components:
           default: 0
           example: 30
 
-        remainingQuantity:
-          type: integer
-          minimum: 0
-          default: 0
-          example: 25
-
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
-
+        
         reminderBeforeMinutes:
           type: integer
           default: 5
           example: 10
 
-        dailyConsumption:
-          type: integer
-          minimum: 0
-          default: 0
-          example: 2
 
         notes:
           type: string
@@ -262,9 +243,6 @@ components:
           minimum: 0
           default: 0
           example: 30
-
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
 
         reminderBeforeMinutes:
           type: integer

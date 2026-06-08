@@ -12,7 +12,7 @@ const {
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
-const generateReminderOccurrences = require("../utils/reminderOccurrenceGenerator");
+const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -222,8 +222,6 @@ class MedicationService {
     }
 
     const startFromDate = new Date(lastOccurrence.actualMedicationTime);
-
-    startFromDate.setUTCDate(startFromDate.getUTCDate() + 1);
 
     const reminderMedication = {
       ...updatedMedication,
