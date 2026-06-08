@@ -1,4 +1,4 @@
-const { and, asc, count, desc, eq, ilike, or, sql, lte } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
 // const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
@@ -249,7 +249,7 @@ class MedicationRepository {
           eq(medication.softDelete, false),
           eq(medication.ongoing, ongoing),
           sql`${medicationReminder.refillReminderTime} IS NOT NULL`,
-          lte(medicationReminder.refillReminderTime, new Date()),
+          sql`DATE(${medicationReminder.refillReminderTime}) <= CURRENT_DATE`,
         ),
       );
     return result;

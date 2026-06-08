@@ -9,10 +9,8 @@ const {
 } = require("../utils/reminderOccurrenceGenerator");
 const reminderNotificationService = require("./reminderNotificationService");
 const { reminderTypes } = require("../enums/reminderTypes");
+
 class ReminderService {
-  constructor() {
-    this.refillReminderFlag = true;
-  }
   //WRAP TWO FUNCTION IN ONE
   async processReminders() {
     await this.sendReminder();
@@ -24,7 +22,6 @@ class ReminderService {
       reminderOccurrenceStatus.PENDING,
     ]);
     for (const reminder of reminders) {
-      // console.log("reminder payload:==", reminder);
       try {
         const { occurrence, medication } = reminder;
         const now = new Date();
@@ -41,8 +38,6 @@ class ReminderService {
             reminder,
             reminderTypes.BEFORE,
           );
-          this.refillReminderFlag = true;
-          console.log("Sent Before reminder notification for occurrence:", occurrence.id);
         }
         //MARK AS FOLLOW UP TRUE AFTER ACTUAL MEDICATION TIME
         if (
@@ -53,7 +48,6 @@ class ReminderService {
           await medicationReminderOccurrenceRepository.update(occurrence.id, {
             isOverdue: true,
           });
-          console.log("Marked as follow up for occurrence:", occurrence.id);
         }
 
         // 2. Send after Notification
@@ -63,18 +57,15 @@ class ReminderService {
           isSameMinute(now, afterTime)
         ) {
           await reminderNotificationService.sendReminderNotification(reminder, reminderTypes.AFTER);
-          console.log("Sent notification after medication time for occurrence:", occurrence.id);
         }
 
-        //3. send follow up notification if 30 mins over due and not marked as skipped
+        //3. send follow up notification if 30 mins overdue and not marked as skipped
         if (
-          // occurrence.afterNotificationSent &&
           !occurrence.overdueNotificationSent &&
           occurrence.status === reminderOccurrenceStatus.PENDING &&
           isSameMinute(now, new Date(afterTime.getTime() + 30 * 60 * 1000))
         ) {
           await reminderNotificationService.sendOverdueNotification(reminder);
-          console.log("sent Followup notification to occurence:", occurrence.id);
         }
       } catch (err) {
         console.error("Reminder failed:", err);
@@ -84,16 +75,12 @@ class ReminderService {
   // 2. SEND REFILL ALERTS REMINDERS
   async sendRefillAlert() {
     const medications = await medicationRepository.findMedicationsForRefillAlert(true);
-
     const now = new Date();
 
     const hour = now.getHours();
     const minute = now.getMinutes();
 
-    const isReminderTime =
-      (hour === 10 && minute === 0) || // 10:00 AM
-      (hour === 19 && minute === 0); // 7:00 PM
-
+    const isReminderTime = (hour === 10 && minute === 0) || (hour === 19 && minute === 0);
     if (!isReminderTime) {
       return;
     }
@@ -105,14 +92,12 @@ class ReminderService {
         continue;
       }
       seenMedicationIds.add(medicationId);
-
       try {
         await reminderNotificationService.sendReminderNotification(
           medication,
           reminderTypes.REFILL,
         );
         await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
-        console.log(`Refill alert sent for medication ${medicationId}`);
       } catch (err) {
         console.error(`Refill alert failed for medication ${medicationId}`, err);
       }

@@ -7,6 +7,7 @@ const sessionRoutes = require("./sessionRoutes");
 const authRoutes = require("./authRoutes");
 const medicationReminderRoutes = require("./medicationReminderRoutes");
 const cronRoutes = require("./cronRoutes");
+const refill = require("./refillCountRoutes");
 const medicationRoutes = require("./medicationRoutes");
 const { db } = require("../configs/db");
 const { StatusCodes } = require("http-status-codes");
@@ -40,5 +41,5 @@ routes.use("/patient", patientRoutes);
 routes.use("/medications", medicationRoutes);
 routes.use("/medication-reminders", medicationReminderRoutes);
 routes.use("/cron", cronRoutes);
-
+routes.use("/refill", refill);
 module.exports = routes;

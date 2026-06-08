@@ -7,13 +7,17 @@ const { notificationConstant } = require("../constants/notificationConstants");
 
 class ReminderNotificationService {
   ReminderNotificationService(data) {
+    const actualTime = data?.occurrence?.actualMedicationTime;
+
     return {
-      medicine_time: data.occurrence.actualMedicationTime.toISOString(),
       medicineName: data.medication.medicationName,
-      localTime: convertToISTTime(data.occurrence.actualMedicationTime),
+      ...(actualTime && {
+        medicineTime: actualTime.toISOString(),
+        localTime: convertToISTTime(actualTime),
+      }),
     };
   }
-  // MAIN SEND NOTIFICATION
+  //  SEND NOTIFICATION
   async sendReminderNotification(occurrence, type) {
     try {
       let payload = null;
@@ -39,7 +43,6 @@ class ReminderNotificationService {
     console.log(" BEFORE MEDICATION REMINDER");
     const variable = this.ReminderNotificationService(data);
     return {
-      // occurrenceId: occurrence.occurrence.id,
       title: notificationConstant.BEFORE_REMINDER,
       body: Mustache.render(notificationConstant.BEFORE_MEDICATION_TEMPLATE, variable),
       data: {
@@ -54,7 +57,6 @@ class ReminderNotificationService {
     console.log(" AFTER MEDICATION REMINDER");
     const variable = this.ReminderNotificationService(data);
     return {
-      // occurrenceId: occurrence.occurrence.id,
       title: notificationConstant.AFTER_REMINDER,
       body: Mustache.render(notificationConstant.AFTER_MEDICATION_TEMPLATE, variable),
       data: {
@@ -66,11 +68,9 @@ class ReminderNotificationService {
   // REFILL ALERT REMINDER
 
   sendRefillAlertReminder(data) {
-    // console.log("occurrence:==", data);
     console.log(" REFILL ALERT REMINDER");
     const variable = this.ReminderNotificationService(data);
     return {
-      // medicationId: occurrence.medication.id,
       title: notificationConstant.REFILL_REMINDER,
       body: Mustache.render(notificationConstant.REFILL_ALERT_TEMPLATE, variable),
       data: {

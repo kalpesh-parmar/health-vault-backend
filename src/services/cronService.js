@@ -95,7 +95,6 @@ class cronService {
         status: value.status,
       });
     }
-    // console.log("Cron list: ",result);
     return result;
   }
 }

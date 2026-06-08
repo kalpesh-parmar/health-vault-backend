@@ -99,6 +99,41 @@
       "when": 1780571488605,
       "tag": "0024_fine_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780653815609,
+      "tag": "0013_black_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780666130963,
+      "tag": "0014_long_sally_floyd",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780666465128,
+      "tag": "0015_bumpy_pet_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780894077813,
+      "tag": "0016_cooing_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780894240305,
+      "tag": "0017_fat_bulldozer",
+      "breakpoints": true
     }
   ]
 }

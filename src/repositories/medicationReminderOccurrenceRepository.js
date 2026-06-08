@@ -25,9 +25,7 @@ class MedicationReminderOccurrenceRepository {
   async findPendingReminders(pendingStatuses) {
     return db
       .select({
-        // all fields from occurrence
         occurrence: medicationReminderOccurrence,
-        // patientId from medicationReminder
         medication: medication,
       })
       .from(medicationReminderOccurrence)
@@ -51,7 +49,10 @@ class MedicationReminderOccurrenceRepository {
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
-        isOverdue: medicationReminderOccurrence.isOverdue,
+        isOverdue:
+          sql`CASE WHEN ${medicationReminderOccurrence.status} = 'PENDING' AND ${medicationReminderOccurrence.actualMedicationTime} < NOW() THEN true ELSE false END`.mapWith(
+            Boolean,
+          ),
       })
       .from(medicationReminderOccurrence)
       .innerJoin(
@@ -139,7 +140,6 @@ class MedicationReminderOccurrenceRepository {
     if (date) {
       conditions.push(sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${date}`);
     }
-
     if (isOverdue) {
       conditions.push(eq(medicationReminderOccurrence.isOverdue, isOverdue));
     }
@@ -251,7 +251,7 @@ class MedicationReminderOccurrenceRepository {
     return result[0] || null;
   }
 
-  async softDeleteFutureOccurrences(reminderId) {
+  async softDeletePendingOccurrences(reminderId) {
     return db
       .update(medicationReminderOccurrence)
       .set({
@@ -263,8 +263,6 @@ class MedicationReminderOccurrenceRepository {
           eq(medicationReminderOccurrence.reminderId, reminderId),
           eq(medicationReminderOccurrence.softDelete, false),
           eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
-          eq(medicationReminderOccurrence.isOverdue, false),
-          gte(medicationReminderOccurrence.actualMedicationTime, new Date()),
         ),
       );
   }
@@ -306,7 +304,7 @@ class MedicationReminderOccurrenceRepository {
         COUNT(
           CASE
             WHEN ${medicationReminderOccurrence.status} = 'PENDING'
-            AND ${medicationReminderOccurrence.isOverdue} = false
+            AND ${medicationReminderOccurrence.actualMedicationTime} >= NOW()
             THEN 1
           END
         )
@@ -324,8 +322,8 @@ class MedicationReminderOccurrenceRepository {
         overdue: sql`
         COUNT(
           CASE
-            WHEN ${medicationReminderOccurrence.isOverdue} = true
-            AND ${medicationReminderOccurrence.status} = 'PENDING'
+            WHEN ${medicationReminderOccurrence.status} = 'PENDING'
+            AND ${medicationReminderOccurrence.actualMedicationTime} < NOW()
             THEN 1
           END
         )

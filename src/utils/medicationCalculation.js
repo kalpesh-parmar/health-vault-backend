@@ -12,7 +12,7 @@ function getUnitByMedicationType(type) {
       return "ML";
 
     case medictationType.DROP:
-      return "DROPS";
+      return "ML";
 
     case medictationType.INJECTION:
       return "UNITS";
@@ -30,11 +30,12 @@ function calculateMedicationValues(data, baseDate = null) {
   const calculationDate = baseDate ? new Date(baseDate) : new Date(data.startDate);
 
   const endDate = new Date(calculationDate);
-  endDate.setDate(endDate.getDate() + totalDays - 1);
+  endDate.setUTCDate(endDate.getUTCDate() + totalDays - 1);
+  const endDateString = endDate.toISOString().split("T")[0];
   const unit = getUnitByMedicationType(data.medicationType);
 
   return {
-    endDate,
+    endDate: endDateString,
     dailyConsumption,
     unit,
   };

@@ -27,6 +27,7 @@ const messageConstants = Object.freeze({
   PATIENT_PERMANENTLY_DELETED: "Patient permanently deleted successfully",
   PATIENT_UPDATED: "Patient updated successfully",
   PASSWORD_RESET_SUCCESS: "Password reset successfully",
+  REFILL_BADGE_COUNT_FETCH: "Fetch data successfully",
   REMINDER_SENT: "Reminder sent successfully",
   SESSION_CREATED: "Session created successfully",
   SESSION_FETCHED: "Session fetched successfully",

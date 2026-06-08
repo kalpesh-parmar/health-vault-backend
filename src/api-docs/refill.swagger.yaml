@@ -1,0 +1,32 @@
+openapi: 3.0.0
+info:
+  title: Refill API
+  version: 1.0.0
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    MedicationIdRequest:
+      type: object
+      additionalProperties: false
+      properties:
+
+paths:
+  /refill/badge-count/{medicationId}:
+    get:
+      tags: [Refill]
+      summary: Get Refill medication count
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: medicationId
+          required: true
+          schema:
+            type: string
+          description: Medication ID
+      responses:
+        "200": { description: Badge count fetched }

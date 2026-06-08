@@ -6,7 +6,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   const occurrences = [];
   const medicationTimes = medication.medicationTime || [];
   const userTimezone = medication.timezone || "Asia/Kolkata";
-  const { skipPastOccurrences = false } = options;
+  const { skipPastOccurrences = true } = options;
 
   const now = new Date();
   const currentDate = startFromDate ? new Date(startFromDate) : new Date(medication.startDate);
@@ -20,7 +20,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       const dosePerIntake = Number(medication.dosePerIntake || 1);
 
       if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
-        return occurrences;
+        break;
       }
 
       let [hours, minutes] = timeObj.time.split(":").map(Number);
@@ -75,7 +75,19 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       consumedQuantity += dosePerIntake;
     }
 
+    if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
+      break;
+    }
+
     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+  }
+
+  if (occurrences.length > 0) {
+    const finalEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
+    const finalRefillTime = refillTime(finalEndDate);
+    for (const occurrence of occurrences) {
+      occurrence.refillReminderTime = finalRefillTime;
+    }
   }
 
   return occurrences;
@@ -99,9 +111,6 @@ function calculateMedicationEndDate(medication) {
   calculatedEndDate.setUTCHours(23, 59, 59, 999);
   return calculatedEndDate;
 }
-// function beforeReminderTime(actualTime, reminderBeforeMinutes) {
-//   return new Date(actualTime.getTime() - reminderBeforeMinutes * 60000);
-// }
 
 function beforeReminderTime(actualMedicationTime, reminderBeforeMinutes) {
   if (!reminderBeforeMinutes) {
@@ -109,7 +118,18 @@ function beforeReminderTime(actualMedicationTime, reminderBeforeMinutes) {
   }
   return new Date(actualMedicationTime.getTime() - reminderBeforeMinutes * 60 * 1000);
 }
-
+function isSameMinute(time1, time2) {
+  if (!time1 || !time2) {
+    return false;
+  }
+  return (
+    time1.getMinutes() === time2.getMinutes() &&
+    time1.getHours() === time2.getHours() &&
+    time1.getDate() === time2.getDate() &&
+    time1.getMonth() === time2.getMonth() &&
+    time1.getFullYear() === time2.getFullYear()
+  );
+}
 function afterReminderTime(actualMedicationTime) {
   return new Date(
     actualMedicationTime.getTime() + env.afterReminderNotificationMinutes * 60 * 1000,
@@ -124,19 +144,8 @@ function refillTime(endDate) {
   end.setUTCHours(23, 59, 59, 999);
   return new Date(end.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
 }
-
-function isSameMinute(date1, date2) {
-  if (!date1 || !date2) return false;
-  return Math.floor(date1.getTime() / 60000) === Math.floor(date2.getTime() / 60000);
-}
-
-function convertToISTTime(date) {
-  return new Date(date).toLocaleTimeString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+function convertToISTTime(date, timeZone = "Asia/Kolkata") {
+  return moment(date).tz(timeZone).format("hh:mm a");
 }
 
 module.exports = {
@@ -145,6 +154,6 @@ module.exports = {
   beforeReminderTime,
   afterReminderTime,
   refillTime,
-  isSameMinute,
   convertToISTTime,
+  isSameMinute,
 };

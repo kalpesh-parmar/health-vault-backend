@@ -18,8 +18,8 @@ class MedicationReminderService {
     const validData = await validateSchema(createReminderSchema, data);
     // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
-    //refill reminder time
-    const refillReminderTime = refillTime(medication.endDate);
+    //refillTime (initial estimate based on current medication endDate)
+    const initialRefillTime = refillTime(medication.endDate);
     // CREATE MAIN REMINDER
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
@@ -27,16 +27,31 @@ class MedicationReminderService {
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
       dosePerIntake: medication.dosePerIntake,
       routineBase: medication.frequency,
+      refillReminderTime: initialRefillTime,
       medicationTime: medication.medicationTime,
-      refillReminderTime: refillReminderTime,
     });
 
-    // GENERATE OCCURRENCES
-    const occurrences = generateReminderOccurrences(reminder, medication);
+    // GENERATE OCCURRENCES (with skipPastOccurrences: true)
+    const occurrences = generateReminderOccurrences(reminder, medication, null, {
+      skipPastOccurrences: true,
+    });
 
     // BULK CREATE OCCURRENCES
     if (occurrences.length > 0) {
       await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
+
+      // Recalculate end date and refill reminder time based on the actual generated occurrences
+      const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
+      const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
+      await medicationRepository.updateById(medication.id, {
+        endDate: endDateOnly,
+      });
+
+      const finalRefillTime = refillTime(recalculatedEndDate);
+      await medicationReminderRepository.updateById(reminder.id, {
+        refillReminderTime: finalRefillTime,
+      });
+      reminder.refillReminderTime = finalRefillTime;
     }
 
     return reminder;
