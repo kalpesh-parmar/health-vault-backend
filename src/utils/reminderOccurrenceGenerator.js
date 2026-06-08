@@ -6,7 +6,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   const occurrences = [];
   const medicationTimes = medication.medicationTime || [];
   const userTimezone = medication.timezone || "Asia/Kolkata";
-  const { skipPastOccurrences = false } = options;
+  const { skipPastOccurrences = true } = options;
 
   const now = new Date();
   const currentDate = startFromDate ? new Date(startFromDate) : new Date(medication.startDate);
@@ -20,7 +20,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       const dosePerIntake = Number(medication.dosePerIntake || 1);
 
       if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
-        return occurrences;
+        break;
       }
 
       let [hours, minutes] = timeObj.time.split(":").map(Number);
@@ -48,7 +48,9 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       );
 
       const actualMedicationTime = localDateTime.clone().utc().toDate();
-
+      if (startFromDate && actualMedicationTime <= new Date(startFromDate)) {
+        continue;
+      }
       if (skipPastOccurrences && actualMedicationTime < now) {
         continue;
       }
@@ -75,7 +77,19 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       consumedQuantity += dosePerIntake;
     }
 
+    if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
+      break;
+    }
+
     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+  }
+
+  if (occurrences.length > 0) {
+    const finalEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
+    const finalRefillTime = refillTime(finalEndDate);
+    for (const occurrence of occurrences) {
+      occurrence.refillReminderTime = finalRefillTime;
+    }
   }
 
   return occurrences;
@@ -119,7 +133,7 @@ function refillTime(endDate) {
   }
   const end = new Date(endDate);
   end.setUTCHours(23, 59, 59, 999);
-  return new Date(endDate.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
+  return new Date(end.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
 }
 
 module.exports = {

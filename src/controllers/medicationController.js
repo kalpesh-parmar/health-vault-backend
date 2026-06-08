@@ -60,11 +60,7 @@ async function listMedicationsPaginated(req, res) {
 }
 // refill medication
 async function refillMedication(req, res) {
-  const result = await medicationService.refillMedication(
-    req.params.id,
-    req.auth.userId,
-    req.body,
-  );
+  const result = await medicationService.refillMedication(req.params.id, req.auth.userId, req.body);
 
   return successResponse(res, result, messageConstants.MEDICATION_REFILLED);
 }

@@ -146,7 +146,15 @@ components:
           default: 0
           example: 30
 
-        
+        remainingQuantity:
+          type: integer
+          minimum: 0
+          default: 0
+          example: 25
+
+        # unit:
+        #   $ref: "#/components/schemas/MedicationUnit"
+
         reminderBeforeMinutes:
           type: integer
           default: 5
@@ -244,6 +252,9 @@ components:
           default: 0
           example: 30
 
+        # unit:
+        #   $ref: "#/components/schemas/MedicationUnit"
+
         reminderBeforeMinutes:
           type: integer
           default: 5
@@ -263,8 +274,8 @@ components:
           type: string
           maxLength: 255
 
-        medicationType:
-          $ref: "#/components/schemas/MedicationType"
+        # medicationType:
+        #   $ref: "#/components/schemas/MedicationType"
 
         prescribedBy:
           type: string
@@ -290,12 +301,12 @@ components:
           items:
             $ref: "#/components/schemas/BestTakenType"
 
-        foodFrequency:
-          $ref: "#/components/schemas/FoodType"
+        # foodFrequency:
+        #   $ref: "#/components/schemas/FoodType"
 
-        startDate:
-          type: string
-          format: date
+        # startDate:
+        #   type: string
+        #   format: date
 
         ongoing:
           type: boolean
@@ -339,7 +350,6 @@ components:
 
         ongoing:
           type: boolean
-
 
         search:
           type: string

@@ -1,6 +1,6 @@
 {
-  "id": "7abae3c4-8c85-4d88-ad99-242558bd716d",
-  "prevId": "94cca59d-b8f9-4ccc-a69f-550fe2bb73fd",
+  "id": "1edf029a-13b0-4cbd-a368-8ffbe08f0a7a",
+  "prevId": "a6e44f6d-39bf-46df-9835-a8872eaccb88",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -298,16 +298,16 @@
         },
         "best_taken": {
           "name": "best_taken",
-          "type": "varchar(50)[]",
+          "type": "varchar(255)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "food_frequency": {
           "name": "food_frequency",
           "type": "food_type",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "start_date": {
           "name": "start_date",
@@ -342,16 +342,10 @@
           "notNull": false,
           "default": 0
         },
-        "dose_reminders": {
-          "name": "dose_reminders",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "unit": {
           "name": "unit",
-          "type": "varchar(20)",
+          "type": "unit",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -362,26 +356,11 @@
           "notNull": true,
           "default": 0
         },
-        "refill_alert": {
-          "name": "refill_alert",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
-        "is_reminder": {
-          "name": "is_reminder",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "reminder_before_minutes": {
           "name": "reminder_before_minutes",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": 5
+          "notNull": false
         },
         "notes": {
           "name": "notes",
@@ -502,27 +481,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "reminder_before_minutes": {
-          "name": "reminder_before_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 5
-        },
-        "after_reminder_minutes": {
-          "name": "after_reminder_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 10
-        },
-        "refill_alert_before_days": {
-          "name": "refill_alert_before_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 2
-        },
         "dose_per_intake": {
           "name": "dose_per_intake",
           "type": "integer",
@@ -531,7 +489,14 @@
         },
         "frequency": {
           "name": "frequency",
-          "type": "varchar(50)",
+          "type": "frequency",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ONCE_DAILY'"
+        },
+        "refill_reminder_time": {
+          "name": "refill_reminder_time",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -540,13 +505,6 @@
           "type": "json",
           "primaryKey": false,
           "notNull": false
-        },
-        "active": {
-          "name": "active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "created_at": {
           "name": "created_at",
@@ -679,36 +637,18 @@
           "primaryKey": false,
           "notNull": true
         },
-        "before_reminder_time": {
-          "name": "before_reminder_time",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "after_reminder_time": {
-          "name": "after_reminder_time",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "notification_sent": {
-          "name": "notification_sent",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "notification_sent_at": {
-          "name": "notification_sent_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
         "completed_at": {
           "name": "completed_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "is_overdue": {
+          "name": "is_overdue",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -783,36 +723,6 @@
           "columns": [
             {
               "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "before_reminder_idx": {
-          "name": "before_reminder_idx",
-          "columns": [
-            {
-              "expression": "before_reminder_time",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "after_reminder_idx": {
-          "name": "after_reminder_idx",
-          "columns": [
-            {
-              "expression": "after_reminder_time",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -999,12 +909,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_name": {
-          "name": "user_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
         "first_name": {
           "name": "first_name",
           "type": "varchar(255)",
@@ -1094,9 +998,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "age": {
-          "name": "age",
-          "type": "integer",
+        "date_of_birth": {
+          "name": "date_of_birth",
+          "type": "date",
           "primaryKey": false,
           "notNull": true
         },
@@ -1505,6 +1409,16 @@
       "values": [
         "BEFORE_FOOD",
         "AFTER_FOOD"
+      ]
+    },
+    "public.frequency": {
+      "name": "frequency",
+      "schema": "public",
+      "values": [
+        "ONCE_DAILY",
+        "TWICE_DAILY",
+        "THREE_TIMES_DAILY",
+        "AS_NEEDED"
       ]
     },
     "public.occurrence_status": {

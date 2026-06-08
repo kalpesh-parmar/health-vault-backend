@@ -1,146 +1,94 @@
-const { reminderType } = require("../enums/reminderType");
+// // const { notificationType } = require("../enums/notificationType");
+// // const { reminderType } = require("../enums/reminderType");
+// const notificationService = require("./notificationService");
 
-class ReminderNotificationService {
-  
-  // MAIN SEND NOTIFICATION
-  async sendReminderNotification(occurrence) {
-    try {
-      switch (occurrence.type) {
-      
-        // BEFORE MEDICATION
-        case reminderType.BEFORE_MEDICATION:
-          await this.sendBeforeMedicationReminder(occurrence);
-          break;
-        // AFTER MEDICATION
-        case reminderType.AFTER_MEDICATION:
-          await this.sendAfterMedicationReminder(occurrence);
-          break;
-        // REFILL ALERT
-        case reminderType.REFILL_ALERT:
-          await this.sendRefillAlertReminder(occurrence);
-          break;
+// class ReminderNotificationService {
+//   // MAIN SEND NOTIFICATION
+//   async sendReminderNotification(occurrence) {
+//     try {
+//       let payload = null;
 
-        default:
-          console.log("❌ Unknown reminder type");
-      }
-    } catch (error) {
-      console.error("❌ sendReminderNotification error:", error);
-    }
-  }
-  // BEFORE MEDICATION REMINDER
-  async sendBeforeMedicationReminder(occurrence) {
-    //
-    // TODO:
-    // FIREBASE PUSH NOTIFICATION
-    // SOCKET EVENT
-    // EMAIL
-    // SMS
-    //
+//       switch (occurrence.occurrence.type) {
+//         // BEFORE MEDICATION
+//         case reminderType.BEFORE_MEDICATION:
+//           payload = this.sendBeforeMedicationReminder(occurrence);
+//           break;
+//         // AFTER MEDICATION
+//         case reminderType.AFTER_MEDICATION:
+//           payload = this.sendAfterMedicationReminder(occurrence);
+//           break;
+//         // REFILL ALERT
+//         case reminderType.REFILL_ALERT:
+//           payload = this.sendRefillAlertReminder(occurrence);
+//           break;
 
-    console.log("💊 BEFORE MEDICATION REMINDER");
+//         default:
+//           console.log(" Unknown reminder type");
+//       }
+//       await notificationService.sendToUser(occurrence.patientId, payload);
+//     } catch (error) {
+//       console.error(" sendReminderNotification error:", error);
+//     }
+//   }
+//   // BEFORE MEDICATION REMINDER
+//   sendBeforeMedicationReminder(occurrence) {
+//     console.log(" BEFORE MEDICATION REMINDER");
+//     return {
+//       occurrenceId: occurrence.occurrence.id,
+//       title: "Medication Reminder",
+//       body: "Your medication time is coming soon.",
+//       data: {
+//         type: reminderType.BEFORE_MEDICATION,
+//       },
+//     };
+//   }
 
-    console.log({
-      occurrenceId: occurrence.id,
-      title: "Medication Reminder",
-      body: "Your medication time is coming soon.",
-      type: reminderType.BEFORE_MEDICATION,
-      scheduledAt: occurrence.scheduledAt,
-    });
-  }
+//   // AFTER MEDICATION REMINDER
+//   sendAfterMedicationReminder(occurrence) {
+//     console.log(" AFTER MEDICATION REMINDER");
+//     return {
+//       occurrenceId: occurrence.occurrence.id,
+//       title: "Did you take your medicine?",
+//       body: "Please confirm your medication status.",
+//       data: {
+//         type: reminderType.AFTER_MEDICATION,
+//         // actions: ["COMPLETE", "MISSED", "SKIPPED", "SNOOZE"],
+//       },
+//     };
+//   }
+//   // REFILL ALERT REMINDER
 
-  // AFTER MEDICATION REMINDER
-  async sendAfterMedicationReminder(occurrence) {
-    //
-    // USER ACTIONS:
-    // COMPLETE
-    // MISSED
-    // SKIPPED
-    // SNOOZE
-    //
+//   sendRefillAlertReminder(occurrence) {
+//     console.log(" REFILL ALERT REMINDER");
+//     return {
+//       occurrenceId: occurrence.occurrence.id,
+//       title: "Medication Refill Alert",
+//       body: "Your medication stock may finish soon.",
+//       data: {
+//         type: reminderType.REFILL_ALERT,
+//       },
+//     };
+//   }
 
-    console.log("💊 AFTER MEDICATION REMINDER");
+//   async sendOverdueNotification(occurrence) {
+//     try {
+//       console.log(" OVERDUE REMINDER");
+//       const payload = {
+//         occurrenceId: occurrence.occurrence.id,
+//         title: "Medication Overdue",
+//         body: "You missed your medication time.",
+//         data: {
+//           type: "OVERDUE_REMINDER",
+//           // medicationId: occurrence.occurrence.medicationId,
+//           // occurrenceId: occurrence.occurrence.id,
+//           // actions: ["COMPLETE", "SKIP"],
+//         },
+//       };
+//       await notificationService.sendToUser(occurrence.patientId, payload);
+//     } catch (error) {
+//       console.error(" sendOverdueNotification error:", error);
+//     }
+//   }
+// }
 
-    console.log({
-      occurrenceId: occurrence.id,
-      title: "Did you take your medication?",
-      body: "Please confirm your medication status.",
-      type: reminderType.AFTER_MEDICATION,
-      actions: ["COMPLETE", "MISSED", "SKIPPED", "SNOOZE"],
-      scheduledAt: occurrence.scheduledAt,
-    });
-  }
-  
-  // REFILL ALERT REMINDER
-
-  async sendRefillAlertReminder(occurrence) {
-    console.log("💊 REFILL ALERT REMINDER");
-
-    console.log({
-      occurrenceId: occurrence.id,
-
-      title: "Medication Refill Alert",
-
-      body: "Your medication stock may finish soon.",
-
-      type: reminderType.REFILL_ALERT,
-
-      scheduledAt: occurrence.scheduledAt,
-    });
-  }
-
-  //
-  // SEND PUSH NOTIFICATION
-  //
-  async sendPushNotification(userId, notificationData) {
-    try {
-      //
-      // TODO:
-      // FIREBASE FCM LOGIC
-      //
-
-      console.log("📲 Push notification sent");
-
-      console.log({
-        userId,
-
-        notificationData,
-      });
-
-      return true;
-    } catch (error) {
-      console.error("❌ Push notification error:", error);
-
-      return false;
-    }
-  }
-
-  //
-  // SEND SOCKET EVENT
-  //
-  async sendSocketEvent(userId, event, payload) {
-    try {
-      //
-      // TODO:
-      // SOCKET.IO LOGIC
-      //
-
-      console.log("🔌 Socket event sent");
-
-      console.log({
-        userId,
-
-        event,
-
-        payload,
-      });
-
-      return true;
-    } catch (error) {
-      console.error("❌ Socket event error:", error);
-
-      return false;
-    }
-  }
-}
-
-module.exports = new ReminderNotificationService();
+// module.exports = new ReminderNotificationService();

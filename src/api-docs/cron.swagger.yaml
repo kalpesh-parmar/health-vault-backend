@@ -1,0 +1,263 @@
+openapi: 3.0.0
+
+info:
+  title: Cron API
+  version: 1.0.0
+
+paths:
+  /cron/run-reminder:
+    post:
+      summary: Run reminders cron
+      tags:
+        - Cron
+
+      responses:
+        "200":
+          description: Reminder cron executed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Reminder sent successfully
+
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Internal Server Error
+
+  /cron/list:
+    get:
+      summary: List running cron jobs
+      tags:
+        - Cron
+
+      responses:
+        "200":
+          description: List of running cron jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Cron list fetched successfully
+                  data:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - SEND_REMINDERS
+                      - GENERATE_OCCURRENCES
+
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Internal Server Error
+
+  /cron/start:
+    post:
+      summary: Start a cron job
+      tags:
+        - Cron
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - key
+                - expression
+              properties:
+                key:
+                  type: string
+                  example: SEND_REMINDERS
+
+                expression:
+                  type: string
+                  example: "*/5 * * * *"
+
+      responses:
+        "200":
+          description: Cron started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+                  message:
+                    type: string
+                    example: Cron started successfully
+
+                  data:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        example: SEND_REMINDERS
+
+                      expression:
+                        type: string
+                        example: "*/5 * * * *"
+
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+
+                  message:
+                    type: string
+                    example: Internal Server Error
+
+  /cron/stop:
+    post:
+      summary: Stop a cron job
+      tags:
+        - Cron
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - key
+              properties:
+                key:
+                  type: string
+                  example: SEND_REMINDERS
+
+      responses:
+        "200":
+          description: Cron stopped successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+                  message:
+                    type: string
+                    example: Cron stopped successfully
+
+                  data:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                        example: SEND_REMINDERS
+
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+
+                  message:
+                    type: string
+                    example: Internal Server Error
+
+  /cron/startAll:
+    post:
+      summary: Start multiple cron jobs
+      tags:
+        - Cron
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required:
+                  - key
+                  - cronTime
+                properties:
+                  key:
+                    type: string
+                    example: SEND_REMINDERS
+
+                  cronTime:
+                    type: string
+                    example: "*/5 * * * *"
+
+      responses:
+        "200":
+          description: Multiple cron jobs started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+                  message:
+                    type: string
+                    example: All cron jobs started successfully
+
+        "500":
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+
+                  message:
+                    type: string
+                    example: Internal Server Error

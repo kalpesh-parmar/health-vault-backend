@@ -1,6 +1,6 @@
 {
-  "id": "29bb4450-c001-4411-a197-c6916f6dfe70",
-  "prevId": "4acf8db0-4a46-4eb8-9d41-8226f5fa6ed1",
+  "id": "e0c27dce-b670-4821-9442-d3c3ed3e925d",
+  "prevId": "14cb574c-7c1d-4fbb-8ed8-02603b94946a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1520,8 +1520,7 @@
         "COMPLETED",
         "MISSED",
         "SKIPPED",
-        "SNOOZED",
-        "OVERDUE"
+        "SNOOZED"
       ]
     },
     "public.occurrence_type": {

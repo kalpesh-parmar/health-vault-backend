@@ -1,6 +1,6 @@
 {
-  "id": "a21d83f0-0143-47f3-b61a-6818dabc0b4e",
-  "prevId": "2303425e-7517-41ff-b952-f7df06162453",
+  "id": "edd7febf-ca4b-4218-a36b-ace3d21c7f0c",
+  "prevId": "7e6814a4-23d5-4378-9b25-5b2931556a58",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -369,13 +369,6 @@
           "notNull": false,
           "default": false
         },
-        "is_reminder": {
-          "name": "is_reminder",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "reminder_before_minutes": {
           "name": "reminder_before_minutes",
           "type": "integer",
@@ -690,12 +683,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "medication_id": {
-          "name": "medication_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
         "type": {
           "name": "type",
           "type": "occurrence_type",
@@ -818,21 +805,6 @@
           "method": "btree",
           "with": {}
         },
-        "occurrence_medication_idx": {
-          "name": "occurrence_medication_idx",
-          "columns": [
-            {
-              "expression": "medication_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "occurrence_status_idx": {
           "name": "occurrence_status_idx",
           "columns": [
@@ -871,19 +843,6 @@
           "tableTo": "medication_reminders",
           "columnsFrom": [
             "reminder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "medication_reminder_occurrences_medication_id_medications_id_fk": {
-          "name": "medication_reminder_occurrences_medication_id_medications_id_fk",
-          "tableFrom": "medication_reminder_occurrences",
-          "tableTo": "medications",
-          "columnsFrom": [
-            "medication_id"
           ],
           "columnsTo": [
             "id"
@@ -1026,12 +985,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_name": {
-          "name": "user_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
         "first_name": {
           "name": "first_name",
           "type": "varchar(255)",
@@ -1121,9 +1074,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "age": {
-          "name": "age",
-          "type": "integer",
+        "date_of_birth": {
+          "name": "date_of_birth",
+          "type": "date",
           "primaryKey": false,
           "notNull": true
         },

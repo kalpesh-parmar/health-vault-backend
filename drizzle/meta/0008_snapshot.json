@@ -1,6 +1,6 @@
 {
-  "id": "2303425e-7517-41ff-b952-f7df06162453",
-  "prevId": "8ab34eee-2a2a-4ac7-8037-cda3cec8021f",
+  "id": "7e6814a4-23d5-4378-9b25-5b2931556a58",
+  "prevId": "10cd62ee-da09-45e5-8bd8-afdc8533fef7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -683,12 +683,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "medication_id": {
-          "name": "medication_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
         "type": {
           "name": "type",
           "type": "occurrence_type",
@@ -811,21 +805,6 @@
           "method": "btree",
           "with": {}
         },
-        "occurrence_medication_idx": {
-          "name": "occurrence_medication_idx",
-          "columns": [
-            {
-              "expression": "medication_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "occurrence_status_idx": {
           "name": "occurrence_status_idx",
           "columns": [
@@ -864,19 +843,6 @@
           "tableTo": "medication_reminders",
           "columnsFrom": [
             "reminder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "medication_reminder_occurrences_medication_id_medications_id_fk": {
-          "name": "medication_reminder_occurrences_medication_id_medications_id_fk",
-          "tableFrom": "medication_reminder_occurrences",
-          "tableTo": "medications",
-          "columnsFrom": [
-            "medication_id"
           ],
           "columnsTo": [
             "id"
@@ -1019,12 +985,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_name": {
-          "name": "user_name",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
         "first_name": {
           "name": "first_name",
           "type": "varchar(255)",
@@ -1111,6 +1071,12 @@
           "name": "gender",
           "type": "gender",
           "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date_of_birth": {
+          "name": "date_of_birth",
+          "type": "date",
           "primaryKey": false,
           "notNull": true
         },

@@ -1,4 +1,8 @@
 const messageConstants = Object.freeze({
+  CRON_STARTED: "Cron started successfully",
+  CRON_STOPPED: "Cron stopped successfully",
+  CRON_LIST: "Cron list fetched successfully",
+  CRON_STARTED_ALL: "Cron started all successfully",
   DOCUMENT_CREATED: "Document created successfully",
   DOCUMENT_DELETED: "Document deleted successfully",
   DOCUMENT_FETCHED: "Document fetched successfully",
@@ -23,6 +27,7 @@ const messageConstants = Object.freeze({
   PATIENT_PERMANENTLY_DELETED: "Patient permanently deleted successfully",
   PATIENT_UPDATED: "Patient updated successfully",
   PASSWORD_RESET_SUCCESS: "Password reset successfully",
+  REMINDER_SENT: "Reminder sent successfully",
   SESSION_CREATED: "Session created successfully",
   SESSION_FETCHED: "Session fetched successfully",
   TOKEN_REFRESHED: "Token refreshed successfully",

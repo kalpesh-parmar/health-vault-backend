@@ -1,6 +1,6 @@
 {
-  "id": "8ab34eee-2a2a-4ac7-8037-cda3cec8021f",
-  "prevId": "9b058233-9ce5-4412-b67b-b2ce7c642b5f",
+  "id": "10cd62ee-da09-45e5-8bd8-afdc8533fef7",
+  "prevId": "32c723ce-fd8d-4b62-b6d2-648471acfe2d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -666,6 +666,197 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.medication_reminder_occurrences": {
+      "name": "medication_reminder_occurrences",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "reminder_id": {
+          "name": "reminder_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "occurrence_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "occurrence_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDING'"
+        },
+        "scheduled_at": {
+          "name": "scheduled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actual_medication_time": {
+          "name": "actual_medication_time",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notification_sent": {
+          "name": "notification_sent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "notification_sent_at": {
+          "name": "notification_sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skipped_at": {
+          "name": "skipped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "missed_at": {
+          "name": "missed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "snooze_until": {
+          "name": "snooze_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "snooze_count": {
+          "name": "snooze_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "response_message": {
+          "name": "response_message",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantity_consumed": {
+          "name": "quantity_consumed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "soft_delete": {
+          "name": "soft_delete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "occurrence_reminder_idx": {
+          "name": "occurrence_reminder_idx",
+          "columns": [
+            {
+              "expression": "reminder_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "occurrence_status_idx": {
+          "name": "occurrence_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "occurrence_schedule_idx": {
+          "name": "occurrence_schedule_idx",
+          "columns": [
+            {
+              "expression": "scheduled_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "medication_reminder_occurrences_reminder_id_medication_reminders_id_fk": {
+          "name": "medication_reminder_occurrences_reminder_id_medication_reminders_id_fk",
+          "tableFrom": "medication_reminder_occurrences",
+          "tableTo": "medication_reminders",
+          "columnsFrom": [
+            "reminder_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.notifications": {
       "name": "notifications",
       "schema": "",
@@ -791,12 +982,6 @@
         "patient_code": {
           "name": "patient_code",
           "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_name": {
-          "name": "user_name",
-          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
@@ -1318,6 +1503,28 @@
         "ACTIVE",
         "PAUSED",
         "STOPPED"
+      ]
+    },
+    "public.occurrence_status": {
+      "name": "occurrence_status",
+      "schema": "public",
+      "values": [
+        "PENDING",
+        "SENT",
+        "COMPLETED",
+        "MISSED",
+        "SKIPPED",
+        "SNOOZED",
+        "OVERDUE"
+      ]
+    },
+    "public.occurrence_type": {
+      "name": "occurrence_type",
+      "schema": "public",
+      "values": [
+        "BEFORE_MEDICATION",
+        "AFTER_MEDICATION",
+        "REFILL_ALERT"
       ]
     },
     "public.user_status": {

@@ -1,1 +1,0 @@
-ALTER TABLE "medication_reminders" DROP COLUMN "routineBase";

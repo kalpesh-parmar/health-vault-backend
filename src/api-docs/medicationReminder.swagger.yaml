@@ -68,7 +68,6 @@ components:
           type: integer
           example: 5
 
-
         dosePerIntake:
           type: integer
           example: 1

@@ -1,6 +1,6 @@
 {
-  "id": "9b058233-9ce5-4412-b67b-b2ce7c642b5f",
-  "prevId": "29bb4450-c001-4411-a197-c6916f6dfe70",
+  "id": "32c723ce-fd8d-4b62-b6d2-648471acfe2d",
+  "prevId": "e0c27dce-b670-4821-9442-d3c3ed3e925d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -683,12 +683,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "medication_id": {
-          "name": "medication_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
         "type": {
           "name": "type",
           "type": "occurrence_type",
@@ -811,21 +805,6 @@
           "method": "btree",
           "with": {}
         },
-        "occurrence_medication_idx": {
-          "name": "occurrence_medication_idx",
-          "columns": [
-            {
-              "expression": "medication_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "occurrence_status_idx": {
           "name": "occurrence_status_idx",
           "columns": [
@@ -864,19 +843,6 @@
           "tableTo": "medication_reminders",
           "columnsFrom": [
             "reminder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "medication_reminder_occurrences_medication_id_medications_id_fk": {
-          "name": "medication_reminder_occurrences_medication_id_medications_id_fk",
-          "tableFrom": "medication_reminder_occurrences",
-          "tableTo": "medications",
-          "columnsFrom": [
-            "medication_id"
           ],
           "columnsTo": [
             "id"
