@@ -60,7 +60,7 @@ components:
               minimum: 1
 
 paths:
-  /refill/badge-count/{medicationId}:
+  /refill/badge-count:
     get:
       tags: [Refill]
       summary: Get Refill medication count
@@ -75,6 +75,7 @@ paths:
           description: Medication ID
       responses:
         "200": { description: Badge count fetched }
+
   /refill/list:
     get:
       tags: [Refill]

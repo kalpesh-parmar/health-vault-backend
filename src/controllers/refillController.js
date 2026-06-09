@@ -3,7 +3,8 @@ const { successResponse, paginatedSuccessResponse } = require("../helpers/genera
 const refillService = require("../services/refillService");
 
 async function badgeCount(req, res) {
-  const result = await refillService.badgeCount(req.params);
+  const { medicationId } = req.query;
+  const result = await refillService.badgeCount(medicationId);
   return successResponse(res, result, messageConstants.REFILL_BADGE_COUNT_FETCH);
 }
 

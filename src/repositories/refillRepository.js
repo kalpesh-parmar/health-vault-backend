@@ -73,12 +73,27 @@ class refillRepository {
     return result[0] || null;
   }
   async getUnreadCount(medicationId) {
-    const result = await db
-      .select({ count: sql`count(*)` })
-      .from(refillCount)
-      .where(and(eq(refillCount.medicationId, medicationId)));
+    // const result = await db
+    //   .select({ count: sql`count(*)` })
+    //   .from(refillCount)
+    //   .where(and(eq(refillCount.medicationId, medicationId), eq(refillCount.softDelete, false)));
+    // return Number(result[0].count);
+    const [list, countResult] = await Promise.all([
+      db
+        .select()
+        .from(refillCount)
+        .where(and(eq(refillCount.medicationId, medicationId), eq(refillCount.softDelete, false))),
 
-    return Number(result[0].count);
+      db
+        .select({ count: sql`count(*)` })
+        .from(refillCount)
+        .where(and(eq(refillCount.medicationId, medicationId), eq(refillCount.softDelete, false))),
+    ]);
+
+    return {
+      count: Number(countResult[0].count),
+      list,
+    };
   }
   async getRefillList(userId) {
     const result = await db

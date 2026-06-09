@@ -2,8 +2,8 @@ const refillRepository = require("../repositories/refillRepository");
 const { validateSchema, listRefillQuerySchema } = require("../validations");
 
 class refillService {
-  async badgeCount(payload) {
-    const count = await refillRepository.getUnreadCount(payload.medicationId);
+  async badgeCount(medicationId) {
+    const count = await refillRepository.getUnreadCount(medicationId);
     return { count };
   }
   async getRefillList(userId) {
