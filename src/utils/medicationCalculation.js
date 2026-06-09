@@ -1,5 +1,5 @@
 const { medictationType } = require("../enums/medicationType");
-
+const { set } = require("date-fns");
 function getUnitByMedicationType(type) {
   switch (type) {
     case medictationType.TABLET:
@@ -29,27 +29,22 @@ function calculateMedicationValues(data, baseDate = null) {
   const totalDays = Math.ceil(quantity / dailyConsumption);
   const calculationDate = baseDate ? new Date(baseDate) : new Date(data.startDate);
 
+  const now = new Date();
+
+  const timeParts = {
+    hours: now.getUTCHours(),
+    minutes: now.getUTCMinutes(),
+    seconds: now.getUTCSeconds(),
+    milliseconds: now.getUTCMilliseconds(),
+  };
   const endDate = calculationDate;
   endDate.setUTCDate(endDate.getUTCDate() + totalDays - 1);
-  // endDate.setUTCHours(23, 59, 59, 999);
-  // const endDateString = endDate.split("T")[0];
-  const now = new Date();
-  endDate.setUTCHours(
-    now.getUTCHours(),
-    now.getUTCMinutes(),
-    now.getUTCSeconds(),
-    now.getUTCMilliseconds(),
-  );
-  const startDate = new Date(data.startDate);
-  startDate.setUTCHours(
-    now.getUTCHours(),
-    now.getUTCMinutes(),
-    now.getUTCSeconds(),
-    now.getUTCMilliseconds(),
-  );
+
+  const updatedEndDate = set(endDate, timeParts);
+  const startDate = set(new Date(data.startDate), timeParts);
 
   return {
-    endDate,
+    endDate: updatedEndDate,
     dailyConsumption,
     unit: getUnitByMedicationType(data.medicationType),
     startDate,
