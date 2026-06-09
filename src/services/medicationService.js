@@ -227,9 +227,7 @@ class MedicationService {
       ...updatedMedication,
       remainingQuantity: quantity,
       totalQuantity: quantity,
-    };
-
-    // Refill should skip past occurrences in case the last occurrence was long ago
+    }; // Refill should skip past occurrences in case the last occurrence was long ago
     const occurrences = generateReminderOccurrences(reminder, reminderMedication, startFromDate, {
       skipPastOccurrences: true,
     });

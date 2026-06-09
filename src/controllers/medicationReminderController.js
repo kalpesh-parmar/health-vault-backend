@@ -54,9 +54,7 @@ async function getTodayOccurrences(req, res) {
 }
 // medication summary
 async function getMedicationSummary(req, res) {
-  const userId = req.auth.userId;
-
-  const result = await medicationReminderService.getMedicationSummary(userId, req.query);
+  const result = await medicationReminderService.getMedicationSummary(req.auth.userId, req.body);
 
   return successResponse(res, result, messageConstants.MEDICTION_SUMMARY);
 }

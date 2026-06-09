@@ -72,15 +72,15 @@ components:
           type: integer
           example: 1
 
-        routineBase:
-          type: string
-          example: ONCE_DAILY
+        # routineBase:
+        #   type: string
+        #   example: ONCE_DAILY
 
-        medicationTime:
-          type: array
+        # medicationTime:
+        #   type: array
 
-          items:
-            $ref: "#/components/schemas/ReminderTime"
+        #   items:
+        #     $ref: "#/components/schemas/ReminderTime"
 
         createdAt:
           type: string
@@ -318,7 +318,7 @@ paths:
           description: Unauthorized
 
   /medication-reminders/occurrences/summary:
-    get:
+    post:
       tags:
         - Medication Reminder Occurrence
 
@@ -327,30 +327,22 @@ paths:
       security:
         - bearerAuth: []
 
-      parameters:
-        - in: query
-          name: date
-          required: false
-          schema:
-            type: string
-            format: date
-          example: "2026-05-30"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                startDate:
+                  type: string
+                  format: date
+                  example: "2026-05-01"
 
-        - in: query
-          name: startDate
-          required: false
-          schema:
-            type: string
-            format: date
-          example: "2026-05-01"
-
-        - in: query
-          name: endDate
-          required: false
-          schema:
-            type: string
-            format: date
-          example: "2026-05-30"
+                endDate:
+                  type: string
+                  format: date
+                  example: "2026-05-30"
 
       responses:
         "200":

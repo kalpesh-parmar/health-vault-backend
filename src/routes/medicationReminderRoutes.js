@@ -12,11 +12,11 @@ router.get("/", verifyToken, medicationReminderController.getAllReminders);
 // GET ALL OCCURRENCES
 router.get("/occurrences", verifyToken, medicationReminderController.getAllOccurrences);
 
-//count api
-router.get("/occurrences/summary", verifyToken, medicationReminderController.getMedicationSummary);
-
 //get today occurrences
 router.get("/occurrences/today", verifyToken, medicationReminderController.getTodayOccurrences);
+
+//count api
+router.post("/occurrences/summary", verifyToken, medicationReminderController.getMedicationSummary);
 
 // FILTER OCCURRENCES + PAGINATION
 router.post("/occurrences/list", verifyToken, medicationReminderController.getOccurrences);

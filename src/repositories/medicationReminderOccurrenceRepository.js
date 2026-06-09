@@ -272,28 +272,23 @@ class MedicationReminderOccurrenceRepository {
       eq(medicationReminderOccurrence.patientId, userId),
       eq(medicationReminderOccurrence.softDelete, false),
     ];
-
-    // Single Date Filter
-    if (filters.date) {
+    // Single specific date when startDate and endDate are same
+    if (filters.startDate && filters.endDate && filters.startDate === filters.endDate) {
       conditions.push(
-        sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${filters.date}`,
+        sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${filters.startDate}`,
       );
-    }
+    } else {
+      if (filters.startDate) {
+        conditions.push(
+          gte(medicationReminderOccurrence.actualMedicationTime, new Date(`${filters.startDate}`)),
+        );
+      }
 
-    // Date Range Filter
-    if (filters.startDate) {
-      conditions.push(
-        gte(medicationReminderOccurrence.actualMedicationTime, new Date(filters.startDate)),
-      );
-    }
-
-    if (filters.endDate) {
-      conditions.push(
-        lte(
-          medicationReminderOccurrence.actualMedicationTime,
-          new Date(`${filters.endDate}T23:59:59`),
-        ),
-      );
+      if (filters.endDate) {
+        conditions.push(
+          lte(medicationReminderOccurrence.actualMedicationTime, new Date(`${filters.endDate}`)),
+        );
+      }
     }
 
     const result = await db
@@ -322,8 +317,7 @@ class MedicationReminderOccurrenceRepository {
         overdue: sql`
         COUNT(
           CASE
-            WHEN ${medicationReminderOccurrence.status} = 'PENDING'
-            AND ${medicationReminderOccurrence.actualMedicationTime} < NOW()
+            WHEN ${medicationReminderOccurrence.isOverdue} = true 
             THEN 1
           END
         )

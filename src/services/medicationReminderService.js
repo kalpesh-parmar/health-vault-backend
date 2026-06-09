@@ -26,9 +26,9 @@ class MedicationReminderService {
       medicationId: medication.id,
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
       dosePerIntake: medication.dosePerIntake,
-      routineBase: medication.frequency,
+      // routineBase: medication.frequency,
       refillReminderTime: initialRefillTime,
-      medicationTime: medication.medicationTime,
+      // medicationTime: medication.medicationTime,
     });
 
     // GENERATE OCCURRENCES (with skipPastOccurrences: true)
@@ -88,7 +88,13 @@ class MedicationReminderService {
     if (occurrence.status === reminderOccurrenceStatus.COMPLETED) {
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_ALREADY_COMPLETED);
     }
-
+    //do not allow future reminders to be completed
+    if (
+      validData.status === reminderOccurrenceStatus.COMPLETED &&
+      new Date(occurrence.actualMedicationTime) > new Date()
+    ) {
+      throw new NotFoundException(errorConstants.FUTURE_REMINDER_CANNOT_BE_COMPLETED);
+    }
     const updatePayload = {
       status: validData.status,
       completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
