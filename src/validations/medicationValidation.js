@@ -33,6 +33,7 @@ const dateField = z.coerce.date({
   invalid_type_error: errorConstants.INVALID_DATE,
   required_error: errorConstants.DATE_REQUIRED,
 });
+
 //comman validation function
 const validateMedicationSelections = (data, ctx) => {
   if (!data.frequency) {

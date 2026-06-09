@@ -56,6 +56,7 @@ const messageConstants = Object.freeze({
   TODAY_REFILL_ALERTS_FETCHED: "Today's refill alerts fetched successfully",
   REFILL_ALERT_COMPLETED: "Refill alert marked as completed",
   REFILL_ALERT_SNOOZED: "Refill alert snoozed",
+  REFILL_FILTERED_LIST_FETCHED: "Refill filtered list fetched successfully",
   MEDICATION_REMINDER_CREATED: "Medication reminder created successfully",
   MEDICATION_OCCURRENCE_UPDATED: "Medication occurrence updated successfully",
   MEDICTION_SUMMARY: "Medication summary fetched successfully",

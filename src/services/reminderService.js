@@ -6,9 +6,11 @@ const {
   beforeReminderTime,
   afterReminderTime,
   isSameMinute,
+  refillTime,
 } = require("../utils/reminderOccurrenceGenerator");
 const reminderNotificationService = require("./reminderNotificationService");
 const { reminderTypes } = require("../enums/reminderTypes");
+const { now } = require("moment-timezone");
 
 class ReminderService {
   //WRAP TWO FUNCTION IN ONE
@@ -75,31 +77,27 @@ class ReminderService {
   // 2. SEND REFILL ALERTS REMINDERS
   async sendRefillAlert() {
     const medications = await medicationRepository.findMedicationsForRefillAlert(true);
-    const now = new Date();
-
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-
-    const isReminderTime = (hour === 10 && minute === 0) || (hour === 19 && minute === 0);
-    if (!isReminderTime) {
-      return;
-    }
-
     const seenMedicationIds = new Set();
     for (const medication of medications) {
-      const medicationId = medication.medication.id;
-      if (seenMedicationIds.has(medicationId)) {
-        continue;
-      }
-      seenMedicationIds.add(medicationId);
-      try {
-        await reminderNotificationService.sendReminderNotification(
-          medication,
-          reminderTypes.REFILL,
-        );
-        await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
-      } catch (err) {
-        console.error(`Refill alert failed for medication ${medicationId}`, err);
+      const refill = refillTime(medication.medication.endDate);
+      const hour = refill.getHours();
+      const minute = refill.getMinutes();
+
+      if (now === hour && now === minute) {
+        const medicationId = medication.medication.id;
+        if (seenMedicationIds.has(medicationId)) {
+          continue;
+        }
+        seenMedicationIds.add(medicationId);
+        try {
+          await reminderNotificationService.sendReminderNotification(
+            medication,
+            reminderTypes.REFILL,
+          );
+          await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
+        } catch (err) {
+          console.error(`Refill alert failed for medication ${medicationId}`, err);
+        }
       }
     }
   }

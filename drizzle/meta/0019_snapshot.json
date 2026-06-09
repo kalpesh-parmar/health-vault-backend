@@ -1,5 +1,5 @@
 {
-  "id": "b8b8c8dc-b642-4dec-b120-dadd45803c2f",
+  "id": "4720158e-ebf2-4b31-aed6-84cba8ee1855",
   "prevId": "399b47c5-e5ed-4d9a-9af9-e9380eb2e818",
   "version": "7",
   "dialect": "postgresql",
@@ -311,13 +311,13 @@
         },
         "start_date": {
           "name": "start_date",
-          "type": "date",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": true
         },
         "end_date": {
           "name": "end_date",
-          "type": "date",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -1211,8 +1211,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "total_quantity": {
-          "name": "total_quantity",
+        "before_refill_total_quantity": {
+          "name": "before_refill_total_quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "before_refill_remaining_quantity": {
+          "name": "before_refill_remaining_quantity",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
@@ -1223,8 +1229,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "remaining_quantity": {
-          "name": "remaining_quantity",
+        "after_refill_total_quantity": {
+          "name": "after_refill_total_quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "after_refill_remaining_quantity": {
+          "name": "after_refill_remaining_quantity",
           "type": "integer",
           "primaryKey": false,
           "notNull": true

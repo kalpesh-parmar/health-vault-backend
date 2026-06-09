@@ -29,15 +29,30 @@ function calculateMedicationValues(data, baseDate = null) {
   const totalDays = Math.ceil(quantity / dailyConsumption);
   const calculationDate = baseDate ? new Date(baseDate) : new Date(data.startDate);
 
-  const endDate = new Date(calculationDate);
+  const endDate = calculationDate;
   endDate.setUTCDate(endDate.getUTCDate() + totalDays - 1);
-  const endDateString = endDate.toISOString().split("T")[0];
-  const unit = getUnitByMedicationType(data.medicationType);
+  // endDate.setUTCHours(23, 59, 59, 999);
+  // const endDateString = endDate.split("T")[0];
+  const now = new Date();
+  endDate.setUTCHours(
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+    now.getUTCSeconds(),
+    now.getUTCMilliseconds(),
+  );
+  const startDate = new Date(data.startDate);
+  startDate.setUTCHours(
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+    now.getUTCSeconds(),
+    now.getUTCMilliseconds(),
+  );
 
   return {
-    endDate: endDateString,
+    endDate,
     dailyConsumption,
-    unit,
+    unit: getUnitByMedicationType(data.medicationType),
+    startDate,
   };
 }
 

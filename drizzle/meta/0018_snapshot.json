@@ -1,5 +1,5 @@
 {
-  "id": "f0294db3-596d-43eb-aa44-f383106bd41d",
+  "id": "22b14b64-3b4c-47cc-b2eb-fcfcdbfb48e1",
   "prevId": "399b47c5-e5ed-4d9a-9af9-e9380eb2e818",
   "version": "7",
   "dialect": "postgresql",
@@ -311,13 +311,13 @@
         },
         "start_date": {
           "name": "start_date",
-          "type": "date",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": true
         },
         "end_date": {
           "name": "end_date",
-          "type": "date",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

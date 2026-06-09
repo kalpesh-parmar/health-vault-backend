@@ -141,7 +141,6 @@ function refillTime(endDate) {
     return null;
   }
   const end = new Date(endDate);
-  end.setUTCHours(23, 59, 59, 999);
   return new Date(end.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
 }
 function convertToISTTime(date, timeZone = "Asia/Kolkata") {
