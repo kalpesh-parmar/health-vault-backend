@@ -1,11 +1,6 @@
 {
-<<<<<<< HEAD:drizzle/meta/0017_snapshot.json
-  "id": "811c4408-b229-43d9-a39a-2094c3b61510",
-  "prevId": "e8d94c5e-64a5-4fbe-9d38-9f829a3d84bd",
-=======
-  "id": "4720158e-ebf2-4b31-aed6-84cba8ee1855",
-  "prevId": "399b47c5-e5ed-4d9a-9af9-e9380eb2e818",
->>>>>>> fe6fae4 (feat(notification): api for refill count, list and list-pagination):drizzle/meta/0019_snapshot.json
+  "id": "e4aa604b-9162-48c5-8c1b-37c33e00385b",
+  "prevId": "ba084f3b-4b6a-4a61-b510-b4e91785a8fe",
   "version": "7",
   "dialect": "postgresql",
   "tables": {

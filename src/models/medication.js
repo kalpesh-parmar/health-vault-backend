@@ -8,7 +8,6 @@ const {
   json,
   uuid,
   varchar,
-  date,
 } = require("drizzle-orm/pg-core");
 
 const { medicationTypeValues } = require("../enums/medicationType");
