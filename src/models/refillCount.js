@@ -19,9 +19,11 @@ const refillCount = pgTable(
         onDelete: "cascade",
       })
       .notNull(),
-    totalQuantity: integer("total_quantity").notNull(),
+    beforeRefillTotalQuantity: integer("before_refill_total_quantity").notNull(),
+    beforeRefillRemainingQuantity: integer("before_refill_remaining_quantity").notNull(),
     refillQuantity: integer("refill_quantity").notNull(),
-    remainingQuantity: integer("remaining_quantity").notNull(),
+    afterRefillTotalQuantity: integer("after_refill_total_quantity").notNull(),
+    afterRefillRemainingQuantity: integer("after_refill_remaining_quantity").notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
     })

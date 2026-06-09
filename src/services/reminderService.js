@@ -1,7 +1,14 @@
 // repositories/services
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
-const reminderNotificationService = require("./reminderNotificationService");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
+const medicationRepository = require("../repositories/medicationRepository");
+const {
+  refillTime,
+} = require("../utils/reminderOccurrenceGenerator");
+const reminderNotificationService = require("./reminderNotificationService");
+const { reminderTypes } = require("../enums/reminderTypes");
+const { now } = require("moment-timezone");
+
 class ReminderService {
   // 1. SEND REMINDERS (EVERY MINUTE)
   async sendReminder() {
@@ -38,6 +45,33 @@ class ReminderService {
         }
       } catch (err) {
         console.error("Reminder failed:", err);
+      }
+    }
+  }
+  // 2. SEND REFILL ALERTS REMINDERS
+  async sendRefillAlert() {
+    const medications = await medicationRepository.findMedicationsForRefillAlert(true);
+    const seenMedicationIds = new Set();
+    for (const medication of medications) {
+      const refill = refillTime(medication.medication.endDate);
+      const hour = refill.getHours();
+      const minute = refill.getMinutes();
+
+      if (now === hour && now === minute) {
+        const medicationId = medication.medication.id;
+        if (seenMedicationIds.has(medicationId)) {
+          continue;
+        }
+        seenMedicationIds.add(medicationId);
+        try {
+          await reminderNotificationService.sendReminderNotification(
+            medication,
+            reminderTypes.REFILL,
+          );
+          await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
+        } catch (err) {
+          console.error(`Refill alert failed for medication ${medicationId}`, err);
+        }
       }
     }
   }

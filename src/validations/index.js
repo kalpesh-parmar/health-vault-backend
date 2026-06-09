@@ -7,6 +7,7 @@ const {
   listDocumentsPaginatedSchema,
   listDocumentsQuerySchema,
 } = require("./documentValidation");
+const { listRefillQuerySchema } = require("./refillValidation");
 const {
   createPatientSchema,
   emailOnlySchema,
@@ -82,6 +83,7 @@ module.exports = {
   updatePatientSchema,
   userIdBodySchema,
   validateSchema,
+  listRefillQuerySchema,
   verifyOtpSchema,
   createMedicationSchema,
   updateMedicationSchema,

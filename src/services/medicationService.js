@@ -23,7 +23,8 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, dailyConsumption, unit } = calculateMedicationValues(validData);
+
+    const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
@@ -32,6 +33,7 @@ class MedicationService {
       dailyConsumption,
       remainingQuantity: validData.totalQuantity,
       unit,
+      startDate,
     });
     return medication;
   }
@@ -217,8 +219,8 @@ class MedicationService {
       return updatedMedication;
     }
 
-    const startFromDate = new Date(lastOccurrence.actualMedicationTime);
-    startFromDate.setUTCDate(startFromDate.getUTCDate());
+    const startFromDate = lastOccurrence.actualMedicationTime;
+    startFromDate + 1;
 
     const reminderMedication = {
       ...updatedMedication,
@@ -234,9 +236,9 @@ class MedicationService {
 
       // Recalculate end date based on actual generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
+      // const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(id, {
-        endDate: endDateOnly,
+        endDate: recalculatedEndDate,
       });
       updatedMedication.endDate = recalculatedEndDate;
 
@@ -246,9 +248,11 @@ class MedicationService {
       await refillCountRepository.add({
         userId: medication.userId,
         medicationId: medication.id,
-        totalQuantity: medication.totalQuantity,
+        beforeRefillTotalQuantity: medication.totalQuantity,
+        beforeRefillRemainingQuantity: medication.remainingQuantity,
         refillQuantity: quantity,
-        remainingQuantity: newRemainingQuantity,
+        afterRefillTotalQuantity: newTotalQuantity,
+        afterRefillRemainingQuantity: newRemainingQuantity,
       });
       await medicationReminderRepository.updateById(reminder.id, {
         refillReminderTime: finalRefillTime,

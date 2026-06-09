@@ -42,9 +42,9 @@ class MedicationReminderService {
 
       // Recalculate end date and refill reminder time based on the actual generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
+      // const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(medication.id, {
-        endDate: endDateOnly,
+        endDate: recalculatedEndDate,
       });
 
       const finalRefillTime = refillTime(recalculatedEndDate);
