@@ -75,7 +75,6 @@ paths:
           description: Medication ID
       responses:
         "200": { description: Badge count fetched }
-
   /refill/list:
     get:
       tags: [Refill]
