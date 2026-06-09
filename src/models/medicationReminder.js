@@ -1,4 +1,4 @@
-const { pgTable, uuid, timestamp, integer, boolean, index, json } = require("drizzle-orm/pg-core");
+const { pgTable, uuid, timestamp, integer, boolean, index,} = require("drizzle-orm/pg-core");
 const { medication } = require("./medication");
 const { patient } = require("./patient");
 const { frequencyType } = require("../enums/frequencyType");
@@ -21,9 +21,9 @@ const medicationReminder = pgTable(
       })
       .notNull(),
     dosePerIntake: integer("dose_per_intake"),
-    routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
+    // routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
     refillReminderTime: timestamp("refill_reminder_time"),
-    medicationTime: json("medication_times"),
+    // medicationTime: json("medication_times"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
     })

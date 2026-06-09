@@ -89,9 +89,7 @@ class MedicationRepository {
   // FIND ALL FILTERS
   async findAllWithFilters({ filter = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
-
     const orderClause = buildOrderClause(sort);
-
     const rows = await db.select().from(medication).where(where).orderBy(orderClause);
 
     const totalRows = await db
@@ -174,12 +172,7 @@ class MedicationRepository {
         ...payload,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(medication.id, id),
-          eq(medication.softDelete, false),
-        ),
-      )
+      .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
 
     return result[0] || null;

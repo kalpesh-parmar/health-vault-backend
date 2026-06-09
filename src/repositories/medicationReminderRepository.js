@@ -18,8 +18,9 @@ class MedicationReminderRepository {
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
         dosePerIntake: medicationReminder.dosePerIntake,
-        routineBase: medicationReminder.routineBase,
-        medicationTime: medicationReminder.medicationTime,
+        medicationSchedule: medication.medicationSchedule,
+        // routineBase: medicationReminder.routineBase,
+        // medicationTime: medicationReminder.medicationTime,
         createdAt: medicationReminder.createdAt,
         updatedAt: medicationReminder.updatedAt,
       })

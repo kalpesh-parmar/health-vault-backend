@@ -69,7 +69,7 @@ class MedicationService {
     };
 
     // Recalculate endDate, dailyConsumption and unit based on updated data
-    const { endDate, dailyConsumption } = calculateMedicationValues(
+    const { endDate, dailyConsumption, unit } = calculateMedicationValues(
       medicationDataForCalculation,
       new Date(),
     );
@@ -80,6 +80,7 @@ class MedicationService {
       remainingQuantity,
       endDate,
       dailyConsumption,
+      unit,
     });
 
     if (!reminder) {
@@ -223,8 +224,7 @@ class MedicationService {
       ...updatedMedication,
       remainingQuantity: quantity,
       totalQuantity: quantity,
-    };
-    // Refill should skip past occurrences in case the last occurrence was long ago
+    }; // Refill should skip past occurrences in case the last occurrence was long ago
     const occurrences = generateReminderOccurrences(reminder, reminderMedication, startFromDate, {
       skipPastOccurrences: true,
     });

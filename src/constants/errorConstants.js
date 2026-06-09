@@ -92,6 +92,8 @@ const errorConstants = Object.freeze({
   NIGHT_TIME_INVALID: "Night time should be between 7:00 PM and 11:00 PM",
   ONE_REQUIRED: "At least one value is required",
   QUANTITY_REQUIRED: "Quantity is required",
+  START_DATE_PAST: "Start date cannot be in the past.",
+  FUTURE_REMINDER_CANNOT_BE_COMPLETED: "Future remider cannot be completed",
 });
 
 module.exports = { errorConstants };

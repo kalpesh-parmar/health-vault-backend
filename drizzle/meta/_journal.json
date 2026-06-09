@@ -99,6 +99,34 @@
       "when": 1780653815609,
       "tag": "0013_black_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780915735337,
+      "tag": "0014_next_exodus",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780918950657,
+      "tag": "0015_bumpy_inhumans",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1780992738062,
+      "tag": "0016_wonderful_namorita",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780993288119,
+      "tag": "0017_lush_magus",
+      "breakpoints": true
     }
   ]
 }

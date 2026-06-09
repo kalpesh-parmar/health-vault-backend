@@ -5,10 +5,10 @@ const {
   pgEnum,
   pgTable,
   timestamp,
-  date,
   json,
   uuid,
   varchar,
+  date,
 } = require("drizzle-orm/pg-core");
 
 const { medicationTypeValues } = require("../enums/medicationType");
@@ -20,6 +20,7 @@ const foodEnum = pgEnum("food_type", foodTypeValues);
 const { patient } = require("./patient");
 const { text } = require("drizzle-orm/pg-core");
 const { mediactionUnitValues } = require("../enums/medicationUnit");
+
 const medicationUnitType = pgEnum("unit", mediactionUnitValues);
 
 const medication = pgTable(
@@ -43,10 +44,11 @@ const medication = pgTable(
     }),
     dosePerIntake: integer("dose_per_intake"),
     frequency: frequencyEnum("frequency").notNull(),
-    medicationTime: json("medication_times"),
-    bestTaken: varchar("best_taken", {
-      length: 255,
-    }).notNull(),
+    // medicationTime: json("medication_times"),
+    // bestTaken: varchar("best_taken", {
+    //   length: 255,
+    // }).notNull(),
+    medicationSchedule: json("medication_schedule").notNull(),
     foodFrequency: foodEnum("food_frequency").notNull(),
     startDate: date("start_date").notNull(),
     endDate: date("end_date"),

@@ -4,7 +4,7 @@ const { env } = require("../configs/env");
 
 function generateReminderOccurrences(reminder, medication, startFromDate = null, options = {}) {
   const occurrences = [];
-  const medicationTimes = medication.medicationTime || [];
+  const medicationTimes = medication.medicationSchedule || [];
   const userTimezone = medication.timezone || "Asia/Kolkata";
   const { skipPastOccurrences = true } = options;
 
@@ -104,7 +104,7 @@ function calculateMedicationEndDate(medication) {
 
   const startDate = new Date(medication.startDate);
   startDate.setUTCHours(0, 0, 0, 0);
-  const medicationTimes = medication.medicationTime || [];
+  const medicationTimes = medication.medicationSchedule || [];
   const dailyConsumption = medicationTimes.length * Number(medication.dosePerIntake || 1);
   const totalDays =
     dailyConsumption > 0 ? Math.ceil(Number(medication.totalQuantity || 0) / dailyConsumption) : 0;
