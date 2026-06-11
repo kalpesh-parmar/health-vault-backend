@@ -1,22 +1,22 @@
 // repositories/services
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
-const medicationRepository = require("../repositories/medicationRepository");
+// const medicationRepository = require("../repositories/medicationRepository");
 const {
   beforeReminderTime,
   afterReminderTime,
   isSameMinute,
-  refillTime,
+  // refillTime,
 } = require("../utils/reminderOccurrenceGenerator");
 const reminderNotificationService = require("./reminderNotificationService");
 const { reminderTypes } = require("../enums/reminderTypes");
-const { now } = require("moment-timezone");
+// const { now } = require("moment-timezone");
 
 class ReminderService {
   //WRAP TWO FUNCTION IN ONE
   async processReminders() {
     await this.sendReminder();
-    await this.sendRefillAlert();
+    // await this.sendRefillAlert();
   }
   // 1. SEND REMINDERS (EVERY MINUTE)
   async sendReminder() {
@@ -75,31 +75,31 @@ class ReminderService {
     }
   }
   // 2. SEND REFILL ALERTS REMINDERS
-  async sendRefillAlert() {
-    const medications = await medicationRepository.findMedicationsForRefillAlert(true);
-    const seenMedicationIds = new Set();
-    for (const medication of medications) {
-      const refill = refillTime(medication.medication.endDate);
-      const hour = refill.getHours();
-      const minute = refill.getMinutes();
+  // async sendRefillAlert() {
+  //   const medications = await medicationRepository.findMedicationsForRefillAlert(true);
+  //   const seenMedicationIds = new Set();
+  //   for (const medication of medications) {
+  //     const refill = refillTime(medication.medication.endDate);
+  //     const hour = refill.getHours();
+  //     const minute = refill.getMinutes();
 
-      if (now === hour && now === minute) {
-        const medicationId = medication.medication.id;
-        if (seenMedicationIds.has(medicationId)) {
-          continue;
-        }
-        seenMedicationIds.add(medicationId);
-        try {
-          await reminderNotificationService.sendReminderNotification(
-            medication,
-            reminderTypes.REFILL,
-          );
-          await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
-        } catch (err) {
-          console.error(`Refill alert failed for medication ${medicationId}`, err);
-        }
-      }
-    }
-  }
+  //     if (now === hour && now === minute) {
+  //       const medicationId = medication.medication.id;
+  //       if (seenMedicationIds.has(medicationId)) {
+  //         continue;
+  //       }
+  //       seenMedicationIds.add(medicationId);
+  //       try {
+  //         await reminderNotificationService.sendReminderNotification(
+  //           medication,
+  //           reminderTypes.REFILL,
+  //         );
+  //         await medicationReminderOccurrenceRepository.clearRefillReminderTime(medicationId);
+  //       } catch (err) {
+  //         console.error(`Refill alert failed for medication ${medicationId}`, err);
+  //       }
+  //     }
+  //   }
+  // }
 }
 module.exports = new ReminderService();

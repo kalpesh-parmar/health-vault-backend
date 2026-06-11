@@ -23,7 +23,7 @@ function getUnitByMedicationType(type) {
 }
 
 function calculateMedicationValues(data, baseDate = null) {
-  const timesPerDay = data.medicationSchedule?.length || 1;
+  const timesPerDay = Object.keys(data.medicationSchedule || {}).length || 1;
   const dailyConsumption = data.dosePerIntake * timesPerDay;
   const quantity = data.remainingQuantity ?? data.totalQuantity;
   const totalDays = Math.ceil(quantity / dailyConsumption);

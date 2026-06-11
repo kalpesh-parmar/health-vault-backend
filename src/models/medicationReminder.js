@@ -8,13 +8,11 @@ const medicationReminder = pgTable(
   "medication_reminders",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-
     patientId: uuid("patient_id")
       .references(() => patient.id, {
         onDelete: "cascade",
       })
       .notNull(),
-
     medicationId: uuid("medication_id")
       .references(() => medication.id, {
         onDelete: "cascade",
@@ -22,7 +20,7 @@ const medicationReminder = pgTable(
       .notNull(),
     dosePerIntake: integer("dose_per_intake"),
     // routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
-    refillReminderTime: timestamp("refill_reminder_time"),
+    // refillReminderTime: timestamp("refill_reminder_time"),
     // medicationTime: json("medication_times"),
     createdAt: timestamp("created_at", {
       withTimezone: true,

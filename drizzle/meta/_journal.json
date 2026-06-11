@@ -169,6 +169,13 @@
       "when": 1780981531908,
       "tag": "0019_magical_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781153779579,
+      "tag": "0020_stiff_puppet_master",
+      "breakpoints": true
     }
   ]
 }

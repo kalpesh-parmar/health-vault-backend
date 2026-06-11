@@ -19,7 +19,6 @@ class MedicationReminderOccurrenceRepository {
         ),
       )
       .limit(1);
-
     return result[0] || null;
   }
   async findPendingReminders(pendingStatuses) {
@@ -49,10 +48,7 @@ class MedicationReminderOccurrenceRepository {
         completedAt: medicationReminderOccurrence.completedAt,
         medicationName: medication.medicationName,
         medicationType: medication.medicationType,
-        isOverdue:
-          sql`CASE WHEN ${medicationReminderOccurrence.status} = 'PENDING' AND ${medicationReminderOccurrence.actualMedicationTime} < NOW() THEN true ELSE false END`.mapWith(
-            Boolean,
-          ),
+        isOverdue: medicationReminderOccurrence.isOverdue,
       })
       .from(medicationReminderOccurrence)
       .innerJoin(
@@ -104,7 +100,6 @@ class MedicationReminderOccurrenceRepository {
     const filter = payload?.filter || {};
     const sort = payload?.sort || {};
     const pageData = payload?.page || {};
-
     const { status, startDate, endDate, medicationName, medicationType, date, isOverdue } = filter;
     const page = pageData.pageNumber || 1;
     const limit = pageData.pageLimit || 10;
@@ -114,21 +109,17 @@ class MedicationReminderOccurrenceRepository {
       eq(medicationReminder.patientId, userId),
       eq(medicationReminderOccurrence.softDelete, false),
     ];
-
     if (status) {
       conditions.push(eq(medicationReminderOccurrence.status, status));
     }
-
     if (startDate) {
       conditions.push(gte(medicationReminderOccurrence.actualMedicationTime, new Date(startDate)));
     }
-
     if (endDate) {
       conditions.push(
         lte(medicationReminderOccurrence.actualMedicationTime, new Date(`${endDate}T23:59:59`)),
       );
     }
-
     if (medicationName) {
       conditions.push(sql`${medication.medicationName} ILIKE ${"%" + medicationName + "%"}`);
     }
@@ -229,12 +220,21 @@ class MedicationReminderOccurrenceRepository {
       .update(medicationReminderOccurrence)
       .set({
         softDelete: true,
-
         updatedAt: new Date(),
       })
       .where(eq(medicationReminderOccurrence.reminderId, reminderId));
   }
 
+  async deletePendingOccurrences(reminderId) {
+    return db
+      .delete(medicationReminderOccurrence)
+      .where(
+        and(
+          eq(medicationReminderOccurrence.reminderId, reminderId),
+          eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
+        ),
+      );
+  }
   async findLastOccurrenceByReminderId(reminderId) {
     const result = await db
       .select()
@@ -335,20 +335,21 @@ class MedicationReminderOccurrenceRepository {
       }
     );
   }
-
-  async clearRefillReminderTime(medicationId) {
-    return db
-      .update(medicationReminderOccurrence)
-      .set({
-        refillReminderTime: null,
-        updatedAt: new Date(),
+  async countCompletedOccurrencesByMedicationId(medicationId) {
+    const result = await db
+      .select({
+        count: sql`COUNT(*)`.mapWith(Number),
       })
+      .from(medicationReminderOccurrence)
       .where(
         and(
           eq(medicationReminderOccurrence.medicationId, medicationId),
+          eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.COMPLETED),
           eq(medicationReminderOccurrence.softDelete, false),
         ),
       );
+
+    return result[0]?.count || 0;
   }
 }
 

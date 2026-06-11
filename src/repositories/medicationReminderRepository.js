@@ -27,11 +27,7 @@ class MedicationReminderRepository {
       .from(medicationReminder)
       .leftJoin(medication, eq(medicationReminder.medicationId, medication.id))
       .where(
-        and(
-          eq(medicationReminder.patientId, userId),
-
-          eq(medicationReminder.softDelete, false),
-        ),
+        and(eq(medicationReminder.patientId, userId), eq(medicationReminder.softDelete, false)),
       )
       .orderBy(asc(medicationReminder.createdAt));
   }
@@ -51,12 +47,10 @@ class MedicationReminderRepository {
       .update(medicationReminder)
       .set({
         ...payload,
-
         updatedAt: new Date(),
       })
       .where(eq(medicationReminder.id, id))
       .returning();
-
     return result[0] || null;
   }
 

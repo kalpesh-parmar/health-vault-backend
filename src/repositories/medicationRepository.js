@@ -16,38 +16,27 @@ const filterSortColumnMap = Object.freeze({
 // FILTERS
 function buildMedicationFilters(filters = {}, userId) {
   const conditions = [eq(medication.softDelete, false)];
-
   if (userId) {
     conditions.push(eq(medication.userId, String(userId)));
   }
-
   if (filters.patientCode) {
     conditions.push(eq(medication.patientCode, filters.patientCode));
   }
-
   if (filters.medicationType) {
     conditions.push(eq(medication.medicationType, filters.medicationType));
   }
-
   if (filters.frequency) {
     conditions.push(eq(medication.frequency, filters.frequency));
   }
-
   if (filters.search) {
     const search = `%${filters.search}%`;
-
     conditions.push(
       or(
         ilike(medication.medicationName, search),
-
         ilike(medication.prescribedBy, search),
-
         ilike(medication.notes, search),
-
         ilike(sql`${medication.medicationType}::text`, search),
-
         ilike(sql`${medication.frequency}::text`, search),
-
         ilike(sql`${medication.foodFrequency}::text`, search),
       ),
     );
@@ -59,7 +48,6 @@ function buildMedicationFilters(filters = {}, userId) {
 // SORT
 function buildOrderClause(sort = {}) {
   const sortColumn = filterSortColumnMap[sort.sortBy] || medication.createdAt;
-
   return sort.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
 }
 
@@ -67,7 +55,6 @@ class MedicationRepository {
   // CREATE
   async create(data) {
     const result = await db.insert(medication).values(data).returning();
-
     return result[0] || null;
   }
 
@@ -76,15 +63,8 @@ class MedicationRepository {
     const result = await db
       .select()
       .from(medication)
-      .where(
-        and(
-          eq(medication.id, id),
-
-          eq(medication.softDelete, false),
-        ),
-      )
+      .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .limit(1);
-
     return result[0] || null;
   }
 
@@ -111,15 +91,10 @@ class MedicationRepository {
   // PAGINATION
   async findAllWithPagination({ filter = {}, page = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
-
     const orderClause = buildOrderClause(sort);
-
     const pageLimit = page.pageLimit || 10;
-
     const pageNumber = page.pageNumber || 1;
-
     const offset = (pageNumber - 1) * pageLimit;
-
     const data = await db
       .select()
       .from(medication)
@@ -127,26 +102,19 @@ class MedicationRepository {
       .orderBy(orderClause)
       .limit(pageLimit)
       .offset(offset);
-
     const totalRecordsResult = await db
       .select({
         count: sql`count(*)`,
       })
       .from(medication)
       .where(where);
-
     const totalRecords = Number(totalRecordsResult[0].count);
-
     return {
       data,
-
       page: {
         pageLimit,
-
         pageNumber,
-
         totalPages: Math.ceil(totalRecords / pageLimit),
-
         totalRecords,
       },
     };
@@ -186,26 +154,26 @@ class MedicationRepository {
     return db.select().from(medication).where(eq(medication.softDelete, false));
   }
 
-  // REDUCE QUANTITY
-  async reduceQuantity(medicationId, quantity = 1) {
-    const existingMedication = await this.findById(medicationId);
-    if (!existingMedication) {
-      return null;
-    }
-    const updatedQuantity = Math.max(
-      0,
-      Number(existingMedication.remainingQuantity) - Number(quantity),
-    );
-    const result = await db
-      .update(medication)
-      .set({
-        remainingQuantity: updatedQuantity,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(medication.id, medicationId), eq(medication.softDelete, false)))
-      .returning();
-    return result[0] || null;
-  }
+  // // REDUCE QUANTITY
+  // async reduceQuantity(medicationId, quantity = 1) {
+  //   const existingMedication = await this.findById(medicationId);
+  //   if (!existingMedication) {
+  //     return null;
+  //   }
+  //   const updatedQuantity = Math.max(
+  //     0,
+  //     Number(existingMedication.remainingQuantity) - Number(quantity),
+  //   );
+  //   const result = await db
+  //     .update(medication)
+  //     .set({
+  //       remainingQuantity: updatedQuantity,
+  //       updatedAt: new Date(),
+  //     })
+  //     .where(and(eq(medication.id, medicationId), eq(medication.softDelete, false)))
+  //     .returning();
+  //   return result[0] || null;
+  // }
 
   // SOFT DELETE
   async softDeleteById(id) {
@@ -213,18 +181,10 @@ class MedicationRepository {
       .update(medication)
       .set({
         softDelete: true,
-
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(medication.id, id),
-
-          eq(medication.softDelete, false),
-        ),
-      )
+      .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
-
     return result[0] || null;
   }
   //findMedicationsForRefillAlert
