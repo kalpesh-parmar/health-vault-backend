@@ -59,44 +59,29 @@ components:
         - ML
         - DROPS
         - UNITS
-
-    MedicationTime:
-      type: object
-      required:
-        - time
-        - period
-
-      properties:
-        time:
-          type: string
-          example: "08:00"
-
-        period:
-          type: string
-          enum:
-            - AM
-            - PM
     MedicationSchedule:
       type: object
-      required:
-        - time
-        - period
-        - bestTaken
 
       properties:
-        time:
+        MORNING:
           type: string
-          example: "08:00"
+          example: "09:00:00"
 
-      period:
-        type: string
-        enum:
-          - AM
-          - PM
-        example: AM
+        NOON:
+          type: string
+          example: "13:00:00"
 
-    bestTaken:
-      $ref: "#/components/schemas/BestTakenType"
+        NIGHT:
+          type: string
+          example: "22:00:00"
+
+        CUSTOM:
+          type: string
+          example: "16:30:00"
+
+      example:
+        MORNING: "09:00:00"
+        NIGHT: "22:00:00"
 
     Medication:
       type: object
@@ -137,29 +122,8 @@ components:
         frequency:
           $ref: "#/components/schemas/FrequencyType"
 
-        # medicationTime:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/MedicationTime"
-
-        # bestTaken:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/BestTakenType"
         medicationSchedule:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationSchedule"
-          example:
-            - time: "08:00"
-              period: AM
-              bestTaken: MORNING
-
-            - time: "08:00"
-              period: PM
-              bestTaken: NIGHT
+          $ref: "#/components/schemas/MedicationSchedule"
 
         foodFrequency:
           $ref: "#/components/schemas/FoodType"
@@ -184,9 +148,6 @@ components:
           minimum: 0
           default: 0
           example: 25
-
-        # unit:
-        #   $ref: "#/components/schemas/MedicationUnit"
 
         reminderBeforeMinutes:
           type: integer
@@ -219,6 +180,8 @@ components:
         - medicationType
         - frequency
         - startDate
+        - medicationSchedule
+        - foodFrequency
 
       properties:
         medicationName:
@@ -243,40 +206,8 @@ components:
         frequency:
           $ref: "#/components/schemas/FrequencyType"
 
-        # medicationTime:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/MedicationTime"
-
-        #   example:
-        #     - time: "08:00"
-        #       period: AM
-        #     - time: "08:00"
-        #       period: PM
-
-        # bestTaken:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/BestTakenType"
-
-        #   example:
-        #     - MORNING
-        #     - NIGHT
         medicationSchedule:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationSchedule"
-
-          example:
-            - time: "08:00"
-              period: AM
-              bestTaken: MORNING
-
-            - time: "08:00"
-              period: PM
-              bestTaken: NIGHT
+          $ref: "#/components/schemas/MedicationSchedule"
 
         foodFrequency:
           $ref: "#/components/schemas/FoodType"
@@ -296,9 +227,6 @@ components:
           minimum: 0
           default: 0
           example: 30
-
-        # unit:
-        #   $ref: "#/components/schemas/MedicationUnit"
 
         reminderBeforeMinutes:
           type: integer
@@ -334,30 +262,8 @@ components:
         frequency:
           $ref: "#/components/schemas/FrequencyType"
 
-        # medicationTime:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/MedicationTime"
-
-        # bestTaken:
-        #   type: array
-
-        #   items:
-        #     $ref: "#/components/schemas/BestTakenType"
         medicationSchedule:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationSchedule"
-
-          example:
-            - time: "08:00"
-              period: AM
-              bestTaken: MORNING
-
-            - time: "08:00"
-              period: PM
-              bestTaken: NIGHT
+          $ref: "#/components/schemas/MedicationSchedule"
 
         foodFrequency:
           $ref: "#/components/schemas/FoodType"

@@ -29,7 +29,6 @@ class MedicationReminderRepository {
       .where(
         and(
           eq(medicationReminder.patientId, userId),
-
           eq(medicationReminder.softDelete, false),
         ),
       )
@@ -51,12 +50,10 @@ class MedicationReminderRepository {
       .update(medicationReminder)
       .set({
         ...payload,
-
         updatedAt: new Date(),
       })
       .where(eq(medicationReminder.id, id))
       .returning();
-
     return result[0] || null;
   }
 

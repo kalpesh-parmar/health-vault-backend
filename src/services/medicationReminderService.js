@@ -47,11 +47,11 @@ class MedicationReminderService {
         endDate: recalculatedEndDate,
       });
 
-      const finalRefillTime = refillTime(recalculatedEndDate);
-      await medicationReminderRepository.updateById(reminder.id, {
-        refillReminderTime: finalRefillTime,
-      });
-      reminder.refillReminderTime = finalRefillTime;
+      // const finalRefillTime = refillTime(recalculatedEndDate);
+      // await medicationReminderRepository.updateById(reminder.id, {
+      //   refillReminderTime: finalRefillTime,
+      // });
+      // reminder.refillReminderTime = finalRefillTime;
     }
 
     return reminder;
@@ -75,7 +75,7 @@ class MedicationReminderService {
     const filters = await validateSchema(listOccurrencesQuerySchema, data);
     return medicationReminderOccurrenceRepository.getOccurrences(userId, filters);
   }
-  // UPDATE
+  // UPDATE OCCURRENCE
   async updateOccurrence(id, userId, data) {
     const validData = await validateSchema(updateOccurrenceSchema, data);
     const occurrence = await medicationReminderOccurrenceRepository.findById(id);
@@ -95,24 +95,13 @@ class MedicationReminderService {
     ) {
       throw new NotFoundException(errorConstants.FUTURE_REMINDER_CANNOT_BE_COMPLETED);
     }
+
     const updatePayload = {
       status: validData.status,
       completedAt: validData.status === reminderOccurrenceStatus.COMPLETED ? new Date() : null,
     };
 
     await medicationReminderOccurrenceRepository.update(id, updatePayload);
-
-    if (validData.status === reminderOccurrenceStatus.COMPLETED) {
-      const medication = await medicationRepository.findById(occurrence.medicationId);
-
-      if (medication) {
-        await medicationRepository.reduceQuantity(
-          occurrence.medicationId,
-          medication.dosePerIntake || 1,
-        );
-      }
-    }
-
     return true;
   }
 
@@ -149,7 +138,6 @@ class MedicationReminderService {
     if (!userId) {
       throw new NotFoundException(errorConstants.USER_NOT_FOUND);
     }
-
     return medicationReminderOccurrenceRepository.getMedicationSummary(userId, filters);
   }
 }

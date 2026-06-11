@@ -14,6 +14,7 @@ const {
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillCountRepository");
+const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -23,7 +24,6 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-
     const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
     const medication = await medicationRepository.create({
       userId,
@@ -31,101 +31,125 @@ class MedicationService {
       ...validData,
       endDate,
       dailyConsumption,
-      remainingQuantity: validData.totalQuantity,
       unit,
       startDate,
     });
     return medication;
   }
 
-  //update medication
+  // UPDATE MEDICATION
   async updateMedication(id, userId, payload) {
+    // Validate request payload
     const validData = await validateSchema(updateMedicationSchema, payload);
+
+    // Check medication
     const existingMedication = await medicationRepository.findById(id);
+
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+
+    // Find reminder
     const reminder = await medicationReminderRepository.findByMedicationId(id);
+
+    // Calculate remaining quantity BEFORE update
+    let remainingQuantity = await calculateRemainingQuantity(
+      existingMedication,
+      medicationReminderOccurrenceRepository,
+    );
+
+    // If total quantity is updated, recalculate remaining quantity
+    if (validData.totalQuantity !== undefined) {
+      const completedCount =
+        await medicationReminderOccurrenceRepository.countCompletedOccurrencesByMedicationId(id);
+      const consumedQuantity = completedCount * Number(existingMedication.dosePerIntake || 1);
+      remainingQuantity = Math.max(0, Number(validData.totalQuantity) - consumedQuantity);
+    }
+
+    // Merge existing medication with incoming updates
     const updatedPayload = {
       ...existingMedication,
       ...validData,
     };
 
-    let totalQuantity = Number(existingMedication.totalQuantity);
-    let remainingQuantity = Number(existingMedication.remainingQuantity);
-
-    // Calculate consumed quantity based on existing total and remaining values
-    const consumedQuantity =
-      Number(existingMedication.totalQuantity) - Number(existingMedication.remainingQuantity);
-
-    //new total remaining quantity = total Quantity - consumed quantity
-    if (validData.totalQuantity !== undefined) {
-      totalQuantity = Number(validData.totalQuantity);
-      remainingQuantity = Math.max(0, totalQuantity - consumedQuantity);
-    }
+    // Use updated total quantity if provided
+    const totalQuantity =
+      validData.totalQuantity !== undefined
+        ? Number(validData.totalQuantity)
+        : Number(existingMedication.totalQuantity);
 
     const medicationDataForCalculation = {
       ...updatedPayload,
       totalQuantity,
-      remainingQuantity,
     };
 
-    // Recalculate endDate, dailyConsumption and unit based on updated data
+    // Recalculate medication values
     const { endDate, dailyConsumption, unit } = calculateMedicationValues(
       medicationDataForCalculation,
       new Date(),
     );
 
+    // Update medication
     const updatedMedication = await medicationRepository.updateById(id, {
       ...validData,
       totalQuantity,
-      remainingQuantity,
       endDate,
       dailyConsumption,
       unit,
     });
 
+    // If medication has no reminder then update is complete
     if (!reminder) {
       return updatedMedication;
     }
-    await medicationReminderRepository.updateById(reminder.id, {
-      routineBase: validData.frequency ?? reminder.routineBase,
-      medicationTime: validData.medicationTime ?? reminder.medicationTime,
-      dosePerIntake: validData.dosePerIntake ?? reminder.dosePerIntake,
-      reminderBeforeMinutes: validData.reminderBeforeMinutes ?? reminder.reminderBeforeMinutes,
-    });
+
+    // Update reminder dose if changed
+    if (validData.dosePerIntake !== undefined) {
+      await medicationReminderRepository.updateById(reminder.id, {
+        dosePerIntake: validData.dosePerIntake,
+      });
+    }
 
     const updatedReminder = await medicationReminderRepository.findByMedicationId(id);
-
-    //remove all pending occurrences of the reminder, and generate again based on new medication data and reminder data
-    await medicationReminderOccurrenceRepository.softDeletePendingOccurrences(updatedReminder.id);
-
-    //refetch medication to get updated endDate and dailyConsumption values
+    // Remove future pending occurrences
+    await medicationReminderOccurrenceRepository.deletePendingOccurrences(updatedReminder.id);
+    // Get latest medication values after update
     const latestMedication = await medicationRepository.findById(id);
-    //generate occurrences from current date, so that past reminders will not be generated again
-    const occurrences = generateReminderOccurrences(updatedReminder, latestMedication, new Date(), {
-      skipPastOccurrences: true,
-    });
+    // Generate future occurrences using updated medication +
+    // calculated remaining quantity
+    const occurrences = generateReminderOccurrences(
+      updatedReminder,
+      {
+        ...latestMedication,
+        remainingQuantity,
+      },
+      new Date(),
+      {
+        skipPastOccurrences: true,
+      },
+    );
 
     if (occurrences.length) {
+      // Create new future occurrences
       await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
+      // Update medication end date from generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(id, {
-        endDate: endDateOnly,
+        endDate: recalculatedEndDate,
       });
-      updatedMedication.endDate = recalculatedEndDate;
 
-      // Update the reminder's refillReminderTime
-      const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      const finalRefillTime = refillTime(recalculatedEndDate);
-      await medicationReminderRepository.updateById(updatedReminder.id, {
-        refillReminderTime: finalRefillTime,
-      });
+      updatedMedication.endDate = recalculatedEndDate;
+      //   // Update refill reminder time
+      //   const { refillTime } = require("../utils/reminderOccurrenceGenerator");
+      //   const finalRefillTime = refillTime(recalculatedEndDate);
+      //   await medicationReminderRepository.updateById(updatedReminder.id, {
+      //     refillReminderTime: finalRefillTime,
+      //   });
     }
 
     return updatedMedication;
   }
+
   // GET MEDICATION BY ID
   async getMedicationById(id, userId) {
     const existingMedication = await medicationRepository.findById(id);
@@ -196,19 +220,19 @@ class MedicationService {
     if (!medication || String(medication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
-
     const reminder = await medicationReminderRepository.findByMedicationId(id);
-
     if (!reminder) {
       throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
     }
 
-    const newRemainingQuantity = Number(medication.remainingQuantity || 0) + Number(quantity);
+    const currentRemainingQuantity = await calculateRemainingQuantity(
+      medication,
+      medicationReminderOccurrenceRepository,
+    );
+    const newRemainingQuantity = Number(currentRemainingQuantity) + Number(quantity);
     const newTotalQuantity = Number(medication.totalQuantity || 0) + Number(quantity);
-
     // Update quantities in database
     const updatedMedication = await medicationRepository.updateById(id, {
-      remainingQuantity: newRemainingQuantity,
       totalQuantity: newTotalQuantity,
     });
 
@@ -226,7 +250,7 @@ class MedicationService {
       ...updatedMedication,
       remainingQuantity: quantity,
       totalQuantity: quantity,
-    }; // Refill should skip past occurrences in case the last occurrence was long ago
+    };
     const occurrences = generateReminderOccurrences(reminder, reminderMedication, startFromDate, {
       skipPastOccurrences: true,
     });
@@ -236,27 +260,26 @@ class MedicationService {
 
       // Recalculate end date based on actual generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      // const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(id, {
         endDate: recalculatedEndDate,
       });
       updatedMedication.endDate = recalculatedEndDate;
 
       // Update the reminder's refillReminderTime
-      const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      const finalRefillTime = refillTime(recalculatedEndDate);
+      // const { refillTime } = require("../utils/reminderOccurrenceGenerator");
+      // const finalRefillTime = refillTime(recalculatedEndDate);
       await refillCountRepository.add({
         userId: medication.userId,
         medicationId: medication.id,
         beforeRefillTotalQuantity: medication.totalQuantity,
-        beforeRefillRemainingQuantity: medication.remainingQuantity,
+        beforeRefillRemainingQuantity: currentRemainingQuantity,
         refillQuantity: quantity,
         afterRefillTotalQuantity: newTotalQuantity,
         afterRefillRemainingQuantity: newRemainingQuantity,
       });
-      await medicationReminderRepository.updateById(reminder.id, {
-        refillReminderTime: finalRefillTime,
-      });
+      // await medicationReminderRepository.updateById(reminder.id, {
+      //   refillReminderTime: finalRefillTime,
+      // });
     }
 
     return updatedMedication;

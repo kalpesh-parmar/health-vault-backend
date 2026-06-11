@@ -1,0 +1,1 @@
+ALTER TABLE "medications" DROP COLUMN "remaining_quantity";

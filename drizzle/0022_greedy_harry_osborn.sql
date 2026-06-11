@@ -1,0 +1,1 @@
+ALTER TABLE "medication_reminders" DROP COLUMN "refill_reminder_time";

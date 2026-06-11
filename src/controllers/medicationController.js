@@ -6,7 +6,6 @@ const medicationService = require("../services/medicationService");
 //create medication
 async function createMedication(req, res) {
   const result = await medicationService.createMedication(req.auth.userId, req.body);
-
   return successResponse(res, result, messageConstants.MEDICATION_CREATED, StatusCodes.CREATED);
 }
 
