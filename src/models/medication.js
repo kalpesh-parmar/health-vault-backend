@@ -9,7 +9,6 @@ const {
   uuid,
   varchar,
 } = require("drizzle-orm/pg-core");
-
 const { medicationTypeValues } = require("../enums/medicationType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { foodTypeValues } = require("../enums/foodType");

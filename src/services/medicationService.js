@@ -41,23 +41,18 @@ class MedicationService {
   async updateMedication(id, userId, payload) {
     // Validate request payload
     const validData = await validateSchema(updateMedicationSchema, payload);
-
     // Check medication
     const existingMedication = await medicationRepository.findById(id);
-
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
-
     // Find reminder
     const reminder = await medicationReminderRepository.findByMedicationId(id);
-
     // Calculate remaining quantity BEFORE update
     let remainingQuantity = await calculateRemainingQuantity(
       existingMedication,
       medicationReminderOccurrenceRepository,
     );
-
     // If total quantity is updated, recalculate remaining quantity
     if (validData.totalQuantity !== undefined) {
       const completedCount =
@@ -65,7 +60,6 @@ class MedicationService {
       const consumedQuantity = completedCount * Number(existingMedication.dosePerIntake || 1);
       remainingQuantity = Math.max(0, Number(validData.totalQuantity) - consumedQuantity);
     }
-
     // Merge existing medication with incoming updates
     const updatedPayload = {
       ...existingMedication,
@@ -82,7 +76,6 @@ class MedicationService {
       ...updatedPayload,
       totalQuantity,
     };
-
     // Recalculate medication values
     const { endDate, dailyConsumption, unit } = calculateMedicationValues(
       medicationDataForCalculation,
@@ -109,7 +102,6 @@ class MedicationService {
         dosePerIntake: validData.dosePerIntake,
       });
     }
-
     const updatedReminder = await medicationReminderRepository.findByMedicationId(id);
     // Remove future pending occurrences
     await medicationReminderOccurrenceRepository.deletePendingOccurrences(updatedReminder.id);
@@ -128,7 +120,6 @@ class MedicationService {
         skipPastOccurrences: true,
       },
     );
-
     if (occurrences.length) {
       // Create new future occurrences
       await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
@@ -137,23 +128,14 @@ class MedicationService {
       await medicationRepository.updateById(id, {
         endDate: recalculatedEndDate,
       });
-
       updatedMedication.endDate = recalculatedEndDate;
-      //   // Update refill reminder time
-      //   const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      //   const finalRefillTime = refillTime(recalculatedEndDate);
-      //   await medicationReminderRepository.updateById(updatedReminder.id, {
-      //     refillReminderTime: finalRefillTime,
-      //   });
     }
-
     return updatedMedication;
   }
 
   // GET MEDICATION BY ID
   async getMedicationById(id, userId) {
     const existingMedication = await medicationRepository.findById(id);
-
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
@@ -224,7 +206,6 @@ class MedicationService {
     if (!reminder) {
       throw new NotFoundException(errorConstants.MEDICATION_REMINDER_NOT_FOUND);
     }
-
     const currentRemainingQuantity = await calculateRemainingQuantity(
       medication,
       medicationReminderOccurrenceRepository,
@@ -264,10 +245,6 @@ class MedicationService {
         endDate: recalculatedEndDate,
       });
       updatedMedication.endDate = recalculatedEndDate;
-
-      // Update the reminder's refillReminderTime
-      // const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      // const finalRefillTime = refillTime(recalculatedEndDate);
       await refillCountRepository.add({
         userId: medication.userId,
         medicationId: medication.id,
@@ -277,9 +254,6 @@ class MedicationService {
         afterRefillTotalQuantity: newTotalQuantity,
         afterRefillRemainingQuantity: newRemainingQuantity,
       });
-      // await medicationReminderRepository.updateById(reminder.id, {
-      //   refillReminderTime: finalRefillTime,
-      // });
     }
 
     return updatedMedication;

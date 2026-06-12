@@ -1,5 +1,4 @@
 const { z } = require("zod");
-
 const { errorConstants } = require("../constants/errorConstants");
 const { documentTypeValue } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");

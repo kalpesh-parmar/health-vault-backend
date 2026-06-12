@@ -21,7 +21,6 @@ function getUnitByMedicationType(type) {
       return "PILLS";
   }
 }
-
 function calculateMedicationValues(data, baseDate = null) {
   const timesPerDay = Object.keys(data.medicationSchedule || {}).length || 1;
   const dailyConsumption = data.dosePerIntake * timesPerDay;

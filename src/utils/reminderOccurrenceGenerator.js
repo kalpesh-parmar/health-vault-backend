@@ -10,15 +10,12 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
 
   const now = new Date();
   const currentDate = startFromDate ? new Date(startFromDate) : new Date(medication.startDate);
-  // currentDate.setUTCHours(0, 0, 0, 0);
-  // const endDate = calculateMedicationEndDate(medication);
   const availableQuantity = Number(medication.remainingQuantity ?? medication.totalQuantity ?? 0);
   let consumedQuantity = 0;
 
   while (availableQuantity === 0 || consumedQuantity < availableQuantity) {
     for (const [, timeValue] of medicationTimes) {
       const dosePerIntake = Number(medication.dosePerIntake || 1);
-
       if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
         break;
       }
@@ -55,7 +52,6 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
           reminder.beforeReminderMinutes,
         ),
         afterReminderTime: afterReminderTime(actualMedicationTime),
-        // refillReminderTime: refillTime(endDate),
         notificationSent: false,
         notificationSentAt: null,
         completedAt: null,
@@ -65,22 +61,11 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
 
       consumedQuantity += dosePerIntake;
     }
-
     if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
       break;
     }
-
     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
   }
-
-  // if (occurrences.length > 0) {
-  //   const finalEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-  //   const finalRefillTime = refillTime(finalEndDate);
-  //   for (const occurrence of occurrences) {
-  //     occurrence.refillReminderTime = finalRefillTime;
-  //   }
-  // }
-
   return occurrences;
 }
 
@@ -117,18 +102,10 @@ function afterReminderTime(actualMedicationTime) {
   );
 }
 
-// function refillTime(endDate) {
-//   if (!env.refillAlertBeforeDays) {
-//     return null;
-//   }
-//   const end = new Date(endDate);
-//   return new Date(end.getTime() - env.refillAlertBeforeDays * 24 * 60 * 60 * 1000);
-// }
 
 module.exports = {
   generateReminderOccurrences,
   calculateMedicationEndDate,
   beforeReminderTime,
   afterReminderTime,
-  // refillTime,
 };
