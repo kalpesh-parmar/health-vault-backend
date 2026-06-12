@@ -6,6 +6,7 @@ const patientRoutes = require("./patientRoutes");
 const sessionRoutes = require("./sessionRoutes");
 const authRoutes = require("./authRoutes");
 const medicationReminderRoutes = require("./medicationReminderRoutes");
+const s3Routes = require("./s3Routes");
 const cronRoutes = require("./cronRoutes");
 const refill = require("./refillCountRoutes");
 const medicationRoutes = require("./medicationRoutes");
@@ -36,6 +37,7 @@ routes.get("/health", async (_req, res) => {
 routes.use("/auth", authRoutes);
 routes.use("/documents", documentRoutes);
 routes.use("/notifications", notificationRoutes);
+routes.use("/file", s3Routes);
 routes.use("/session", sessionRoutes);
 routes.use("/patient", patientRoutes);
 routes.use("/medications", medicationRoutes);
