@@ -15,7 +15,10 @@ const validateFile = (req, res, next) => {
     const allowedTypes = [
       "application/pdf",
       "image/jpeg",
+      "image/jpg",
       "image/png",
+      "image/tiff",
+      "image/webp",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "text/plain",

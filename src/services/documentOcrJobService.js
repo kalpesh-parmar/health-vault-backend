@@ -1,0 +1,267 @@
+/**
+ * Non-blocking PDF extraction job orchestrator.
+ *
+ *  ┌────────────┐       enqueue        ┌──────────────────┐
+ *  │ Controller │ ───────────────────► │ jobs table       │
+ *  └─────┬──────┘                      │ (status=QUEUED)  │
+ *        │ returns 202 immediately     └────────┬─────────┘
+ *        │                                      │
+ *        │ setImmediate(_runPipeline)           │
+ *        ▼                                      ▼
+ *  ┌────────────┐       update progress + emit SSE
+ *  │  Pipeline  │ ──────────────────────────────►
+ *  └─────┬──────┘
+ *        │ on completion / failure: persist final payload
+ *        ▼
+ *   GET /run-ocr-status/:fileKey returns the row
+ *
+ * Why this works with an in-process job runner
+ * ─────────────────────────────
+ *  • The pipeline is a single chain of awaits. Failures are caught and
+ *    persisted; nothing throws into Express's request lifecycle because
+ *    the request has already returned 202.
+ *  • Progress is dual-written to (a) the SSE bus for live FE updates and
+ *    (b) the jobs table for crash recovery / late subscribers.
+ *  • A weak-ref lock on the fileKey prevents duplicate concurrent runs
+ *    for the same file inside a single Node process.
+ *  • The jobs table is the source of truth; SSE is best-effort.
+ *
+ * For multi-instance deployments behind a load balancer use sticky
+ * sessions OR replace `ocrProgressBus` with a PG LISTEN/NOTIFY adapter
+ * (the public API of the bus is identical).
+ */
+
+const { env } = require("../configs/env");
+const { STAGES, buildStageEvent } = require("../constants/ocrStages");
+const { messageConstants } = require("../constants/messageConstants");
+const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
+const aiServiceClient = require("./aiService/aiServiceClient");
+const ocrOrchestratorService = require("./aiService/ocr/ocrOrchestratorService");
+const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
+const intelligenceRepository = require("../repositories/documentIntelligenceRepository");
+const medicalExtractionService = require("./aiService/medicalExtractionService");
+const objectStorageService = require("./objectStorageService");
+const ocrProgressBus = require("./sse/ocrProgressBus");
+
+const RUNNING_LOCKS = new Set();
+const MIME_BY_EXTENSION = new Map([
+  [".pdf", "application/pdf"],
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".tif", "image/tiff"],
+  [".tiff", "image/tiff"],
+  [".webp", "image/webp"],
+]);
+
+function inferMimeType(fileKey, explicitMimeType) {
+  if (explicitMimeType) return explicitMimeType;
+  const cleanKey = String(fileKey || "")
+    .split("?")[0]
+    .toLowerCase();
+  const dot = cleanKey.lastIndexOf(".");
+  if (dot >= 0) {
+    return MIME_BY_EXTENSION.get(cleanKey.slice(dot)) || "application/pdf";
+  }
+  return "application/pdf";
+}
+
+async function ensureFileExists(fileKey) {
+  try {
+    await objectStorageService.getSignedFileUrl(fileKey);
+  } catch {
+    throw new NotFoundException(`File not found in storage: ${fileKey}`);
+  }
+}
+
+async function emitAndPersist(jobId, fileKey, stage, payload = {}) {
+  const event = buildStageEvent(stage, payload);
+  ocrProgressBus.publish(fileKey, event);
+  await documentProcessingJobRepository
+    .updateProgress(jobId, {
+      completedSteps: event.completedSteps ?? 0,
+      currentStep: event.currentStep,
+      message: event.message ?? null,
+      metadata: event.metadata ?? {},
+      pendingSteps: event.pendingSteps ?? 0,
+      percentage: event.percentage,
+      stage: event.stage,
+    })
+    .catch((error) => {
+      // Persistence failure must never abort the pipeline; log only.
+      console.warn("[ocr-job] progress write failed", { error: error.message, fileKey, jobId });
+    });
+}
+
+class DocumentOcrJobService {
+  /**
+   * Schedule an OCR + AI extraction run for a previously uploaded file.
+   *
+   * Returns the job row immediately. The actual pipeline runs in the
+   * background via `setImmediate` so the HTTP request can resolve in
+   * tens of milliseconds.
+   */
+  async enqueue({ fileKey, mimeType, userId }) {
+    if (!fileKey) {
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "fileKey is required");
+    }
+
+    await ensureFileExists(fileKey);
+
+    const job = await documentProcessingJobRepository.startJob({ fileKey, userId });
+
+    // Capture patient context once outside the pipeline to keep its body
+    // free of repository fetches that should not block the worker chain.
+    let patientContext = null;
+    try {
+      patientContext = await intelligenceRepository.getPatientContext(userId);
+    } catch {
+      patientContext = null;
+    }
+
+    // Schedule the pipeline. We deliberately do NOT await it. Errors are
+    // captured inside `_runPipeline` and persisted to the job row.
+    setImmediate(() => {
+      this._runPipeline({ fileKey, jobId: job.id, mimeType, patientContext, userId }).catch(
+        (error) => {
+          // _runPipeline already handles its own failures; this catch is a
+          // last-resort guard against bugs in the error path itself.
+          console.error("[ocr-job] uncaught pipeline error", {
+            error: error.message,
+            fileKey,
+            jobId: job.id,
+          });
+        },
+      );
+    });
+
+    return job;
+  }
+
+  async getStatus({ fileKey, userId }) {
+    return documentProcessingJobRepository.findByFileKey(fileKey, userId);
+  }
+
+  async _runPipeline({ fileKey, jobId, patientContext, userId, mimeType }) {
+    if (RUNNING_LOCKS.has(fileKey)) {
+      // Idempotency: a second enqueue while the first is in-flight is a
+      // no-op. The shared job row already reflects the latest state.
+      return;
+    }
+    RUNNING_LOCKS.add(fileKey);
+
+    try {
+      await documentProcessingJobRepository.markRunning(jobId);
+      await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
+
+      // 1. Download (existence check is enough; OCR reads from configured storage).
+      await emitAndPersist(jobId, fileKey, STAGES.PDF_DOWNLOADING);
+      await ensureFileExists(fileKey);
+      await emitAndPersist(jobId, fileKey, STAGES.PDF_DOWNLOADED);
+
+      // 2. OCR + extraction through the single configured AI_MODEL. The
+      // envelope is backward-compatible with the legacy /v1/run-ocr shape.
+      await emitAndPersist(jobId, fileKey, STAGES.PAGE_EXTRACTION_STARTED);
+      const ocrResponse = await ocrOrchestratorService.runFromStorage({
+        bucket: env.gcpStorageBucket || env.patientDocumentsBucket,
+        fileKey,
+        mimeType: inferMimeType(fileKey, mimeType),
+        traceId: `ocr_job_${jobId}`,
+      });
+
+      const ocrPayload = ocrResponse?.structuredDocument || ocrResponse?.ocr || ocrResponse || {};
+      const pageCount =
+        ocrPayload?.pageCount ||
+        ocrResponse?.metadata?.pageCount ||
+        (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
+
+      await emitAndPersist(jobId, fileKey, STAGES.PAGE_EXTRACTION_COMPLETED, {
+        metadata: {
+          confidence: ocrResponse?.metadata?.confidence ?? null,
+          pageCount,
+          processingSeconds: ocrResponse?.metrics?.processing_seconds ?? null,
+          usedDirectText: !!ocrResponse?.metrics?.used_direct_text,
+          usedOcr: !!ocrResponse?.metrics?.used_ocr,
+          engine: ocrResponse?.metrics?.engine ?? ocrResponse?.engine ?? null,
+          primaryEngine: ocrResponse?.metrics?.primary_engine ?? null,
+          fallbackUsed: false,
+        },
+      });
+
+      // 3. AI structured extraction through the same configured model.
+      await emitAndPersist(jobId, fileKey, STAGES.AI_SUMMARY_STARTED);
+      const { rawOcrData, structured, normalized, summary } =
+        await medicalExtractionService.extract({
+          patientContext,
+          rawOcr: ocrResponse,
+        });
+      await emitAndPersist(jobId, fileKey, STAGES.MEDICATION_EXTRACTION, {
+        metadata: { medicationCount: structured.medications.length },
+      });
+
+      // 4. Graph extraction (best-effort).
+      await emitAndPersist(jobId, fileKey, STAGES.GRAPH_EXTRACTION);
+      let graphs = [];
+      try {
+        graphs = await aiServiceClient.extractGraphs(normalized);
+      } catch (error) {
+        console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
+      }
+
+      // 5. Embeddings are deferred to /documents/add (after FE confirmation)
+      // because they will depend on user edits to the structured payload.
+      await emitAndPersist(jobId, fileKey, STAGES.EMBEDDING_GENERATION, {
+        message: "Embeddings will be generated when the document is saved",
+        metadata: { deferred: true },
+      });
+
+      const finalPayload = {
+        embeddingsGenerated: false,
+        extractedStructuredData: { ...structured, normalized, rawSummary: summary },
+        fileKey,
+        graphsDetected: graphs,
+        metrics: rawOcrData.metrics,
+        rawOcrData,
+      };
+
+      await documentProcessingJobRepository.markCompleted(jobId, {
+        completedSteps: 11,
+        currentStep: "Done",
+        extractedStructuredData: finalPayload.extractedStructuredData,
+        graphs,
+        message: null,
+        metadata: {
+          confidence: rawOcrData.confidence,
+          graphsDetected: graphs.length,
+          medications: structured.medications.length,
+          pageCount: rawOcrData.pageCount,
+          processingSeconds: rawOcrData.processingSeconds,
+        },
+        pendingSteps: 0,
+        rawOcrData,
+      });
+
+      ocrProgressBus.publish(
+        fileKey,
+        buildStageEvent(STAGES.COMPLETED, {
+          metadata: {
+            confidence: rawOcrData.confidence,
+            graphsDetected: graphs.length,
+            medications: structured.medications.length,
+            pageCount: rawOcrData.pageCount,
+            processingSeconds: rawOcrData.processingSeconds,
+          },
+        }),
+      );
+      ocrProgressBus.complete(fileKey);
+    } catch (error) {
+      await documentProcessingJobRepository.markFailed(jobId, error).catch(() => {});
+      ocrProgressBus.fail(fileKey, error);
+      console.error("[ocr-job] pipeline failed", { error: error.message, fileKey, jobId, userId });
+    } finally {
+      RUNNING_LOCKS.delete(fileKey);
+    }
+  }
+}
+
+module.exports = new DocumentOcrJobService();

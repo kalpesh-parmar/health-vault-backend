@@ -9,10 +9,16 @@ servers:
   - url: http://localhost:3000/api
 
 paths:
-  /file/upload:
+  /s3-file-upload/upload:
     post:
-      summary: Upload file to S3
-      description: Uploads file to S3 bucket and returns fileKey
+      summary: Upload non-document file (e.g. patient profile picture) to GCS
+      description: |
+        Generic GCS uploader. **Medical documents must NOT be uploaded
+        through this endpoint.** Use `POST /documents/upload` for medical
+        documents so they are picked up by the OCR + AI pipeline.
+
+        Only `uploadType=PATIENT_PROFILE` is accepted here. Sending
+        `PATIENT_DOCUMENT` returns `400`.
       tags:
         - File Upload
       requestBody:
@@ -32,9 +38,8 @@ paths:
                 uploadType:
                   type: string
                   enum:
-                    - PATIENT_DOCUMENT
                     - PATIENT_PROFILE
-                  description: Type of upload to decide folder
+                  description: Only PATIENT_PROFILE is accepted on this endpoint.
       responses:
         "200":
           description: File uploaded successfully
@@ -45,11 +50,13 @@ paths:
                 properties:
                   fileKey:
                     type: string
-                    example: patient/profile/17000012345-image.png
+                    example: profile_image/17000012345-image.png
         "400":
-          description: Invalid request
+          description: |
+            Returned when `uploadType` is missing, invalid, or set to
+            `PATIENT_DOCUMENT` (use POST /documents/upload instead).
 
-  /file/getUrl:
+  /s3-file-upload/getUrl:
     get:
       summary: Get signed URL for file
       description: Returns temporary public access URL for private S3 file
@@ -77,7 +84,7 @@ paths:
         "400":
           description: Missing fileKey
 
-  /file/hard-delete:
+  /s3-file-upload/hard-delete:
     delete:
       summary: Delete file from S3
       description: Deletes file from S3 bucket using fileKey
