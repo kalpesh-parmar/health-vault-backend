@@ -1,8 +1,7 @@
 const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
-// const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
-const { medicationReminder } = require("../models/medicationReminder");
+// const { medicationReminder } = require("../models/medicationReminder");
 
 const filterSortColumnMap = Object.freeze({
   createdAt: medication.createdAt,
@@ -150,8 +149,15 @@ class MedicationRepository {
   }
 
   // FIND ALL ACTIVE
-  async findAllActive() {
-    return db.select().from(medication).where(eq(medication.softDelete, false));
+  async findAllActive(ongoing) {
+    const conditions = [eq(medication.softDelete, false)];
+    if (ongoing !== undefined) {
+      conditions.push(eq(medication.ongoing, ongoing));
+    }
+    return db
+      .select()
+      .from(medication)
+      .where(and(...conditions));
   }
 
   // // REDUCE QUANTITY
@@ -186,25 +192,6 @@ class MedicationRepository {
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
     return result[0] || null;
-  }
-  //findMedicationsForRefillAlert
-  async findMedicationsForRefillAlert(ongoing) {
-    const result = db
-      .select({
-        medication: medication,
-        reminder: medicationReminder,
-      })
-      .from(medication)
-      .innerJoin(medicationReminder, eq(medication.id, medicationReminder.medicationId))
-      .where(
-        and(
-          eq(medication.softDelete, false),
-          eq(medication.ongoing, ongoing),
-          sql`${medicationReminder.refillReminderTime} IS NOT NULL`,
-          sql`DATE(${medicationReminder.refillReminderTime}) <= CURRENT_DATE`,
-        ),
-      );
-    return result;
   }
 }
 

@@ -126,5 +126,14 @@ class refillRepository {
       .where(where);
     return Number(result[0].count);
   }
+  async findLatestRefillByMedicationId(medicationId) {
+    const result = await db
+      .select()
+      .from(refillCount)
+      .where(and(eq(refillCount.medicationId, medicationId), eq(refillCount.softDelete, false)))
+      .orderBy(desc(refillCount.createdAt))
+      .limit(1);
+    return result[0] || null;
+  }
 }
 module.exports = new refillRepository();

@@ -1,8 +1,8 @@
 const notificationConstant = Object.freeze({
-  BEFORE_REMINDER: "BEFORE_REMINDER",
-  AFTER_REMINDER: "AFTER_REMINDER",
-  REFILL_REMINDER: "REFILL_REMINDER",
-  FOLLOW_UP_REMINDER: "FOLLOW_UP_REMINDER",
+  BEFORE_REMINDER: "Before reminder",
+  AFTER_REMINDER: "After reminder",
+  REFILL_REMINDER: "Refill reminder",
+  FOLLOW_UP_REMINDER: "Follow up reminder",
   BEFORE_MEDICATION_TEMPLATE: `🔔Upcoming dose {{medicineName}}. Be ready at {{localTime}}!`,
   AFTER_MEDICATION_TEMPLATE: `⁉️Did you take your {{medicineName}} at {{localTime}}?`,
   REFILL_ALERT_TEMPLATE: `💊 {{medicineName}} may be running low. Consider refilling soon.`,

@@ -4,7 +4,10 @@ const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus"
 const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
-const { generateReminderOccurrences, refillTime } = require("../utils/reminderOccurrenceGenerator");
+const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
+// const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
+// const refillRepository = require("../repositories/refillRepository");
+// const notificationRepository = require("../repositories/notificationRepository");
 const {
   validateSchema,
   createReminderSchema,
@@ -18,8 +21,6 @@ class MedicationReminderService {
     const validData = await validateSchema(createReminderSchema, data);
     // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
-    //refillTime (initial estimate based on current medication endDate)
-    const initialRefillTime = refillTime(medication.endDate);
     // CREATE MAIN REMINDER
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
@@ -27,7 +28,6 @@ class MedicationReminderService {
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
       dosePerIntake: medication.dosePerIntake,
       // routineBase: medication.frequency,
-      refillReminderTime: initialRefillTime,
       // medicationTime: medication.medicationTime,
     });
 

@@ -2,7 +2,7 @@ const { notificationType } = require("../enums/notificationType");
 const Mustache = require("mustache");
 const { reminderTypes } = require("../enums/reminderTypes");
 const notificationService = require("./notificationService");
-const { convertToISTTime } = require("../utils/reminderOccurrenceGenerator");
+const { convertToUserTimeZone } = require("../utils/reminderOccurrenceGenerator");
 const { notificationConstant } = require("../constants/notificationConstants");
 
 class ReminderNotificationService {
@@ -13,7 +13,7 @@ class ReminderNotificationService {
       medicineName: data.medication.medicationName,
       ...(actualTime && {
         medicineTime: actualTime.toISOString(),
-        localTime: convertToISTTime(actualTime),
+        localTime: convertToUserTimeZone(actualTime),
       }),
     };
   }
@@ -75,6 +75,7 @@ class ReminderNotificationService {
       body: Mustache.render(notificationConstant.REFILL_ALERT_TEMPLATE, variable),
       data: {
         type: notificationType.REFILL_ALERT,
+        medicationId: data.medication.id,
         ...variable,
       },
     };

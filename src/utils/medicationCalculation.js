@@ -42,7 +42,6 @@ function calculateMedicationValues(data, baseDate = null) {
 
   const updatedEndDate = set(endDate, timeParts);
   const startDate = set(new Date(data.startDate), timeParts);
-
   return {
     endDate: updatedEndDate,
     dailyConsumption,

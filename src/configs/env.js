@@ -41,6 +41,7 @@ const env = Object.freeze({
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 100),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   smtpHost: process.env.SMTP_HOST,
   smtpPassword: process.env.SMTP_PASSWORD,
   smtpPort: numberFromEnv("SMTP_PORT", 587),
