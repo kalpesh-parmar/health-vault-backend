@@ -3,7 +3,9 @@ const fileType = Object.freeze({
   JPEG: "image/jpeg",
   PDF: "application/pdf",
   PNG: "image/png",
+  TIFF: "image/tiff",
   TXT: "text/plain",
+  WEBP: "image/webp",
   JPG: "image/jpg",
 });
 

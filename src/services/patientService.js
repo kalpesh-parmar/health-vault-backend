@@ -37,9 +37,7 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-// const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-// const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const s3service = require("./s3service");
+const objectStorageService = require("./objectStorageService");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -192,7 +190,6 @@ class PatientService {
       password,
       status: USER_STATUS.ACTIVE,
     });
-    console.log("patientData====", createdPatient);
 
     return {
       patientData: sanitizePatient(createdPatient),
@@ -231,7 +228,7 @@ class PatientService {
       existingPatient.profileImageKey &&
       payload.profileImageKey !== existingPatient.profileImageKey
     ) {
-      await s3service.deleteFile(existingPatient.profileImageKey);
+      await objectStorageService.deleteFile(existingPatient.profileImageKey);
     }
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(

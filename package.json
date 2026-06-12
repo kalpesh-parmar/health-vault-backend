@@ -17,6 +17,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
     "dev": "nodemon src/server.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -24,16 +25,20 @@
     "lint:fix": "eslint . --fix",
     "prepare": "husky",
     "start": "node src/server.js",
-    "test": "npm run lint"
+    "test": "npm run lint && npm run test:ocr",
+    "test:unit": "npx jest",
+    "test:ocr": "npx jest tests/services/aiService/ocr",
+    "test:watch": "npx jest --watch",
+    "test:coverage": "npx jest --coverage",
+    "analyze:project": "mkdir reports && depcruise . --exclude '^node_modules' --output-type html > reports/architecture.html && madge . --extensions js,ts --image reports/dependency-graph.svg"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1038.0",
     "@aws-sdk/s3-request-presigner": "^3.1039.0",
-    "@google/generative-ai": "^0.24.1",
-    "@paddle/paddle-node-sdk": "^3.8.0",
+    "@google-cloud/storage": "^7.19.0",
+    "@google/genai": "^2.7.0",
     "axios": "^1.16.1",
     "bcrypt": "^6.0.0",
-    "child_process": "^1.0.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
@@ -50,27 +55,28 @@
     "mustache": "^4.2.0",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.7",
-    "ollama": "^0.6.3",
     "pg": "^8.20.0",
-    "sharp": "^0.34.5",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1",
-    "tesseract.js": "^7.0.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.2.0",
     "@commitlint/config-conventional": "^20.2.0",
     "@eslint/js": "^9.39.2",
+    "@redocly/cli": "^2.31.5",
     "@types/pg": "^8.20.0",
+    "dependency-cruiser": "^17.4.3",
+    "drizzle-dbml-generator": "^0.10.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-unused-imports": "^4.3.0",
     "husky": "^9.1.7",
+    "jest": "^30.4.2",
     "lint-staged": "^16.2.7",
     "nodemon": "^3.1.11",
-    "prettier": "^3.6.2"
+    "prettier": "^3.6.2",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1"
   },
   "lint-staged": {
     "*.js": [

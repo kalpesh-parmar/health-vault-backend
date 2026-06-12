@@ -1,0 +1,231 @@
+openapi: 3.0.0
+
+components:
+  schemas:
+    UploadResponse:
+      type: object
+      properties:
+        fileKey: { type: string, example: "uploads/1716711000-report.pdf" }
+        originalName: { type: string, example: "report.pdf" }
+        mimeType: { type: string, example: "application/pdf" }
+        size: { type: integer, example: 482311 }
+        storageProvider: { type: string, example: "gcp" }
+        uploadedAt: { type: string, format: date-time }
+
+    OcrProgressEvent:
+      type: object
+      properties:
+        fileKey: { type: string }
+        stage: { type: string, example: "AI_SUMMARY_STARTED" }
+        percentage: { type: integer, example: 65 }
+        currentStep: { type: string, example: "Generating AI summary" }
+        completedSteps: { type: integer, example: 6 }
+        pendingSteps: { type: integer, example: 5 }
+        message: { type: string, nullable: true }
+        metadata: { type: object }
+        timestamp: { type: string, format: date-time }
+
+    RunOcrRequest:
+      type: object
+      required: [fileKey]
+      properties:
+        fileKey: { type: string, example: "uploads/1716711000-report.pdf" }
+        documentType: { type: string, example: "lab_report" }
+
+    RunOcrAcceptedResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            jobId: { type: string, format: uuid }
+            fileKey: { type: string }
+            status: { type: string, example: "OCR_STARTED" }
+            stage: { type: string, example: "OCR_QUEUED" }
+
+    RunOcrStatusResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fileKey: { type: string }
+        status: { type: string, example: "COMPLETED" }
+        stage: { type: string, example: "COMPLETED" }
+        percentage: { type: integer, example: 100 }
+        currentStep: { type: string }
+        completedSteps: { type: integer }
+        pendingSteps: { type: integer }
+        rawOcrData: { type: object, nullable: true }
+        extractedStructuredData: { type: object, nullable: true }
+        graphs: { type: array, items: { type: object } }
+        error: { type: string, nullable: true }
+
+    AddDocumentRequest:
+      type: object
+      required: [fileKey, rawOcrData, extractedStructuredData]
+      properties:
+        fileKey: { type: string }
+        rawOcrData: { type: object }
+        extractedStructuredData:
+          type: object
+          properties:
+            patientInfo: { type: object }
+            hospitalInfo: { type: object }
+            doctorInfo: { type: object }
+            diagnosis: { type: array, items: {} }
+            medications: { type: array, items: {} }
+            labResults: { type: array, items: {} }
+            vitals: { type: array, items: {} }
+            recommendations: { type: array, items: {} }
+            summary: { type: string }
+        graphs: { type: array, items: { type: object } }
+        embeddingsGenerated: { type: boolean, example: false }
+        documentType: { type: string, example: "lab_report" }
+        fileName: { type: string }
+
+    AddDocumentResponse:
+      type: object
+      properties:
+        document: { type: object }
+        embeddings:
+          type: object
+          properties:
+            chunkCount: { type: integer, example: 24 }
+            embeddings: { type: integer, example: 24 }
+        medicationsCreated:
+          type: array
+          description: Rows inserted into the `medications` table from the AI extraction.
+          items: { type: object }
+        medicationsSkipped:
+          type: array
+          description: |
+            AI medications that could not be normalized into a strict
+            medications row (e.g. missing frequency). Returned to the FE
+            so the user can complete them via the existing add-medication
+            API.
+          items:
+            type: object
+            properties:
+              raw: { type: object }
+              reason: { type: string, example: "unable to map frequency" }
+        patientSuggestions:
+          type: object
+          properties:
+            bloodGroup: { type: string, nullable: true, example: "B+" }
+            allergies: { type: array, items: { type: string } }
+
+paths:
+  /documents/upload:
+    post:
+      tags: [Documents]
+      summary: Upload a medical document to GCS
+      description: |
+        Uploads a PDF to Google Cloud Storage and returns the
+        `fileKey`. No DB records or AI processing are triggered — call
+        `POST /documents/run-ocr` next.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: File uploaded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadResponse" }
+
+  /documents/ocr-progress/{fileKey}:
+    get:
+      tags: [Documents]
+      summary: Server-Sent Events stream of OCR progress
+      description: |
+        Subscribe to realtime progress for a previously uploaded file.
+        The connection stays open and emits stage events shaped like
+        `OcrProgressEvent`. The stream replays the last buffered events on
+        connect, so it is safe to subscribe slightly before or after
+        `POST /documents/run-ocr`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: fileKey
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/OcrProgressEvent" }
+
+  /documents/run-ocr:
+    post:
+      tags: [Documents]
+      summary: Enqueue OCR + AI extraction (non-blocking)
+      description: |
+        Validates the fileKey, creates a `document_processing_jobs` row,
+        and returns immediately with `status=OCR_STARTED`. The pipeline
+        runs in the background; subscribe to the SSE channel for live
+        progress, or poll `GET /documents/run-ocr-status/:fileKey`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RunOcrRequest" }
+      responses:
+        "202":
+          description: OCR job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunOcrAcceptedResponse" }
+
+  /documents/run-ocr-status/{fileKey}:
+    get:
+      tags: [Documents]
+      summary: Poll OCR job status
+      description: |
+        Returns the latest job state. When `status === COMPLETED` the
+        response also contains `rawOcrData`, `extractedStructuredData`,
+        and `graphs` — ready to be reviewed by the FE before calling
+        `POST /documents/add`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: fileKey
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunOcrStatusResponse" }
+
+  /documents/add:
+    post:
+      tags: [Documents]
+      summary: Persist FE-confirmed extraction
+      description: |
+        Saves the user-reviewed payload across `documents`,
+        `document_ocr_raw_data`, `document_pages`, `document_ai_summary`,
+        `medical_graphs`, `document_chunks`, and `embeddings` (pgvector)
+        in a single transaction. Does not run OCR or AI extraction.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddDocumentRequest" }
+      responses:
+        "201":
+          description: Document persisted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AddDocumentResponse" }

@@ -1,14 +1,14 @@
-const { StatusCodes } = require("http-status-codes");
+/**
+ * Document CRUD controller.
+ *
+ * Note: the legacy `addDocument` controller has been removed. The new
+ * upload → run-ocr → add flow lives in `documentFlowController.js`. This
+ * file keeps only the read/delete/download endpoints.
+ */
+
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
 const documentService = require("../services/documentService");
-
-async function addDocument(req, res) {
-  const result = await documentService.createDocument(req.auth.userId, req.body);
-  console.log("req.body===", req.body);
-
-  return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
-}
 
 async function getDocumentById(req, res) {
   const result = await documentService.getDocumentById(req.params.id, req.auth.userId);
@@ -53,12 +53,11 @@ async function deleteFile(req, res) {
 }
 
 module.exports = {
-  addDocument,
   deleteDocument,
+  deleteFile,
   getDocumentById,
   getDocumentList,
+  getDownloadFile,
   listDocuments,
   listDocumentsPaginated,
-  getDownloadFile,
-  deleteFile,
 };

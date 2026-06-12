@@ -41,6 +41,8 @@ const patient = pgTable(
     age: integer("age").notNull(),
     phone: varchar("phone", { length: 20 }).notNull(),
     profileImageKey: text("profile_image_key"),
+    bloodGroup: varchar("blood_group", { length: 8 }),
+    allergies: text("allergies").array(),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
