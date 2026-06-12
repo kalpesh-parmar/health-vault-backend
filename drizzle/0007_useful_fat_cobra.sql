@@ -1,0 +1,1 @@
+ALTER TABLE "medication_reminder_occurrences" RENAME COLUMN "is_follow_up" TO "is_overdue";

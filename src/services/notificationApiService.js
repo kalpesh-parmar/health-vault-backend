@@ -6,24 +6,25 @@ const {
   listNotificationsSchema,
   notificationIdParamSchema,
   testSendNotificationSchema,
-  userIdBodySchema,
   validateSchema,
+  userIdBodySchema,
 } = require("../validations");
+const notificationService = require("./notificationService");
 
 class NotificationApiService {
-  async testSend(payload) {
+  async testSend(userId, payload) {
     const data = await validateSchema(testSendNotificationSchema, payload);
-    return notificationRepository.create(data);
+    return notificationService.sendToUser(userId, data);
   }
 
-  async list(payload) {
+  async list(userId, payload) {
     const data = await validateSchema(listNotificationsSchema, payload || {});
-    return notificationRepository.list(data);
+    return notificationRepository.list(userId, data);
   }
 
-  async listPaginated(payload) {
+  async listPaginated(userId, payload) {
     const data = await validateSchema(listNotificationsPaginatedSchema, payload);
-    return notificationRepository.listPaginated(data);
+    return notificationRepository.listPaginated(userId, data);
   }
 
   async markRead(params) {
@@ -33,13 +34,11 @@ class NotificationApiService {
     if (!existingNotification) {
       throw new NotFoundException(errorConstants.NOTIFICATION_NOT_FOUND);
     }
-
     return notificationRepository.markRead(data.id);
   }
 
-  async markAllRead(payload) {
-    const data = await validateSchema(userIdBodySchema, payload);
-    return notificationRepository.markAllRead(data.userId);
+  async markAllRead(userId) {
+    return notificationRepository.markAllRead(userId);
   }
 
   async delete(params) {

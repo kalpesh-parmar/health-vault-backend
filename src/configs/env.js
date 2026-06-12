@@ -19,6 +19,7 @@ const env = Object.freeze({
   awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
   awsRegion: process.env.AWS_REGION || "us-east-1",
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  cronDisable: process.env.CRON_DISABLE,
   databaseUrl: process.env.DATABASE_URL,
   dbIdleTimeoutMs: numberFromEnv("DB_IDLE_TIMEOUT_MS", 30000),
   dbPoolMax: numberFromEnv("DB_POOL_MAX", 10),
@@ -37,14 +38,18 @@ const env = Object.freeze({
   passwordResetWindowMinutes: numberFromEnv("PASSWORD_RESET_WINDOW_MINUTES", 15),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
   port: numberFromEnv("PORT", 8080),
+  reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 100),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   smtpHost: process.env.SMTP_HOST,
   smtpPassword: process.env.SMTP_PASSWORD,
   smtpPort: numberFromEnv("SMTP_PORT", 587),
   smtpSecure: booleanFromEnv("SMTP_SECURE", false),
   smtpUser: process.env.SMTP_USER,
   userProfileImagesBucket: process.env.USER_PROFILE_IMAGES_BUCKET || "user-profile-images",
+  afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
+  // refillAlertBeforeDays: numberFromEnv("REFILL_ALERT_BEFORE_DAYS", 2),
 });
 
 module.exports = { env };

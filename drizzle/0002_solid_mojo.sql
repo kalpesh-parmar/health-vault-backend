@@ -1,0 +1,1 @@
+CREATE TYPE "public"."best_taken" AS ENUM('MORNING', 'NOON', 'NIGHT', 'CUSTOM');

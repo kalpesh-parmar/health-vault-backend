@@ -1,0 +1,1 @@
+ALTER TABLE "medications" ALTER COLUMN "best_taken" SET DATA TYPE varchar[];
