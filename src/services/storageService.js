@@ -1,56 +1,40 @@
-const { DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
-
-const { s3Buckets, s3Client } = require("../configs/s3");
+const { env } = require("../configs/env");
+const objectStorageService = require("./objectStorageService");
 
 class StorageService {
   getBuckets() {
-    return s3Buckets;
+    return {
+      patientDocuments:
+        env.storageProvider === "gcp" ? env.gcpStorageBucket : env.patientDocumentsBucket,
+      userProfileImages: env.userProfileImagesBucket,
+      provider: env.storageProvider,
+    };
   }
 
   async uploadPatientDocument({ body, contentType, key }) {
-    await s3Client.send(
-      new PutObjectCommand({
-        Body: body,
-        Bucket: s3Buckets.patientDocuments,
-        ContentType: contentType,
-        Key: key,
-      }),
-    );
-
+    const uploaded = await objectStorageService.uploadBuffer({ body, contentType, key });
     return {
-      bucket: s3Buckets.patientDocuments,
-      key,
+      bucket: uploaded.bucket,
+      key: uploaded.key,
+      provider: uploaded.provider,
     };
   }
 
   async uploadProfileImage({ body, contentType, key }) {
-    await s3Client.send(
-      new PutObjectCommand({
-        Body: body,
-        Bucket: s3Buckets.userProfileImages,
-        ContentType: contentType,
-        Key: key,
-      }),
-    );
-
+    const uploaded = await objectStorageService.uploadBuffer({ body, contentType, key });
     return {
-      bucket: s3Buckets.userProfileImages,
-      key,
+      bucket: uploaded.bucket,
+      key: uploaded.key,
+      provider: uploaded.provider,
     };
   }
 
-  async deleteObject({ bucket, key }) {
-    await s3Client.send(
-      new DeleteObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      }),
-    );
-
+  async deleteObject({ key }) {
+    await objectStorageService.deleteFile(key);
     return {
-      bucket,
       deleted: true,
       key,
+      provider: objectStorageService.getProviderName(),
     };
   }
 }

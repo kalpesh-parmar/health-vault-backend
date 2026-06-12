@@ -37,8 +37,9 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-const s3service = require("./s3service");
+// const s3service = require("./s3service");
 const { calculateAge } = require("../validations/patientValidation");
+const objectStorageService = require("./objectStorageService");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -229,7 +230,7 @@ class PatientService {
       existingPatient.profileImageKey &&
       payload.profileImageKey !== existingPatient.profileImageKey
     ) {
-      await s3service.deleteFile(existingPatient.profileImageKey);
+      await objectStorageService.deleteFile(existingPatient.profileImageKey);
     }
     const age = calculateAge(data.dateOfBirth);
     if (data.email) {

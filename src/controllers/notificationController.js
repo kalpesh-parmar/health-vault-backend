@@ -4,8 +4,6 @@ const notificationApiService = require("../services/notificationApiService");
 
 async function testSend(req, res) {
   const result = await notificationApiService.testSend(req.auth.userId, req.body);
-  console.log(("req.body:===", req.body));
-
   return successResponse(res, result, messageConstants.NOTIFICATION_SENT);
 }
 

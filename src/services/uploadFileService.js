@@ -1,19 +1,36 @@
+/**
+ * Generic object-storage helper used for non-document uploads (e.g. patient profile
+ * pictures). Document uploads MUST go through `/documents/upload` →
+ * `documentUploadService` so the new OCR flow can attach correctly.
+ *
+ * The `uploadType` form field used to accept `PATIENT_DOCUMENT` here.
+ * After the refactor we explicitly reject that value to avoid a second,
+ * duplicate code path that bypassed multipart validation, mime-type
+ * checks, and the documents/run-ocr lifecycle.
+ */
+
 const { messageConstants } = require("../constants/messageConstants");
 const { folderType } = require("../enums/s3Folder");
 const { InvalidRequestException } = require("../exceptions/appError");
-const s3service = require("./s3service");
+const objectStorageService = require("./objectStorageService");
 
-class uploadFileService {
+const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE"]);
+
+class UploadFileService {
   async uploadFile(file, uploadType) {
-    const folder = folderType[uploadType];
-
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
     }
+    if (!ALLOWED_UPLOAD_TYPES.has(uploadType)) {
+      throw new InvalidRequestException(
+        "This endpoint only accepts non-document uploads. Use POST /documents/upload for medical documents.",
+      );
+    }
+    const folder = folderType[uploadType];
     if (!folder) {
       throw new InvalidRequestException(messageConstants.INVALID_UPLOAD_TYPE);
     }
-    const upload = await s3service.uploadFile(file, folder);
+    const upload = await objectStorageService.uploadFile(file, folder);
     return { upload };
   }
 
@@ -21,7 +38,7 @@ class uploadFileService {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED);
     }
-    await s3service.deleteFile(fileKey);
+    await objectStorageService.deleteFile(fileKey);
     return { message: messageConstants.FILE_DELETED };
   }
 
@@ -29,10 +46,9 @@ class uploadFileService {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED);
     }
-    const signedUrl = await s3service.getSignedFileUrl(fileKey);
-    return {
-      signedUrl,
-    };
+    const signedUrl = await objectStorageService.getSignedFileUrl(fileKey);
+    return { signedUrl };
   }
 }
-module.exports = new uploadFileService();
+
+module.exports = new UploadFileService();

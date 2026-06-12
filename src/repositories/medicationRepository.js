@@ -139,7 +139,6 @@ class MedicationRepository {
       .update(medication)
       .set({
         ...payload,
-
         updatedAt: new Date(),
       })
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))

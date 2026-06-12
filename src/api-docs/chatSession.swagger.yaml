@@ -1,0 +1,153 @@
+openapi: 3.0.0
+
+components:
+  schemas:
+    ChatSession:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        lastMessageAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        citations: { type: array, items: { type: object } }
+        createdAt: { type: string, format: date-time }
+
+    CursorPage:
+      type: object
+      properties:
+        nextCursor: { type: string, nullable: true }
+
+    CreateChatSessionRequest:
+      type: object
+      properties:
+        title: { type: string }
+        documentId: { type: string, format: uuid }
+
+    SendChatMessageRequest:
+      type: object
+      required: [sessionId, message]
+      properties:
+        sessionId: { type: string, format: uuid }
+        message: { type: string }
+        documentId: { type: string, format: uuid }
+
+paths:
+  /chat/session:
+    post:
+      tags: [Chat]
+      summary: Create a new chat session
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateChatSessionRequest" }
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatSession" }
+
+    get:
+      tags: [Chat]
+      summary: List the current user's chat sessions
+      description: Cursor-paginated by `lastMessageAt DESC, id DESC`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CursorPage"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatSession" }
+
+  /chat/session/{id}/messages:
+    get:
+      tags: [Chat]
+      summary: Infinite-scroll chat history
+      description: |
+        Returns up to `limit` messages older than `cursor` (default
+        direction=before). Pass `direction=after` to fetch newer
+        messages. Cursor is opaque base64url.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: direction
+          schema: { type: string, enum: [before, after], default: before }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Messages page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CursorPage"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ChatMessage" }
+
+  /chat/message:
+    post:
+      tags: [Chat]
+      summary: Send a question and get an AI answer
+      description: |
+        STRICT: the assistant answers ONLY from the user's uploaded
+        documents (pgvector RAG). When no relevant chunk passes the
+        relevance threshold, the response is the canonical text
+        "Information not found in uploaded reports." and no LLM call is
+        made.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendChatMessageRequest" }
+      responses:
+        "201":
+          description: Answer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/ChatMessage" }
+                  ai: { $ref: "#/components/schemas/ChatMessage" }
+                  reply: { type: string }
+                  citations: { type: array, items: { type: object } }
