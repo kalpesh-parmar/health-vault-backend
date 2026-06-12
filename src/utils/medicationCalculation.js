@@ -1,5 +1,5 @@
 const { medictationType } = require("../enums/medicationType");
-
+const { set } = require("date-fns");
 function getUnitByMedicationType(type) {
   switch (type) {
     case medictationType.TABLET:
@@ -12,7 +12,7 @@ function getUnitByMedicationType(type) {
       return "ML";
 
     case medictationType.DROP:
-      return "DROPS";
+      return "ML";
 
     case medictationType.INJECTION:
       return "UNITS";
@@ -22,41 +22,35 @@ function getUnitByMedicationType(type) {
   }
 }
 
-function calculateMedicationValues(data) {
-  const timesPerDay = data.medicationTime.length;
-
+function calculateMedicationValues(data, baseDate = null) {
+  const timesPerDay = Object.keys(data.medicationSchedule || {}).length || 1;
   const dailyConsumption = data.dosePerIntake * timesPerDay;
+  const quantity = data.remainingQuantity ?? data.totalQuantity;
+  const totalDays = Math.ceil(quantity / dailyConsumption);
+  const calculationDate = baseDate ? new Date(baseDate) : new Date(data.startDate);
 
-  const totalDays = Math.ceil(data.totalQuantity / dailyConsumption);
+  const now = new Date();
 
-  let endDate = null;
+  const timeParts = {
+    hours: now.getUTCHours(),
+    minutes: now.getUTCMinutes(),
+    seconds: now.getUTCSeconds(),
+    milliseconds: now.getUTCMilliseconds(),
+  };
+  const endDate = calculationDate;
+  endDate.setUTCDate(endDate.getUTCDate() + totalDays - 1);
 
-  if (!data.ongoing) {
-    endDate = new Date(data.startDate);
-
-    endDate.setDate(endDate.getDate() + totalDays);
-  }
-
-  const today = new Date();
-
-  const startDate = new Date(data.startDate);
-
-  const daysPassed = Math.max(Math.floor((today - startDate) / (1000 * 60 * 60 * 24)), 0);
-
-  const consumed = daysPassed * dailyConsumption;
-
-  const remainingQuantity = Math.max(data.totalQuantity - consumed, 0);
-
-  const unit = getUnitByMedicationType(data.medicationType);
-
+  const updatedEndDate = set(endDate, timeParts);
+  const startDate = set(new Date(data.startDate), timeParts);
   return {
-    endDate,
-    remainingQuantity,
+    endDate: updatedEndDate,
     dailyConsumption,
-    unit,
+    unit: getUnitByMedicationType(data.medicationType),
+    startDate,
   };
 }
 
 module.exports = {
   calculateMedicationValues,
+  getUnitByMedicationType,
 };

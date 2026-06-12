@@ -1,5 +1,4 @@
 const { defineConfig } = require("drizzle-kit");
-
 require("dotenv").config({ quiet: true });
 
 module.exports = defineConfig({

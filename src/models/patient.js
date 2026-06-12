@@ -12,7 +12,7 @@ const {
 
 const { genderTypeValue } = require("../enums/genderType");
 const { USER_STATUS, userStatusValues } = require("../enums/userStatus.enum");
-const { text } = require("drizzle-orm/pg-core");
+const { date } = require("drizzle-orm/pg-core");
 
 const genderEnum = pgEnum("gender", genderTypeValue);
 const userStatusEnum = pgEnum("user_status", userStatusValues);
@@ -22,7 +22,6 @@ const patient = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     patientCode: varchar("patient_code", { length: 32 }).notNull().unique(),
-    userName: varchar("user_name", { length: 255 }).notNull(),
     firstName: varchar("first_name", { length: 255 }).notNull(),
     lastName: varchar("last_name", { length: 255 }).notNull(),
     fullName: varchar("full_name", { length: 255 }).notNull(),
@@ -37,10 +36,10 @@ const patient = pgTable(
     isVerified: boolean("is_verified").default(false).notNull(),
     otpVerifiedAt: timestamp("otp_verified_at"),
     gender: genderEnum("gender").notNull(),
-    // dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
-    age: integer("age").notNull(),
+    dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
+    // age: integer("age").notNull(),
     phone: varchar("phone", { length: 20 }).notNull(),
-    profileImageKey: text("profile_image_key"),
+    profileImageKey: varchar("profile_image_key", { length: 500 }),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

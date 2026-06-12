@@ -1,6 +1,7 @@
 const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
+// const { medicationReminder } = require("../models/medicationReminder");
 
 const filterSortColumnMap = Object.freeze({
   createdAt: medication.createdAt,
@@ -11,28 +12,23 @@ const filterSortColumnMap = Object.freeze({
   updatedAt: medication.updatedAt,
 });
 
+// FILTERS
 function buildMedicationFilters(filters = {}, userId) {
   const conditions = [eq(medication.softDelete, false)];
-
   if (userId) {
     conditions.push(eq(medication.userId, String(userId)));
   }
-
   if (filters.patientCode) {
     conditions.push(eq(medication.patientCode, filters.patientCode));
   }
-
   if (filters.medicationType) {
     conditions.push(eq(medication.medicationType, filters.medicationType));
   }
-
   if (filters.frequency) {
     conditions.push(eq(medication.frequency, filters.frequency));
   }
-
   if (filters.search) {
     const search = `%${filters.search}%`;
-
     conditions.push(
       or(
         ilike(medication.medicationName, search),
@@ -48,44 +44,50 @@ function buildMedicationFilters(filters = {}, userId) {
   return and(...conditions);
 }
 
+// SORT
 function buildOrderClause(sort = {}) {
   const sortColumn = filterSortColumnMap[sort.sortBy] || medication.createdAt;
-
   return sort.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
 }
 
 class MedicationRepository {
+  // CREATE
   async create(data) {
     const result = await db.insert(medication).values(data).returning();
-
     return result[0] || null;
   }
 
+  // FIND BY ID
   async findById(id) {
     const result = await db
       .select()
       .from(medication)
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .limit(1);
-
     return result[0] || null;
   }
 
+  // FIND ALL FILTERS
   async findAllWithFilters({ filter = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
-
     const orderClause = buildOrderClause(sort);
-
     const rows = await db.select().from(medication).where(where).orderBy(orderClause);
 
-    const totalRows = await db.select({ total: count() }).from(medication).where(where);
+    const totalRows = await db
+      .select({
+        total: count(),
+      })
+      .from(medication)
+      .where(where);
 
     return {
       rows,
+
       total: Number(totalRows[0]?.total || 0),
     };
   }
 
+  // PAGINATION
   async findAllWithPagination({ filter = {}, page = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
     const orderClause = buildOrderClause(sort);
@@ -117,19 +119,27 @@ class MedicationRepository {
     };
   }
 
+  // FIND ALL
   async findAll(userId) {
-    const result = await db
+    return db
       .select()
       .from(medication)
-      .where(and(eq(medication.softDelete, false), eq(medication.userId, String(userId))));
+      .where(
+        and(
+          eq(medication.softDelete, false),
 
-    return result;
+          eq(medication.userId, userId),
+        ),
+      );
   }
+
+  // UPDATE BY ID
   async updateById(id, payload) {
     const result = await db
       .update(medication)
       .set({
         ...payload,
+
         updatedAt: new Date(),
       })
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
@@ -138,24 +148,49 @@ class MedicationRepository {
     return result[0] || null;
   }
 
-  async findAllActive() {
+  // FIND ALL ACTIVE
+  async findAllActive(ongoing) {
+    const conditions = [eq(medication.softDelete, false)];
+    if (ongoing !== undefined) {
+      conditions.push(eq(medication.ongoing, ongoing));
+    }
     return db
       .select()
       .from(medication)
-      .where(and(eq(medication.softDelete, false)));
+      .where(and(...conditions));
   }
 
+  // // REDUCE QUANTITY
+  // async reduceQuantity(medicationId, quantity = 1) {
+  //   const existingMedication = await this.findById(medicationId);
+  //   if (!existingMedication) {
+  //     return null;
+  //   }
+  //   const updatedQuantity = Math.max(
+  //     0,
+  //     Number(existingMedication.remainingQuantity) - Number(quantity),
+  //   );
+  //   const result = await db
+  //     .update(medication)
+  //     .set({
+  //       remainingQuantity: updatedQuantity,
+  //       updatedAt: new Date(),
+  //     })
+  //     .where(and(eq(medication.id, medicationId), eq(medication.softDelete, false)))
+  //     .returning();
+  //   return result[0] || null;
+  // }
+
+  // SOFT DELETE
   async softDeleteById(id) {
     const result = await db
       .update(medication)
       .set({
         softDelete: true,
-        deletedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
-
     return result[0] || null;
   }
 }

@@ -1,11 +1,8 @@
 require("dotenv").config({ quiet: true });
 
 const http = require("http");
-
 const cors = require("cors");
 const express = require("express");
-require("./jobs/medicationCron");
-
 const { pool } = require("./configs/db");
 const { env } = require("./configs/env");
 const { apiRateLimiter, helmetMiddleware } = require("./configs/security");
@@ -13,7 +10,9 @@ const swaggerDocs = require("./configs/swagger");
 const { errorConstants } = require("./constants/errorConstants");
 const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
-const routes = require("./routes");
+const routes = require("./routes/index");
+const cronService = require("./services/cronService");
+const cronRegisterHandler = require("./configs/cronConfig");
 
 const app = express();
 const server = http.createServer(app);
@@ -33,8 +32,10 @@ app.use(errorHandler);
 if (require.main === module) {
   server.listen(port, () => {
     console.log(`Server started on port ${port}`);
+    cronRegisterHandler();
+    cronService.loadStartAll();
+    console.log("cron system initialized...");
   });
-
   const shutdown = (signal) => {
     console.log(`${signal} received. Closing server.`);
     server.close(() => {

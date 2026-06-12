@@ -38,6 +38,7 @@ const {
 } = require("../validations");
 const emailService = require("./emailService");
 const s3service = require("./s3service");
+const { calculateAge } = require("../validations/patientValidation");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -178,6 +179,7 @@ class PatientService {
   async createPatient(payload) {
     const data = await validateSchema(createPatientSchema, payload);
     const existingPatient = await patientRepository.findByEmail(data.email);
+    const age = calculateAge(data.dateOfBirth);
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
     }
@@ -189,10 +191,10 @@ class PatientService {
       password,
       status: USER_STATUS.ACTIVE,
     });
-
-    return {
-      patientData: sanitizePatient(createdPatient),
-    };
+    return sanitizePatient({
+      ...createdPatient,
+      age: age,
+    });
   }
 
   async getPatientById(id) {
@@ -229,6 +231,7 @@ class PatientService {
     ) {
       await s3service.deleteFile(existingPatient.profileImageKey);
     }
+    const age = calculateAge(data.dateOfBirth);
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
         data.email,
@@ -248,9 +251,10 @@ class PatientService {
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    return {
-      patientData: sanitizePatient(updatedPatient),
-    };
+    return sanitizePatient({
+      ...updatedPatient,
+      age: age,
+    });
   }
 
   async deletePatient(id) {
@@ -391,7 +395,10 @@ class PatientService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    return existingPatient;
+    return {
+      ...existingPatient,
+      age: calculateAge(existingPatient.dateOfBirth),
+    };
   }
 }
 
