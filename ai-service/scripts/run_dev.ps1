@@ -3,8 +3,7 @@
 $ErrorActionPreference = "Stop"
 
 $aiServiceRoot = Split-Path -Parent $PSScriptRoot
-$projectRoot = Split-Path -Parent $aiServiceRoot
-Set-Location $projectRoot
+Set-Location $aiServiceRoot
 
 $venvPython = Join-Path $aiServiceRoot "venv\Scripts\python.exe"
 if (-not (Test-Path $venvPython)) {
@@ -13,4 +12,4 @@ if (-not (Test-Path $venvPython)) {
 }
 
 & $venvPython -m pip install --disable-pip-version-check -q -r (Join-Path $aiServiceRoot "requirements.txt")
-& $venvPython -m uvicorn --app-dir (Join-Path $projectRoot "ai-service") app.main:app --host localhost --port 8000 @args
+& $venvPython -m uvicorn app.main:app --host localhost --port 8000 @args

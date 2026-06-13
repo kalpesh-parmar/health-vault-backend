@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AI_SERVICE_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = AI_SERVICE_ROOT.parent if AI_SERVICE_ROOT.name == "ai-service" else AI_SERVICE_ROOT
-ROOT_ENV_FILE = PROJECT_ROOT / ".env"
+if (AI_SERVICE_ROOT / ".env").exists():
+    ROOT_ENV_FILE = AI_SERVICE_ROOT / ".env"
+else:
+    PROJECT_ROOT = AI_SERVICE_ROOT.parent if AI_SERVICE_ROOT.name == "ai-service" else AI_SERVICE_ROOT
+    ROOT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -23,6 +26,18 @@ class Settings(BaseSettings):
     app_name: str = "Health Vault Unified AI Service"
     environment: str = Field(default="development", alias="NODE_ENV")
     log_level: str = "INFO"
+    cors_origins: list[str] = Field(default=["*"], alias="CORS_ORIGINS")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_cors_origins(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            val = data.get("CORS_ORIGINS") or data.get("cors_origins")
+            if isinstance(val, str):
+                parsed = [origin.strip() for origin in val.split(",") if origin.strip()]
+                data["CORS_ORIGINS"] = parsed
+                data["cors_origins"] = parsed
+        return data
 
     database_url: str = Field(alias="DATABASE_URL")
 
