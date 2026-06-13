@@ -1,18 +1,19 @@
-const { and, asc, desc, eq, ilike, or, sql } = require("drizzle-orm");
-
+const { and, asc, desc, eq, ilike, or, sql, gte } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { notification } = require("../models/notification");
 
 const sortMap = Object.freeze({
+  createdBy: notification.userId,
   createdAt: notification.createdAt,
   title: notification.title,
 });
 
-function buildConditions(filter = {}) {
+function buildConditions(filter = {}, userId) {
   const conditions = [];
 
-  if (filter.userId) {
-    conditions.push(eq(notification.userId, filter.userId));
+  const actualUserId = userId || filter.userId;
+  if (actualUserId) {
+    conditions.push(eq(notification.userId, actualUserId));
   }
 
   if (filter.isRead !== undefined) {
@@ -43,8 +44,8 @@ class NotificationRepository {
     return result[0] || null;
   }
 
-  async list({ filter = {}, sort = {} }) {
-    const conditions = buildConditions(filter);
+  async list({ filter = {}, sort = {}, userId }) {
+    const conditions = buildConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
 
     return db
@@ -54,8 +55,8 @@ class NotificationRepository {
       .orderBy(orderClause);
   }
 
-  async listPaginated({ filter = {}, page, sort = {} }) {
-    const conditions = buildConditions(filter);
+  async listPaginated({ filter = {}, page, sort = {}, userId }) {
+    const conditions = buildConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
     const offset = page.pageNumber * page.pageLimit;
 
@@ -66,6 +67,7 @@ class NotificationRepository {
       .orderBy(orderClause)
       .limit(page.pageLimit)
       .offset(offset);
+
     const totalRecordsResult = await db
       .select({ count: sql`count(*)` })
       .from(notification)
@@ -119,6 +121,23 @@ class NotificationRepository {
       .where(and(eq(notification.userId, userId), eq(notification.isRead, false)));
 
     return Number(result[0].count);
+  }
+
+  async findRefillAlertSentSince(userId, medicationId, sinceTime) {
+    const result = await db
+      .select()
+      .from(notification)
+      .where(
+        and(
+          eq(notification.userId, userId),
+          gte(notification.createdAt, sinceTime),
+          sql`${notification.data}->>'type' = 'REFILL_ALERT'`,
+          sql`${notification.data}->>'medicationId' = ${medicationId}`,
+        ),
+      )
+      .limit(1);
+
+    return result[0] || null;
   }
 }
 

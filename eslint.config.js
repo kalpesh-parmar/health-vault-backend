@@ -4,7 +4,14 @@ const unusedImports = require("eslint-plugin-unused-imports");
 
 module.exports = [
   {
-    ignores: ["node_modules/**", "coverage/**", "dist/**", "drizzle/**"],
+    ignores: [
+      "node_modules/**",
+      "coverage/**",
+      "dist/**",
+      "drizzle/**",
+      "ai-service/**",
+      "services/**/venv/**",
+    ],
   },
   js.configs.recommended,
   {
@@ -18,6 +25,11 @@ module.exports = [
         module: "readonly",
         process: "readonly",
         require: "readonly",
+        setTimeout: "readonly",
+        setImmediate: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        clearTimeout: "readonly",
       },
       sourceType: "commonjs",
     },

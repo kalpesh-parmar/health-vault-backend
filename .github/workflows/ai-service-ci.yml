@@ -1,0 +1,50 @@
+name: AI Service CI
+
+on:
+  push:
+    paths:
+      - "ai-service/**"
+  pull_request:
+    paths:
+      - "ai-service/**"
+
+jobs:
+  test:
+    name: Run Python Tests & Check Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ai-service
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg build-essential
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run Tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/health_vault
+          AI_MODEL: qwen3-vl:latest
+          AI_BASE_URL: http://localhost:11434/v1
+          STORAGE_PROVIDER: s3
+          PATIENT_DOCUMENTS_BUCKET: patient-documents
+          AWS_REGION: us-east-1
+        run: |
+          python -m pytest tests/

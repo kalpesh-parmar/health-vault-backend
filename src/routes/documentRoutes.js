@@ -1,15 +1,31 @@
 const express = require("express");
 
 const documentController = require("../controllers/documentController");
+const documentFlowController = require("../controllers/documentFlowController");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const { upload } = require("../middlewares/upload");
 const { validateRequest } = require("../middlewares/validateRequest");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
 
 const router = express.Router();
 
-router.post("/add", verifyToken, documentController.addDocument);
+// ── Async OCR Flow (New Migrated Branch) ──
+// 1. Upload only — no DB writes, no OCR. Returns fileKey + metadata.
+router.post("/upload", verifyToken, upload.single("file"), documentFlowController.uploadDocument);
 
-//download document from s3 bucket using file key
+// 2. SSE channel keyed by fileKey. FE subscribes BEFORE calling /run-ocr.
+router.get("/ocr-progress/:fileKey", verifyToken, documentFlowController.ocrProgressStream);
+
+// 3. Non-blocking enqueue. Returns 202 in <100ms; pipeline runs in background.
+router.post("/run-ocr", verifyToken, documentFlowController.runOcr);
+
+// 4. Polling fallback if the FE drops the SSE connection. Returns the persisted job state.
+router.get("/run-ocr-status/:fileKey", verifyToken, documentFlowController.runOcrStatus);
+
+// 5. Persist FE-confirmed extraction.
+router.post("/add", verifyToken, documentFlowController.addDocument);
+
+// ── Document CRUD & Download (Both Branches) ──
 router.get(
   "/download-url",
   verifyToken,
@@ -17,12 +33,13 @@ router.get(
   documentController.getDownloadFile,
 );
 
-// delete document from s3 bucket using file key
 router.delete("/delete", verifyToken, documentController.deleteFile);
-router.post("/list", verifyToken, documentController.listDocuments);
-router.post("/list-paginated", verifyToken, documentController.listDocumentsPaginated);
-router.get("/list", verifyToken, documentController.getDocumentList);
+router.get("/", verifyToken, documentController.getDocumentList);
 router.get("/:id", verifyToken, documentController.getDocumentById);
 router.delete("/:id", verifyToken, documentController.deleteDocument);
+
+// Legacy filter endpoints kept for backwards compatibility.
+router.post("/list", verifyToken, documentController.listDocuments);
+router.post("/list-paginated", verifyToken, documentController.listDocumentsPaginated);
 
 module.exports = router;

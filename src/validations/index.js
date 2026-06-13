@@ -7,6 +7,7 @@ const {
   listDocumentsPaginatedSchema,
   listDocumentsQuerySchema,
 } = require("./documentValidation");
+const { listRefillQuerySchema } = require("./refillValidation");
 const {
   createPatientSchema,
   emailOnlySchema,
@@ -28,8 +29,13 @@ const {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  refillMedicationSchema,
 } = require("./medicationValidation");
-
+const {
+  createReminderSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
+} = require("./reminderValidation");
 const { createSessionSchema } = require("./sessionValidation");
 
 function formatZodIssues(error) {
@@ -75,8 +81,13 @@ module.exports = {
   updatePatientSchema,
   userIdBodySchema,
   validateSchema,
+  listRefillQuerySchema,
   verifyOtpSchema,
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  createReminderSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
+  refillMedicationSchema,
 };

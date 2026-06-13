@@ -1,5 +1,4 @@
 const { S3Client } = require("@aws-sdk/client-s3");
-
 const { env } = require("./env");
 
 const s3Client = new S3Client({
@@ -14,8 +13,8 @@ const s3Client = new S3Client({
 });
 
 const s3Buckets = Object.freeze({
-  patientDocuments: env.PATIENT_DOCUMENTS_BUCKET,
-  userProfileImages: env.USER_PROFILE_IMAGES_BUCKET,
+  patientDocuments: env.patientDocumentsBucket,
+  userProfileImages: env.userProfileImagesBucket,
 });
 
 module.exports = {

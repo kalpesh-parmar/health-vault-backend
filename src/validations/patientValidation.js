@@ -1,5 +1,4 @@
 const { z } = require("zod");
-
 const { errorConstants } = require("../constants/errorConstants");
 const { genderTypeValue } = require("../enums/genderType");
 const { userStatusValues } = require("../enums/userStatus.enum");
@@ -11,18 +10,19 @@ const numberRegex = /[0-9]/;
 const symbolRegex = /[@$!%*?&]/;
 const alphabetsRegex = /^[A-Za-z\s]+$/;
 
-// function calculateAge(dateOfBirth) {
-//   const today = new Date();
-//   const birthDate = new Date(dateOfBirth);
-//   let age = today.getFullYear() - birthDate.getFullYear();
-//   const monthDiff = today.getMonth() - birthDate.getMonth();
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return undefined;
+  const today = new Date();
+  const birthDate = new Date(dateOfBirth);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDiff = today.getMonth() - birthDate.getMonth();
 
-//   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-//     age -= 1;
-//   }
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
 
-//   return age;
-// }
+  return age;
+}
 
 const nameField = (requiredError) =>
   z
@@ -50,10 +50,13 @@ const passwordField = z
   .refine((value) => numberRegex.test(value), errorConstants.PASSWORD_NUMBER_REQUIRED)
   .refine((value) => symbolRegex.test(value), errorConstants.PASSWORD_SYMBOL_REQUIRED);
 
-// const dateOfBirthField = z.coerce.date({
-//   invalid_type_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
-//   required_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
-// });
+const dateOfBirthField = z.coerce
+  .date({
+    invalid_type_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
+    required_error: errorConstants.DATE_OF_BIRTH_REQUIRED,
+  })
+  .max(new Date(), errorConstants.CANT_BE_FUTURE_DATE);
+
 const ageField = z.preprocess(
   (val) => {
     if (typeof val === "string") return Number(val);
@@ -68,6 +71,7 @@ const ageField = z.preprocess(
     .positive()
     .max(150, errorConstants.AGE_INVALID),
 );
+
 const phoneField = z
   .string({ required_error: errorConstants.PHONE_REQUIRED })
   .regex(/^\d{10}$/, errorConstants.PHONE_INVALID);
@@ -79,15 +83,16 @@ const usernameField = (requiredError) =>
     .min(2, errorConstants.NAME_TOO_SHORT)
     .max(255, errorConstants.NAME_TOO_LONG)
     .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
-const profileImageKey = z.string().trim().optional().nullable();
+
+const profileImageKey = z.string().trim().max(500).optional().nullable();
+
 const createPatientSchema = z
   .object({
-    // dateOfBirth: dateOfBirthField,
-    age: ageField,
+    dateOfBirth: dateOfBirthField.optional(),
+    age: ageField.optional(),
     email: emailField,
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED),
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED),
-    // fullName: nameField(errorConstants.FULL_NAME_REQUIRED),
     gender: z.enum(genderTypeValue, {
       invalid_type_error: errorConstants.GENDER_INVALID,
       required_error: errorConstants.GENDER_INVALID,
@@ -95,17 +100,23 @@ const createPatientSchema = z
     password: passwordField,
     phone: phoneField,
     profileImageKey: profileImageKey,
-    userName: usernameField(errorConstants.USER_NAME_REQUIRED),
+    userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
+    allergies: z.string().trim().optional().nullable(),
+    bloodGroup: z.string().trim().optional().nullable(),
   })
   .strict()
-  .transform((data) => ({
-    ...data,
-    // age: calculateAge(data.dateOfBirth),
-    fullName: `${data.firstName} ${data.lastName}`,
-  }));
+  .transform((data) => {
+    const calculatedAgeValue = data.dateOfBirth ? calculateAge(data.dateOfBirth) : data.age;
+    return {
+      ...data,
+      age: calculatedAgeValue,
+      fullName: `${data.firstName} ${data.lastName}`,
+    };
+  });
+
 const updatePatientSchema = z
   .object({
-    // dateOfBirth: dateOfBirthField.optional(),
+    dateOfBirth: dateOfBirthField.optional(),
     age: ageField.optional(),
     email: emailField.optional(),
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED).optional(),
@@ -116,14 +127,16 @@ const updatePatientSchema = z
     profileImageKey: profileImageKey,
     status: z.enum(userStatusValues).optional(),
     userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
+    allergies: z.string().trim().optional().nullable(),
+    bloodGroup: z.string().trim().optional().nullable(),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)
   .transform((data) => {
     const updatedData = { ...data };
-    // if (data.dateOfBirth) {
-    //   updatedData.age = calculateAge(data.dateOfBirth);
-    // }
+    if (data.dateOfBirth) {
+      updatedData.age = calculateAge(data.dateOfBirth);
+    }
     if (data.firstName && data.lastName) {
       updatedData.fullName = `${data.firstName} ${data.lastName}`;
     }
@@ -188,4 +201,5 @@ module.exports = {
   resetPasswordSchema,
   updatePatientSchema,
   verifyOtpSchema,
+  calculateAge,
 };

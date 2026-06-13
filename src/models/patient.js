@@ -8,11 +8,12 @@ const {
   uniqueIndex,
   uuid,
   varchar,
+  date,
+  text,
 } = require("drizzle-orm/pg-core");
 
 const { genderTypeValue } = require("../enums/genderType");
 const { USER_STATUS, userStatusValues } = require("../enums/userStatus.enum");
-const { text } = require("drizzle-orm/pg-core");
 
 const genderEnum = pgEnum("gender", genderTypeValue);
 const userStatusEnum = pgEnum("user_status", userStatusValues);
@@ -37,10 +38,15 @@ const patient = pgTable(
     isVerified: boolean("is_verified").default(false).notNull(),
     otpVerifiedAt: timestamp("otp_verified_at"),
     gender: genderEnum("gender").notNull(),
-    // dateOfBirth: date("date_of_birth", { mode: "date" }).notNull(),
-    age: integer("age").notNull(),
+
+    // Support DOB, Age, allergies, bloodGroup from both branches
+    dateOfBirth: date("date_of_birth", { mode: "date" }),
+    age: integer("age"),
     phone: varchar("phone", { length: 20 }).notNull(),
     profileImageKey: text("profile_image_key"),
+    bloodGroup: varchar("blood_group", { length: 8 }),
+    allergies: text("allergies").array(),
+
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

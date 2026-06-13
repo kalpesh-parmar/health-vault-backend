@@ -1,13 +1,15 @@
 const { InvalidRequestException } = require("../exceptions/appError");
 const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { s3Client } = require("../configs/s3");
-// const documentService = require("./documentService");
+const { env } = require("../configs/env");
 const { messageConstants } = require("../constants/messageConstants");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 class S3Service {
   constructor() {
-    this.bucket = process.env.PATIENT_DOCUMENTS_BUCKET;
+    this.bucket = env.patientDocumentsBucket;
+    this.region = env.awsRegion;
+    this.provider = "s3";
   }
 
   // Upload file method
@@ -36,8 +38,25 @@ class S3Service {
       fileSize: file.size,
       s3Bucket: this.bucket,
       s3Key: fileKey,
+      storageProvider: this.provider,
     };
   }
+
+  async uploadBuffer({ body, contentType, key }) {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    });
+    await s3Client.send(command);
+    return {
+      bucket: this.bucket,
+      key,
+      provider: this.provider,
+    };
+  }
+
   //  Generate Signed URL
   async getSignedFileUrl(fileKey) {
     if (!fileKey) {
@@ -50,6 +69,24 @@ class S3Service {
     const signedUrl = await getSignedUrl(s3Client, command);
     return signedUrl;
   }
+
+  // Download raw object bytes (used by the Gemini OCR primary path).
+  async getFileBuffer(fileKey) {
+    if (!fileKey) {
+      throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
+    }
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: fileKey,
+    });
+    const response = await s3Client.send(command);
+    const chunks = [];
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
   //delete File
   async deleteFile(fileKey) {
     if (!fileKey) {

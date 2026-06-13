@@ -1,11 +1,16 @@
 const { z } = require("zod");
-
 const { errorConstants } = require("../constants/errorConstants");
 const { foodTypeValues } = require("../enums/foodType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
-const { bestTakenValues } = require("../enums/bestTakenType");
+const { bestTakenValues, bestTakenType } = require("../enums/bestTakenType");
 const { mediactionUnitValues } = require("../enums/medicationUnit");
+
+const time24HourSchema = z
+  .string({
+    required_error: errorConstants.TIME_REQUIRED,
+  })
+  .regex(/^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/, errorConstants.INVALID_TIME);
 
 const medicationNameField = z
   .string({
@@ -34,13 +39,41 @@ const dateField = z.coerce.date({
   invalid_type_error: errorConstants.INVALID_DATE,
   required_error: errorConstants.DATE_REQUIRED,
 });
-//comman validation function
+
+const validateStartDate = (startDate, ctx) => {
+  if (!startDate) return;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const selectedDate = new Date(startDate);
+  selectedDate.setHours(0, 0, 0, 0);
+
+  if (selectedDate < today) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["startDate"],
+      message: errorConstants.START_DATE_PAST,
+    });
+  }
+};
+
+const medicationScheduleSchema = z
+  .object({
+    [bestTakenType.MORNING || "MORNING"]: time24HourSchema.optional(),
+    [bestTakenType.NOON || "NOON"]: time24HourSchema.optional(),
+    [bestTakenType.NIGHT || "NIGHT"]: time24HourSchema.optional(),
+    [bestTakenType.CUSTOM || "CUSTOM"]: time24HourSchema.optional(),
+  })
+  .refine((data) => Object.values(data).some(Boolean), {
+    message: errorConstants.ONE_REQUIRED,
+  });
+
 const validateMedicationSelections = (data, ctx) => {
   if (!data.frequency) {
     return;
   }
 
-  //frequency limit map
   const frequencyLimitMap = {
     ONCE_DAILY: 1,
     TWICE_DAILY: 2,
@@ -49,18 +82,36 @@ const validateMedicationSelections = (data, ctx) => {
 
   const allowedCount = frequencyLimitMap[data.frequency];
 
-  //mecication time validation
-  if (allowedCount && data.medicationTime && data.medicationTime.length > allowedCount) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["medicationTime"],
-      message: `Maximum ${allowedCount} medication times allowed for ${data.frequency}`,
-    });
+  // medicationSchedule validation
+  if (data.medicationSchedule) {
+    const selectedCount = Object.values(data.medicationSchedule).filter(
+      (value) => value !== undefined,
+    ).length;
+    if (allowedCount && selectedCount !== allowedCount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["medicationSchedule"],
+        message: `${data.frequency} requires exactly ${allowedCount} medication time(s)`,
+      });
+    }
   }
 
-  //best taken validation
+  // medicationTime validation
+  if (data.medicationTime && data.medicationTime.length) {
+    if (allowedCount && data.medicationTime.length > allowedCount) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["medicationTime"],
+        message: `Maximum ${allowedCount} medication times allowed for ${data.frequency}`,
+      });
+    }
+  }
+
+  // best taken validation
   if (data.bestTaken?.length) {
-    const customCount = data.bestTaken.filter((value) => value === bestTakenValues.CUSTOM).length;
+    const customCount = data.bestTaken.filter(
+      (value) => value === "CUSTOM" || value === (bestTakenValues && bestTakenValues.CUSTOM),
+    ).length;
 
     // Prevent duplicate CUSTOM
     if (customCount > 1) {
@@ -71,7 +122,7 @@ const validateMedicationSelections = (data, ctx) => {
       });
     }
 
-    //validation total count based on frequency
+    // validation total count based on frequency
     if (allowedCount && data.bestTaken.length > allowedCount) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -80,7 +131,8 @@ const validateMedicationSelections = (data, ctx) => {
       });
     }
   }
-  //match medicationTime count
+
+  // match medicationTime count with bestTaken
   if (
     data.bestTaken &&
     data.medicationTime &&
@@ -98,73 +150,59 @@ const validateMedicationSelections = (data, ctx) => {
 const createMedicationSchema = z
   .object({
     medicationName: medicationNameField,
-
     medicationType: z.enum(medicationTypeValues, {
       required_error: errorConstants.MEDICATION_TYPE_REQUIRED,
       invalid_type_error: errorConstants.INVALID_TYPE,
     }),
-
     prescribedBy: prescribedByField.optional(),
-
     dosePerIntake: doseField,
-
     frequency: z.enum(frequencyTypeValues, {
       required_error: errorConstants.FREQUENCY_REQUIRED,
       invalid_type_error: errorConstants.INVALID_TYPE,
     }),
-
     medicationTime: z
       .array(
         z.object({
           time: z.string({
             required_error: errorConstants.TIME_REQUIRED,
           }),
-
           period: z.enum(["AM", "PM"], {
             required_error: errorConstants.PERIOD_REQUIRED,
           }),
         }),
       )
-      .min(1, errorConstants.ONE_REQUIRED),
-
-    bestTaken: z.array(z.enum(bestTakenValues)).min(1, errorConstants.ONE_REQUIRED).optional(),
-
+      .min(1, errorConstants.ONE_REQUIRED)
+      .optional(),
+    bestTaken: z
+      .array(z.enum(bestTakenValues || ["MORNING", "NOON", "NIGHT", "CUSTOM"]))
+      .min(1, errorConstants.ONE_REQUIRED)
+      .optional(),
+    medicationSchedule: medicationScheduleSchema.optional(),
     foodFrequency: z.enum(foodTypeValues).optional(),
-
     startDate: dateField,
-
     endDate: dateField.optional().nullable(),
-
-    unit: z.enum(mediactionUnitValues, {
-      required_error: errorConstants.UNIT_REQUIRED,
-      invalid_type_error: errorConstants.INVALID_UNIT,
-    }),
-
     ongoing: z.boolean().default(false),
-
+    unit: z.enum(mediactionUnitValues || ["PILLS", "ML", "DROPS", "UNITS"]).optional(),
     totalQuantity: z
       .number({
         required_error: errorConstants.TOTAL_PILLS_REQUIRED,
       })
       .int()
       .min(0, errorConstants.NOT_NEGATIVE),
-
     doseReminders: z.boolean().default(false),
-
     reminderBeforeMinutes: z
       .number({
         invalid_type_error: errorConstants.INVALID_NUMBER,
       })
       .int()
-      .optional()
-      .default(5),
-
+      .optional(),
     refillAlert: z.boolean().default(false),
-
     notes: z.string().trim().max(1000).optional().nullable(),
   })
   .strict()
   .superRefine((data, ctx) => {
+    validateStartDate(data.startDate, ctx);
+
     if (data.totalQuantity !== undefined && data.dosePerIntake > data.totalQuantity) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -193,22 +231,16 @@ const createMedicationSchema = z
 const updateMedicationSchema = z
   .object({
     medicationName: medicationNameField.optional(),
-
     medicationType: z.enum(medicationTypeValues).optional(),
-
-    prescribedBy: prescribedByField,
-
+    prescribedBy: prescribedByField.optional().nullable(),
     dosePerIntake: doseField.optional(),
-
     frequency: z.enum(frequencyTypeValues).optional(),
-
     medicationTime: z
       .array(
         z.object({
           time: z.string({
             required_error: errorConstants.TIME_REQUIRED,
           }),
-
           period: z.enum(["AM", "PM"], {
             required_error: errorConstants.PERIOD_REQUIRED,
           }),
@@ -216,40 +248,31 @@ const updateMedicationSchema = z
       )
       .min(1, errorConstants.ONE_REQUIRED)
       .optional(),
-
-    bestTaken: z.array(z.enum(bestTakenValues)).optional(),
-
-    foodFrequency: z.enum(foodTypeValues).optional(),
-
-    startDate: dateField.optional(),
-
-    ongoing: z.boolean().optional(),
-
-    totalQuantity: z.number().int().min(0).optional(),
-
-    unit: z
-      .enum(mediactionUnitValues, {
-        invalid_type_error: errorConstants.INVALID_UNIT,
-      })
+    bestTaken: z
+      .array(z.enum(bestTakenValues || ["MORNING", "NOON", "NIGHT", "CUSTOM"]))
       .optional(),
+    medicationSchedule: medicationScheduleSchema.optional(),
+    foodFrequency: z.enum(foodTypeValues).optional(),
+    startDate: dateField.optional(),
+    endDate: dateField.optional().nullable(),
+    ongoing: z.boolean().optional(),
+    totalQuantity: z.number().int().min(0).optional(),
+    unit: z.enum(mediactionUnitValues || ["PILLS", "ML", "DROPS", "UNITS"]).optional(),
     doseReminders: z.boolean().optional(),
-
     reminderBeforeMinutes: z
       .number({
         invalid_type_error: errorConstants.INVALID_NUMBER,
       })
       .int()
-      .optional()
-      .default(5),
-
+      .optional(),
     remainingQuantity: z.number().int().min(0).optional(),
-
     refillAlert: z.boolean().optional(),
-
     notes: z.string().trim().max(1000).optional().nullable(),
   })
   .strict()
   .superRefine((data, ctx) => {
+    validateStartDate(data.startDate, ctx);
+
     if (
       data.totalQuantity !== undefined &&
       data.dosePerIntake !== undefined &&
@@ -296,15 +319,26 @@ const listMedicationQuerySchema = z
     page: z
       .object({
         pageNumber: z.coerce.number().int().min(1).default(1),
-
         pageLimit: z.coerce.number().int().min(1).max(100).default(10),
       })
       .optional(),
   })
   .strict();
 
+//refill medication
+const refillMedicationSchema = z.object({
+  quantity: z
+    .number({
+      required_error: errorConstants.QUANTITY_REQUIRED,
+      invalid_type_error: errorConstants.INVALID_NUMBER,
+    })
+    .int()
+    .positive(),
+});
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
+  refillMedicationSchema,
 };

@@ -4,25 +4,28 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
-//create
+// create
 router.post("/create", verifyToken, medicationController.createMedication);
 
-//list of all data
+// list of all data
 router.get("/list", verifyToken, medicationController.getMedicationList);
 
-//pagination list
+// pagination list
 router.post("/list-paginated", verifyToken, medicationController.listMedicationsPaginated);
 
-//filter list
+// filter list
 router.post("/list", verifyToken, medicationController.listMedications);
 
-//get by id
+// refill medication
+router.post("/refill/:id", verifyToken, medicationController.refillMedication);
+
+// get by id
 router.get("/:id", verifyToken, medicationController.getMedicationById);
 
-//updated user
+// update
 router.put("/:id", verifyToken, medicationController.updateMedication);
 
-//delted user
+// delete
 router.delete("/:id", verifyToken, medicationController.deleteMedication);
 
 module.exports = router;

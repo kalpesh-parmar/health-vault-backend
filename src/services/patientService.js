@@ -1,7 +1,5 @@
 const { randomUUID } = require("crypto");
-
 const bcrypt = require("bcrypt");
-
 const { env } = require("../configs/env");
 const { errorConstants } = require("../constants/errorConstants");
 const { responseConstants } = require("../constants/responseConstants");
@@ -37,7 +35,8 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-const s3service = require("./s3service");
+const { calculateAge } = require("../validations/patientValidation");
+const objectStorageService = require("./objectStorageService");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -178,6 +177,7 @@ class PatientService {
   async createPatient(payload) {
     const data = await validateSchema(createPatientSchema, payload);
     const existingPatient = await patientRepository.findByEmail(data.email);
+    const age = calculateAge(data.dateOfBirth);
     if (existingPatient) {
       throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
     }
@@ -189,9 +189,13 @@ class PatientService {
       password,
       status: USER_STATUS.ACTIVE,
     });
-
+    const sanitized = sanitizePatient({
+      ...createdPatient,
+      age: age,
+    });
     return {
-      patientData: sanitizePatient(createdPatient),
+      ...sanitized,
+      patientData: sanitized,
     };
   }
 
@@ -227,8 +231,9 @@ class PatientService {
       existingPatient.profileImageKey &&
       payload.profileImageKey !== existingPatient.profileImageKey
     ) {
-      await s3service.deleteFile(existingPatient.profileImageKey);
+      await objectStorageService.deleteFile(existingPatient.profileImageKey);
     }
+    const age = calculateAge(data.dateOfBirth);
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
         data.email,
@@ -248,8 +253,15 @@ class PatientService {
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
+
+    const sanitized = sanitizePatient({
+      ...updatedPatient,
+      age: age,
+    });
+
     return {
-      patientData: sanitizePatient(updatedPatient),
+      ...sanitized,
+      patientData: sanitized,
     };
   }
 
@@ -391,7 +403,10 @@ class PatientService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    return existingPatient;
+    return {
+      ...existingPatient,
+      age: calculateAge(existingPatient.dateOfBirth),
+    };
   }
 }
 
