@@ -37,7 +37,6 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-// const s3service = require("./s3service");
 const { calculateAge } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 
@@ -231,6 +230,12 @@ class PatientService {
       payload.profileImageKey !== existingPatient.profileImageKey
     ) {
       await objectStorageService.deleteFile(existingPatient.profileImageKey);
+    }
+    if (data.firstName || data.lastName) {
+      const firstName = data.firstName ?? existingPatient.firstName;
+      const lastName = data.lastName ?? existingPatient.lastName;
+
+      data.fullName = `${firstName} ${lastName}`;
     }
     const age = calculateAge(data.dateOfBirth);
     if (data.email) {

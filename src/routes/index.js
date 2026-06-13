@@ -37,16 +37,16 @@ routes.get("/health", async (_req, res) => {
   }
 });
 routes.use("/auth", authRoutes);
-routes.use("/documents", documentRoutes);
-routes.use("/notifications", notificationRoutes);
-routes.use("/s3-file-upload", s3Routes);
-routes.use("/session", sessionRoutes);
 routes.use("/patient", patientRoutes);
 routes.use("/medications", medicationRoutes);
 routes.use("/medication-reminders", medicationReminderRoutes);
+routes.use("/documents", documentRoutes);
+routes.use("/chat", chatSessionRoutes);
+routes.use("/s3-file-upload", s3Routes);
+routes.use("/notifications", notificationRoutes);
+routes.use("/session", sessionRoutes);
 routes.use("/cron", cronRoutes);
 routes.use("/refill", refill);
-routes.use("/chat", chatSessionRoutes);
 
 routes.get("/health/ocr", async (_req, res) => {
   try {

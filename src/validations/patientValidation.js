@@ -78,6 +78,8 @@ const phoneField = z
 const profileImageKey = z.string().trim().optional().nullable();
 const createPatientSchema = z
   .object({
+    bloodGroup: z.string().optional(),
+    allergies: z.array(z.string()).optional(),
     dateOfBirth: dateOfBirthField,
     // age: calculateAge(),
     email: emailField,
@@ -117,11 +119,9 @@ const updatePatientSchema = z
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)
   .transform((data) => {
     const updatedData = { ...data };
-    if (data.dateOfBirth) {
-      updatedData.age = calculateAge(data.dateOfBirth);
-    }
-    if (data.firstName && data.lastName) {
-      updatedData.fullName = `${data.firstName} ${data.lastName}`;
+    // fullName: `${updatedData.firstName} ${data.lastName}`,
+    if (updatedData.dateOfBirth) {
+      updatedData.age = calculateAge(updatedData.dateOfBirth);
     }
     return updatedData;
   });

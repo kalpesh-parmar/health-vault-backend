@@ -27,11 +27,11 @@ function stringFromEnv(key) {
 //   );
 // }
 
-// function hasGcpCredentials() {
-//   return Boolean(
-//     stringFromEnv("GCP_CREDENTIALS_BASE64") || stringFromEnv("GOOGLE_APPLICATION_CREDENTIALS"),
-//   );
-// }
+function hasGcpCredentials() {
+  return Boolean(
+    stringFromEnv("GCP_CREDENTIALS_BASE64") || stringFromEnv("GOOGLE_APPLICATION_CREDENTIALS"),
+  );
+}
 
 // function resolveStorageProvider() {
 //   const configured = (process.env.STORAGE_PROVIDER || "auto").trim().toLowerCase();
@@ -96,7 +96,6 @@ const env = Object.freeze({
   otpExpiryMinutes: numberFromEnv("OTP_EXPIRY_MINUTES", 10),
   passwordResetWindowMinutes: numberFromEnv("PASSWORD_RESET_WINDOW_MINUTES", 15),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
-  port: numberFromEnv("PORT", 8080),
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 100),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
@@ -110,6 +109,47 @@ const env = Object.freeze({
   userProfileImagesBucket: process.env.USER_PROFILE_IMAGES_BUCKET || "user-profile-images",
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   // refillAlertBeforeDays: numberFromEnv("REFILL_ALERT_BEFORE_DAYS", 2),
+  port: numberFromEnv("PORT", 3000),
+  ragTopK: numberFromEnv("RAG_TOP_K", 8),
 });
+
+function validateEnv(config) {
+  const missing = [];
+
+  if (!config.aiModel) missing.push("AI_MODEL");
+  if (!config.aiBaseUrl) missing.push("AI_BASE_URL");
+  if (!config.databaseUrl) missing.push("DATABASE_URL");
+  if (!config.jwtSecret) missing.push("JWT_SECRET");
+
+  if (config.storageProvider === "gcp") {
+    if (!config.gcpStorageBucket) missing.push("GCP_STORAGE_BUCKET or PATIENT_DOCUMENTS_BUCKET");
+    if (!hasGcpCredentials())
+      missing.push("GCP_CREDENTIALS_BASE64 or GOOGLE_APPLICATION_CREDENTIALS");
+  }
+
+  if (config.storageProvider === "s3") {
+    if (!config.patientDocumentsBucket) missing.push("PATIENT_DOCUMENTS_BUCKET");
+    if (!config.awsRegion) missing.push("AWS_REGION");
+  }
+
+  if (missing.length) {
+    throw new Error(`Missing required configuration: ${missing.join(", ")}`);
+  }
+
+  if (config.aiTimeoutMs <= 0) throw new Error("AI_TIMEOUT_MS must be greater than zero");
+  if (config.aiMaxRetries < 0) throw new Error("AI_MAX_RETRIES must be zero or greater");
+  if (config.aiMaxOutputTokens <= 0)
+    throw new Error("AI_MAX_OUTPUT_TOKENS must be greater than zero");
+  if (config.aiPageConcurrency <= 0)
+    throw new Error("AI_PAGE_CONCURRENCY must be greater than zero");
+  if (config.aiMaxInlineBytes <= 0)
+    throw new Error("AI_MAX_INLINE_BYTES must be greater than zero");
+  if (config.aiMinTextChars < 0) throw new Error("AI_MIN_TEXT_CHARS must be zero or greater");
+  if (config.aiMinConfidence < 0 || config.aiMinConfidence > 1) {
+    throw new Error("AI_MIN_CONFIDENCE must be between 0 and 1");
+  }
+}
+
+validateEnv(env);
 
 module.exports = { env };

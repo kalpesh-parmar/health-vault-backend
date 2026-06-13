@@ -43,6 +43,8 @@ components:
           type: string
           format: date
         phone: { type: string }
+        bloodGroup: { type: string }
+        allergies: { type: array, items: { type: string } }
 
     UpdatePatientRequest:
       type: object

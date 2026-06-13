@@ -10,8 +10,7 @@ router.get("/list", verifyToken, patientController.getPatientList);
 router.get("/profile", verifyToken, patientController.getPatientProfile);
 router.get("/:id", verifyToken, patientController.getPatientById);
 router.put("/:id", verifyToken, upload.single("profilePicture"), patientController.updatePatient);
-// router.delete("/soft-delete/:id", verifyToken, patientController.deletePatient);
-// router.delete("/hard-delete/:id", verifyToken, patientController.permanentDeletePatient);
-// router.delete("/profile-picture-delete", verifyToken, patientController.profilePicDelete);
+router.delete("/soft-delete/:id", verifyToken, patientController.deletePatient);
+router.delete("/hard-delete/:id", verifyToken, patientController.permanentDeletePatient);
 
 module.exports = router;

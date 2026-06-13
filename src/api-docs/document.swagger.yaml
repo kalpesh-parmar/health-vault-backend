@@ -34,7 +34,6 @@ components:
         - fileType
         - fileSize
         - s3Bucket
-        - filePath
       properties:
         documentType:
           type: string
@@ -63,9 +62,9 @@ components:
         s3Bucket:
           type: string
           example: patient-documents
-        fileStoragePath:
-          type: string
-          example: https://${bucket}.s3.amazonaws.com/${uploads/17123-report.pdf}
+        # fileStoragePath:
+        #   type: string
+        #   example: https://${bucket}.s3.amazonaws.com/${uploads/17123-report.pdf}
     DocumentFilter:
       type: object
       additionalProperties: false
