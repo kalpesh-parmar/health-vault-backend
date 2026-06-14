@@ -19,10 +19,50 @@ function stringFromEnv(key) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function hasAwsCredentials() {
+  return Boolean(
+    (stringFromEnv("AWS_ACCESS_KEY_ID") && stringFromEnv("AWS_SECRET_ACCESS_KEY")) ||
+    stringFromEnv("AWS_PROFILE") ||
+    stringFromEnv("AWS_WEB_IDENTITY_TOKEN_FILE"),
+  );
+}
+
+function hasGcpCredentials() {
+  return Boolean(
+    stringFromEnv("GCP_CREDENTIALS_BASE64") || stringFromEnv("GOOGLE_APPLICATION_CREDENTIALS"),
+  );
+}
+
+function resolveStorageProvider() {
+  const configured = (process.env.STORAGE_PROVIDER || "auto").trim().toLowerCase();
+  const hasGcpConfig = Boolean(
+    stringFromEnv("GCP_STORAGE_BUCKET") || stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
+  );
+  const hasS3Config = Boolean(stringFromEnv("PATIENT_DOCUMENTS_BUCKET"));
+
+  if (configured === "auto") {
+    if (hasGcpConfig && hasGcpCredentials()) return "gcp";
+    if (hasS3Config && hasAwsCredentials()) return "s3";
+    throw new Error(
+      "Storage is not configured. Set STORAGE_PROVIDER=s3 or STORAGE_PROVIDER=gcp with the required bucket and credentials.",
+    );
+  }
+
+  if (configured === "aws") {
+    return "s3";
+  }
+
+  if (!["s3", "gcp"].includes(configured)) {
+    throw new Error("STORAGE_PROVIDER must be one of: auto, s3, gcp, aws");
+  }
+
+  return configured;
+}
+
 const env = Object.freeze({
   appName: process.env.APP_NAME || "Health Vault",
   appUrl: process.env.APP_URL || "http://localhost:3000",
-  port: numberFromEnv("PORT", 8080),
+  port: numberFromEnv("PORT", 3000),
   nodeEnv: process.env.NODE_ENV || "development",
 
   // Database
@@ -54,7 +94,7 @@ const env = Object.freeze({
   smtpPassword: process.env.SMTP_PASSWORD,
 
   // Storage Buckets & Providers
-  storageProvider: process.env.STORAGE_PROVIDER || "s3",
+  storageProvider: resolveStorageProvider(),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
   userProfileImagesBucket: process.env.USER_PROFILE_IMAGES_BUCKET || "user-profile-images",
 
@@ -102,6 +142,46 @@ const env = Object.freeze({
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
+  ragTopK: numberFromEnv("RAG_TOP_K", 8),
 });
+
+function validateEnv(config) {
+  const missing = [];
+
+  if (!config.aiModel) missing.push("AI_MODEL");
+  if (!config.aiBaseUrl) missing.push("AI_BASE_URL");
+  if (!config.databaseUrl) missing.push("DATABASE_URL");
+  if (!config.jwtSecret) missing.push("JWT_SECRET");
+
+  if (config.storageProvider === "gcp") {
+    if (!config.gcpStorageBucket) missing.push("GCP_STORAGE_BUCKET or PATIENT_DOCUMENTS_BUCKET");
+    if (!hasGcpCredentials())
+      missing.push("GCP_CREDENTIALS_BASE64 or GOOGLE_APPLICATION_CREDENTIALS");
+  }
+
+  if (config.storageProvider === "s3") {
+    if (!config.patientDocumentsBucket) missing.push("PATIENT_DOCUMENTS_BUCKET");
+    if (!config.awsRegion) missing.push("AWS_REGION");
+  }
+
+  if (missing.length) {
+    throw new Error(`Missing required configuration: ${missing.join(", ")}`);
+  }
+
+  if (config.aiTimeoutMs <= 0) throw new Error("AI_TIMEOUT_MS must be greater than zero");
+  if (config.aiMaxRetries < 0) throw new Error("AI_MAX_RETRIES must be zero or greater");
+  if (config.aiMaxOutputTokens <= 0)
+    throw new Error("AI_MAX_OUTPUT_TOKENS must be greater than zero");
+  if (config.aiPageConcurrency <= 0)
+    throw new Error("AI_PAGE_CONCURRENCY must be greater than zero");
+  if (config.aiMaxInlineBytes <= 0)
+    throw new Error("AI_MAX_INLINE_BYTES must be greater than zero");
+  if (config.aiMinTextChars < 0) throw new Error("AI_MIN_TEXT_CHARS must be zero or greater");
+  if (config.aiMinConfidence < 0 || config.aiMinConfidence > 1) {
+    throw new Error("AI_MIN_CONFIDENCE must be between 0 and 1");
+  }
+}
+
+validateEnv(env);
 
 module.exports = { env };

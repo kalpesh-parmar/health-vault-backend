@@ -5,6 +5,7 @@ import json
 import logging
 import re
 
+from app.core.json_utils import parse_json_object
 from app.modules.ocr.cleanup import clean_ocr_text, compress_for_llm
 from app.services.llm import LLMService
 from app.services.llm.service import LLMModelError
@@ -120,9 +121,8 @@ def build_prompt(text: str, *, mode: str, document_type: str, merge: bool) -> st
 
 
 def parse_summary(raw: str, *, mode: str, document_type: str) -> dict:
-    cleaned = (raw or "").replace("```json", "").replace("```", "").strip()
     try:
-        parsed = json.loads(cleaned)
+        parsed = parse_json_object(raw)
         if isinstance(parsed, dict):
             return {
                 "type": parsed.get("type") or document_type,
@@ -133,8 +133,8 @@ def parse_summary(raw: str, *, mode: str, document_type: str) -> dict:
                 "warnings": as_list(parsed.get("warnings")),
                 "follow_up": as_list(parsed.get("follow_up")),
             }
-    except json.JSONDecodeError:
-        raise LLMModelError("Configured AI model returned invalid summary JSON")
+    except Exception as exc:
+        raise LLMModelError(f"Configured AI model returned invalid summary JSON: {exc}") from exc
 
     raise LLMModelError("Configured AI model returned summary JSON in an unexpected shape")
 

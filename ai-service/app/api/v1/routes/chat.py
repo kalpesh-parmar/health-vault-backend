@@ -23,7 +23,6 @@ async def chat(payload: ChatRequest, request: Request) -> dict:
         "document_id": str(payload.document_id) if payload.document_id else None,
         "session_id": payload.session_id,
     })
-    print(f"chatRequest: {payload}");
     container = request.app.state.container
     async with container.db.session_factory() as session:
         try:
@@ -85,18 +84,31 @@ async def chat_ws(websocket: WebSocket) -> None:
     container = websocket.app.state.container
     try:
         while True:
-            payload = ChatRequest.model_validate_json(await websocket.receive_text())
-            async with container.db.session_factory() as session:
-                async for token in container.chat.stream_answer(
-                    user_id=payload.user_id,
-                    message=payload.message,
-                    document_id=payload.document_id,
-                    session_id=payload.session_id,
-                    intelligence_repo=IntelligenceRepository(session),
-                    medication_repo=MedicationRepository(session),
-                ):
-                    await websocket.send_json({"type": "token", "token": token})
-                await session.commit()
-            await websocket.send_json({"type": "done"})
+            raw_text = await websocket.receive_text()
+            try:
+                payload = ChatRequest.model_validate_json(raw_text)
+            except Exception as e:
+                logger.warning("chat_ws_validation_error", extra={"error": str(e)})
+                await websocket.send_json({"type": "error", "message": f"Invalid request payload: {e}"})
+                continue
+
+            try:
+                async with container.db.session_factory() as session:
+                    async for token in container.chat.stream_answer(
+                        user_id=payload.user_id,
+                        message=payload.message,
+                        document_id=payload.document_id,
+                        session_id=payload.session_id,
+                        intelligence_repo=IntelligenceRepository(session),
+                        medication_repo=MedicationRepository(session),
+                    ):
+                        await websocket.send_json({"type": "token", "token": token})
+                    await session.commit()
+                await websocket.send_json({"type": "done"})
+            except Exception as e:
+                logger.error("chat_ws_error", extra={"user_id": str(payload.user_id), "error": str(e)}, exc_info=True)
+                await websocket.send_json({"type": "error", "message": f"Chat stream failed: {e}"})
     except WebSocketDisconnect:
-        return
+        logger.info("chat_ws_disconnected")
+    except Exception as e:
+        logger.exception("chat_ws_unexpected_error")

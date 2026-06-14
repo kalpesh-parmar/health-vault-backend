@@ -1,82 +1,9 @@
 {
-  "id": "a10aca3c-650a-492f-8d2f-6d7dde529666",
+  "id": "e277b469-5c01-4fb7-8dd0-921e1b102579",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.AI_Summary": {
-      "name": "AI_Summary",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_message": {
-          "name": "user_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "AI_summary_data": {
-          "name": "AI_summary_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "soft_delete": {
-          "name": "soft_delete",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "AI_Summary_user_id_patients_id_fk": {
-          "name": "AI_Summary_user_id_patients_id_fk",
-          "tableFrom": "AI_Summary",
-          "tableTo": "patients",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.chat_messages": {
       "name": "chat_messages",
       "schema": "",

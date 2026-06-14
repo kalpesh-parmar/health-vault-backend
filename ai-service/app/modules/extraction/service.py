@@ -1,28 +1,27 @@
 from __future__ import annotations
 
-import json
-
+from app.core.json_utils import parse_json_object
 from app.modules.extraction.prompts import graph_extraction_prompt, structured_document_prompt, summary_prompt
 from app.services.llm import LLMService
 from app.services.llm.service import LLMModelError
 
 
 def parse_json(text: str, _unused_default: dict | None = None) -> dict:
-    cleaned = (text or "").replace("```json", "").replace("```", "").strip()
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        raise LLMModelError("Configured AI model returned invalid extraction JSON")
+        parsed = parse_json_object(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception as exc:
+        raise LLMModelError(f"Configured AI model returned invalid extraction JSON: {exc}") from exc
 
 
 def parse_json_loose(text: str) -> list | dict | None:
-    cleaned = (text or "").replace("```json", "").replace("```", "").strip()
-    if not cleaned:
+    if not text or not text.strip():
         return None
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        raise LLMModelError("Configured AI model returned invalid graph JSON")
+        parsed = parse_json_object(text)
+        return parsed if isinstance(parsed, (list, dict)) else None
+    except Exception as exc:
+        raise LLMModelError(f"Configured AI model returned invalid graph JSON: {exc}") from exc
 
 
 class ExtractionService:
