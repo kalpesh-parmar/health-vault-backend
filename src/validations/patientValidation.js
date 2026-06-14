@@ -81,8 +81,8 @@ const usernameField = (requiredError) =>
     .string({ required_error: requiredError })
     .trim()
     .min(2, errorConstants.NAME_TOO_SHORT)
-    .max(255, errorConstants.NAME_TOO_LONG)
-    .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
+    .max(255, errorConstants.NAME_TOO_LONG);
+// .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
 
 const profileImageKey = z.string().trim().max(500).optional().nullable();
 

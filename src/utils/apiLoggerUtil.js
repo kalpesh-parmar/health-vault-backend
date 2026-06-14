@@ -18,13 +18,48 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 /**
+ * Checks if the current environment requires masking sensitive fields.
+ * Masking is enabled for all environments except explicit local 'development'.
+ * @returns {boolean}
+ */
+function shouldMask() {
+  return process.env.NODE_ENV !== "development";
+}
+
+/**
  * Recursively clones and masks sensitive keys in objects, arrays, and stringified JSON.
+ * If the environment is 'development', it returns a clean copy of the original values unmasked.
  * @param {any} data
  * @returns {any}
  */
 function maskSensitiveData(data) {
   if (!data) return data;
 
+  // If in local development, skip masking (log actual values)
+  if (!shouldMask()) {
+    // We clone the object structure to maintain identical return type behavior
+    // without mutating the original request/response payloads
+    if (Array.isArray(data)) {
+      return data.map((item) => maskSensitiveData(item));
+    }
+    if (typeof data === "object") {
+      // Special node objects do not need cloning
+      if (
+        data.constructor &&
+        ["Buffer", "ReadStream", "WriteStream"].includes(data.constructor.name)
+      ) {
+        return data;
+      }
+      const clone = {};
+      for (const key of Object.keys(data)) {
+        clone[key] = maskSensitiveData(data[key]);
+      }
+      return clone;
+    }
+    return data;
+  }
+
+  // Production/Masking flow
   if (typeof data === "string") {
     // Mask Bearer tokens
     if (data.toLowerCase().startsWith("bearer ")) {
@@ -59,7 +94,12 @@ function maskSensitiveData(data) {
     for (const key of Object.keys(data)) {
       const lowerKey = key.toLowerCase();
       if (SENSITIVE_KEYS.has(lowerKey)) {
-        masked[key] = "***";
+        const val = data[key];
+        if (typeof val === "string" && val.toLowerCase().startsWith("bearer ")) {
+          masked[key] = "Bearer ***";
+        } else {
+          masked[key] = "***";
+        }
       } else {
         masked[key] = maskSensitiveData(data[key]);
       }
