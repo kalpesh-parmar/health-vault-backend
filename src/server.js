@@ -1,4 +1,5 @@
 require("dotenv").config({ quiet: true });
+require("./configs/axiosLogger");
 
 const http = require("http");
 const cors = require("cors");
@@ -27,6 +28,7 @@ app.use(helmetMiddleware);
 app.use(cors());
 app.use(apiRateLimiter);
 app.use(express.json());
+app.use(require("./middlewares/apiLogger"));
 
 // Routes registration
 app.use(routes);
