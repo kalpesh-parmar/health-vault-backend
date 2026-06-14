@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     database_url: str = Field(alias="DATABASE_URL")
 
-    storage_provider: Literal["auto", "s3", "gcp"] = Field(default="auto", alias="STORAGE_PROVIDER")
+    storage_provider: Literal["auto", "s3", "gcp", "aws"] = Field(default="auto", alias="STORAGE_PROVIDER")
     patient_documents_bucket: str = Field(default="patient-documents", alias="PATIENT_DOCUMENTS_BUCKET")
     gcp_storage_bucket: str | None = Field(default=None, alias="GCP_STORAGE_BUCKET")
     gcp_project_id: str | None = Field(default=None, alias="GCP_PROJECT_ID")
@@ -162,7 +162,7 @@ class Settings(BaseSettings):
 
         if configured == "gcp":
             return "gcp"
-        if configured == "s3":
+        if configured in ("s3", "aws"):
             return "s3"
         if has_gcp:
             return "gcp"
