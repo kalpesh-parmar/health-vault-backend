@@ -24,8 +24,7 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, dailyConsumption, unit, startDate, remainingQuantity } =
-      calculateMedicationValues(validData);
+    const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
@@ -34,7 +33,6 @@ class MedicationService {
       dailyConsumption,
       unit,
       startDate,
-      remainingQuantity: validData.remainingQuantity ?? remainingQuantity,
     });
     return medication;
   }
@@ -98,7 +96,6 @@ class MedicationService {
       endDate,
       dailyConsumption,
       unit,
-      remainingQuantity,
     });
 
     // If medication has no reminder then update is complete
