@@ -244,8 +244,10 @@ class MedicationService {
       return updatedMedication;
     }
 
-    const startFromDate = lastOccurrence.actualMedicationTime;
-    startFromDate + 1;
+    // const startFromDate = lastOccurrence.actualMedicationTime;
+    // startFromDate + 1;
+    const startFromDate = new Date(lastOccurrence.actualMedicationTime);
+    startFromDate.setUTCDate(startFromDate.getUTCDate() + 1);
 
     const reminderMedication = {
       ...updatedMedication,

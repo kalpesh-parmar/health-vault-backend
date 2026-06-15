@@ -49,7 +49,6 @@ function calculateMedicationValues(data, baseDate = null) {
     startDate,
   };
 }
-
 module.exports = {
   calculateMedicationValues,
   getUnitByMedicationType,

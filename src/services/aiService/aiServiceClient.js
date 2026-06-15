@@ -35,6 +35,8 @@ class AiServiceClient {
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
+    console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
+
     return postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
       bucket,
       fileKey,
@@ -44,7 +46,10 @@ class AiServiceClient {
   }
 
   async normalizeStructuredOcr(structuredOcr) {
+    console.log("structuredOcr===", structuredOcr);
     const data = await postWithRetry(`${this.baseUrl}/v1/extraction/normalize`, { structuredOcr });
+    console.log("data===", data);
+
     return data?.data || data;
   }
 
