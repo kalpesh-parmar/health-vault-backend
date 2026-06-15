@@ -44,14 +44,6 @@ components:
         - BEFORE_FOOD
         - AFTER_FOOD
 
-    BestTakenType:
-      type: string
-      enum:
-        - MORNING
-        - NOON
-        - NIGHT
-        - CUSTOM
-
     MedicationUnit:
       type: string
       enum:
@@ -60,20 +52,20 @@ components:
         - DROPS
         - UNITS
 
-    MedicationTime:
-      type: object
-      required:
-        - time
-        - period
-      properties:
-        time:
-          type: string
-          example: "08:00"
-        period:
-          type: string
-          enum:
-            - AM
-            - PM
+    # MedicationTime:
+    #   type: object
+    #   required:
+    #     - time
+    #     - period
+    #   properties:
+    #     time:
+    #       type: string
+    #       example: "08:00"
+    #     period:
+    #       type: string
+    #       enum:
+    #         - AM
+    #         - PM
 
     MedicationSchedule:
       type: object
@@ -124,14 +116,6 @@ components:
           example: 1
         frequency:
           $ref: "#/components/schemas/FrequencyType"
-        medicationTime:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationTime"
-        bestTaken:
-          type: array
-          items:
-            $ref: "#/components/schemas/BestTakenType"
         medicationSchedule:
           $ref: "#/components/schemas/MedicationSchedule"
         foodFrequency:
@@ -140,11 +124,11 @@ components:
           type: string
           format: date
           example: 2026-05-12
-        endDate:
-          type: string
-          format: date
-          nullable: true
-          example: 2026-05-20
+        # endDate:
+        #   type: string
+        #   format: date
+        #   nullable: true
+        #   example: 2026-05-20
         ongoing:
           type: boolean
           default: false
@@ -153,28 +137,28 @@ components:
           minimum: 0
           default: 0
           example: 30
-        remainingQuantity:
-          type: integer
-          minimum: 0
-          default: 0
-          example: 25
+        # remainingQuantity:
+        #   type: integer
+        #   minimum: 0
+        #   default: 0
+        #   example: 25
         doseReminders:
           type: boolean
           default: false
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
+        # unit:
+        #   $ref: "#/components/schemas/MedicationUnit"
         reminderBeforeMinutes:
           type: integer
           default: 5
           example: 10
-        dailyConsumption:
-          type: integer
-          minimum: 0
-          default: 0
-          example: 2
-        refillAlert:
-          type: boolean
-          default: false
+        # dailyConsumption:
+        #   type: integer
+        #   minimum: 0
+        #   default: 0
+        #   example: 2
+        # refillAlert:
+        #   type: boolean
+        #   default: false
         notes:
           type: string
           nullable: true
@@ -214,14 +198,6 @@ components:
           default: 1
         frequency:
           $ref: "#/components/schemas/FrequencyType"
-        medicationTime:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationTime"
-        bestTaken:
-          type: array
-          items:
-            $ref: "#/components/schemas/BestTakenType"
         medicationSchedule:
           $ref: "#/components/schemas/MedicationSchedule"
         foodFrequency:
@@ -229,10 +205,10 @@ components:
         startDate:
           type: string
           format: date
-        endDate:
-          type: string
-          format: date
-          nullable: true
+        # endDate:
+        #   type: string
+        #   format: date
+        #   nullable: true
         ongoing:
           type: boolean
           default: false
@@ -240,17 +216,11 @@ components:
           type: integer
           minimum: 0
           default: 0
-        doseReminders:
-          type: boolean
-          default: false
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
+        # unit:
+        #   $ref: "#/components/schemas/MedicationUnit"
         reminderBeforeMinutes:
           type: integer
           default: 5
-        refillAlert:
-          type: boolean
-          default: false
         notes:
           type: string
           nullable: true
@@ -273,14 +243,6 @@ components:
           minimum: 1
         frequency:
           $ref: "#/components/schemas/FrequencyType"
-        medicationTime:
-          type: array
-          items:
-            $ref: "#/components/schemas/MedicationTime"
-        bestTaken:
-          type: array
-          items:
-            $ref: "#/components/schemas/BestTakenType"
         medicationSchedule:
           $ref: "#/components/schemas/MedicationSchedule"
         foodFrequency:
@@ -288,27 +250,27 @@ components:
         startDate:
           type: string
           format: date
-        endDate:
-          type: string
-          format: date
-          nullable: true
+        # endDate:
+        #   type: string
+        #   format: date
+        #   nullable: true
         ongoing:
           type: boolean
         totalQuantity:
           type: integer
           minimum: 0
-        doseReminders:
-          type: boolean
-        unit:
-          $ref: "#/components/schemas/MedicationUnit"
+        # doseReminders:
+        #   type: boolean
+        # unit:
+        #   $ref: "#/components/schemas/MedicationUnit"
         reminderBeforeMinutes:
           type: integer
           default: 5
-        remainingQuantity:
-          type: integer
-          minimum: 0
-        refillAlert:
-          type: boolean
+        # remainingQuantity:
+        #   type: integer
+        #   minimum: 0
+        # refillAlert:
+        #   type: boolean
         notes:
           type: string
           nullable: true

@@ -1,82 +1,9 @@
 {
-  "id": "1522446e-1322-4653-b3f7-bf86ca8c08ac",
-  "prevId": "6a30cde7-b729-4e7b-b042-025e56f3c412",
+  "id": "6fdab5e9-c361-444a-babd-634f0b49a8e3",
+  "prevId": "1522446e-1322-4653-b3f7-bf86ca8c08ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.AI_Summary": {
-      "name": "AI_Summary",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_message": {
-          "name": "user_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "AI_summary_data": {
-          "name": "AI_summary_data",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "soft_delete": {
-          "name": "soft_delete",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "AI_Summary_user_id_patients_id_fk": {
-          "name": "AI_Summary_user_id_patients_id_fk",
-          "tableFrom": "AI_Summary",
-          "tableTo": "patients",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.chat_messages": {
       "name": "chat_messages",
       "schema": "",
@@ -1820,7 +1747,7 @@
         },
         "embedding": {
           "name": "embedding",
-          "type": "vector(384)",
+          "type": "vector(768)",
           "primaryKey": false,
           "notNull": true
         },
@@ -2547,7 +2474,7 @@
         },
         "medication_name": {
           "name": "medication_name",
-          "type": "text",
+          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
@@ -2577,18 +2504,30 @@
           "primaryKey": false,
           "notNull": true
         },
+        "medication_times": {
+          "name": "medication_times",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
         "medication_schedule": {
           "name": "medication_schedule",
           "type": "json",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "best_taken": {
+          "name": "best_taken",
+          "type": "varchar(50)[]",
+          "primaryKey": false,
+          "notNull": false
         },
         "food_frequency": {
           "name": "food_frequency",
           "type": "food_type",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "start_date": {
           "name": "start_date",
@@ -2616,12 +2555,12 @@
           "notNull": false,
           "default": 0
         },
-        "unit": {
-          "name": "unit",
-          "type": "unit",
-          "typeSchema": "public",
+        "remaining_quantity": {
+          "name": "remaining_quantity",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false,
+          "default": 0
         },
         "daily_consumption": {
           "name": "daily_consumption",
@@ -2630,11 +2569,33 @@
           "notNull": true,
           "default": 0
         },
+        "dose_reminders": {
+          "name": "dose_reminders",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "refill_alert": {
+          "name": "refill_alert",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
         "reminder_before_minutes": {
           "name": "reminder_before_minutes",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "default": 5
+        },
+        "unit": {
+          "name": "unit",
+          "type": "unit",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
         },
         "notes": {
           "name": "notes",
@@ -3164,6 +3125,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "user_name": {
+          "name": "user_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
         "first_name": {
           "name": "first_name",
           "type": "varchar(255)",
@@ -3257,7 +3224,13 @@
           "name": "date_of_birth",
           "type": "date",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "age": {
+          "name": "age",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "phone": {
           "name": "phone",
@@ -3267,7 +3240,7 @@
         },
         "profile_image_key": {
           "name": "profile_image_key",
-          "type": "varchar(500)",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

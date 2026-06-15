@@ -28,9 +28,6 @@ components:
           nullable: true
           description: Uploaded profile image file key
           example: profile_image/171637282-image.png
-        userName:
-          type: string
-          example: john_doe
         firstName:
           type: string
           example: John
@@ -47,11 +44,6 @@ components:
           type: string
           enum: [female, male]
           example: male
-        age:
-          type: integer
-          minimum: 0
-          maximum: 120
-          example: 30
         dateOfBirth:
           type: string
           format: date
@@ -66,13 +58,9 @@ components:
           type: string
           nullable: true
           description: Optional profile picture upload
-        userName:
-          type: string
         firstName:
           type: string
         lastName:
-          type: string
-        email:
           type: string
         gender:
           type: string
@@ -81,8 +69,6 @@ components:
           type: string
         phone:
           type: string
-        age:
-          type: integer
         dateOfBirth:
           type: string
           format: date

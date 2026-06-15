@@ -81,7 +81,7 @@ const createPatientSchema = z
     bloodGroup: z.string().optional(),
     allergies: z.array(z.string()).optional(),
     dateOfBirth: dateOfBirthField,
-    // age: calculateAge(),
+    // age: ageField,
     email: emailField,
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED),
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED),
@@ -104,7 +104,7 @@ const createPatientSchema = z
 const updatePatientSchema = z
   .object({
     dateOfBirth: dateOfBirthField.optional(),
-    // age: age.optional(),
+    // age: ageField.optional(),
     email: emailField.optional(),
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED).optional(),
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED).optional(),

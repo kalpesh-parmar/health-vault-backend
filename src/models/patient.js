@@ -23,7 +23,7 @@ const patient = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     patientCode: varchar("patient_code", { length: 32 }).notNull().unique(),
-    userName: varchar("user_name", { length: 255 }).notNull(),
+    // userName: varchar("user_name", { length: 255 }).notNull(),
     firstName: varchar("first_name", { length: 255 }).notNull(),
     lastName: varchar("last_name", { length: 255 }).notNull(),
     fullName: varchar("full_name", { length: 255 }).notNull(),
@@ -41,7 +41,7 @@ const patient = pgTable(
 
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),
-    age: integer("age"),
+    // age: integer("age"),
     phone: varchar("phone", { length: 20 }).notNull(),
     profileImageKey: text("profile_image_key"),
     bloodGroup: varchar("blood_group", { length: 8 }),

@@ -45,11 +45,11 @@ const medication = pgTable(
     frequency: frequencyEnum("frequency").notNull(),
 
     // Support both scheduling formats from local and remote branches
-    medicationTime: json("medication_times"),
+    // medicationTime: json("medication_times"),
     medicationSchedule: json("medication_schedule"),
-    bestTaken: varchar("best_taken", {
-      length: 50,
-    }).array(),
+    // bestTaken: varchar("best_taken", {
+    //   length: 50,
+    // }).array(),
 
     foodFrequency: foodEnum("food_frequency"),
     startDate: timestamp("start_date").notNull(),
@@ -58,12 +58,12 @@ const medication = pgTable(
 
     // Quantities and Refills
     totalQuantity: integer("total_quantity").default(0),
-    remainingQuantity: integer("remaining_quantity").default(0),
+    // remainingQuantity: integer("remaining_quantity").default(0),
     dailyConsumption: integer("daily_consumption").default(0).notNull(),
 
     // Alerting and reminders
-    doseReminders: boolean("dose_reminders").default(false),
-    refillAlert: boolean("refill_alert").default(false),
+    // doseReminders: boolean("dose_reminders").default(false),
+    // refillAlert: boolean("refill_alert").default(false),
     reminderBeforeMinutes: integer("reminder_before_minutes").default(5),
 
     // Unit
