@@ -50,6 +50,13 @@ class InternalServerException extends AppError {
   }
 }
 
+class NonMedicalDocumentException extends AppError {
+  constructor(message = "The uploaded file is not a medical document.") {
+    super(StatusCodes.BAD_REQUEST, message, "NON_MEDICAL_DOCUMENT");
+    this.reason = message;
+  }
+}
+
 module.exports = {
   AccessDeniedException,
   AlreadyExistsException,
@@ -58,4 +65,5 @@ module.exports = {
   InvalidRequestException,
   NotFoundException,
   UnauthorizedException,
+  NonMedicalDocumentException,
 };

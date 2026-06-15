@@ -1,26 +1,37 @@
-const { InvalidRequestException } = require("../exceptions/appError");
+const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
 const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-const { s3Client } = require("../configs/s3");
+const { s3Client } = require("../configs/file");
 const { env } = require("../configs/env");
 const { messageConstants } = require("../constants/messageConstants");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 class S3Service {
   constructor() {
-    this.bucket = env.patientDocumentsBucket;
+    this.bucket = env.awsBucketName;
     this.region = env.awsRegion;
     this.provider = "s3";
   }
 
   // Upload file method
-  async uploadFile(file, folder) {
+  async uploadFile(file, category, patientId) {
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
     }
-    if (!folder) {
-      throw new InvalidRequestException("Folder is required");
+    if (!category) {
+      throw new InvalidRequestException("Category is required");
     }
-    const fileKey = `${folder}/${Date.now()}-${file.originalname}`;
+
+    const crypto = require("crypto");
+    const uuid = crypto.randomUUID();
+    const sanitizedName = file.originalname.replace(/\s+/g, "_");
+
+    let fileKey;
+    if (patientId) {
+      fileKey = `${category}/${patientId}/${uuid}-${sanitizedName}`;
+    } else {
+      fileKey = `${category}/${uuid}-${sanitizedName}`;
+    }
+
     const filePath = `https://${this.bucket}.s3.amazonaws.com/${fileKey}`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
@@ -70,7 +81,7 @@ class S3Service {
     return signedUrl;
   }
 
-  // Download raw object bytes (used by the Gemini OCR primary path).
+  // Download raw object bytes (used by the local OCR primary path).
   async getFileBuffer(fileKey) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_KEY_REQUIRED);
@@ -85,6 +96,31 @@ class S3Service {
       chunks.push(chunk);
     }
     return Buffer.concat(chunks);
+  }
+
+  async getFileStream(fileKey) {
+    if (!fileKey) {
+      throw new InvalidRequestException(
+        messageConstants.FILE_KEY_REQUIRED || "fileKey is required",
+      );
+    }
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: fileKey,
+      });
+      const response = await s3Client.send(command);
+      return {
+        stream: response.Body,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      };
+    } catch (error) {
+      if (error.name === "NoSuchKey") {
+        throw new NotFoundException(`File not found in storage: ${fileKey}`);
+      }
+      throw error;
+    }
   }
 
   //delete File

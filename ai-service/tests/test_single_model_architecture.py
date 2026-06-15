@@ -143,7 +143,7 @@ async def test_invalid_model_result_stops_processing() -> None:
 async def test_invalid_http_200_model_output_maps_to_ocr_error_not_503() -> None:
     service = VisionModelService(
         api_key="",
-        base_url="http://localhost:11434/v1",
+        base_url="http://122.174.67.117:11434/v1",
         model="qwen3-vl:latest",
         timeout_seconds=5,
         max_retries=0,
@@ -164,8 +164,8 @@ async def test_invalid_http_200_model_output_maps_to_ocr_error_not_503() -> None
 async def test_valid_http_200_model_output_completes_ocr_payload() -> None:
     service = VisionModelService(
         api_key="",
-        base_url="http://localhost:11434/v1",
-        model="qwen3-vl:latest",
+        base_url="http://122.174.67.117:11434/v1",
+        model="qwen 3-vl:latest",
         timeout_seconds=5,
         max_retries=0,
         max_output_tokens=128,
@@ -184,7 +184,7 @@ async def test_valid_http_200_model_output_completes_ocr_payload() -> None:
 async def test_pdf_vision_returns_partial_results_when_one_page_is_empty() -> None:
     service = VisionModelService(
         api_key="",
-        base_url="http://localhost:11434/v1",
+        base_url="http://122.174.67.117:11434/v1",
         model="qwen3-vl:latest",
         timeout_seconds=5,
         max_retries=0,

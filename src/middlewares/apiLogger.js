@@ -69,7 +69,7 @@ module.exports = (req, res, next) => {
               size: req.file.size,
             }
           : undefined,
-        files: req.files
+        files: Array.isArray(req.files)
           ? req.files.map((file) => ({
               fieldname: file.fieldname,
               originalname: file.originalname,

@@ -1,22 +1,38 @@
 const { env } = require("../../../configs/env");
-const aiOcrService = require("./geminiOcrService");
+const { ollamaClient } = require("../../ai/ollamaClient.ts");
 
 class OcrHealthService {
   async check() {
-    const configured = aiOcrService.isConfigured;
-    const client = configured ? aiOcrService.provider() : null;
-    const modelValidation = client?.validateModelAvailable
-      ? await client.validateModelAvailable()
-      : { ok: configured };
+    const configured = true;
+    let modelValidation = { ok: false };
+
+    try {
+      const tags = await ollamaClient.listTags();
+      const modelName = env.aiModel || "qwen3-vl:latest";
+      const isReachable = tags.length > 0;
+
+      modelValidation = {
+        ok: isReachable,
+        modelConfigured: modelName,
+        modelFound: tags.some((t) => t.startsWith(modelName.split(":")[0])),
+        availableModels: tags,
+      };
+    } catch (error) {
+      modelValidation = {
+        ok: false,
+        error: error.message,
+      };
+    }
+
     return {
-      status: configured && modelValidation.ok ? "ok" : "degraded",
+      status: modelValidation.ok ? "ok" : "degraded",
       timestamp: new Date().toISOString(),
       ai: {
-        engine: client?.status().engine || null,
-        model: env.aiModel,
-        baseUrl: env.aiBaseUrl,
+        engine: "ollama",
+        model: env.aiModel || "qwen3-vl:latest",
+        baseUrl: env.ollamaUrl || "http://localhost:11434",
         configured,
-        apiKeyPresent: Boolean(env.aiApiKey),
+        apiKeyPresent: false,
         modelValidation,
       },
       limits: {

@@ -1,5 +1,5 @@
 const express = require("express");
-const medicationController = require("../controllers/medicationController");
+const medicationController = require("../controllers/medication.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
 const router = express.Router();

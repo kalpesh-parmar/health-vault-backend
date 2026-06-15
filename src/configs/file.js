@@ -12,12 +12,6 @@ const s3Client = new S3Client({
   region: env.awsRegion,
 });
 
-const s3Buckets = Object.freeze({
-  patientDocuments: env.patientDocumentsBucket,
-  userProfileImages: env.userProfileImagesBucket,
-});
-
 module.exports = {
-  s3Buckets,
   s3Client,
 };

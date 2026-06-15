@@ -108,7 +108,7 @@ const validateMedicationSelections = (data, ctx) => {
   }
 
   // best taken validation
-  if (data.bestTaken?.length) {
+  if (Array.isArray(data.bestTaken) && data.bestTaken.length) {
     const customCount = data.bestTaken.filter(
       (value) => value === "CUSTOM" || value === (bestTakenValues && bestTakenValues.CUSTOM),
     ).length;

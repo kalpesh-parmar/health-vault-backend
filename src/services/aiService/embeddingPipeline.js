@@ -12,8 +12,9 @@
  */
 
 const { env } = require("../../configs/env");
-const intelligenceRepository = require("../../repositories/documentIntelligenceRepository");
-const aiServiceClient = require("./aiServiceClient");
+const DocumentIntelligenceRepository = require("../../repositories/documentIntelligenceRepository");
+const intelligenceRepository = new DocumentIntelligenceRepository();
+const { embeddingService } = require("../ai/embeddingService.ts");
 
 const CHUNK_TARGET_CHARS = 900;
 const CHUNK_OVERLAP_CHARS = 120;
@@ -128,7 +129,7 @@ async function embedAndPersist({
 
   const embeddingRows = [];
   for (const chunk of persistedChunks) {
-    const vector = await aiServiceClient.embedText(chunk.content);
+    const vector = await embeddingService.embedText(chunk.content);
     if (!Array.isArray(vector) || vector.length === 0) continue;
     embeddingRows.push({
       chunkId: chunk.id,

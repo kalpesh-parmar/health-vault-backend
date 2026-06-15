@@ -123,7 +123,7 @@ const embedding = pgTable(
     chunkId: uuid("chunk_id").references(() => documentChunk.id, { onDelete: "cascade" }),
     sourceType: aiSourceTypeEnum("source_type").notNull(),
     sourceId: uuid("source_id"),
-    embedding: vector("embedding", { dimensions: 384 }).notNull(),
+    embedding: vector("embedding", { dimensions: 768 }).notNull(),
     model: varchar("model", { length: 128 }).notNull(),
     metadata: jsonb("metadata").default({}).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),

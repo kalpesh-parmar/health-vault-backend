@@ -74,7 +74,7 @@ function buildOcrResult({
   processedPageCount,
   metrics = {},
 }) {
-  const normalizedPages = (pages || []).map((page) => {
+  const normalizedPages = (Array.isArray(pages) ? pages : []).map((page) => {
     const text = String(page.text || "").trim();
     return {
       page: page.page,
@@ -134,7 +134,6 @@ function buildOcrResult({
       client_engine: clientEngine,
       used_ocr: true,
       used_ai_model: true,
-      used_gemini: false,
       used_qwen_vl: false,
       used_direct_text: false,
       non_empty_pages: nonEmptyPages,

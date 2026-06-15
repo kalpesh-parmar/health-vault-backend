@@ -36,9 +36,9 @@ function hasGcpCredentials() {
 function resolveStorageProvider() {
   const configured = (process.env.STORAGE_PROVIDER || "auto").trim().toLowerCase();
   const hasGcpConfig = Boolean(
-    stringFromEnv("GCP_STORAGE_BUCKET") || stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
+    stringFromEnv("GCP_STORAGE_BUCKET") || stringFromEnv("AWS_BUCKET_NAME"),
   );
-  const hasS3Config = Boolean(stringFromEnv("PATIENT_DOCUMENTS_BUCKET"));
+  const hasS3Config = Boolean(stringFromEnv("AWS_BUCKET_NAME"));
 
   if (configured === "auto") {
     if (hasGcpConfig && hasGcpCredentials()) return "gcp";
@@ -95,8 +95,7 @@ const env = Object.freeze({
 
   // Storage Buckets & Providers
   storageProvider: resolveStorageProvider(),
-  patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
-  userProfileImagesBucket: process.env.USER_PROFILE_IMAGES_BUCKET || "user-profile-images",
+  awsBucketName: stringFromEnv("AWS_BUCKET_NAME"),
 
   // AWS S3
   awsAccessKeyId: stringFromEnv("AWS_ACCESS_KEY_ID"),
@@ -105,8 +104,7 @@ const env = Object.freeze({
 
   // GCP Storage
   gcpProjectId: stringFromEnv("GCP_PROJECT_ID"),
-  gcpStorageBucket:
-    stringFromEnv("GCP_STORAGE_BUCKET") || stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
+  gcpStorageBucket: stringFromEnv("GCP_STORAGE_BUCKET") || stringFromEnv("AWS_BUCKET_NAME"),
   gcpCredentialsBase64: stringFromEnv("GCP_CREDENTIALS_BASE64"),
 
   // Firebase
@@ -131,7 +129,7 @@ const env = Object.freeze({
   // Local/Legacy AI Settings
   apiKey: stringFromEnv("CHATBOT_API_KEY"),
   chatbotAPIKey: stringFromEnv("CHATBOT_API_KEY"),
-  ollamaUrl: process.env.OLLAMA_URL,
+  ollamaUrl: process.env.AI_BASE_URL,
   ocrModel: process.env.OCR_MODEL,
   chatModel: process.env.CHAT_MODEL,
   codeModel: process.env.CODE_MODEL,
@@ -154,13 +152,13 @@ function validateEnv(config) {
   if (!config.jwtSecret) missing.push("JWT_SECRET");
 
   if (config.storageProvider === "gcp") {
-    if (!config.gcpStorageBucket) missing.push("GCP_STORAGE_BUCKET or PATIENT_DOCUMENTS_BUCKET");
+    if (!config.gcpStorageBucket) missing.push("GCP_STORAGE_BUCKET or AWS_BUCKET_NAME");
     if (!hasGcpCredentials())
       missing.push("GCP_CREDENTIALS_BASE64 or GOOGLE_APPLICATION_CREDENTIALS");
   }
 
   if (config.storageProvider === "s3") {
-    if (!config.patientDocumentsBucket) missing.push("PATIENT_DOCUMENTS_BUCKET");
+    if (!config.awsBucketName) missing.push("AWS_BUCKET_NAME");
     if (!config.awsRegion) missing.push("AWS_REGION");
   }
 

@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const medicationReminderController = require("../controllers/medicationReminderController");
+const medicationReminderController = require("../controllers/medicationReminder.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
 // CREATE

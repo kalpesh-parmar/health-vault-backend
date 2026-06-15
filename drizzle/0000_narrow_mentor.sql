@@ -465,4 +465,5 @@ CREATE INDEX "patients_created_at_idx" ON "patients" USING btree ("created_at");
 CREATE INDEX "sessions_user_id_idx" ON "sessions" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "sessions_refresh_token_hash_idx" ON "sessions" USING btree ("refresh_token_hash");--> statement-breakpoint
 CREATE INDEX "sessions_is_active_idx" ON "sessions" USING btree ("is_active");--> statement-breakpoint
-CREATE INDEX "sessions_soft_delete_idx" ON "sessions" USING btree ("soft_delete");
+CREATE INDEX "sessions_soft_delete_idx" ON "sessions" USING btree ("soft_delete");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "embeddings_hnsw_idx" ON "embeddings" USING hnsw ("embedding" vector_cosine_ops);

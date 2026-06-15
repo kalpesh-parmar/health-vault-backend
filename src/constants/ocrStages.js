@@ -7,55 +7,36 @@
 
 const STAGES = Object.freeze({
   OCR_QUEUED: { stage: "OCR_QUEUED", percentage: 0, label: "Queued" },
-  OCR_STARTED: { stage: "OCR_STARTED", percentage: 5, label: "OCR started" },
-  PDF_DOWNLOADING: {
-    stage: "PDF_DOWNLOADING",
-    percentage: 10,
-    label: "Downloading PDF from cloud storage",
-  },
-  PDF_DOWNLOADED: { stage: "PDF_DOWNLOADED", percentage: 18, label: "PDF downloaded" },
-  PAGE_EXTRACTION_STARTED: {
-    stage: "PAGE_EXTRACTION_STARTED",
-    percentage: 25,
-    label: "Extracting page text",
-  },
-  PAGE_EXTRACTION_COMPLETED: {
-    stage: "PAGE_EXTRACTION_COMPLETED",
-    percentage: 55,
-    label: "Page extraction complete",
-  },
-  AI_SUMMARY_STARTED: {
-    stage: "AI_SUMMARY_STARTED",
-    percentage: 65,
-    label: "Generating AI summary",
-  },
-  MEDICATION_EXTRACTION: {
-    stage: "MEDICATION_EXTRACTION",
-    percentage: 75,
-    label: "Extracting medications",
-  },
-  GRAPH_EXTRACTION: { stage: "GRAPH_EXTRACTION", percentage: 82, label: "Extracting graphs" },
-  EMBEDDING_GENERATION: {
-    stage: "EMBEDDING_GENERATION",
-    percentage: 90,
-    label: "Generating embeddings",
-  },
-  SAVING_DATA: { stage: "SAVING_DATA", percentage: 96, label: "Saving extracted data" },
-  COMPLETED: { stage: "COMPLETED", percentage: 100, label: "Completed" },
+  OCR_STARTED: { stage: "OCR_STARTED", percentage: 5, label: "Started" },
+
+  // 1. Uploading File
+  UPLOADING_FILE: { stage: "UPLOADING_FILE", percentage: 10, label: "Uploading File" },
+
+  // 2. Medical Document Validation
+  VALIDATING: { stage: "VALIDATING", percentage: 20, label: "Medical Document Validation" },
+
+  // 3. Extracting Text
+  EXTRACTING: { stage: "EXTRACTING", percentage: 40, label: "Extracting Text" },
+
+  // 4. Analyzing Report
+  ANALYZING: { stage: "ANALYZING", percentage: 60, label: "Analyzing Report" },
+
+  // 5. Generating Summary
+  SUMMARIZING: { stage: "SUMMARIZING", percentage: 80, label: "Generating Summary" },
+
+  // 6. Ready / Completed
+  COMPLETED: { stage: "COMPLETED", percentage: 100, label: "Ready" },
   FAILED: { stage: "FAILED", percentage: 100, label: "Failed" },
 });
 
 const ORDERED_STAGES = [
+  STAGES.OCR_QUEUED,
   STAGES.OCR_STARTED,
-  STAGES.PDF_DOWNLOADING,
-  STAGES.PDF_DOWNLOADED,
-  STAGES.PAGE_EXTRACTION_STARTED,
-  STAGES.PAGE_EXTRACTION_COMPLETED,
-  STAGES.AI_SUMMARY_STARTED,
-  STAGES.MEDICATION_EXTRACTION,
-  STAGES.GRAPH_EXTRACTION,
-  STAGES.EMBEDDING_GENERATION,
-  STAGES.SAVING_DATA,
+  STAGES.UPLOADING_FILE,
+  STAGES.VALIDATING,
+  STAGES.EXTRACTING,
+  STAGES.ANALYZING,
+  STAGES.SUMMARIZING,
   STAGES.COMPLETED,
 ];
 

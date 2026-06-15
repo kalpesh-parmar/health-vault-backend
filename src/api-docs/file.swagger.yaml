@@ -9,7 +9,7 @@ servers:
   - url: http://localhost:3000/api
 
 paths:
-  /s3-file-upload/upload:
+  /file/upload:
     post:
       summary: Upload non-document file (e.g. patient profile picture) to GCS
       description: |
@@ -20,7 +20,7 @@ paths:
         Only `uploadType=PATIENT_PROFILE` is accepted here. Sending
         `PATIENT_DOCUMENT` returns `400`.
       tags:
-        - File Upload
+        - File
       requestBody:
         required: true
         content:
@@ -56,12 +56,12 @@ paths:
             Returned when `uploadType` is missing, invalid, or set to
             `PATIENT_DOCUMENT` (use POST /documents/upload instead).
 
-  /s3-file-upload/getUrl:
+  /file/view:
     get:
-      summary: Get signed URL for file
-      description: Returns temporary public access URL for private S3 file
+      summary: View file directly
+      description: Returns the file content directly for viewing (images and PDFs open inline, other file types are streamed as attachments)
       tags:
-        - File Upload
+        - File
       parameters:
         - in: query
           name: fileKey
@@ -72,24 +72,31 @@ paths:
           example: patient/profile/17000012345-image.png
       responses:
         "200":
-          description: Signed URL generated successfully
-          content:
-            application/json:
+          description: File stream returned successfully. Images and PDFs are served inline, while other files trigger a download.
+          headers:
+            Content-Type:
               schema:
-                type: object
-                properties:
-                  url:
-                    type: string
-                    example: https://bucket.s3.amazonaws.com/xyz?signature=abc
+                type: string
+              description: Detected MIME type of the file (e.g. image/png, application/pdf)
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+            Content-Disposition:
+              schema:
+                type: string
+              description: inline for images/PDFs, attachment for other files
         "400":
-          description: Missing fileKey
+          description: Missing or invalid fileKey
+        "404":
+          description: File not found in storage
 
-  /s3-file-upload/hard-delete:
+  /file/:
     delete:
       summary: Delete file from S3
       description: Deletes file from S3 bucket using fileKey
       tags:
-        - File Upload
+        - File
       requestBody:
         required: true
         content:

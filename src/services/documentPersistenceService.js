@@ -1,4 +1,5 @@
 const { db } = require("../configs/db");
+const { env } = require("../configs/env");
 const { documentTypeValue } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");
 const { messageConstants } = require("../constants/messageConstants");
@@ -29,10 +30,12 @@ function buildPatientSuggestions(extracted, patient) {
   if (extracted?.bloodGroup && extracted.bloodGroup !== patient?.bloodGroup) {
     suggestions.bloodGroup = extracted.bloodGroup;
   }
-  const newAllergies = (extracted?.allergies || []).filter(
+  const extAllergies = Array.isArray(extracted?.allergies) ? extracted.allergies : [];
+  const patAllergies = Array.isArray(patient?.allergies) ? patient.allergies : [];
+  const newAllergies = extAllergies.filter(
     (allergy) =>
       allergy &&
-      !(patient?.allergies || []).some(
+      !patAllergies.some(
         (existing) => String(existing).toLowerCase() === String(allergy).toLowerCase(),
       ),
   );
@@ -83,13 +86,21 @@ class DocumentPersistenceService {
       const artifacts = new DocumentArtifactsRepository(tx);
       const intelligence = new documentIntelligenceRepository(tx);
 
+      const bucketName =
+        payload.bucket ||
+        (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
+      const filePath =
+        env.storageProvider === "gcp"
+          ? `gs://${bucketName}/${fileKey}`
+          : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+
       const [documentRow] = await tx
         .insert(document)
         .values({
           documentType: inferDocumentType(payload.documentType),
           doctorName: extractedStructuredData?.doctorName || null,
           fileName,
-          filePath: `gs://${payload.bucket || ""}/${fileKey}`,
+          filePath,
           fileSize: rawOcrData?.fileSize || 0,
           fileType: inferFileType(mimeType),
           hospitalName: extractedStructuredData?.hospitalName || null,
@@ -99,7 +110,7 @@ class DocumentPersistenceService {
           reportDate: extractedStructuredData?.reportDate
             ? new Date(extractedStructuredData.reportDate)
             : null,
-          s3Bucket: payload.bucket || null,
+          s3Bucket: bucketName,
           s3Key: fileKey,
           structuredExtractedData: extractedStructuredData,
           userId,
@@ -124,9 +135,10 @@ class DocumentPersistenceService {
         userId,
       });
 
+      const ocrPages = Array.isArray(rawOcrData?.pages) ? rawOcrData.pages : [];
       await artifacts.replacePages(
         documentId,
-        (rawOcrData?.pages || []).map((page, index) => ({
+        ocrPages.map((page, index) => ({
           blocks: page?.lines || [],
           confidence: page?.confidence != null ? Number(page.confidence) : null,
           documentId,
@@ -162,9 +174,10 @@ class DocumentPersistenceService {
         userId,
       });
 
+      const safeGraphs = Array.isArray(graphs) ? graphs : [];
       await artifacts.replaceGraphs(
         documentId,
-        graphs.map((graph) => ({
+        safeGraphs.map((graph) => ({
           documentId,
           graphType: graph.graphType || "unknown",
           metadata: graph.metadata || {},

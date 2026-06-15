@@ -215,7 +215,7 @@ class PatientService {
     const { rows, total } = await patientRepository.findAll(filters);
 
     return {
-      items: rows.map(sanitizePatient),
+      items: (Array.isArray(rows) ? rows : []).map(sanitizePatient),
       limit: filters.limit,
       page: filters.page,
       total,

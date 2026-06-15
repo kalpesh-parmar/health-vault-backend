@@ -16,7 +16,7 @@ const swaggerDocs = require("./configs/swagger");
 const { errorConstants } = require("./constants/errorConstants");
 const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
-const routes = require("./routes/index");
+const routes = require("./routes/index.route");
 const cronService = require("./services/cronService");
 const cronRegisterHandler = require("./configs/cronConfig");
 

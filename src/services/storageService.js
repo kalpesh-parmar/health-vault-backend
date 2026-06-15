@@ -3,10 +3,10 @@ const objectStorageService = require("./objectStorageService");
 
 class StorageService {
   getBuckets() {
+    const bucket = env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName;
     return {
-      patientDocuments:
-        env.storageProvider === "gcp" ? env.gcpStorageBucket : env.patientDocumentsBucket,
-      userProfileImages: env.userProfileImagesBucket,
+      patientDocuments: bucket,
+      userProfileImages: bucket,
       provider: env.storageProvider,
     };
   }

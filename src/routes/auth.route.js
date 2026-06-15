@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const patientController = require("../controllers/patientController");
+const patientController = require("../controllers/patient.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
 router.post("/login", patientController.loginPatient);

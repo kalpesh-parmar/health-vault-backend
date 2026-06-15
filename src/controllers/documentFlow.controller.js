@@ -16,7 +16,6 @@ const { attachSseStream } = require("../services/sse/sseTransport");
 const { NotFoundException } = require("../exceptions/appError");
 const documentOcrJobService = require("../services/documentOcrJobService");
 const documentPersistenceService = require("../services/documentPersistenceService");
-const documentUploadService = require("../services/documentUploadService");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
 const { validateSchema } = require("../validations");
 const {
@@ -24,16 +23,6 @@ const {
   fileKeySchema,
   runOcrSchema,
 } = require("../validations/documentFlowValidation");
-
-async function uploadDocument(req, res) {
-  const result = await documentUploadService.uploadDocument(req.file);
-  return successResponse(
-    res,
-    result,
-    messageConstants.FILE_UPLOADED || "File uploaded",
-    StatusCodes.CREATED,
-  );
-}
 
 async function ocrProgressStream(req, res) {
   const { fileKey } = await validateSchema(fileKeySchema, req.params);
@@ -77,6 +66,14 @@ async function runOcrStatus(req, res) {
   const { fileKey } = await validateSchema(fileKeySchema, req.params);
   const job = await documentOcrJobService.getStatus({ fileKey, userId: req.auth.userId });
   if (!job) throw new NotFoundException("OCR job not found for this fileKey");
+
+  if (job.status === "FAILED") {
+    return res.status(StatusCodes.OK).json({
+      status: "FAILED",
+      error: job.error || "AI response format is invalid.",
+    });
+  }
+
   return successResponse(res, job, "OCR job status fetched");
 }
 
@@ -89,4 +86,4 @@ async function addDocument(req, res) {
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 
-module.exports = { addDocument, ocrProgressStream, runOcr, runOcrStatus, uploadDocument };
+module.exports = { addDocument, ocrProgressStream, runOcr, runOcrStatus };

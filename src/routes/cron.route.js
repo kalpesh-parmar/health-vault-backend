@@ -1,7 +1,7 @@
 //create a routes for cron want to create API for cron
 const express = require("express");
 const router = express.Router();
-const cronController = require("../controllers/cronController");
+const cronController = require("../controllers/cron.controller");
 
 router.post("/run-reminder", cronController.runReminder);
 router.post("/start", cronController.cronStart);

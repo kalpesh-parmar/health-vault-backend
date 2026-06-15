@@ -1,53 +1,128 @@
-/**
- * Generic object-storage helper used for non-document uploads (e.g. patient profile
- * pictures). Document uploads MUST go through `/documents/upload` →
- * `documentUploadService` so the new OCR flow can attach correctly.
- *
- * The `uploadType` form field used to accept `PATIENT_DOCUMENT` here.
- * After the refactor we explicitly reject that value to avoid a second,
- * duplicate code path that bypassed multipart validation, mime-type
- * checks, and the documents/run-ocr lifecycle.
- */
-
 const { messageConstants } = require("../constants/messageConstants");
-const { folderType } = require("../enums/s3Folder");
+const { FileCategory } = require("../enums/fileCategory");
 const { InvalidRequestException } = require("../exceptions/appError");
 const objectStorageService = require("./objectStorageService");
 
-const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE"]);
+const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE", "PATIENT_DOCUMENT"]);
+
+const ALLOWED_MIME_TYPES = {
+  PATIENT_PROFILE: new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]),
+  PATIENT_DOCUMENT: new Set([
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/tiff",
+  ]),
+};
+
+const MAX_FILE_SIZES = {
+  PATIENT_PROFILE: 5 * 1024 * 1024, // 5 MB
+  PATIENT_DOCUMENT: 25 * 1024 * 1024, // 25 MB
+};
+
+const UPLOAD_TYPE_TO_CATEGORY = {
+  PATIENT_PROFILE: FileCategory.PROFILE,
+  PATIENT_DOCUMENT: FileCategory.DOCUMENT,
+};
 
 class UploadFileService {
-  async uploadFile(file, uploadType) {
+  async uploadFile(file, uploadType, patientId) {
     if (!file) {
-      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "File is required");
     }
-    if (!ALLOWED_UPLOAD_TYPES.has(uploadType)) {
+    if (!uploadType || !ALLOWED_UPLOAD_TYPES.has(uploadType)) {
       throw new InvalidRequestException(
-        "This endpoint only accepts non-document uploads. Use POST /documents/upload for medical documents.",
+        `Invalid uploadType. Allowed values: ${Array.from(ALLOWED_UPLOAD_TYPES).join(", ")}`,
       );
     }
-    const folder = folderType[uploadType];
-    if (!folder) {
-      throw new InvalidRequestException(messageConstants.INVALID_UPLOAD_TYPE);
+
+    // Mime-type validation
+    const allowedMimes = ALLOWED_MIME_TYPES[uploadType];
+    if (!allowedMimes.has(file.mimetype)) {
+      throw new InvalidRequestException(
+        `Invalid file type for ${uploadType}. Supported types: ${Array.from(allowedMimes).join(", ")}`,
+      );
     }
-    const upload = await objectStorageService.uploadFile(file, folder);
-    return { upload };
+
+    // File size validation
+    const maxSize = MAX_FILE_SIZES[uploadType];
+    if (file.size > maxSize) {
+      throw new InvalidRequestException(
+        `File size exceeds the limit of ${maxSize / (1024 * 1024)} MB`,
+      );
+    }
+
+    const category = UPLOAD_TYPE_TO_CATEGORY[uploadType];
+    if (!category) {
+      throw new InvalidRequestException(
+        messageConstants.INVALID_UPLOAD_TYPE || "Invalid upload type mapping",
+      );
+    }
+
+    if (uploadType === "PATIENT_DOCUMENT") {
+      const { qwenVisionService } = require("./ai/qwenVisionService.ts");
+      const { NonMedicalDocumentException } = require("../exceptions/appError");
+
+      const validation = await qwenVisionService.validateDocument({
+        buffer: file.buffer,
+        mimeType: file.mimetype,
+        filename: file.originalname,
+      });
+
+      if (validation.status === "FAILED") {
+        throw new InvalidRequestException(validation.error || "AI response format is invalid.");
+      }
+
+      if (!validation.isMedicalDocument) {
+        throw new NonMedicalDocumentException(
+          validation.reason || "The uploaded file is not a medical document.",
+        );
+      }
+
+      const upload = await objectStorageService.uploadFile(file, category, patientId);
+      const signedUrl = await objectStorageService.getSignedFileUrl(upload.fileKey);
+
+      return {
+        isMedicalDocument: true,
+        documentType: validation.documentType,
+        data: {
+          fileKey: upload.fileKey,
+          originalFileName: upload.fileName || file.originalname,
+          mimeType: upload.fileType || file.mimetype,
+          fileSize: upload.fileSize || file.size,
+          fileUrl: signedUrl,
+        },
+      };
+    }
+
+    const upload = await objectStorageService.uploadFile(file, category, patientId);
+    const signedUrl = await objectStorageService.getSignedFileUrl(upload.fileKey);
+
+    return {
+      fileKey: upload.fileKey,
+      originalFileName: upload.fileName || file.originalname,
+      mimeType: upload.fileType || file.mimetype,
+      fileSize: upload.fileSize || file.size,
+      fileUrl: signedUrl,
+    };
   }
 
-  async deleteFile(fileKey) {
+  async deleteFile(query) {
+    const fileKey = query.fileKey;
     if (!fileKey) {
-      throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED);
+      throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED || "fileKey is required");
     }
     await objectStorageService.deleteFile(fileKey);
     return { message: messageConstants.FILE_DELETED };
   }
 
-  async getSignedUrl(fileKey) {
+  async getFileStream(fileKey) {
     if (!fileKey) {
-      throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED);
+      throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED || "fileKey is required");
     }
-    const signedUrl = await objectStorageService.getSignedFileUrl(fileKey);
-    return { signedUrl };
+    return objectStorageService.getFileStream(fileKey);
   }
 }
 
