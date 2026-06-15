@@ -5,9 +5,6 @@ const medicationRepository = require("../repositories/medicationRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
-// const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
-// const refillRepository = require("../repositories/refillRepository");
-// const notificationRepository = require("../repositories/notificationRepository");
 const {
   validateSchema,
   createReminderSchema,

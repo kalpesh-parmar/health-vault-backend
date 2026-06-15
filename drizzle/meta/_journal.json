@@ -15,6 +15,13 @@
       "when": 1781484457933,
       "tag": "0001_friendly_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781525088664,
+      "tag": "0002_nosy_james_howlett",
+      "breakpoints": true
     }
   ]
 }

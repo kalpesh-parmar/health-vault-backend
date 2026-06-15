@@ -14,7 +14,6 @@ const { medicationTypeValues } = require("../enums/medicationType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { foodTypeValues } = require("../enums/foodType");
 const { mediactionUnitValues } = require("../enums/medicationUnit");
-
 const medicationTypeEnum = pgEnum("medication_type", medicationTypeValues);
 const frequencyEnum = pgEnum("frequency_type", frequencyTypeValues);
 const foodEnum = pgEnum("food_type", foodTypeValues);
@@ -43,31 +42,18 @@ const medication = pgTable(
     }),
     dosePerIntake: integer("dose_per_intake"),
     frequency: frequencyEnum("frequency").notNull(),
-
-    // Support both scheduling formats from local and remote branches
-    medicationTime: json("medication_times"),
-    medicationSchedule: json("medication_schedule"),
-    bestTaken: varchar("best_taken", {
-      length: 50,
-    }).array(),
-
-    foodFrequency: foodEnum("food_frequency"),
+    medicationSchedule: json("medication_schedule").notNull(),
+    foodFrequency: foodEnum("food_frequency").notNull(),
     startDate: timestamp("start_date").notNull(),
     endDate: timestamp("end_date"),
     ongoing: boolean("ongoing").default(false).notNull(),
-
     // Quantities and Refills
     totalQuantity: integer("total_quantity").default(0),
-    remainingQuantity: integer("remaining_quantity").default(0),
+    unit: medicationUnitType("unit").notNull(),
     dailyConsumption: integer("daily_consumption").default(0).notNull(),
 
     // Alerting and reminders
-    doseReminders: boolean("dose_reminders").default(false),
-    refillAlert: boolean("refill_alert").default(false),
     reminderBeforeMinutes: integer("reminder_before_minutes").default(5),
-
-    // Unit
-    unit: medicationUnitType("unit").notNull(),
 
     notes: varchar("notes", {
       length: 1000,

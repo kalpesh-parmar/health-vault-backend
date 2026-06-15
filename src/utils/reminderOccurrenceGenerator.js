@@ -36,10 +36,6 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       if (skipPastOccurrences && actualMedicationTime < now) {
         continue;
       }
-      console.log({
-        date: currentDate.toISOString(),
-        actualMedicationTime: actualMedicationTime.toISOString(),
-      });
       occurrences.push({
         reminderId: reminder.id,
         medicationId: medication.id,
