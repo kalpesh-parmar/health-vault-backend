@@ -37,9 +37,8 @@ const messageConstants = Object.freeze({
   PATIENT_PROFILE_FETCHED: "Patient profile fetched successfully",
   FILE_IS_REQUIRED: "File is required",
   DOCUMENT_DOWNLOAD_URL_FETCHED: "Document signed URL  fetched successfully",
-  // DOCUMENT_DOWNLOAD_URL_FETCHED: "Document download URL fetched successfully",
 
-  //medication
+  // medication
   MEDICATION_CREATED: "Medication created successfully",
   MEDICATION_UPDATED: "Medication updated successfully",
   MEDICATION_DELETED: "Medication deleted successfully",
@@ -47,7 +46,7 @@ const messageConstants = Object.freeze({
   MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
 
-  //medication
+  // reminders and refills
   MEDICATION_REMINDER_LIST_FETCHED: "Medication reminder list fetched successfully",
   MEDICATION_REMINDER_FETCHED: "Medication reminder fetched successfully",
   MEDICATION_REMINDER_DELETED: "Medication reminder deleted successfully",

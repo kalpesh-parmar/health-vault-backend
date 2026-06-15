@@ -19,12 +19,12 @@ class NotificationApiService {
 
   async list(userId, payload) {
     const data = await validateSchema(listNotificationsSchema, payload || {});
-    return notificationRepository.list(userId, data);
+    return notificationRepository.list({ userId, ...data });
   }
 
   async listPaginated(userId, payload) {
     const data = await validateSchema(listNotificationsPaginatedSchema, payload);
-    return notificationRepository.listPaginated(userId, data);
+    return notificationRepository.listPaginated({ userId, ...data });
   }
 
   async markRead(params) {

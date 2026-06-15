@@ -1,7 +1,5 @@
 const { randomUUID } = require("crypto");
-
 const bcrypt = require("bcrypt");
-
 const { env } = require("../configs/env");
 const { errorConstants } = require("../constants/errorConstants");
 const { responseConstants } = require("../constants/responseConstants");
@@ -191,10 +189,14 @@ class PatientService {
       password,
       status: USER_STATUS.ACTIVE,
     });
-    return sanitizePatient({
+    const sanitized = sanitizePatient({
       ...createdPatient,
       age: age,
     });
+    return {
+      ...sanitized,
+      patientData: sanitized,
+    };
   }
 
   async getPatientById(id) {
@@ -213,7 +215,7 @@ class PatientService {
     const { rows, total } = await patientRepository.findAll(filters);
 
     return {
-      items: rows.map(sanitizePatient),
+      items: (Array.isArray(rows) ? rows : []).map(sanitizePatient),
       limit: filters.limit,
       page: filters.page,
       total,
@@ -257,10 +259,16 @@ class PatientService {
     if (!updatedPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    return sanitizePatient({
+
+    const sanitized = sanitizePatient({
       ...updatedPatient,
       age: age,
     });
+
+    return {
+      ...sanitized,
+      patientData: sanitized,
+    };
   }
 
   async deletePatient(id) {

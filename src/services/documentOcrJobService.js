@@ -38,7 +38,8 @@ const { InvalidRequestException, NotFoundException } = require("../exceptions/ap
 const aiServiceClient = require("./aiService/aiServiceClient");
 const ocrOrchestratorService = require("./aiService/ocr/ocrOrchestratorService");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
-const intelligenceRepository = require("../repositories/documentIntelligenceRepository");
+const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
+const intelligenceRepository = new DocumentIntelligenceRepository();
 const medicalExtractionService = require("./aiService/medicalExtractionService");
 const objectStorageService = require("./objectStorageService");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -154,16 +155,17 @@ class DocumentOcrJobService {
       await documentProcessingJobRepository.markRunning(jobId);
       await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
 
-      // 1. Download (existence check is enough; OCR reads from configured storage).
-      await emitAndPersist(jobId, fileKey, STAGES.PDF_DOWNLOADING);
+      // 1. Uploading File / Download check stage
+      await emitAndPersist(jobId, fileKey, STAGES.UPLOADING_FILE);
       await ensureFileExists(fileKey);
-      await emitAndPersist(jobId, fileKey, STAGES.PDF_DOWNLOADED);
 
-      // 2. OCR + extraction through the single configured AI_MODEL. The
-      // envelope is backward-compatible with the legacy /v1/run-ocr shape.
-      await emitAndPersist(jobId, fileKey, STAGES.PAGE_EXTRACTION_STARTED);
+      // 2. Medical Document Validation stage
+      await emitAndPersist(jobId, fileKey, STAGES.VALIDATING);
+
+      // 3. Extracting Text stage
+      await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
       const ocrResponse = await ocrOrchestratorService.runFromStorage({
-        bucket: env.gcpStorageBucket || env.patientDocumentsBucket,
+        bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
         fileKey,
         mimeType: inferMimeType(fileKey, mimeType),
         traceId: `ocr_job_${jobId}`,
@@ -175,7 +177,8 @@ class DocumentOcrJobService {
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
 
-      await emitAndPersist(jobId, fileKey, STAGES.PAGE_EXTRACTION_COMPLETED, {
+      // 4. Analyzing Report stage
+      await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
         metadata: {
           confidence: ocrResponse?.metadata?.confidence ?? null,
           pageCount,
@@ -188,32 +191,21 @@ class DocumentOcrJobService {
         },
       });
 
-      // 3. AI structured extraction through the same configured model.
-      await emitAndPersist(jobId, fileKey, STAGES.AI_SUMMARY_STARTED);
+      // 5. Generating Summary stage
+      await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
       const { rawOcrData, structured, normalized, summary } =
         await medicalExtractionService.extract({
           patientContext,
           rawOcr: ocrResponse,
         });
-      await emitAndPersist(jobId, fileKey, STAGES.MEDICATION_EXTRACTION, {
-        metadata: { medicationCount: structured.medications.length },
-      });
 
-      // 4. Graph extraction (best-effort).
-      await emitAndPersist(jobId, fileKey, STAGES.GRAPH_EXTRACTION);
+      // Best-effort graph extraction
       let graphs = [];
       try {
         graphs = await aiServiceClient.extractGraphs(normalized);
       } catch (error) {
         console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
       }
-
-      // 5. Embeddings are deferred to /documents/add (after FE confirmation)
-      // because they will depend on user edits to the structured payload.
-      await emitAndPersist(jobId, fileKey, STAGES.EMBEDDING_GENERATION, {
-        message: "Embeddings will be generated when the document is saved",
-        metadata: { deferred: true },
-      });
 
       const finalPayload = {
         embeddingsGenerated: false,
@@ -225,7 +217,7 @@ class DocumentOcrJobService {
       };
 
       await documentProcessingJobRepository.markCompleted(jobId, {
-        completedSteps: 11,
+        completedSteps: 8,
         currentStep: "Done",
         extractedStructuredData: finalPayload.extractedStructuredData,
         graphs,

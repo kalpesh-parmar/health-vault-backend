@@ -10,7 +10,8 @@ class NotificationService {
       //getDeviceTokens for user
       const session = await sessionRepository.getTokenById(userId);
 
-      const token = session.map((s) => s.deviceToken).filter(Boolean);
+      const safeSession = Array.isArray(session) ? session : [];
+      const token = safeSession.map((s) => s.deviceToken).filter(Boolean);
       if (!token.length) {
         throw new InvalidRequestException(errorConstants.NO_DEVICE_TOKEN);
       }

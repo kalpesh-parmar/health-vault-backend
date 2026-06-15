@@ -21,24 +21,37 @@ components:
   schemas:
     CreatePatientRequest:
       type: object
-      required: [fullName, email, password, gender, dateOfBirth, phone]
+      required: [firstName, lastName, email, password, gender, phone]
       properties:
         profileImageKey:
           type: string
           nullable: true
-          description: S3 uploaded profile image file key
+          description: Uploaded profile image file key
           example: profile_image/171637282-image.png
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string }
-        password: { type: string }
+        userName:
+          type: string
+          example: john_doe
+        firstName:
+          type: string
+          example: John
+        lastName:
+          type: string
+          example: Doe
+        email:
+          type: string
+          example: john.doe@example.com
+        password:
+          type: string
+          example: Password123!
         gender:
           type: string
           enum: [female, male]
-        # age:
-        #   type: integer
-        #   minimum: 0
-        #   maximum: 120
+          example: male
+        age:
+          type: integer
+          minimum: 0
+          maximum: 120
+          example: 30
         dateOfBirth:
           type: string
           format: date
@@ -53,8 +66,33 @@ components:
           type: string
           nullable: true
           description: Optional profile picture upload
-        firstName: { type: string }
-        lastName: { type: string }
+        userName:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+        gender:
+          type: string
+          enum: [female, male]
+        password:
+          type: string
+        phone:
+          type: string
+        age:
+          type: integer
+        dateOfBirth:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, BLOCKED]
+        allergies:
+          type: string
+        bloodGroup:
+          type: string
 
 paths:
   /patient/add:
@@ -69,16 +107,14 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreatePatientRequest"
-
       responses:
         "201":
           description: Patient created successfully
-
         "400":
           description: Invalid request
-
         "409":
           description: Email already exists
+
   /patient/list:
     get:
       tags: [Patient]

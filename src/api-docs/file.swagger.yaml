@@ -1,0 +1,124 @@
+openapi: 3.0.0
+
+info:
+  title: S3 File Upload API
+  version: 1.0.0
+  description: APIs for uploading, retrieving, and deleting files from S3 bucket
+
+servers:
+  - url: http://localhost:3000/api
+
+paths:
+  /file/upload:
+    post:
+      summary: Upload non-document file (e.g. patient profile picture) to GCS
+      description: |
+        Generic GCS uploader. **Medical documents must NOT be uploaded
+        through this endpoint.** Use `POST /documents/upload` for medical
+        documents so they are picked up by the OCR + AI pipeline.
+
+        Only `uploadType=PATIENT_PROFILE` is accepted here. Sending
+        `PATIENT_DOCUMENT` returns `400`.
+      tags:
+        - File
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - uploadType
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+                uploadType:
+                  type: string
+                  enum:
+                    - PATIENT_PROFILE
+                  description: Only PATIENT_PROFILE is accepted on this endpoint.
+      responses:
+        "200":
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileKey:
+                    type: string
+                    example: profile_image/17000012345-image.png
+        "400":
+          description: |
+            Returned when `uploadType` is missing, invalid, or set to
+            `PATIENT_DOCUMENT` (use POST /documents/upload instead).
+
+  /file/view:
+    get:
+      summary: View file directly
+      description: Returns the file content directly for viewing (images and PDFs open inline, other file types are streamed as attachments)
+      tags:
+        - File
+      parameters:
+        - in: query
+          name: fileKey
+          required: true
+          schema:
+            type: string
+          description: S3 file key
+          example: patient/profile/17000012345-image.png
+      responses:
+        "200":
+          description: File stream returned successfully. Images and PDFs are served inline, while other files trigger a download.
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: Detected MIME type of the file (e.g. image/png, application/pdf)
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+            Content-Disposition:
+              schema:
+                type: string
+              description: inline for images/PDFs, attachment for other files
+        "400":
+          description: Missing or invalid fileKey
+        "404":
+          description: File not found in storage
+
+  /file/:
+    delete:
+      summary: Delete file from S3
+      description: Deletes file from S3 bucket using fileKey
+      tags:
+        - File
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileKey
+              properties:
+                fileKey:
+                  type: string
+                  example: patient/profile/17000012345-image.png
+      responses:
+        "200":
+          description: File deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        "400":
+          description: Invalid fileKey

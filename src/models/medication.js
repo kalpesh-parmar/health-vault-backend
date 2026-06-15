@@ -13,13 +13,15 @@ const {
 const { medicationTypeValues } = require("../enums/medicationType");
 const { frequencyTypeValues } = require("../enums/frequencyType");
 const { foodTypeValues } = require("../enums/foodType");
+const { mediactionUnitValues } = require("../enums/medicationUnit");
+
 const medicationTypeEnum = pgEnum("medication_type", medicationTypeValues);
 const frequencyEnum = pgEnum("frequency_type", frequencyTypeValues);
 const foodEnum = pgEnum("food_type", foodTypeValues);
-const { patient } = require("./patient");
-const { text } = require("drizzle-orm/pg-core");
-const { mediactionUnitValues } = require("../enums/medicationUnit");
 const medicationUnitType = pgEnum("unit", mediactionUnitValues);
+
+const { patient } = require("./patient");
+
 const medication = pgTable(
   "medications",
   {
@@ -32,7 +34,7 @@ const medication = pgTable(
     patientCode: varchar("patient_code", {
       length: 32,
     }).notNull(),
-    medicationName: text("medication_name", {
+    medicationName: varchar("medication_name", {
       length: 255,
     }).notNull(),
     medicationType: medicationTypeEnum("medication_type").notNull(),
@@ -41,15 +43,32 @@ const medication = pgTable(
     }),
     dosePerIntake: integer("dose_per_intake"),
     frequency: frequencyEnum("frequency").notNull(),
-    medicationSchedule: json("medication_schedule").notNull(),
-    foodFrequency: foodEnum("food_frequency").notNull(),
+
+    // Support both scheduling formats from local and remote branches
+    medicationTime: json("medication_times"),
+    medicationSchedule: json("medication_schedule"),
+    bestTaken: varchar("best_taken", {
+      length: 50,
+    }).array(),
+
+    foodFrequency: foodEnum("food_frequency"),
     startDate: timestamp("start_date").notNull(),
     endDate: timestamp("end_date"),
     ongoing: boolean("ongoing").default(false).notNull(),
+
+    // Quantities and Refills
     totalQuantity: integer("total_quantity").default(0),
-    unit: medicationUnitType("unit").notNull(),
+    remainingQuantity: integer("remaining_quantity").default(0),
     dailyConsumption: integer("daily_consumption").default(0).notNull(),
-    reminderBeforeMinutes: integer("reminder_before_minutes"),
+
+    // Alerting and reminders
+    doseReminders: boolean("dose_reminders").default(false),
+    refillAlert: boolean("refill_alert").default(false),
+    reminderBeforeMinutes: integer("reminder_before_minutes").default(5),
+
+    // Unit
+    unit: medicationUnitType("unit").notNull(),
+
     notes: varchar("notes", {
       length: 1000,
     }),
@@ -57,7 +76,6 @@ const medication = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     softDelete: boolean("soft_delete").default(false).notNull(),
   },
-
   (table) => [
     index("medications_patient_code_idx").on(table.patientCode),
     index("medications_name_idx").on(table.medicationName),

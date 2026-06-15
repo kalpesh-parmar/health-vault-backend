@@ -1,9 +1,11 @@
 require("dotenv").config({ quiet: true });
+require("./configs/axiosLogger");
 
 const http = require("http");
-
 const cors = require("cors");
 const express = require("express");
+
+// Import background crons/jobs
 require("./jobs/medicationCron");
 require("./jobs/documentJobSweeper");
 
@@ -14,7 +16,7 @@ const swaggerDocs = require("./configs/swagger");
 const { errorConstants } = require("./constants/errorConstants");
 const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
-const routes = require("./routes/index");
+const routes = require("./routes/index.route");
 const cronService = require("./services/cronService");
 const cronRegisterHandler = require("./configs/cronConfig");
 
@@ -26,20 +28,27 @@ app.use(helmetMiddleware);
 app.use(cors());
 app.use(apiRateLimiter);
 app.use(express.json());
+app.use(require("./middlewares/apiLogger"));
 
+// Routes registration
 app.use(routes);
+
+// Swagger initialization
 swaggerDocs(app, port);
 
+// NotFound error handling
 app.use((_req, _res, next) => next(new NotFoundException(errorConstants.ROUTE_NOT_FOUND)));
 app.use(errorHandler);
 
 if (require.main === module) {
   server.listen(port, () => {
     console.log(`Server started on port ${port}`);
+    // Initialize cron tasks
     cronRegisterHandler();
     cronService.loadStartAll();
     console.log("cron system initialized...");
   });
+
   const shutdown = (signal) => {
     console.log(`${signal} received. Closing server.`);
     server.close(() => {

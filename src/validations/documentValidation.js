@@ -43,6 +43,7 @@ const createDocumentSchema = z
       .optional(),
     s3Bucket: z.string().trim().min(1).max(255),
     s3Key: z.string().trim().min(1).max(500),
+    fileStoragePath: z.string().trim().min(1).max(1000).optional(),
   })
   .strict();
 

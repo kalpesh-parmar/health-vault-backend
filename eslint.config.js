@@ -4,7 +4,14 @@ const unusedImports = require("eslint-plugin-unused-imports");
 
 module.exports = [
   {
-    ignores: ["node_modules/**", "coverage/**", "dist/**", "ai-service/**", "services/**/venv/**"],
+    ignores: [
+      "node_modules/**",
+      "coverage/**",
+      "dist/**",
+      "drizzle/**",
+      "ai-service/**",
+      "services/**/venv/**",
+    ],
   },
   js.configs.recommended,
   {

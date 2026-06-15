@@ -15,7 +15,6 @@ const errorConstants = Object.freeze({
   FILE_KEY_REQUIRED: "File key required",
   ACCOUNT_BLOCKED: "Account is blocked",
   ACCOUNT_INACTIVE: "Account is inactive",
-  // USER_NOT_FOUND: "User not found",
   ALREADY_EXISTS: "Already exists",
   CANT_BE_FUTURE_DATE: "Date of birth cannot be in the future",
   DATABASE_URL_REQUIRED: "DATABASE_URL is required",

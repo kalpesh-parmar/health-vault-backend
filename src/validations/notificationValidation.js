@@ -1,5 +1,4 @@
 const { z } = require("zod");
-
 const { errorConstants } = require("../constants/errorConstants");
 
 const notificationSortKeys = ["createdAt", "title"];
@@ -61,6 +60,7 @@ const testSendNotificationSchema = z
       .default("This is a test notification."),
     data: z.record(z.any()).optional().nullable(),
     title: z.string().trim().min(1, errorConstants.INVALID_REQUEST).default("Test notification"),
+    userId: z.string().trim().min(1, errorConstants.INVALID_REQUEST).optional(),
   })
   .strict();
 

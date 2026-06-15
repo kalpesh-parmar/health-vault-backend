@@ -8,14 +8,14 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-  # parameters:
-  #   UuidParam:
-  #     in: path
-  #     name: id
-  #     required: true
-  #     schema:
-  #       type: string
-  #       format: uuid
+  parameters:
+    UuidParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
     NotificationPayload:
       type: object
@@ -24,6 +24,9 @@ components:
       type: object
       additionalProperties: false
       properties:
+        userId:
+          type: string
+          example: user-123
         title:
           type: string
           example: Test notification

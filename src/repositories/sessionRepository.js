@@ -1,5 +1,4 @@
 const { and, eq, gt } = require("drizzle-orm");
-
 const { db } = require("../configs/db");
 const { session } = require("../models/session");
 
@@ -92,12 +91,7 @@ class SessionRepository {
       })
       .from(session)
       .where(
-        and(
-          eq(session.userId, userId),
-          eq(session.isActive, true),
-          eq(session.softDelete, false),
-          // gt(session.refreshTokenExpiresAt, new Date()),
-        ),
+        and(eq(session.userId, userId), eq(session.isActive, true), eq(session.softDelete, false)),
       );
     return result;
   }

@@ -1,19 +1,19 @@
 const { and, asc, desc, eq, ilike, or, sql, gte } = require("drizzle-orm");
-
 const { db } = require("../configs/db");
 const { notification } = require("../models/notification");
 
 const sortMap = Object.freeze({
-  createdAt: notification.createdAt,
   createdBy: notification.userId,
+  createdAt: notification.createdAt,
   title: notification.title,
 });
 
 function buildConditions(filter = {}, userId) {
   const conditions = [];
 
-  if (userId) {
-    conditions.push(eq(notification.userId, userId));
+  const actualUserId = userId || filter.userId;
+  if (actualUserId) {
+    conditions.push(eq(notification.userId, actualUserId));
   }
 
   if (filter.isRead !== undefined) {
@@ -35,7 +35,6 @@ function buildOrderClause(sort = {}) {
 
 class NotificationRepository {
   async create(data) {
-    console.log("CREATE CALLED", data);
     const result = await db.insert(notification).values(data).returning();
     return result[0] || null;
   }
@@ -47,9 +46,6 @@ class NotificationRepository {
 
   async list({ filter = {}, sort = {}, userId }) {
     const conditions = buildConditions(filter, userId);
-    if (userId) {
-      conditions.push(eq(notification.userId, userId));
-    }
     const orderClause = buildOrderClause(sort);
 
     return db
@@ -71,6 +67,7 @@ class NotificationRepository {
       .orderBy(orderClause)
       .limit(page.pageLimit)
       .offset(offset);
+
     const totalRecordsResult = await db
       .select({ count: sql`count(*)` })
       .from(notification)

@@ -43,12 +43,12 @@ class CorruptedFileError extends AppError {
  * the expected schema. Carries diagnostic fields so callers can surface
  * actionable error messages instead of a generic failure.
  */
-class GeminiInvalidResponseError extends AppError {
+class OcrInvalidResponseError extends AppError {
   constructor({ message, details = {}, rawSnippet, parseError, validationErrors } = {}) {
     super(
       StatusCodes.UNPROCESSABLE_ENTITY,
       message || "Configured AI model returned an unparseable or schema-invalid response",
-      "GEMINI_INVALID_RESPONSE",
+      "OCR_INVALID_RESPONSE",
     );
     this.details = {
       ...details,
@@ -64,5 +64,5 @@ module.exports = {
   UnsupportedDocumentError,
   FileTooLargeError,
   CorruptedFileError,
-  GeminiInvalidResponseError,
+  OcrInvalidResponseError,
 };

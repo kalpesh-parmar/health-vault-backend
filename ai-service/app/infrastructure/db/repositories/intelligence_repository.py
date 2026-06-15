@@ -49,9 +49,7 @@ class IntelligenceRepository:
             Patient.id == user_id,
             Patient.soft_delete.is_(False),
         )
-        print(stmt.compile(dialect=postgresql.dialect(),compile_kwargs={"literal_binds": True},))
         patient = await self.session.scalar(stmt)
-        print(patient)
         if patient is None:
             return None
 

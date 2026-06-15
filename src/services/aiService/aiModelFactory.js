@@ -212,7 +212,8 @@ class ChatCompletionsClient {
   }
 
   async generateJson({ parts, temperature = 0 }) {
-    const content = parts.map((part) => {
+    const safeParts = Array.isArray(parts) ? parts : [];
+    const content = safeParts.map((part) => {
       if (part.text) return { type: "text", text: part.text };
       if (part.inlineData) {
         return {
@@ -270,7 +271,8 @@ class ChatCompletionsClient {
         headers,
         proxy: false,
       });
-      const models = new Set((data?.data || []).map((model) => model.id).filter(Boolean));
+      const dataList = Array.isArray(data?.data) ? data.data : [];
+      const models = new Set(dataList.map((model) => model.id).filter(Boolean));
       if (!models.has(this.config.model)) {
         return {
           ok: false,
@@ -299,7 +301,8 @@ class AnthropicMessagesClient {
   }
 
   async generateJson({ parts, temperature = 0 }) {
-    const content = parts.map((part) => {
+    const safeParts = Array.isArray(parts) ? parts : [];
+    const content = safeParts.map((part) => {
       if (part.text) return { type: "text", text: part.text };
       if (part.inlineData) {
         return {

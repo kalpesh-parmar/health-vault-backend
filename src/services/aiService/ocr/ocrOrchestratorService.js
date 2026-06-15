@@ -1,7 +1,6 @@
 const { env } = require("../../../configs/env");
-const aiOcrService = require("./geminiOcrService");
 const objectStorageService = require("../../objectStorageService");
-const { OcrEmptyResultError, GeminiInvalidResponseError } = require("./ocrErrors");
+const { OcrEmptyResultError, OcrInvalidResponseError } = require("./ocrErrors");
 const { validateDocument } = require("./documentValidation");
 const { createTrace, ocrLogger } = require("./ocrLogger");
 
@@ -65,42 +64,41 @@ class OcrOrchestratorService {
 
     const { mimeType: resolvedMime } = validateDocument({ buffer, filename, mimeType });
 
-    if (!aiOcrService.isConfigured) {
-      throw new OcrEmptyResultError("OCR model is not configured", {
-        filename,
-        required: ["AI_MODEL", "AI_BASE_URL"],
-      });
-    }
-
     let result;
     try {
-      result = await aiOcrService.extract({
+      const { qwenVisionService } = require("../../ai/qwenVisionService.ts");
+      const { buildOcrResult } = require("./ocrResultBuilder");
+
+      const jsonStr = await qwenVisionService.extractMedicalData({
         buffer,
         filename,
         mimeType: resolvedMime,
         traceId: trace,
       });
+      const parsedOCR = JSON.parse(jsonStr);
+
+      result = buildOcrResult({
+        pages: parsedOCR.pages,
+        engine: `ollama:qwen3-vl`,
+        medicalExtraction: parsedOCR.medicalExtraction,
+        filename,
+        mimeType: resolvedMime,
+      });
     } catch (error) {
       ocrLogger.error(trace, "ocr_model_failed", {
-        model: env.aiModel,
+        model: "qwen3-vl:latest",
         error: error.message,
-        code: error.code || error.errorCode,
-        rawSnippet: error.details?.rawSnippet,
-        parseError: error.details?.parseError,
-        validationErrors: error.details?.validationErrors,
         stack: error.stack,
       });
 
-      // GeminiInvalidResponseError already carries rich diagnostics.
-      if (error instanceof GeminiInvalidResponseError) {
+      if (error instanceof OcrInvalidResponseError) {
         throw error;
       }
 
       throw new OcrEmptyResultError("OCR model failed and processing was stopped", {
         filename,
-        model: env.aiModel,
+        model: "qwen3-vl:latest",
         cause: error.message,
-        code: error.code || error.errorCode,
         stack: error.stack,
       });
     }
@@ -108,13 +106,13 @@ class OcrOrchestratorService {
     const quality = evaluateQuality(result);
     if (!quality.ok) {
       ocrLogger.error(trace, "ocr_model_result_rejected", {
-        model: env.aiModel,
+        model: "qwen3-vl:latest",
         reason: quality.reason,
         confidence: quality.confidence,
       });
       throw new OcrEmptyResultError("OCR model returned an invalid or unusable response", {
         filename,
-        model: env.aiModel,
+        model: "qwen3-vl:latest",
         reason: quality.reason,
         confidence: quality.confidence,
       });

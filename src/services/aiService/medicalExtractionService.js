@@ -1,4 +1,4 @@
-const aiServiceClient = require("./aiServiceClient");
+// aiServiceClient removed
 
 function pickEntities(entities, type) {
   if (!Array.isArray(entities)) return [];
@@ -158,7 +158,7 @@ class MedicalExtractionService {
   async extract({ rawOcr, patientContext = null }) {
     const ocrPayload = rawOcr?.structuredDocument || rawOcr?.ocr || rawOcr || {};
 
-    const normalized = await aiServiceClient.normalizeStructuredOcr({
+    const normalized = {
       confidence: ocrPayload?.confidence ?? rawOcr?.metadata?.confidence ?? 0,
       fullText: ocrPayload?.fullText || ocrPayload?.text || rawOcr?.ocr_text || "",
       labReports: ocrPayload?.labReports || [],
@@ -179,15 +179,26 @@ class MedicalExtractionService {
       prescriptions: ocrPayload?.prescriptions || [],
       sections: ocrPayload?.sections || [],
       tables: ocrPayload?.tables || [],
-    });
+    };
 
     const medications = buildMedications(normalized);
-    const summary = await aiServiceClient.summarizeStructuredDocument({
-      medicalEntities: normalized.medicalEntities || [],
+
+    let summaryText = normalized.summary;
+    if (!summaryText) {
+      summaryText = normalized.fullText
+        ? normalized.fullText.slice(0, 500)
+        : "No summary available.";
+    }
+
+    const summary = {
+      summary: summaryText,
+      documentType: ocrPayload?.documentType || null,
+      diagnosis: normalized.diagnosis,
       medications,
-      patientContext,
-      structuredDocument: normalized,
-    });
+      keyFindings: normalized.diagnosis,
+      followUps: normalized.recommendations,
+      recommendations: normalized.recommendations,
+    };
 
     const allergyEntities = pickEntities(normalized.medicalEntities, "allergy");
     const bloodGroupEntities = pickEntities(normalized.medicalEntities, "blood_group");

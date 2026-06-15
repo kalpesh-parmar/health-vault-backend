@@ -1,10 +1,11 @@
 const { env } = require("../configs/env");
 const gcpStorageService = require("./gcpStorageService");
-const s3service = require("./s3service");
+const s3service = require("./fileservice");
 
 const providers = Object.freeze({
   gcp: gcpStorageService,
   s3: s3service,
+  aws: s3service,
 });
 
 class ObjectStorageService {
@@ -30,6 +31,10 @@ class ObjectStorageService {
 
   async getFileBuffer(fileKey) {
     return this.provider.getFileBuffer(fileKey);
+  }
+
+  async getFileStream(fileKey) {
+    return this.provider.getFileStream(fileKey);
   }
 
   async deleteFile(fileKey) {

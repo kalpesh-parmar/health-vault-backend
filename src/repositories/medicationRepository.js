@@ -1,7 +1,6 @@
 const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
-// const { medicationReminder } = require("../models/medicationReminder");
 
 const filterSortColumnMap = Object.freeze({
   createdAt: medication.createdAt,
@@ -12,7 +11,6 @@ const filterSortColumnMap = Object.freeze({
   updatedAt: medication.updatedAt,
 });
 
-// FILTERS
 function buildMedicationFilters(filters = {}, userId) {
   const conditions = [eq(medication.softDelete, false)];
   if (userId) {
@@ -40,24 +38,20 @@ function buildMedicationFilters(filters = {}, userId) {
       ),
     );
   }
-
   return and(...conditions);
 }
 
-// SORT
 function buildOrderClause(sort = {}) {
   const sortColumn = filterSortColumnMap[sort.sortBy] || medication.createdAt;
   return sort.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
 }
 
 class MedicationRepository {
-  // CREATE
   async create(data) {
     const result = await db.insert(medication).values(data).returning();
     return result[0] || null;
   }
 
-  // FIND BY ID
   async findById(id) {
     const result = await db
       .select()
@@ -67,7 +61,6 @@ class MedicationRepository {
     return result[0] || null;
   }
 
-  // FIND ALL FILTERS
   async findAllWithFilters({ filter = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
     const orderClause = buildOrderClause(sort);
@@ -82,12 +75,10 @@ class MedicationRepository {
 
     return {
       rows,
-
       total: Number(totalRows[0]?.total || 0),
     };
   }
 
-  // PAGINATION
   async findAllWithPagination({ filter = {}, page = {}, sort = {}, userId }) {
     const where = buildMedicationFilters(filter, userId);
     const orderClause = buildOrderClause(sort);
@@ -119,21 +110,13 @@ class MedicationRepository {
     };
   }
 
-  // FIND ALL
   async findAll(userId) {
     return db
       .select()
       .from(medication)
-      .where(
-        and(
-          eq(medication.softDelete, false),
-
-          eq(medication.userId, userId),
-        ),
-      );
+      .where(and(eq(medication.softDelete, false), eq(medication.userId, String(userId))));
   }
 
-  // UPDATE BY ID
   async updateById(id, payload) {
     const result = await db
       .update(medication)
@@ -143,11 +126,9 @@ class MedicationRepository {
       })
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
-
     return result[0] || null;
   }
 
-  // FIND ALL ACTIVE
   async findAllActive(ongoing) {
     const conditions = [eq(medication.softDelete, false)];
     if (ongoing !== undefined) {
@@ -159,28 +140,6 @@ class MedicationRepository {
       .where(and(...conditions));
   }
 
-  // // REDUCE QUANTITY
-  // async reduceQuantity(medicationId, quantity = 1) {
-  //   const existingMedication = await this.findById(medicationId);
-  //   if (!existingMedication) {
-  //     return null;
-  //   }
-  //   const updatedQuantity = Math.max(
-  //     0,
-  //     Number(existingMedication.remainingQuantity) - Number(quantity),
-  //   );
-  //   const result = await db
-  //     .update(medication)
-  //     .set({
-  //       remainingQuantity: updatedQuantity,
-  //       updatedAt: new Date(),
-  //     })
-  //     .where(and(eq(medication.id, medicationId), eq(medication.softDelete, false)))
-  //     .returning();
-  //   return result[0] || null;
-  // }
-
-  // SOFT DELETE
   async softDeleteById(id) {
     const result = await db
       .update(medication)

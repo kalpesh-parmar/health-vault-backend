@@ -13,7 +13,7 @@ const {
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
-const refillRepository = require("../repositories/refillRepository");
+const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 
 class MedicationService {
@@ -24,7 +24,8 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
+    const { endDate, dailyConsumption, unit, startDate, remainingQuantity } =
+      calculateMedicationValues(validData);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
@@ -33,6 +34,7 @@ class MedicationService {
       dailyConsumption,
       unit,
       startDate,
+      remainingQuantity: validData.remainingQuantity ?? remainingQuantity,
     });
     return medication;
   }
@@ -96,6 +98,7 @@ class MedicationService {
       endDate,
       dailyConsumption,
       unit,
+      remainingQuantity,
     });
 
     // If medication has no reminder then update is complete
@@ -139,12 +142,6 @@ class MedicationService {
       });
 
       updatedMedication.endDate = recalculatedEndDate;
-      //   // Update refill reminder time
-      //   const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      //   const finalRefillTime = refillTime(recalculatedEndDate);
-      //   await medicationReminderRepository.updateById(updatedReminder.id, {
-      //     refillReminderTime: finalRefillTime,
-      //   });
     }
 
     return updatedMedication;
@@ -157,6 +154,7 @@ class MedicationService {
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+
     return existingMedication;
   }
 
@@ -267,11 +265,7 @@ class MedicationService {
         endDate: recalculatedEndDate,
       });
       updatedMedication.endDate = recalculatedEndDate;
-
-      // Update the reminder's refillReminderTime
-      // const { refillTime } = require("../utils/reminderOccurrenceGenerator");
-      // const finalRefillTime = refillTime(recalculatedEndDate);
-      await refillRepository.add({
+      await refillCountRepository.add({
         userId: medication.userId,
         medicationId: medication.id,
         beforeRefillTotalQuantity: medication.totalQuantity,
@@ -280,9 +274,6 @@ class MedicationService {
         afterRefillTotalQuantity: newTotalQuantity,
         afterRefillRemainingQuantity: newRemainingQuantity,
       });
-      // await medicationReminderRepository.updateById(reminder.id, {
-      //   refillReminderTime: finalRefillTime,
-      // });
     }
 
     return updatedMedication;

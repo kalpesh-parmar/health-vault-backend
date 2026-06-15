@@ -31,13 +31,11 @@ const {
   listMedicationQuerySchema,
   refillMedicationSchema,
 } = require("./medicationValidation");
-
 const {
   createReminderSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 } = require("./reminderValidation");
-
 const { createSessionSchema } = require("./sessionValidation");
 
 function formatZodIssues(error) {

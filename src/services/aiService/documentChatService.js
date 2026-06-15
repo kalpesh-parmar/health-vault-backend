@@ -20,15 +20,20 @@
  *   5. Persist user + assistant messages.
  */
 
-const axios = require("axios");
-
 const { env } = require("../../configs/env");
-const { errorConstants } = require("../../constants/errorConstants");
 const { messageConstants } = require("../../constants/messageConstants");
 const { InvalidRequestException, NotFoundException } = require("../../exceptions/appError");
 const chatSessionRepository = require("../../repositories/chatSessionRepository");
-const intelligenceRepository = require("../../repositories/documentIntelligenceRepository");
-const aiServiceClient = require("./aiServiceClient");
+const DocumentIntelligenceRepository = require("../../repositories/documentIntelligenceRepository");
+const intelligenceRepository = new DocumentIntelligenceRepository();
+const { db } = require("../../configs/db");
+const { document } = require("../../models/document");
+const { chatSession } = require("../../models/chatSession");
+const { and, eq, desc, isNull } = require("drizzle-orm");
+const ocrOrchestratorService = require("./ocr/ocrOrchestratorService");
+const medicalExtractionService = require("./medicalExtractionService");
+const documentPersistenceService = require("../documentPersistenceService");
+const { aiProvider } = require("../ai/aiProvider.ts");
 
 // Debug logger - use console for now, should use proper logger in production
 const debugLogger = {
@@ -44,79 +49,6 @@ function relevance(distance) {
   // a 0-1 similarity score for the FE; threshold prevents low-quality hits.
   if (distance == null) return null;
   return Math.max(0, Math.min(1, 1 - Number(distance)));
-}
-
-async function callRagEndpoint({ userId, message, chunks, history, sessionId, documentId }) {
-  debugLogger.info("callRagEndpoint: Request payload", {
-    userId,
-    message: message?.substring(0, 100),
-    sessionId,
-    documentId,
-    chunkCount: chunks?.length || 0,
-    historyLength: history?.length || 0,
-  });
-
-  // We use the existing /v1/chat handler in the AI service. Here we pre-supply
-  // chunks because we have already done retrieval ourselves and need strict scoping.
-  const payload = {
-    userId, // CRITICAL FIX: Pass userId to Python service
-    message,
-    sessionId,
-    documentId,
-    // The AI-service signature: it accepts message + an internal RAG
-    // step; we override by including the chunks directly in the message
-    // when its native retrieval is not desired. The Python handler is
-    // tolerant of an extra 'context' field which it forwards verbatim.
-    retrievedChunks: chunks,
-    history,
-  };
-
-  debugLogger.info("callRagEndpoint: Sending to Python AI service", {
-    url: `${env.aiServiceUrl}/v1/chat`,
-  });
-
-  let response;
-  try {
-    response = await axios.post(`${env.aiServiceUrl}/v1/chat`, payload, {
-      timeout: 60 * 1000,
-    });
-  } catch (axiosError) {
-    debugLogger.error("callRagEndpoint: HTTP error", {
-      status: axiosError.response?.status,
-      statusText: axiosError.response?.statusText,
-      data: axiosError.response?.data,
-      message: axiosError.message,
-    });
-    throw axiosError;
-  }
-
-  debugLogger.info("callRagEndpoint: Raw response received", {
-    success: response.data?.success,
-    hasData: !!response.data?.data,
-    answerLength: response.data?.data?.answer?.length || 0,
-    answerPreview: response.data?.data?.answer?.substring(0, 100),
-  });
-
-  const data = response.data?.data;
-
-  // Validate response data
-  if (!data) {
-    debugLogger.error("callRagEndpoint: No data in response", { response: response.data });
-    throw new Error("AI service returned empty response");
-  }
-
-  if (!data.answer || typeof data.answer !== "string") {
-    debugLogger.error("callRagEndpoint: Invalid answer in response", { answer: data.answer });
-    throw new Error("AI service returned invalid answer");
-  }
-
-  debugLogger.info("callRagEndpoint: Final answer", {
-    answerLength: data.answer.length,
-    answerPreview: data.answer.substring(0, 100),
-    citationsCount: data.citations?.length || 0,
-  });
-
-  return data;
 }
 
 class DocumentChatService {
@@ -143,185 +75,262 @@ class DocumentChatService {
     return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
   }
 
-  async sendMessage({ userId, sessionId, message, documentId }) {
+  async sendMessage({ userId, documentKey, question }) {
     debugLogger.info("sendMessage: Incoming payload", {
       userId,
-      sessionId,
-      message: message?.substring(0, 100),
-      documentId,
+      documentKey,
+      question: question?.substring(0, 100),
     });
 
-    if (!message?.trim()) {
-      throw new InvalidRequestException("Message is required");
+    if (!question?.trim()) {
+      throw new InvalidRequestException("Question is required");
     }
 
-    debugLogger.info("sendMessage: Validating session", { sessionId, userId });
-    const session = await chatSessionRepository.findSessionById(sessionId, userId);
-    if (!session) {
-      throw new NotFoundException("Chat session not found");
-    }
-    debugLogger.info("sendMessage: Session found", {
-      sessionId: session.id,
-      documentId: session.documentId,
-    });
+    // Branch based on presence of documentKey
+    const isGeneralHealth = !documentKey?.trim();
 
-    debugLogger.info("sendMessage: Saving user message");
+    let session;
+    let doc = null;
+
+    if (isGeneralHealth) {
+      // 1) Find or create general health session
+      const [existingSession] = await db
+        .select()
+        .from(chatSession)
+        .where(
+          and(
+            isNull(chatSession.documentId),
+            eq(chatSession.userId, userId),
+            eq(chatSession.softDelete, false),
+          ),
+        )
+        .orderBy(desc(chatSession.updatedAt))
+        .limit(1);
+
+      session = existingSession;
+      if (!session) {
+        debugLogger.info("sendMessage: Creating new general health session");
+        session = await chatSessionRepository.createSession({
+          userId,
+          documentId: null,
+          title: "General Health Chat",
+        });
+      }
+    } else {
+      // 2) Document RAG Flow - Retrieve document
+      const [existingDoc] = await db
+        .select()
+        .from(document)
+        .where(
+          and(
+            eq(document.s3Key, documentKey),
+            eq(document.userId, userId),
+            eq(document.softDelete, false),
+          ),
+        )
+        .limit(1);
+
+      if (existingDoc) {
+        doc = existingDoc;
+      } else {
+        // Run OCR if not indexed
+        debugLogger.info(
+          "sendMessage: Document not found in DB. Fetching and extracting from S3...",
+          { documentKey },
+        );
+        let ocrResponse;
+        try {
+          ocrResponse = await ocrOrchestratorService.runFromStorage({
+            fileKey: documentKey,
+            mimeType: "application/pdf",
+            traceId: `chat_ocr_${Date.now()}`,
+          });
+        } catch (error) {
+          debugLogger.error("sendMessage: OCR pipeline failed", { error: error.message });
+          throw new InvalidRequestException(`OCR processing failed: ${error.message}`);
+        }
+
+        let patientContext = null;
+        try {
+          patientContext = await intelligenceRepository.getPatientContext(userId);
+        } catch {
+          patientContext = null;
+        }
+
+        const { rawOcrData, structured } = await medicalExtractionService.extract({
+          patientContext,
+          rawOcr: ocrResponse,
+        });
+
+        const addResult = await documentPersistenceService.addDocument({
+          userId,
+          payload: {
+            fileKey: documentKey,
+            rawOcrData: {
+              ...rawOcrData,
+              mimeType: rawOcrData?.mimeType || "application/pdf",
+            },
+            extractedStructuredData: structured,
+          },
+        });
+        doc = addResult.document;
+      }
+
+      // Find or create session for document
+      const [existingSession] = await db
+        .select()
+        .from(chatSession)
+        .where(
+          and(
+            eq(chatSession.documentId, doc.id),
+            eq(chatSession.userId, userId),
+            eq(chatSession.softDelete, false),
+          ),
+        )
+        .orderBy(desc(chatSession.updatedAt))
+        .limit(1);
+
+      session = existingSession;
+      if (!session) {
+        session = await chatSessionRepository.createSession({
+          userId,
+          documentId: doc.id,
+          title: doc.fileName || "Document Chat",
+        });
+      }
+    }
+
+    const sessionId = session.id;
+
+    // Append user message
     const userMessage = await chatSessionRepository.appendMessage({
-      content: message.trim(),
+      content: question.trim(),
       role: "user",
       sessionId,
       userId,
     });
 
-    // 1) Embed the question, search the user's vector store.
-    debugLogger.info("sendMessage: Generating embedding for message");
-    const queryEmbedding = await aiServiceClient.embedText(message);
-    debugLogger.info("sendMessage: Embedding generated", {
-      embeddingLength: queryEmbedding?.length || 0,
-    });
-    if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
-      debugLogger.error("sendMessage: Embedding generation failed", { queryEmbedding });
-      throw new InvalidRequestException(errorConstants.INVALID_REQUEST);
-    }
-
-    debugLogger.info("sendMessage: Searching similar chunks", {
-      documentId: documentId || session.documentId || null,
-      limit: env.ragTopK,
-    });
-
-    const chunks = await intelligenceRepository.searchSimilarChunks({
-      documentId: documentId || session.documentId || null,
-      limit: env.ragTopK,
-      queryEmbedding,
-      userId,
-    });
-
-    debugLogger.info("sendMessage: Vector search results", {
-      totalChunks: chunks.length,
-      sampleChunk: chunks[0]
-        ? { id: chunks[0].id, content: chunks[0].content?.substring(0, 50) }
-        : null,
-    });
-
-    const usableChunks = chunks
-      .map((chunk) => ({ ...chunk, score: relevance(chunk.distance) }))
-      .filter((chunk) => (chunk.score == null ? true : chunk.score >= 1 - MIN_CITATION_RELEVANCE));
-
-    debugLogger.info("sendMessage: Filtered usable chunks", {
-      totalChunks: chunks.length,
-      usableChunks: usableChunks.length,
-    });
-
-    if (!usableChunks.length) {
-      debugLogger.info("sendMessage: No relevant chunks found, returning default reply");
-      const aiMessage = await chatSessionRepository.appendMessage({
-        citations: [],
-        content: NO_CONTEXT_REPLY,
-        metadata: { reason: "no_relevant_chunks" },
-        role: "assistant",
-        sessionId,
-        userId,
-      });
-      return { ai: aiMessage, citations: [], reply: NO_CONTEXT_REPLY, user: userMessage };
-    }
-
-    const recent = await chatSessionRepository.listMessages({
-      direction: "before",
-      limit: 8,
-      sessionId,
-      userId,
-    });
-
-    const history = recent.items.map((msg) => ({ content: msg.content, role: msg.role }));
-
-    debugLogger.info("sendMessage: Retrieved chat history", {
-      historyLength: history.length,
-    });
-
     let assistantText = NO_CONTEXT_REPLY;
     let citations = [];
+    let isEmergency = false;
 
-    debugLogger.info("sendMessage: Calling RAG endpoint with chunks");
-
-    try {
-      const formattedChunks = usableChunks.map(
-        ({ chunkId, content, sectionTitle, sourceType, score }) => ({
-          chunkId,
-          content,
-          score,
-          sectionTitle,
-          sourceType,
-        }),
-      );
-
-      debugLogger.info("sendMessage: Calling callRagEndpoint", {
-        chunkCount: formattedChunks.length,
-        messagePreview: message.substring(0, 50),
-      });
-
-      const aiResponse = await callRagEndpoint({
-        userId,
-        message,
-        chunks: formattedChunks,
-        history,
+    if (isGeneralHealth) {
+      // General Health chat flow
+      const recent = await chatSessionRepository.listMessages({
+        direction: "before",
+        limit: 8,
         sessionId,
-        documentId: documentId || session.documentId,
+        userId,
       });
+      const items = recent && Array.isArray(recent.items) ? recent.items : [];
+      const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
-      debugLogger.info("sendMessage: RAG response received", {
-        hasAnswer: !!aiResponse?.answer,
-        answerLength: aiResponse?.answer?.length || 0,
-        citationsCount: aiResponse?.citations?.length || 0,
-      });
-
-      if (aiResponse?.answer && typeof aiResponse.answer === "string") {
+      debugLogger.info("sendMessage: Calling general health chat provider");
+      try {
+        const aiResponse = await aiProvider.chat(history, "GENERAL_HEALTH");
         assistantText = aiResponse.answer;
-        debugLogger.info("sendMessage: Answer extracted", {
-          answerPreview: assistantText.substring(0, 100),
+        isEmergency = !!aiResponse.emergency;
+      } catch (error) {
+        debugLogger.error("sendMessage: General health provider call failed", {
+          error: error.message,
         });
-      } else {
-        debugLogger.error("sendMessage: Invalid AI response", {
-          answer: aiResponse?.answer,
-          answerType: typeof aiResponse?.answer,
-        });
+        assistantText =
+          "Sorry, I am currently unable to process your request. Please try again later.";
       }
-      citations = aiResponse?.citations || usableChunks;
-    } catch (error) {
-      // Surface a strict, deterministic message instead of an LLM error.
-      debugLogger.error("sendMessage: RAG endpoint failed", {
-        error: error.message,
-        stack: error.stack,
+    } else {
+      // Document RAG flow
+      debugLogger.info("sendMessage: Generating embedding for RAG query");
+      const queryEmbedding = await aiProvider.embeddings(question);
+
+      const chunks = await intelligenceRepository.searchSimilarChunks({
+        documentId: doc.id,
+        limit: env.ragTopK,
+        queryEmbedding,
+        userId,
+      });
+
+      const safeChunks = Array.isArray(chunks) ? chunks : [];
+      const usableChunks = safeChunks
+        .map((chunk) => ({ ...chunk, score: relevance(chunk.distance) }))
+        .filter((chunk) =>
+          chunk.score == null ? true : chunk.score >= 1 - MIN_CITATION_RELEVANCE,
+        );
+
+      if (!usableChunks.length) {
+        const aiMessage = await chatSessionRepository.appendMessage({
+          citations: [],
+          content: NO_CONTEXT_REPLY,
+          metadata: { reason: "no_relevant_chunks" },
+          role: "assistant",
+          sessionId,
+          userId,
+        });
+        return {
+          ai: aiMessage,
+          citations: [],
+          reply: NO_CONTEXT_REPLY,
+          user: userMessage,
+          mode: "DOCUMENT_RAG",
+          emergency: false,
+        };
+      }
+
+      const recent = await chatSessionRepository.listMessages({
+        direction: "before",
+        limit: 8,
         sessionId,
         userId,
       });
-      assistantText = NO_CONTEXT_REPLY;
-      citations = [];
+      const items = recent && Array.isArray(recent.items) ? recent.items : [];
+      const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
+
+      debugLogger.info("sendMessage: Calling RAG chat provider");
+      try {
+        const formattedChunks = usableChunks.map((c) => ({
+          chunkId: c.chunkId || c.id,
+          content: c.content,
+          score: c.score,
+          sectionTitle: c.sectionTitle,
+          sourceType: c.sourceType,
+          documentId: doc.id,
+        }));
+
+        const aiResponse = await aiProvider.chat(history, "DOCUMENT_RAG", formattedChunks);
+        assistantText = aiResponse.answer;
+        citations = aiResponse.citations || formattedChunks;
+        isEmergency = !!aiResponse.emergency;
+      } catch (error) {
+        debugLogger.error("sendMessage: RAG chat provider call failed", { error: error.message });
+        assistantText = NO_CONTEXT_REPLY;
+      }
     }
 
-    debugLogger.info("sendMessage: Saving assistant message to DB");
+    // Save assistant message to DB
     const aiMessage = await chatSessionRepository.appendMessage({
-      citations: citations.map((chunk) => ({
-        chunkId: chunk.chunkId,
-        documentId: chunk.documentId || null,
+      citations: (Array.isArray(citations) ? citations : []).map((chunk) => ({
+        chunkId: chunk.chunkId || chunk.id || null,
+        documentId: doc ? doc.id : null,
         score: chunk.score ?? null,
         sectionTitle: chunk.sectionTitle || null,
       })),
       content: assistantText,
       metadata: {
-        retrievedChunkIds: usableChunks.map((c) => c.chunkId),
+        mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+        emergency: isEmergency,
       },
       role: "assistant",
       sessionId,
       userId,
     });
 
-    debugLogger.info("sendMessage: Complete", {
-      replyPreview: assistantText.substring(0, 100),
-      userMessageId: userMessage?.id,
-      aiMessageId: aiMessage?.id,
-    });
-
-    return { ai: aiMessage, citations, reply: assistantText, user: userMessage };
+    return {
+      ai: aiMessage,
+      citations,
+      reply: assistantText,
+      user: userMessage,
+      mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+      emergency: isEmergency,
+    };
   }
 
   async deleteSession({ sessionId, userId }) {
