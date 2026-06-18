@@ -2504,20 +2504,16 @@
           "primaryKey": false,
           "notNull": true
         },
-<<<<<<< HEAD
         "medication_times": {
           "name": "medication_times",
           "type": "json",
           "primaryKey": false,
           "notNull": false
         },
-=======
->>>>>>> 61d564836b25e074da9602b4c2c09f8f83152a17
         "medication_schedule": {
           "name": "medication_schedule",
           "type": "json",
           "primaryKey": false,
-<<<<<<< HEAD
           "notNull": false
         },
         "best_taken": {
@@ -2525,9 +2521,6 @@
           "type": "varchar(50)[]",
           "primaryKey": false,
           "notNull": false
-=======
-          "notNull": true
->>>>>>> 61d564836b25e074da9602b4c2c09f8f83152a17
         },
         "food_frequency": {
           "name": "food_frequency",
@@ -2562,21 +2555,12 @@
           "notNull": false,
           "default": 0
         },
-<<<<<<< HEAD
         "remaining_quantity": {
           "name": "remaining_quantity",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "default": 0
-=======
-        "unit": {
-          "name": "unit",
-          "type": "unit",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
->>>>>>> 61d564836b25e074da9602b4c2c09f8f83152a17
         },
         "daily_consumption": {
           "name": "daily_consumption",
@@ -2585,7 +2569,6 @@
           "notNull": true,
           "default": 0
         },
-<<<<<<< HEAD
         "dose_reminders": {
           "name": "dose_reminders",
           "type": "boolean",
@@ -2600,8 +2583,6 @@
           "notNull": false,
           "default": false
         },
-=======
->>>>>>> 61d564836b25e074da9602b4c2c09f8f83152a17
         "reminder_before_minutes": {
           "name": "reminder_before_minutes",
           "type": "integer",
@@ -2609,7 +2590,6 @@
           "notNull": false,
           "default": 5
         },
-<<<<<<< HEAD
         "unit": {
           "name": "unit",
           "type": "unit",
@@ -2617,8 +2597,6 @@
           "primaryKey": false,
           "notNull": true
         },
-=======
->>>>>>> 61d564836b25e074da9602b4c2c09f8f83152a17
         "notes": {
           "name": "notes",
           "type": "varchar(1000)",

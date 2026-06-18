@@ -86,7 +86,7 @@ class ExtractionService:
 
         Returns an empty list when no graphs are detected — the response is
         always JSON-safe for the caller.
-        """
+        """ 
         content = await self.llm.chat(
             model=self.chat_model,
             messages=graph_extraction_prompt(structured_document),

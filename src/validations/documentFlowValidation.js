@@ -18,10 +18,10 @@ const runOcrSchema = z
 
 const addDocumentSchema = z
   .object({
-    fileKey: z.string().trim().min(3).max(500),
+    s3Key: z.string().trim().min(3).max(500),
     documentType: z.enum(documentTypeValue).optional(),
     fileName: z.string().trim().max(255).optional(),
-    bucket: z.string().trim().max(255).optional(),
+    s3bucket: z.string().trim().max(255).optional(),
     rawOcrData: z.record(z.any()),
     extractedStructuredData: z.record(z.any()),
     graphs: z.array(z.record(z.any())).optional().default([]),

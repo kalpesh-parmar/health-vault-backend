@@ -92,11 +92,6 @@ components:
               example: 10
         sort:
           $ref: "#/components/schemas/NotificationSort"
-    UserIdRequest:
-      type: object
-      additionalProperties: false
-      properties:
-
 paths:
   /notifications/test-send:
     post:
@@ -199,12 +194,8 @@ paths:
   /notifications/badge-count:
     get:
       tags: [Notification]
+      security:
+        - bearerAuth: []
       summary: Get unread notification count
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UserIdRequest"
       responses:
         "200": { description: Badge count fetched }

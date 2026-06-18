@@ -29,6 +29,8 @@ const UPLOAD_TYPE_TO_CATEGORY = {
 
 class UploadFileService {
   async uploadFile(file, uploadType, patientId) {
+    console.log("upload");
+
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "File is required");
     }

@@ -62,19 +62,22 @@ components:
           type: string
         lastName:
           type: string
+        email:
+          type: string
+          example: EMAIL_ADDRESS
         gender:
           type: string
           enum: [female, male]
-        password:
-          type: string
+        # password:
+        #   type: string
         phone:
           type: string
         dateOfBirth:
           type: string
           format: date
-        status:
-          type: string
-          enum: [ACTIVE, INACTIVE, BLOCKED]
+        # status:
+        #   type: string
+        #   enum: [ACTIVE, INACTIVE, BLOCKED]
         allergies:
           type: string
         bloodGroup:

@@ -7,7 +7,7 @@ const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 class S3Service {
   constructor() {
-    this.bucket = env.awsBucketName;
+    this.bucket = env.patientDocumentsBucket;
     this.region = env.awsRegion;
     this.provider = "s3";
   }

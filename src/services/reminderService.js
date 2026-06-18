@@ -32,7 +32,6 @@ class ReminderService {
           occurrence.actualMedicationTime,
           medication.reminderBeforeMinutes,
         );
-
         const afterTime = afterReminderTime(occurrence.actualMedicationTime);
 
         // 1. Send Main Reminder Notification

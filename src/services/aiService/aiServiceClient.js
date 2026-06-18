@@ -46,10 +46,7 @@ class AiServiceClient {
   }
 
   async normalizeStructuredOcr(structuredOcr) {
-    console.log("structuredOcr===", structuredOcr);
     const data = await postWithRetry(`${this.baseUrl}/v1/extraction/normalize`, { structuredOcr });
-    console.log("data===", data);
-
     return data?.data || data;
   }
 

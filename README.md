@@ -1,11 +1,6 @@
 # Health Vault Backend
 
-<<<<<<< HEAD
 Production-ready Node.js backend using Express, PostgreSQL, pgvector, and Drizzle ORM.
-=======
-Production-ready Node.js backend using Express, PostgreSQL, and pgvector.
-
-> > > > > > > migrate-old-repo
 
 ## Architecture
 

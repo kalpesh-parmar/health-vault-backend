@@ -38,7 +38,7 @@ async function deleteNotification(req, res) {
 }
 
 async function badgeCount(req, res) {
-  const result = await notificationApiService.badgeCount({ userId: req.auth.userId });
+  const result = await notificationApiService.badgeCount(req.auth.userId);
   return successResponse(res, result, messageConstants.NOTIFICATION_BADGE_COUNT_FETCHED);
 }
 

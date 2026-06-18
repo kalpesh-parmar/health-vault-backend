@@ -111,8 +111,10 @@ const updatePatientSchema = z
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
     phone: phoneField.optional(),
+    bloodGroup: z.string().optional(),
+    allergies: z.array(z.string()).optional(),
     profileImageKey: profileImageKey,
-    status: z.enum(userStatusValues).optional(),
+    // status: z.enum(userStatusValues).optional(),
     // userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
   })
   .strict()

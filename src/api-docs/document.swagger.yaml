@@ -34,6 +34,10 @@ components:
         - fileType
         - fileSize
         - s3Bucket
+        - rawOcrData
+        - extractedStructuredData
+        - graphs
+        - embeddingsGenerated
       properties:
         documentType:
           type: string
@@ -65,6 +69,19 @@ components:
         # fileStoragePath:
         #   type: string
         #   example: https://${bucket}.s3.amazonaws.com/${uploads/17123-report.pdf}
+        rawOcrData:
+          type: object
+          example: {}
+        extractedStructuredData:
+          type: object
+          example: {}
+        graphs:
+          type: array
+          items: { type: object }
+          example: []
+        embeddingsGenerated:
+          type: boolean
+          example: true
     DocumentFilter:
       type: object
       additionalProperties: false

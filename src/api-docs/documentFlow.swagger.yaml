@@ -62,9 +62,9 @@ components:
 
     AddDocumentRequest:
       type: object
-      required: [fileKey, rawOcrData, extractedStructuredData]
+      required: [s3Key, rawOcrData, extractedStructuredData]
       properties:
-        fileKey: { type: string }
+        s3Key: { type: string }
         rawOcrData: { type: object }
         extractedStructuredData:
           type: object
@@ -115,31 +115,31 @@ components:
             allergies: { type: array, items: { type: string } }
 
 paths:
-  /documents/upload:
-    post:
-      tags: [Documents]
-      summary: Upload a medical document to GCS
-      description: |
-        Uploads a PDF to Google Cloud Storage and returns the
-        `fileKey`. No DB records or AI processing are triggered — call
-        `POST /documents/run-ocr` next.
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        "201":
-          description: File uploaded
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/UploadResponse" }
+  # /documents/upload:
+  #   post:
+  #     tags: [Documents]
+  #     summary: Upload a medical document to GCS
+  #     description: |
+  #       Uploads a PDF to Google Cloud Storage and returns the
+  #       `fileKey`. No DB records or AI processing are triggered — call
+  #       `POST /documents/run-ocr` next.
+  #     security: [{ bearerAuth: [] }]
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         multipart/form-data:
+  #           schema:
+  #             type: object
+  #             properties:
+  #               file:
+  #                 type: string
+  #                 format: binary
+  #     responses:
+  #       "201":
+  #         description: File uploaded
+  #         content:
+  #           application/json:
+  #             schema: { $ref: "#/components/schemas/UploadResponse" }
 
   /documents/ocr-progress/{fileKey}:
     get:

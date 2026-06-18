@@ -38,7 +38,6 @@ const patient = pgTable(
     isVerified: boolean("is_verified").default(false).notNull(),
     otpVerifiedAt: timestamp("otp_verified_at"),
     gender: genderEnum("gender").notNull(),
-
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),
     // age: integer("age"),

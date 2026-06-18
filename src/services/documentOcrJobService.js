@@ -215,7 +215,6 @@ class DocumentOcrJobService {
         metrics: rawOcrData.metrics,
         rawOcrData,
       };
-
       await documentProcessingJobRepository.markCompleted(jobId, {
         completedSteps: 8,
         currentStep: "Done",

@@ -52,8 +52,8 @@ class NotificationApiService {
     return deletedNotification;
   }
 
-  async badgeCount(payload) {
-    const data = await validateSchema(userIdBodySchema, payload);
+  async badgeCount(userId) {
+    const data = await validateSchema(userIdBodySchema, { userId });
     const count = await notificationRepository.getUnreadCount(data.userId);
 
     return { count };

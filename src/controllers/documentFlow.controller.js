@@ -73,10 +73,8 @@ async function runOcrStatus(req, res) {
       error: job.error || "AI response format is invalid.",
     });
   }
-
   return successResponse(res, job, "OCR job status fetched");
 }
-
 async function addDocument(req, res) {
   const payload = await validateSchema(addDocumentSchema, req.body);
   const result = await documentPersistenceService.addDocument({

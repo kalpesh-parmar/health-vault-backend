@@ -127,20 +127,40 @@ async function embedAndPersist({
     })),
   );
 
+  // const embeddingRows = [];
+  // for (const chunk of persistedChunks) {
+  //   const vector = await embeddingService.embedText(chunk.content);
+  //   if (!Array.isArray(vector) || vector.length === 0) continue;
+  //   embeddingRows.push({
+  //     chunkId: chunk.id,
+  //     embedding: vector,
+  //     metadata: chunk.metadata || {},
+  //     model: env.embeddingModel,
+  //     sourceId: chunk.id,
+  //     sourceType: chunk.sourceType,
+  //     userId,
+  //   });
+  // }
+
+  // if (embeddingRows.length) {
+  //   await txRepository.createEmbeddings(embeddingRows);
+  // }
   const embeddingRows = [];
-  for (const chunk of persistedChunks) {
+  const promises = persistedChunks.map(async (chunk) => {
     const vector = await embeddingService.embedText(chunk.content);
-    if (!Array.isArray(vector) || vector.length === 0) continue;
-    embeddingRows.push({
-      chunkId: chunk.id,
-      embedding: vector,
-      metadata: chunk.metadata || {},
-      model: env.embeddingModel,
-      sourceId: chunk.id,
-      sourceType: chunk.sourceType,
-      userId,
-    });
-  }
+    if (Array.isArray(vector) && vector.length > 0) {
+      embeddingRows.push({
+        chunkId: chunk.id,
+        embedding: vector,
+        metadata: chunk.metadata || {},
+        model: env.embeddingModel,
+        sourceId: chunk.id,
+        sourceType: chunk.sourceType,
+        userId,
+      });
+    }
+  });
+  await Promise.all(promises);
 
   if (embeddingRows.length) {
     await txRepository.createEmbeddings(embeddingRows);

@@ -16,9 +16,6 @@ paths:
         Generic GCS uploader. **Medical documents must NOT be uploaded
         through this endpoint.** Use `POST /documents/upload` for medical
         documents so they are picked up by the OCR + AI pipeline.
-
-        Only `uploadType=PATIENT_PROFILE` is accepted here. Sending
-        `PATIENT_DOCUMENT` returns `400`.
       tags:
         - File
       requestBody:
@@ -39,6 +36,7 @@ paths:
                   type: string
                   enum:
                     - PATIENT_PROFILE
+                    - PATIENT_DOCUMENT
                   description: Only PATIENT_PROFILE is accepted on this endpoint.
       responses:
         "200":

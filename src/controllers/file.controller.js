@@ -2,7 +2,7 @@ const { StatusCodes } = require("http-status-codes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 const { InvalidRequestException } = require("../exceptions/appError");
-const uploadFileService = require("../services/uploadFileService");
+const uploadFileService = require("../services/fileservice");
 
 async function uploadFile(req, res) {
   let patientId = req.body.patientId || req.auth?.userId;
