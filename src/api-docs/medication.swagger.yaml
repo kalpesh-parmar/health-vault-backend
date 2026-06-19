@@ -68,9 +68,10 @@ components:
           example: "22:00:00"
 
         CUSTOM:
-          type: string
-          example: "16:30:00"
-
+          type: array
+          items:
+            type: string
+            example: "15:50:00"
       example:
         MORNING: "09:00:00"
         NIGHT: "22:00:00"

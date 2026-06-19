@@ -54,14 +54,14 @@ function asText(value) {
 class DocumentPersistenceService {
   async addDocument({ userId, payload }) {
     const {
-      fileKey,
+      s3Key,
       rawOcrData,
       extractedStructuredData,
       graphs = [],
       embeddingsGenerated = false,
     } = payload;
-
-    if (!fileKey) {
+    console.log("Payload size:", Buffer.byteLength(JSON.stringify(payload)), "bytes");
+    if (!s3Key) {
       throw new InvalidRequestException(
         messageConstants.FILE_KEY_REQUIRED || "fileKey is required",
       );
@@ -71,15 +71,15 @@ class DocumentPersistenceService {
     }
 
     try {
-      await objectStorageService.getSignedFileUrl(fileKey);
+      await objectStorageService.getSignedFileUrl(s3Key);
     } catch {
-      throw new NotFoundException(`File not found in storage: ${fileKey}`);
+      throw new NotFoundException(`File not found in storage: ${s3Key}`);
     }
 
     const patient = await patientRepository.findById(userId);
     if (!patient) throw new NotFoundException("Patient profile not found");
 
-    const fileName = payload.fileName || fileKey.split("/").pop();
+    const fileName = payload.fileName || s3Key.split("/").pop();
     const mimeType = rawOcrData?.mimeType || rawOcrData?.metrics?.mime_type || "application/pdf";
 
     const result = await db.transaction(async (tx) => {
@@ -91,8 +91,8 @@ class DocumentPersistenceService {
         (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
       const filePath =
         env.storageProvider === "gcp"
-          ? `gs://${bucketName}/${fileKey}`
-          : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+          ? `gs://${bucketName}/${s3Key}`
+          : `https://${bucketName}.s3.amazonaws.com/${s3Key}`;
 
       const [documentRow] = await tx
         .insert(document)
@@ -111,7 +111,7 @@ class DocumentPersistenceService {
             ? new Date(extractedStructuredData.reportDate)
             : null,
           s3Bucket: bucketName,
-          s3Key: fileKey,
+          s3Key: s3Key,
           structuredExtractedData: extractedStructuredData,
           userId,
         })
@@ -123,7 +123,7 @@ class DocumentPersistenceService {
         confidence: rawOcrData?.confidence != null ? Number(rawOcrData.confidence) : null,
         documentId,
         engine: rawOcrData?.engine || "pymupdf",
-        fileKey,
+        s3Key,
         fullText: rawOcrData?.fullText || null,
         language: rawOcrData?.language || null,
         metrics: rawOcrData?.metrics || {},

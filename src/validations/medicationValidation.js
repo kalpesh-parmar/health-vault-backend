@@ -62,12 +62,18 @@ const medicationScheduleSchema = z
     [bestTakenType.MORNING]: time24HourSchema.optional(),
     [bestTakenType.NOON]: time24HourSchema.optional(),
     [bestTakenType.NIGHT]: time24HourSchema.optional(),
-    [bestTakenType.CUSTOM]: time24HourSchema.optional(),
+    [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
   })
-  .refine((data) => Object.values(data).some(Boolean), {
-    message: errorConstants.ONE_REQUIRED,
-  });
-
+  .refine(
+    (data) =>
+      //   Object.values(data).some(Boolean), {
+      //   message: errorConstants.ONE_REQUIRED,
+      // });
+      !!data.MORNING || !!data.NOON || !!data.NIGHT || (data.CUSTOM && data.CUSTOM.length > 0),
+    {
+      message: errorConstants.ONE_REQUIRED,
+    },
+  );
 const validateMedicationSelections = (data, ctx) => {
   if (!data.frequency || !data.medicationSchedule) {
     return;

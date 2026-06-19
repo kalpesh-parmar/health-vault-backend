@@ -1,19 +1,19 @@
 const express = require("express");
 
-const documentRoutes = require("./documentRoutes");
+const documentRoutes = require("./document.route");
 const notificationRoutes = require("./notificationRoutes");
-const patientRoutes = require("./patientRoutes");
-const sessionRoutes = require("./sessionRoutes");
-const authRoutes = require("./authRoutes");
-const medicationReminderRoutes = require("./medicationReminderRoutes");
-const s3Routes = require("./s3Routes");
-const cronRoutes = require("./cronRoutes");
-const refill = require("./refillCountRoutes");
-const medicationRoutes = require("./medicationRoutes");
+const patientRoutes = require("./patient.route");
+const sessionRoutes = require("./session.route");
+const authRoutes = require("./auth.route");
+const medicationReminderRoutes = require("./medication.route");
+const s3Routes = require("./file.route");
+const cronRoutes = require("./cron.route");
+const refill = require("./refillCount.route");
+const medicationRoutes = require("./medication.route");
 const { db } = require("../configs/db");
 const { StatusCodes } = require("http-status-codes");
 const routes = express.Router();
-const chatSessionRoutes = require("./chatSessionRoutes");
+const chatSessionRoutes = require("./chatSession.route");
 const ocrHealthService = require("../services/aiService/ocr/ocrHealthService");
 
 routes.get("/health", async (_req, res) => {
@@ -42,7 +42,7 @@ routes.use("/medications", medicationRoutes);
 routes.use("/medication-reminders", medicationReminderRoutes);
 routes.use("/documents", documentRoutes);
 routes.use("/chat", chatSessionRoutes);
-routes.use("/s3-file-upload", s3Routes);
+routes.use("/file", s3Routes);
 routes.use("/notifications", notificationRoutes);
 routes.use("/session", sessionRoutes);
 routes.use("/cron", cronRoutes);

@@ -59,11 +59,7 @@ components:
           type: string
           example: application/pdf
 
-        fileSize:
-          type: integer
-          example: 204800
-
-        s3Bucket:
+        s3bucket:
           type: string
           example: patient-documents
         # fileStoragePath:
