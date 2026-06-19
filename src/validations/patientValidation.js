@@ -3,6 +3,8 @@ const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { genderTypeValue } = require("../enums/genderType");
 const { userStatusValues } = require("../enums/userStatus.enum");
+// const { provider } = require("../services/objectStorageService");
+const { providerValues } = require("../enums/providerType");
 
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const uppercaseRegex = /[A-Z]/;
@@ -92,6 +94,7 @@ const createPatientSchema = z
     }),
     password: passwordField,
     phone: phoneField,
+    // provider:z.enum(providerValues).optional(),
     profileImageKey: z.string().trim().max(500).optional().nullable(),
     // userName: usernameField(errorConstants.USER_NAME_REQUIRED),
   })
@@ -135,6 +138,11 @@ const loginPatientSchema = z
     password: passwordField,
   })
   .strict();
+
+const socialLogin = z.object({
+  deviceToken: z.string().max(500).optional().nullable(),
+  provider: z.enum(providerValues),
+});
 
 const refreshTokenSchema = z
   .object({
@@ -187,4 +195,5 @@ module.exports = {
   updatePatientSchema,
   verifyOtpSchema,
   calculateAge,
+  socialLogin,
 };

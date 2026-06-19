@@ -40,6 +40,7 @@ const errorConstants = Object.freeze({
   ROUTE_NOT_FOUND: "Route not found",
   SESSION_NOT_FOUND: "Session not found",
   SOMETHING_WENT_WRONG: "Something went wrong, please try again later",
+  TOKEN_REQUIRED: "Token is required",
   NOTIFICATION_FAILED: "Failed to send notification",
   UNAUTHORIZED: "Unauthorized",
   VALIDATION_FAILED: "Validation failed",

@@ -4,6 +4,7 @@ const patientController = require("../controllers/patient.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
 router.post("/login", patientController.loginPatient);
+router.post("/social-login", patientController.socialLogin);
 router.post("/refresh-token", patientController.refreshToken);
 router.post("/request-otp", patientController.requestOtp);
 router.post("/forgot-password", patientController.forgotPassword);

@@ -143,6 +143,9 @@ const env = Object.freeze({
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   // refillAlertBeforeDays: numberFromEnv("REFILL_ALERT_BEFORE_DAYS", 2),
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
+
+  //client Ids based on Provider
+  googleClientId: stringFromEnv("GOOGLE_CLIENT_ID"),
 });
 
 function validateEnv(config) {

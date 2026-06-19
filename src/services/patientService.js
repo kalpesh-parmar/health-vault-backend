@@ -35,9 +35,28 @@ const {
   verifyOtpSchema,
 } = require("../validations");
 const emailService = require("./emailService");
-const { calculateAge } = require("../validations/patientValidation");
+const { calculateAge, socialLogin } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
+const { providerType } = require("../enums/providerType");
+const googleAuth = require("./providerService/googleService");
 
+async function googleLogin(payload) {
+  const { token } = payload;
+  if (!token) {
+    throw InvalidRequestException(errorConstants.TOKEN_REQUIRED);
+  }
+  const ticket = googleAuth.ticket(token);
+  const googleUser = ticket.getPayload();
+  // const providerId = googleUser.sub;
+  const email = googleUser.email;
+  // const name = googleUser.name;
+  // const patient = {providerId,email,name};
+  const existingPatient = await patientRepository.findByEmail(email);
+  if (existingPatient) {
+    // return loginPatient(patient);
+  }
+  return existingPatient;
+}
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const patientCode = generateNumericPatientCode();
@@ -413,6 +432,34 @@ class PatientService {
       ...existingPatient,
       age: calculateAge(existingPatient.dateOfBirth),
     };
+  }
+  async socialLogin(payload) {
+    const data = await validateSchema(socialLogin, payload);
+    await PatientService.providerService(data);
+    return data;
+  }
+  async providerService(data) {
+    const { provider } = data;
+
+    switch (provider) {
+      case providerType.GOOGLE:
+        return googleLogin(data);
+
+      // case providerType.FACEBOOK:
+      //   return facebookLogin(data);
+
+      // case providerType.APPLE:
+      //   return appleLogin(data);
+
+      // case providerType.EMAIL:
+      //   return emailLogin(data);
+
+      // case providerType.MOBILE:
+      //   return mobileLogin(data);
+
+      default:
+        throw new Error("Invalid provider");
+    }
   }
 }
 

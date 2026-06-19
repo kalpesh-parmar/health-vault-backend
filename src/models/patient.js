@@ -13,11 +13,12 @@ const {
 } = require("drizzle-orm/pg-core");
 
 const { genderTypeValue } = require("../enums/genderType");
+const { providerValues } = require("../enums/providerType");
 const { USER_STATUS, userStatusValues } = require("../enums/userStatus.enum");
 
 const genderEnum = pgEnum("gender", genderTypeValue);
 const userStatusEnum = pgEnum("user_status", userStatusValues);
-
+const providerEnum = pgEnum("provider", providerValues);
 const patient = pgTable(
   "patients",
   {
@@ -45,6 +46,8 @@ const patient = pgTable(
     profileImageKey: text("profile_image_key"),
     bloodGroup: varchar("blood_group", { length: 8 }),
     allergies: text("allergies").array(),
+    provider: providerEnum("provider"),
+    providerId: integer("provider_id"),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -66,4 +69,5 @@ module.exports = {
   patient,
   userStatusEnum,
   genderEnum,
+  providerEnum,
 };

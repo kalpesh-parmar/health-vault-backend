@@ -17,6 +17,7 @@ const {
   resetPasswordSchema,
   updatePatientSchema,
   verifyOtpSchema,
+  socialLogin,
 } = require("./patientValidation");
 const {
   listNotificationsPaginatedSchema,
@@ -81,6 +82,7 @@ module.exports = {
   updatePatientSchema,
   userIdBodySchema,
   validateSchema,
+  socialLogin,
   listRefillQuerySchema,
   verifyOtpSchema,
   createMedicationSchema,

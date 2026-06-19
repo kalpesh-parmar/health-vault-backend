@@ -74,6 +74,11 @@ async function getPatientProfile(req, res) {
   return successResponse(res, result, messageConstants.PATIENT_PROFILE_FETCHED);
 }
 
+async function socialLogin(req, res) {
+  const result = await patientService.socialLogin(req.body);
+  return successResponse(res, result, messageConstants.PATIENT_LOGIN_SUCCESS);
+}
+
 module.exports = {
   createPatient,
   deletePatient,
@@ -89,4 +94,5 @@ module.exports = {
   resetPassword,
   updatePatient,
   verifyOtp,
+  socialLogin,
 };
