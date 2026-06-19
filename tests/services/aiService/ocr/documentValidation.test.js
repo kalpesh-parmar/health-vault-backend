@@ -3,13 +3,10 @@ const {
   validateDocument,
   normalizeMime,
   detectSignatureMime,
-} = require("../../../../src/services/aiService/ocr/documentValidation");
-
-const {
   CorruptedFileError,
   FileTooLargeError,
   UnsupportedDocumentError,
-} = require("../../../../src/services/aiService/ocr/ocrErrors");
+} = require("../../../../src/services/ai/ocr/ocr.validator");
 
 describe("documentValidation", () => {
   describe("normalizeMime", () => {

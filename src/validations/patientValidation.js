@@ -10,18 +10,10 @@ const numberRegex = /[0-9]/;
 const symbolRegex = /[@$!%*?&]/;
 const alphabetsRegex = /^[A-Za-z\s]+$/;
 
+const { getAgeFromDateOfBirth } = require("../helpers/dateHelper");
+
 function calculateAge(dateOfBirth) {
-  if (!dateOfBirth) return undefined;
-  const today = new Date();
-  const birthDate = new Date(dateOfBirth);
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
-
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age -= 1;
-  }
-
-  return age;
+  return getAgeFromDateOfBirth(dateOfBirth);
 }
 
 const nameField = (requiredError) =>
@@ -57,39 +49,25 @@ const dateOfBirthField = z.coerce
   })
   .max(new Date(), errorConstants.CANT_BE_FUTURE_DATE);
 
-const ageField = z.preprocess(
-  (val) => {
-    if (typeof val === "string") return Number(val);
-    return val;
-  },
-  z
-    .number({
-      required_error: errorConstants.AGE_REQUIRED,
-      invalid_type_error: errorConstants.AGE_INVALID,
-    })
-    .int()
-    .positive()
-    .max(150, errorConstants.AGE_INVALID),
-);
-
-const phoneField = z
+const mobileField = z
   .string({ required_error: errorConstants.PHONE_REQUIRED })
   .regex(/^\d{10}$/, errorConstants.PHONE_INVALID);
 
-const usernameField = (requiredError) =>
-  z
-    .string({ required_error: requiredError })
-    .trim()
-    .min(2, errorConstants.NAME_TOO_SHORT)
-    .max(255, errorConstants.NAME_TOO_LONG);
-// .regex(/^[a-zA-Z0-9]*$/, errorConstants.USER_NAME_INVALID);
-
 const profileImageKey = z.string().trim().max(500).optional().nullable();
+
+const allergiesField = z.preprocess((val) => {
+  if (typeof val === "string") {
+    return val
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return val;
+}, z.array(z.string()).optional().nullable());
 
 const createPatientSchema = z
   .object({
     dateOfBirth: dateOfBirthField.optional(),
-    age: ageField.optional(),
     email: emailField,
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED),
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED),
@@ -98,18 +76,15 @@ const createPatientSchema = z
       required_error: errorConstants.GENDER_INVALID,
     }),
     password: passwordField,
-    phone: phoneField,
+    mobile: mobileField,
     profileImageKey: profileImageKey,
-    userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
-    allergies: z.string().trim().optional().nullable(),
+    allergies: allergiesField,
     bloodGroup: z.string().trim().optional().nullable(),
   })
   .strict()
   .transform((data) => {
-    const calculatedAgeValue = data.dateOfBirth ? calculateAge(data.dateOfBirth) : data.age;
     return {
       ...data,
-      age: calculatedAgeValue,
       fullName: `${data.firstName} ${data.lastName}`,
     };
   });
@@ -117,63 +92,42 @@ const createPatientSchema = z
 const updatePatientSchema = z
   .object({
     dateOfBirth: dateOfBirthField.optional(),
-    age: ageField.optional(),
     email: emailField.optional(),
     firstName: nameField(errorConstants.FIRST_NAME_REQUIRED).optional(),
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED).optional(),
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
-    phone: phoneField.optional(),
+    mobile: mobileField.optional(),
     profileImageKey: profileImageKey,
     status: z.enum(userStatusValues).optional(),
-    userName: usernameField(errorConstants.USER_NAME_REQUIRED).optional(),
-    allergies: z.string().trim().optional().nullable(),
+    allergies: allergiesField,
     bloodGroup: z.string().trim().optional().nullable(),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)
   .transform((data) => {
     const updatedData = { ...data };
-    if (data.dateOfBirth) {
-      updatedData.age = calculateAge(data.dateOfBirth);
-    }
     if (data.firstName && data.lastName) {
       updatedData.fullName = `${data.firstName} ${data.lastName}`;
     }
     return updatedData;
   });
 
-const loginPatientSchema = z
+const firebaseLoginSchema = z
   .object({
     deviceToken: z.string().max(500).optional().nullable(),
-    email: emailField,
-    password: passwordField,
+    firebaseToken: z.string().min(1).optional(),
+    firebaseIdToken: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => data.firebaseToken || data.firebaseIdToken, {
+    message: "Either firebaseToken or firebaseIdToken is required",
+    path: ["firebaseIdToken"],
+  });
 
 const refreshTokenSchema = z
   .object({
     refreshToken: z.string({ required_error: errorConstants.REFRESH_TOKEN_REQUIRED }).min(1),
-  })
-  .strict();
-
-const emailOnlySchema = z
-  .object({
-    email: emailField,
-  })
-  .strict();
-
-const verifyOtpSchema = z
-  .object({
-    email: emailField,
-    otp: z.string().trim().length(6, errorConstants.INVALID_OTP),
-  })
-  .strict();
-
-const resetPasswordSchema = z
-  .object({
-    email: emailField,
-    password: passwordField,
   })
   .strict();
 
@@ -194,12 +148,9 @@ const listPatientsQuerySchema = z
 
 module.exports = {
   createPatientSchema,
-  emailOnlySchema,
+  firebaseLoginSchema,
   listPatientsQuerySchema,
-  loginPatientSchema,
   refreshTokenSchema,
-  resetPasswordSchema,
   updatePatientSchema,
-  verifyOtpSchema,
   calculateAge,
 };

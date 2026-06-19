@@ -14,28 +14,22 @@ const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const sessionRepository = require("../repositories/sessionRepository");
 const {
-  addMinutes,
   generateNumericPatientCode,
-  generateOtp,
   hashToken,
   parseDurationToDate,
   sanitizePatient,
 } = require("../utils/commonUtils");
 const JwtUtils = require("../utils/jwtUtils");
 const {
-  createPatientSchema,
-  emailOnlySchema,
+  firebaseLoginSchema,
   idParamSchema,
   listPatientsQuerySchema,
-  loginPatientSchema,
   refreshTokenSchema,
-  resetPasswordSchema,
   updatePatientSchema,
   validateSchema,
-  verifyOtpSchema,
 } = require("../validations");
+const { verifyFirebaseToken } = require("../configs/firebase");
 const emailService = require("./emailService");
-const { calculateAge } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 
 async function createUniquePatientCode() {
@@ -68,9 +62,15 @@ function createTokenPair(existingPatient, sessionId) {
   };
 
   return {
-    accessToken: JwtUtils.generateAccessToken(tokenPayload, {
-      subject: existingPatient.id,
-    }),
+    accessToken: JwtUtils.generateAccessToken(
+      {
+        ...tokenPayload,
+        tokenType: "access",
+      },
+      {
+        subject: existingPatient.id,
+      },
+    ),
     refreshToken: JwtUtils.generateRefreshToken(tokenPayload, {
       subject: existingPatient.id,
     }),
@@ -91,6 +91,7 @@ async function persistSession(existingPatient, deviceToken = null) {
 
   return {
     ...tokens,
+    sessionId,
     expiresIn: env.jwtAccessExpiresIn,
     refreshExpiresIn: env.jwtRefreshExpiresIn,
     tokenType: responseConstants.TOKEN_TYPE,
@@ -114,31 +115,102 @@ class PatientService {
     return updatedPatient;
   }
 
-  async loginPatient(payload) {
-    const data = await validateSchema(loginPatientSchema, payload);
-    const existingPatient = await patientRepository.findByEmail(data.email);
+  async firebaseLogin(payload) {
+    const data = await validateSchema(firebaseLoginSchema, payload);
+    const tokenToVerify = data.firebaseIdToken || data.firebaseToken;
 
+    let decodedToken;
+    if (env.enableDummyAuth && tokenToVerify === "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2") {
+      console.log("[DUMMY_AUTH] Bypassing Firebase authentication. Using mock user credentials.");
+      decodedToken = {
+        uid: "msAipc6g4vNEQl24OePv56pe6Qy2",
+        phone_number: "+911111111111",
+      };
+    } else {
+      console.log("[FIREBASE_AUTH] Verifying ID token with Firebase Admin SDK.");
+      try {
+        decodedToken = await verifyFirebaseToken(tokenToVerify);
+      } catch (error) {
+        console.error("Firebase ID Token verification failed:", error);
+        throw new UnauthorizedException("Invalid Firebase token");
+      }
+    }
+
+    const mobileFull = decodedToken.phone_number;
+    if (!mobileFull) {
+      throw new InvalidRequestException("Firebase token does not contain a phone number");
+    }
+
+    // Helper to extract countryCode and mobile
+    const cleaned = mobileFull.replace(/[^+\d]/g, "");
+    let mobile = cleaned;
+    let countryCode = null;
+    if (cleaned.startsWith("+") && cleaned.length > 10) {
+      mobile = cleaned.slice(-10);
+      countryCode = cleaned.slice(0, cleaned.length - 10);
+    }
+
+    const firebaseUid = decodedToken.uid;
+    let existingPatient = await patientRepository.findByFirebaseUid(firebaseUid);
     if (!existingPatient) {
-      throw new UnauthorizedException(errorConstants.INVALID_CREDENTIALS);
+      existingPatient = await patientRepository.findByMobile(mobile);
     }
 
-    assertPatientCanAuthenticate(existingPatient);
-
-    const passwordMatches = await bcrypt.compare(data.password, existingPatient.password);
-
-    if (!passwordMatches) {
-      await this.handleFailedSecurityAttempt(existingPatient);
-      throw new UnauthorizedException(errorConstants.INVALID_CREDENTIALS);
+    let isNewUser = false;
+    if (!existingPatient) {
+      isNewUser = true;
+      const patientCode = await createUniquePatientCode();
+      existingPatient = await patientRepository.create({
+        patientCode,
+        mobile,
+        countryCode,
+        firebaseUid,
+        isActive: true,
+        status: USER_STATUS.ACTIVE,
+        firstName: null,
+        lastName: null,
+        fullName: null,
+        gender: null,
+        dateOfBirth: null,
+        bloodGroup: null,
+        allergies: null,
+        isVerified: true,
+        lastLoginAt: new Date(),
+      });
+    } else {
+      assertPatientCanAuthenticate(existingPatient);
+      isNewUser = false;
+      existingPatient = await patientRepository.updateById(existingPatient.id, {
+        lastLoginAt: new Date(),
+        firebaseUid,
+      });
     }
 
-    const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-      loginAttempts: 0,
-    });
-    const tokens = await persistSession(updatedPatient, data.deviceToken);
+    const isOnboardingCompleted = !!(
+      existingPatient.firstName &&
+      existingPatient.firstName !== "User" &&
+      existingPatient.lastName &&
+      !existingPatient.lastName.startsWith("+") &&
+      existingPatient.gender &&
+      existingPatient.dateOfBirth
+    );
+
+    const tokens = await persistSession(existingPatient, data.deviceToken);
 
     return {
-      ...tokens,
-      patient: sanitizePatient(updatedPatient),
+      success: true,
+      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      sessionId: tokens.sessionId,
+      isNewUser,
+      isOnboardingCompleted,
+      user: {
+        id: existingPatient.id,
+        name: existingPatient.fullName || `User ${existingPatient.mobile}`,
+        mobile: existingPatient.mobile || "",
+        role: "patient",
+      },
     };
   }
 
@@ -171,31 +243,6 @@ class PatientService {
       expiresIn: env.jwtAccessExpiresIn,
       refreshExpiresIn: env.jwtRefreshExpiresIn,
       tokenType: responseConstants.TOKEN_TYPE,
-    };
-  }
-
-  async createPatient(payload) {
-    const data = await validateSchema(createPatientSchema, payload);
-    const existingPatient = await patientRepository.findByEmail(data.email);
-    const age = calculateAge(data.dateOfBirth);
-    if (existingPatient) {
-      throw new AlreadyExistsException(errorConstants.EMAIL_ALREADY_EXISTS);
-    }
-    const password = await bcrypt.hash(data.password, 10);
-    const patientCode = await createUniquePatientCode();
-    const createdPatient = await patientRepository.create({
-      ...data,
-      patientCode,
-      password,
-      status: USER_STATUS.ACTIVE,
-    });
-    const sanitized = sanitizePatient({
-      ...createdPatient,
-      age: age,
-    });
-    return {
-      ...sanitized,
-      patientData: sanitized,
     };
   }
 
@@ -233,7 +280,6 @@ class PatientService {
     ) {
       await objectStorageService.deleteFile(existingPatient.profileImageKey);
     }
-    const age = calculateAge(data.dateOfBirth);
     if (data.email) {
       const patientWithEmail = await patientRepository.findByEmailExcludingId(
         data.email,
@@ -254,10 +300,7 @@ class PatientService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    const sanitized = sanitizePatient({
-      ...updatedPatient,
-      age: age,
-    });
+    const sanitized = sanitizePatient(updatedPatient);
 
     return {
       ...sanitized,
@@ -267,6 +310,10 @@ class PatientService {
 
   async deletePatient(id) {
     const params = await validateSchema(idParamSchema, { id });
+
+    // Revoke all sessions for this patient on deletion
+    await sessionRepository.deleteByPatientId(params.id);
+
     const deletedPatient = await patientRepository.softDeleteById(params.id);
 
     if (!deletedPatient) {
@@ -302,96 +349,6 @@ class PatientService {
     return loggedOutSession;
   }
 
-  async requestOtp(payload, templateName = "otpVerification") {
-    const data = await validateSchema(emailOnlySchema, payload);
-
-    const existingPatient = await patientRepository.findByEmail(data.email);
-
-    if (!existingPatient) {
-      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
-    }
-
-    assertPatientCanAuthenticate(data);
-
-    const now = new Date();
-    const otp = generateOtp();
-    const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-      otp,
-      otpExpiredDateTime: addMinutes(now, env.otpExpiryMinutes),
-      otpSendDateTime: now,
-      otpVerifiedAt: null,
-    });
-    await emailService.sendOtpEmail(data, otp, templateName);
-
-    return {
-      expiresAt: updatedPatient.otpExpiredDateTime,
-    };
-  }
-
-  async forgotPassword(payload) {
-    return this.requestOtp(payload, "forgotPassword");
-  }
-
-  async verifyOtp(payload) {
-    const data = await validateSchema(verifyOtpSchema, payload);
-    const existingPatient = await patientRepository.findByEmail(data.email);
-
-    if (!existingPatient) {
-      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
-    }
-
-    assertPatientCanAuthenticate(existingPatient);
-
-    if (!existingPatient.otp || existingPatient.otp !== data.otp) {
-      await this.handleFailedSecurityAttempt(existingPatient);
-      throw new InvalidRequestException(errorConstants.INVALID_OTP);
-    }
-
-    if (!existingPatient.otpExpiredDateTime || existingPatient.otpExpiredDateTime < new Date()) {
-      throw new InvalidRequestException(errorConstants.OTP_EXPIRED);
-    }
-
-    const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-      isVerified: true,
-      loginAttempts: 0,
-      otp: null,
-      otpExpiredDateTime: null,
-      otpSendDateTime: null,
-      otpVerifiedAt: new Date(),
-    });
-
-    return sanitizePatient(updatedPatient);
-  }
-
-  async resetPassword(payload) {
-    const data = await validateSchema(resetPasswordSchema, payload);
-    const existingPatient = await patientRepository.findByEmail(data.email);
-
-    if (!existingPatient) {
-      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
-    }
-
-    assertPatientCanAuthenticate(existingPatient);
-
-    if (
-      !existingPatient.otpVerifiedAt ||
-      addMinutes(existingPatient.otpVerifiedAt, env.passwordResetWindowMinutes) < new Date()
-    ) {
-      throw new InvalidRequestException(errorConstants.OTP_NOT_VERIFIED);
-    }
-
-    const password = await bcrypt.hash(data.password, 10);
-    const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-      loginAttempts: 0,
-      otpVerifiedAt: null,
-      password,
-    });
-
-    await emailService.sendPasswordResetSuccessEmail(updatedPatient);
-
-    return sanitizePatient(updatedPatient);
-  }
-
   async getPatientProfile(userId) {
     if (!userId) {
       throw new UnauthorizedException(errorConstants.UNAUTHORIZED);
@@ -403,10 +360,7 @@ class PatientService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    return {
-      ...existingPatient,
-      age: calculateAge(existingPatient.dateOfBirth),
-    };
+    return sanitizePatient(existingPatient);
   }
 }
 

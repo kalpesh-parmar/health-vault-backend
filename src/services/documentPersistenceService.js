@@ -8,8 +8,7 @@ const { InvalidRequestException, NotFoundException } = require("../exceptions/ap
 const DocumentArtifactsRepository = require("../repositories/documentArtifactsRepository");
 const documentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const patientRepository = require("../repositories/patientRepository");
-const { embedAndPersist } = require("./aiService/embeddingPipeline");
-const medicationExtractionService = require("./aiService/medicationExtractionService");
+const { embeddingService, medicationMapper } = require("./ai");
 const objectStorageService = require("./objectStorageService");
 const { document } = require("../models/document");
 
@@ -191,18 +190,17 @@ class DocumentPersistenceService {
         })),
       );
 
-      const { rows: medicationRows, skipped: medicationSkipped } =
-        medicationExtractionService.buildRows({
-          defaults: {
-            prescribedBy: extractedStructuredData?.doctorName || null,
-            startDate: extractedStructuredData?.reportDate
-              ? new Date(extractedStructuredData.reportDate).toISOString().slice(0, 10)
-              : new Date().toISOString().slice(0, 10),
-          },
-          medications: extractedStructuredData?.medications || [],
-          patientCode: patient.patientCode,
-          userId,
-        });
+      const { rows: medicationRows, skipped: medicationSkipped } = medicationMapper.buildRows({
+        defaults: {
+          prescribedBy: extractedStructuredData?.doctorName || null,
+          startDate: extractedStructuredData?.reportDate
+            ? new Date(extractedStructuredData.reportDate).toISOString().slice(0, 10)
+            : new Date().toISOString().slice(0, 10),
+        },
+        medications: extractedStructuredData?.medications || [],
+        patientCode: patient.patientCode,
+        userId,
+      });
 
       const insertedMedications = [];
       for (const row of medicationRows) {
@@ -211,7 +209,7 @@ class DocumentPersistenceService {
 
       let embeddingResult = { chunkCount: 0, chunkIds: [], embeddings: 0 };
       if (!embeddingsGenerated) {
-        embeddingResult = await embedAndPersist({
+        embeddingResult = await embeddingService.embedAndPersist({
           documentId,
           rawOcr: rawOcrData,
           structured: extractedStructuredData,

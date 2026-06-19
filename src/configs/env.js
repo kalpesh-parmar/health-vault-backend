@@ -141,6 +141,7 @@ const env = Object.freeze({
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
+  enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", false),
 });
 
 function validateEnv(config) {

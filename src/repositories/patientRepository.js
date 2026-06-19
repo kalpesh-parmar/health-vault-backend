@@ -24,7 +24,7 @@ function buildPatientFilters(filters = {}) {
       or(
         ilike(patient.email, search),
         ilike(patient.fullName, search),
-        ilike(patient.phone, search),
+        ilike(patient.mobile, search),
       ),
     );
   }
@@ -53,6 +53,26 @@ class PatientRepository {
       .select()
       .from(patient)
       .where(and(eq(patient.email, email), eq(patient.softDelete, false)))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findByMobile(mobile) {
+    const result = await db
+      .select()
+      .from(patient)
+      .where(and(eq(patient.mobile, mobile), eq(patient.softDelete, false)))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findByFirebaseUid(firebaseUid) {
+    const result = await db
+      .select()
+      .from(patient)
+      .where(and(eq(patient.firebaseUid, firebaseUid), eq(patient.softDelete, false)))
       .limit(1);
 
     return result[0] || null;

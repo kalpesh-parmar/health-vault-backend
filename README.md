@@ -1,11 +1,6 @@
 # Health Vault Backend
 
-<<<<<<< HEAD
 Production-ready Node.js backend using Express, PostgreSQL, pgvector, and Drizzle ORM.
-=======
-Production-ready Node.js backend using Express, PostgreSQL, and pgvector.
-
-> > > > > > > migrate-old-repo
 
 ## Architecture
 
@@ -38,18 +33,9 @@ MAX_LOGIN_ATTEMPTS=3
 
 ## AI Document Flow
 
-<<<<<<< HEAD
 Drizzle schema is in `src/models`.
 
 # Run migrations with your deployment migration runner or Drizzle Kit workflow.
-
-The document intelligence flow accepts PDFs only. Selectable PDFs are extracted
-with PyMuPDF first; scanned PDFs fall back to the singleton AI service inside
-`ai-service`.
-
-> > > > > > > migrate-old-repo
-
-## AI Document Flow
 
 The document intelligence flow accepts PDFs only. Selectable PDFs are extracted
 with PyMuPDF first; scanned PDFs fall back to the singleton AI service inside

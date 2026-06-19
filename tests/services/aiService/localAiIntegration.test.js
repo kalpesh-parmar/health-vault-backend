@@ -1,10 +1,20 @@
 /* global describe, it, expect, jest, beforeEach */
 const axios = require("axios");
-const { qwenHealthService } = require("../../../src/services/ai/qwenHealthService");
-const { embeddingService } = require("../../../src/services/ai/embeddingService");
-const { EMERGENCY_WARNING } = require("../../../src/services/ai/promptTemplates");
+const { chatService } = require("../../../src/services/ai/chat/chat.service");
+const { embeddingService } = require("../../../src/services/ai/chat/embedding.service");
+const { EMERGENCY_WARNING } = require("../../../src/services/ai/prompts");
 
-jest.mock("axios");
+jest.mock("axios", () => {
+  const mockAxios = jest.fn((config) => {
+    if (config.method === "post") {
+      return mockAxios.post(config.url, config.data, config);
+    }
+    return Promise.resolve({});
+  });
+  mockAxios.post = jest.fn();
+  mockAxios.get = jest.fn();
+  return mockAxios;
+});
 
 describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
   beforeEach(() => {
@@ -14,7 +24,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
   describe("Emergency Detection Flow", () => {
     it("should detect chest pain and trigger the emergency warning", async () => {
       const messages = [{ role: "user", content: "I am having severe chest pain right now" }];
-      const result = await qwenHealthService.chat(messages, "GENERAL_HEALTH");
+      const result = await chatService.qwenHealthChat(messages, "GENERAL_HEALTH");
 
       expect(result.emergency).toBe(true);
       expect(result.answer).toContain("urgent medical attention");
@@ -23,7 +33,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
 
     it("should detect breathing difficulty and set emergency to true", async () => {
       const messages = [{ role: "user", content: "It is hard to breathe, difficulty breathing" }];
-      const result = await qwenHealthService.chat(messages, "GENERAL_HEALTH");
+      const result = await chatService.qwenHealthChat(messages, "GENERAL_HEALTH");
 
       expect(result.emergency).toBe(true);
       expect(result.answer).toContain("urgent medical attention");
@@ -42,7 +52,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
       });
 
       const messages = [{ role: "user", content: "Tell me about symptoms of diabetes" }];
-      const result = await qwenHealthService.chat(messages, "GENERAL_HEALTH");
+      const result = await chatService.qwenHealthChat(messages, "GENERAL_HEALTH");
 
       expect(result.emergency).toBe(false);
       expect(result.answer).toContain("Medical Facts");
@@ -53,7 +63,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
   describe("Document RAG Mode", () => {
     it("should return the canonical missing info message if no context chunks are supplied", async () => {
       const messages = [{ role: "user", content: "What is my blood sugar level?" }];
-      const result = await qwenHealthService.chat(messages, "DOCUMENT_RAG", []);
+      const result = await chatService.qwenHealthChat(messages, "DOCUMENT_RAG", []);
 
       expect(result.answer).toEqual("Information not found in uploaded reports.");
       expect(result.citations).toEqual([]);
@@ -80,7 +90,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
         },
       ];
       const messages = [{ role: "user", content: "What is my glucose level?" }];
-      const result = await qwenHealthService.chat(messages, "DOCUMENT_RAG", chunks);
+      const result = await chatService.qwenHealthChat(messages, "DOCUMENT_RAG", chunks);
 
       expect(result.answer).toContain("glucose level is 110 mg/dL");
       expect(result.citations).toHaveLength(1);

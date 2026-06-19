@@ -2,7 +2,7 @@ const axios = require("axios");
 const crypto = require("crypto");
 const { GoogleGenAI } = require("@google/genai");
 
-const { env } = require("../../configs/env");
+const { env } = require("../../../configs/env");
 const { URL } = require("url");
 
 const TRANSIENT_STATUS = new Set([408, 429, 500, 502, 503, 504]);

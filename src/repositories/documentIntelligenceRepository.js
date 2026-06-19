@@ -120,8 +120,8 @@ class DocumentIntelligenceRepository {
         patientCode: patient.patientCode,
         fullName: patient.fullName,
         gender: patient.gender,
-        age: patient.age,
-        phone: patient.phone,
+        dateOfBirth: patient.dateOfBirth,
+        mobile: patient.mobile,
         email: patient.email,
       })
       .from(patient)

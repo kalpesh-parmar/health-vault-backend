@@ -46,6 +46,7 @@ function errorResponse(res, error) {
     errorCode: error.errorCode || "INTERNAL_SERVER_ERROR",
     message: error.description || error.message || responseConstants.DEFAULT_ERROR_MESSAGE,
     success: false,
+    ...(error.forceLogout ? { forceLogout: true } : {}),
   });
 }
 

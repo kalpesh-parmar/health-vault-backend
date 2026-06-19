@@ -62,10 +62,10 @@ class UploadFileService {
     }
 
     if (uploadType === "PATIENT_DOCUMENT") {
-      const { qwenVisionService } = require("./ai/qwenVisionService.ts");
+      const { ocrService } = require("./ai");
       const { NonMedicalDocumentException } = require("../exceptions/appError");
 
-      const validation = await qwenVisionService.validateDocument({
+      const validation = await ocrService.validateDocument({
         buffer: file.buffer,
         mimeType: file.mimetype,
         filename: file.originalname,

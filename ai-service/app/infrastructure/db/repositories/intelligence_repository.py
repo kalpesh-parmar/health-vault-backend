@@ -59,6 +59,7 @@ class IntelligenceRepository:
             "gender": patient.gender,
             "age": patient.age,
             "phone": patient.phone,
+            "mobile": patient.mobile,
             "email": patient.email,
         }
 

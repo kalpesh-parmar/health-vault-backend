@@ -44,7 +44,9 @@ Only if needed.
 💡 Doctor's Tip
 Provide one practical and encouraging tip.`;
 
-const RAG_PROMPT_TEMPLATE = (context) => `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
+const RAG_PROMPT_TEMPLATE = (
+  context,
+) => `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
 
 Retrieved Report Context:
 """
@@ -189,6 +191,10 @@ Rules:
 3. Do NOT include any reasoning, thinking, explanations, or notes.
 4. Set fields to null if they are not found.
 5. Ensure the response is a valid, parseable JSON object matching the schema.
+6. Implement strict field mapping:
+   - Extract 'Birth Date', 'DOB', or 'Date of Birth' as 'dateOfBirth' under patient. Do NOT confuse this with visit or report date.
+   - Extract 'Visit Date' as 'visitDate' at root level.
+   - Extract 'Report Date' as 'reportDate' at root level.
 
 JSON format schema:
 {
@@ -197,8 +203,17 @@ JSON format schema:
   "documentType": "LAB_REPORT",
   "patient": {
     "name": "Patient Name",
+    "firstName": "First Name",
+    "lastName": "Last Name",
     "age": 25,
-    "gender": "Gender"
+    "gender": "Gender",
+    "dateOfBirth": "YYYY-MM-DD",
+    "email": "Email address",
+    "phoneNumber": "Phone number",
+    "bloodGroup": "Blood group (A+/A-/B+/B-/AB+/AB-/O+/O-)",
+    "allergies": ["allergy1", "allergy2"],
+    "medicalConditions": ["condition1", "condition2"],
+    "address": "Postal address"
   },
   "hospital": {
     "name": "Hospital/Clinic Name"
@@ -207,6 +222,7 @@ JSON format schema:
     "name": "Doctor Name"
   },
   "reportDate": "YYYY-MM-DD",
+  "visitDate": "YYYY-MM-DD",
   "diagnosis": [
     "Diagnosis 1",
     "Diagnosis 2"
@@ -237,6 +253,81 @@ Medical text to analyze:
 ${rawText}
 """`;
 
+const ONBOARDING_SYSTEM_PROMPT = `You are HealthVault AI. Extract patient onboarding details from the medical document text.
+
+Extract the following fields:
+- firstName
+- lastName
+- dateOfBirth (normalize strictly to YYYY-MM-DD, e.g. 1989-01-01. Support formats like DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY. Set to empty string "" if not found)
+- gender (normalize strictly to lowercase "male" or "female". If gender is missing or not explicitly present: DO NOT GUESS. Return empty string "")
+- email (if present in document, extract. Otherwise return empty string "")
+- phoneNumber (if present in document, extract. Otherwise return empty string "")
+- bloodGroup (normalize to A+/A-/B+/B-/AB+/AB-/O+/O-. If missing, return empty string "")
+- allergies (extract list of allergies as a string array, e.g. ["Dust", "Pollen"]. If missing, return empty array [])
+- medicalConditions (extract list of diseases/conditions, e.g. ["Diabetes"]. If missing, return empty array [])
+- address (if present in document, extract. Otherwise return empty string "")
+
+NAME SPLITTING RULE:
+If the full name is found (e.g. Sarah Anderson), split into:
+"firstName": "Sarah", "lastName": "Anderson".
+If name is John Michael Smith, split into:
+"firstName": "John", "lastName": "Michael Smith".
+If name is Madonna, split into:
+"firstName": "Madonna", "lastName": "".
+Never return empty firstName or lastName if a full name is present in the document.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "firstName": "...",
+  "lastName": "...",
+  "dateOfBirth": "...",
+  "gender": "...",
+  "email": "...",
+  "phoneNumber": "...",
+  "bloodGroup": "...",
+  "allergies": [...],
+  "medicalConditions": [...],
+  "address": "..."
+}
+
+Do not explain. Do not output markdown code blocks. Do not output thinking. Response must be parseable by JSON.parse().`;
+
+const CLASSIFICATION_PROMPT = `You are a strict medical document classifier.
+Analyze the provided document (text or image) and determine if it is a medical document.
+
+Accept ONLY these medical document types:
+- Prescription (Prescription Slips)
+- Blood report (Blood Test Reports / CBC Reports / Lab Reports)
+- Lab report
+- CBC report
+- X-ray report
+- MRI report
+- CT Scan report
+- Hospital discharge summary
+- Medical invoice (or hospital bills / pharmacy bills)
+- Vaccination record
+- Insurance medical report
+
+Reject immediately:
+- Profile picture, Selfie, Family photo, Pet photo, Food image, Landscape image, Social media screenshot, Meme, Wallpaper, Random gallery photo, Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, or any non-medical document.
+
+You MUST return a STRICT JSON response only. Do NOT include markdown code blocks (such as \`\`\`json) or any explanations.
+
+JSON format:
+If it IS a medical document:
+{
+  "isMedicalDocument": true,
+  "confidence": 0.95,
+  "documentType": "Prescription"
+}
+
+If it is NOT a medical document:
+{
+  "isMedicalDocument": false,
+  "confidence": 0.92,
+  "reason": "Profile Picture"
+}`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -246,4 +337,6 @@ module.exports = {
   OCR_PROMPT,
   PLAIN_TEXT_OCR_PROMPT,
   STRUCTURED_EXTRACTION_PROMPT,
+  ONBOARDING_SYSTEM_PROMPT,
+  CLASSIFICATION_PROMPT,
 };
