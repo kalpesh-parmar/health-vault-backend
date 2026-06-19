@@ -21,7 +21,8 @@ class Patient(Base):
     full_name: Mapped[str | None] = mapped_column("full_name", String(255))
     gender: Mapped[str | None] = mapped_column(String(64))
     age: Mapped[int | None] = mapped_column(Integer)
-    phone: Mapped[str | None] = mapped_column(String(64))
+    phone: Mapped[str | None] = mapped_column(String(20))
+    mobile: Mapped[str | None] = mapped_column(String(20))
     email: Mapped[str | None] = mapped_column(String(255))
     soft_delete: Mapped[bool] = mapped_column(Boolean, default=False)
 

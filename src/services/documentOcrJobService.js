@@ -35,12 +35,10 @@ const { env } = require("../configs/env");
 const { STAGES, buildStageEvent } = require("../constants/ocrStages");
 const { messageConstants } = require("../constants/messageConstants");
 const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
-const aiServiceClient = require("./aiService/aiServiceClient");
-const ocrOrchestratorService = require("./aiService/ocr/ocrOrchestratorService");
+const { aiClient: aiServiceClient, ocrOrchestrator, ocrService } = require("./ai");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const medicalExtractionService = require("./aiService/medicalExtractionService");
 const objectStorageService = require("./objectStorageService");
 const ocrProgressBus = require("./sse/ocrProgressBus");
 
@@ -164,7 +162,7 @@ class DocumentOcrJobService {
 
       // 3. Extracting Text stage
       await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
-      const ocrResponse = await ocrOrchestratorService.runFromStorage({
+      const ocrResponse = await ocrOrchestrator.runFromStorage({
         bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
         fileKey,
         mimeType: inferMimeType(fileKey, mimeType),
@@ -193,11 +191,10 @@ class DocumentOcrJobService {
 
       // 5. Generating Summary stage
       await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
-      const { rawOcrData, structured, normalized, summary } =
-        await medicalExtractionService.extract({
-          patientContext,
-          rawOcr: ocrResponse,
-        });
+      const { rawOcrData, structured, normalized, summary } = await ocrService.normalizeExtraction({
+        patientContext,
+        rawOcr: ocrResponse,
+      });
 
       // Best-effort graph extraction
       let graphs = [];

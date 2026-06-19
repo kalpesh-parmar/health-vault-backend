@@ -1,12 +1,12 @@
 /* global describe, it, expect, jest */
-const ocrOrchestratorService = require("../../../../src/services/aiService/ocr/ocrOrchestratorService");
 const {
+  ocrOrchestrator: ocrOrchestratorService,
   evaluateQuality,
-} = require("../../../../src/services/aiService/ocr/ocrOrchestratorService");
-const { qwenVisionService } = require("../../../../src/services/ai/qwenVisionService.ts");
-const { OcrEmptyResultError } = require("../../../../src/services/aiService/ocr/ocrErrors");
+} = require("../../../../src/services/ai/ocr/ocr.orchestrator");
+const { ocrService } = require("../../../../src/services/ai/ocr/ocr.service");
+const { OcrEmptyResultError } = require("../../../../src/services/ai/ocr/ocr.validator");
 
-jest.mock("../../../../src/services/ai/qwenVisionService.ts");
+jest.mock("../../../../src/services/ai/ocr/ocr.service");
 jest.mock("../../../../src/services/objectStorageService");
 
 describe("ocrOrchestratorService", () => {
@@ -61,7 +61,7 @@ describe("ocrOrchestratorService", () => {
         },
       };
 
-      qwenVisionService.extractMedicalData.mockResolvedValue(JSON.stringify(mockParsedOCR));
+      ocrService.extractMedicalData.mockResolvedValue(JSON.stringify(mockParsedOCR));
 
       const buffer = Buffer.from([0x25, 0x50, 0x44, 0x46]); // PDF header
       const result = await ocrOrchestratorService.runFromBuffer({
@@ -76,7 +76,7 @@ describe("ocrOrchestratorService", () => {
     });
 
     it("should throw OcrEmptyResultError if qwenVisionService fails", async () => {
-      qwenVisionService.extractMedicalData.mockRejectedValue(new Error("Ollama connection error"));
+      ocrService.extractMedicalData.mockRejectedValue(new Error("Ollama connection error"));
 
       const buffer = Buffer.from([0x25, 0x50, 0x44, 0x46]); // PDF header
       await expect(

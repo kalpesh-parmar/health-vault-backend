@@ -1,8 +1,8 @@
 const FormData = require("form-data");
 const axios = require("axios");
 
-const { env } = require("../../configs/env");
-const { InternalServerException } = require("../../exceptions/appError");
+const { env } = require("../../../configs/env");
+const { InternalServerException } = require("../../../exceptions/appError");
 
 const DEFAULT_TIMEOUT = 120 * 1000;
 const TRANSIENT_STATUS = new Set([502, 503, 504]);

@@ -19,10 +19,10 @@
  * raw extraction. We only normalize.
  */
 
-const { foodType } = require("../../enums/foodType");
-const { frequencyType } = require("../../enums/frequencyType");
-const { medictationType } = require("../../enums/medicationType");
-const { medicationUnit } = require("../../enums/medicationUnit");
+const { foodType } = require("../../../enums/foodType");
+const { frequencyType } = require("../../../enums/frequencyType");
+const { medictationType } = require("../../../enums/medicationType");
+const { medicationUnit } = require("../../../enums/medicationUnit");
 
 const TYPE_HINTS = [
   { keys: ["tab", "tablet"], value: medictationType.TABLET },
@@ -113,7 +113,7 @@ function inferDailyConsumption(frequency) {
   }
 }
 
-class MedicationExtractionService {
+class MedicationMapper {
   /**
    * Map AI medications to insertable medication rows. Returns
    *
@@ -197,4 +197,4 @@ class MedicationExtractionService {
   }
 }
 
-module.exports = new MedicationExtractionService();
+module.exports = new MedicationMapper();

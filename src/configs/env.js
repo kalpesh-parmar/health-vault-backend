@@ -146,6 +146,7 @@ const env = Object.freeze({
 
   //client Ids based on Provider
   googleClientId: stringFromEnv("GOOGLE_CLIENT_ID"),
+  enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", false),
 });
 
 function validateEnv(config) {

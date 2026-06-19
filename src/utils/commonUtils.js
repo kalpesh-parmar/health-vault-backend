@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { getAgeFromDateOfBirth } = require("../helpers/dateHelper");
 
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60 * 1000);
@@ -54,8 +55,13 @@ function sanitizePatient(patient) {
     otpSendDateTime: _otpSendDateTime,
     otpVerifiedAt: _otpVerifiedAt,
     password: _password,
+    userName: _userName,
+    phone: _phone,
+    age: _age,
     ...safePatient
   } = patient;
+
+  safePatient.age = getAgeFromDateOfBirth(safePatient.dateOfBirth);
 
   return safePatient;
 }

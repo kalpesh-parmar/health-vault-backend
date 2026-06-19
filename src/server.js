@@ -1,6 +1,6 @@
 require("dotenv").config({ quiet: true });
 require("./configs/axiosLogger");
-
+// Force nodemon restart to load latest ts changes
 const http = require("http");
 const cors = require("cors");
 const express = require("express");

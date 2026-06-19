@@ -1,41 +1,24 @@
-/**
- * Document-only medical chat.
- *
- * Strict guarantees
- * ─────────────────
- *  • Retrieval is constrained to the authenticated user's documents.
- *  • Prompt forbids the LLM from using any external knowledge.
- *  • If no relevant chunks are returned by pgvector, we respond with the
- *    canonical "Information not found in uploaded reports." message and
- *    do NOT call the LLM at all (saves tokens, blocks hallucinations).
- *
- * Pipeline
- * ────────
- *   1. Validate session ownership.
- *   2. Embed the question via FastAPI `/v1/embeddings`.
- *   3. Vector-search the user's chunks (cosine distance, top-K).
- *   4. If we have hits, call FastAPI `/v1/chat` with a hardened
- *      prompt that includes ONLY the retrieved chunks + recent message
- *      history.
- *   5. Persist user + assistant messages.
- */
-
-const { env } = require("../../configs/env");
-const { messageConstants } = require("../../constants/messageConstants");
-const { InvalidRequestException, NotFoundException } = require("../../exceptions/appError");
-const chatSessionRepository = require("../../repositories/chatSessionRepository");
-const DocumentIntelligenceRepository = require("../../repositories/documentIntelligenceRepository");
+const { env } = require("../../../configs/env");
+const { messageConstants } = require("../../../constants/messageConstants");
+const { InvalidRequestException, NotFoundException } = require("../../../exceptions/appError");
+const chatSessionRepository = require("../../../repositories/chatSessionRepository");
+const DocumentIntelligenceRepository = require("../../../repositories/documentIntelligenceRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const { db } = require("../../configs/db");
-const { document } = require("../../models/document");
-const { chatSession } = require("../../models/chatSession");
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { chatSession } = require("../../../models/chatSession");
 const { and, eq, desc, isNull } = require("drizzle-orm");
-const ocrOrchestratorService = require("./ocr/ocrOrchestratorService");
-const medicalExtractionService = require("./medicalExtractionService");
-const documentPersistenceService = require("../documentPersistenceService");
-const { aiProvider } = require("../ai/aiProvider.ts");
 
-// Debug logger - use console for now, should use proper logger in production
+const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
+const { ocrService } = require("../ocr/ocr.service");
+const documentPersistenceService = require("../../documentPersistenceService");
+const { ollamaClient } = require("../clients/ollamaClient");
+const { embeddingService } = require("./embedding.service");
+const prompts = require("../prompts");
+const patientRepository = require("../../../repositories/patientRepository");
+const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
+
+// Debug logger
 const debugLogger = {
   info: (msg, data) => console.log(`[DEBUG] ${msg}`, JSON.stringify(data, null, 2)),
   error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
@@ -45,13 +28,80 @@ const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
 const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
 
 function relevance(distance) {
-  // pgvector returns cosine distance (0 identical, 2 opposite). Convert to
-  // a 0-1 similarity score for the FE; threshold prevents low-quality hits.
   if (distance == null) return null;
   return Math.max(0, Math.min(1, 1 - Number(distance)));
 }
 
-class DocumentChatService {
+class ChatService {
+  detectEmergency(text) {
+    const cleanText = String(text || "").toLowerCase();
+    return prompts.EMERGENCY_KEYWORDS.some((keyword) => cleanText.includes(keyword));
+  }
+
+  async qwenHealthChat(messages, mode, contextChunks = []) {
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
+    const userQuery = lastUserMessage?.content || "";
+
+    if (this.detectEmergency(userQuery)) {
+      return {
+        answer: prompts.EMERGENCY_WARNING,
+        mode,
+        emergency: true,
+        citations: [],
+      };
+    }
+
+    if (mode === "DOCUMENT_RAG") {
+      if (!contextChunks || contextChunks.length === 0) {
+        return {
+          answer: NO_CONTEXT_REPLY,
+          mode,
+          emergency: false,
+          citations: [],
+        };
+      }
+
+      const contextText = contextChunks
+        .map(
+          (c, idx) =>
+            `[Chunk Index: ${idx + 1}, ID: ${c.chunkId || c.id}, Section: ${c.sectionTitle || "Report Content"}, Source: ${c.sourceType}, Similarity Score: ${(c.score ?? 1.0).toFixed(2)}]\nContent: ${c.content}`,
+        )
+        .join("\n\n");
+
+      const systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText);
+      const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
+
+      console.log("[ChatService] Running local RAG chat using qwen2.5:14b...");
+      const answer = await ollamaClient.chat(formattedMessages, "qwen2.5:14b", {
+        temperature: 0.2,
+        maxTokens: 2048,
+      });
+      return {
+        answer,
+        mode,
+        emergency: false,
+        citations: contextChunks,
+      };
+    }
+
+    const formattedMessages = [
+      { role: "system", content: prompts.GENERAL_HEALTH_PROMPT },
+      ...messages,
+    ];
+
+    console.log("[ChatService] Running local general chat using qwen2.5:14b...");
+    const answer = await ollamaClient.chat(formattedMessages, "qwen2.5:14b", {
+      temperature: 0.2,
+      maxTokens: 2048,
+    });
+    return {
+      answer,
+      mode,
+      emergency: false,
+      citations: [],
+    };
+  }
+
   async createSession({ userId, documentId, title }) {
     return chatSessionRepository.createSession({
       documentId: documentId || null,
@@ -86,14 +136,130 @@ class DocumentChatService {
       throw new InvalidRequestException("Question is required");
     }
 
-    // Branch based on presence of documentKey
+    // Intercept age-related questions
+    const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
+    if (
+      cleanQuestion === "what is my age" ||
+      cleanQuestion === "how old am i" ||
+      cleanQuestion === "calculate my age"
+    ) {
+      debugLogger.info("sendMessage: Intercepted age-related question", { question });
+
+      const p = await patientRepository.findById(userId);
+      let replyText;
+      if (p && p.dateOfBirth) {
+        let dobStr = p.dateOfBirth;
+        if (p.dateOfBirth instanceof Date) {
+          dobStr = p.dateOfBirth.toISOString().split("T")[0];
+        } else if (typeof p.dateOfBirth === "string") {
+          dobStr = p.dateOfBirth.split("T")[0];
+        }
+        const calculatedAge = getAgeFromDateOfBirth(p.dateOfBirth);
+        replyText = `Based on your date of birth (${dobStr}), you are ${calculatedAge} years old.`;
+      } else {
+        replyText =
+          "Your date of birth is not specified in your profile, so I cannot calculate your age.";
+      }
+
+      let session;
+      if (!documentKey?.trim()) {
+        const [existingSession] = await db
+          .select()
+          .from(chatSession)
+          .where(
+            and(
+              isNull(chatSession.documentId),
+              eq(chatSession.userId, userId),
+              eq(chatSession.softDelete, false),
+            ),
+          )
+          .orderBy(desc(chatSession.updatedAt))
+          .limit(1);
+        session =
+          existingSession ||
+          (await chatSessionRepository.createSession({
+            userId,
+            documentId: null,
+            title: "General Health Chat",
+          }));
+      } else {
+        const [existingDoc] = await db
+          .select()
+          .from(document)
+          .where(
+            and(
+              eq(document.s3Key, documentKey),
+              eq(document.userId, userId),
+              eq(document.softDelete, false),
+            ),
+          )
+          .limit(1);
+        if (existingDoc) {
+          const [existingSession] = await db
+            .select()
+            .from(chatSession)
+            .where(
+              and(
+                eq(chatSession.documentId, existingDoc.id),
+                eq(chatSession.userId, userId),
+                eq(chatSession.softDelete, false),
+              ),
+            )
+            .orderBy(desc(chatSession.updatedAt))
+            .limit(1);
+          session =
+            existingSession ||
+            (await chatSessionRepository.createSession({
+              userId,
+              documentId: existingDoc.id,
+              title: existingDoc.fileName || "Document Chat",
+            }));
+        } else {
+          session = await chatSessionRepository.createSession({
+            userId,
+            documentId: null,
+            title: "General Health Chat",
+          });
+        }
+      }
+
+      const userMsg = await chatSessionRepository.appendMessage({
+        content: question.trim(),
+        role: "user",
+        sessionId: session.id,
+        userId,
+      });
+
+      const aiMsg = await chatSessionRepository.appendMessage({
+        citations: [],
+        content: replyText,
+        metadata: {
+          mode: !documentKey?.trim() ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+          emergency: false,
+          intercepted: true,
+        },
+        role: "assistant",
+        sessionId: session.id,
+        userId,
+      });
+
+      return {
+        ai: aiMsg,
+        citations: [],
+        reply: replyText,
+        user: userMsg,
+        mode: !documentKey?.trim() ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+        emergency: false,
+      };
+    }
+
     const isGeneralHealth = !documentKey?.trim();
 
     let session;
     let doc = null;
 
     if (isGeneralHealth) {
-      // 1) Find or create general health session
+      // Find or create general health session
       const [existingSession] = await db
         .select()
         .from(chatSession)
@@ -117,7 +283,7 @@ class DocumentChatService {
         });
       }
     } else {
-      // 2) Document RAG Flow - Retrieve document
+      // Document RAG Flow - Retrieve document
       const [existingDoc] = await db
         .select()
         .from(document)
@@ -140,7 +306,7 @@ class DocumentChatService {
         );
         let ocrResponse;
         try {
-          ocrResponse = await ocrOrchestratorService.runFromStorage({
+          ocrResponse = await ocrOrchestrator.runFromStorage({
             fileKey: documentKey,
             mimeType: "application/pdf",
             traceId: `chat_ocr_${Date.now()}`,
@@ -157,7 +323,7 @@ class DocumentChatService {
           patientContext = null;
         }
 
-        const { rawOcrData, structured } = await medicalExtractionService.extract({
+        const { rawOcrData, structured } = await ocrService.normalizeExtraction({
           patientContext,
           rawOcr: ocrResponse,
         });
@@ -227,7 +393,7 @@ class DocumentChatService {
 
       debugLogger.info("sendMessage: Calling general health chat provider");
       try {
-        const aiResponse = await aiProvider.chat(history, "GENERAL_HEALTH");
+        const aiResponse = await this.qwenHealthChat(history, "GENERAL_HEALTH");
         assistantText = aiResponse.answer;
         isEmergency = !!aiResponse.emergency;
       } catch (error) {
@@ -240,7 +406,7 @@ class DocumentChatService {
     } else {
       // Document RAG flow
       debugLogger.info("sendMessage: Generating embedding for RAG query");
-      const queryEmbedding = await aiProvider.embeddings(question);
+      const queryEmbedding = await embeddingService.embedText(question);
 
       const chunks = await intelligenceRepository.searchSimilarChunks({
         documentId: doc.id,
@@ -295,7 +461,7 @@ class DocumentChatService {
           documentId: doc.id,
         }));
 
-        const aiResponse = await aiProvider.chat(history, "DOCUMENT_RAG", formattedChunks);
+        const aiResponse = await this.qwenHealthChat(history, "DOCUMENT_RAG", formattedChunks);
         assistantText = aiResponse.answer;
         citations = aiResponse.citations || formattedChunks;
         isEmergency = !!aiResponse.emergency;
@@ -340,4 +506,9 @@ class DocumentChatService {
   }
 }
 
-module.exports = new DocumentChatService();
+const chatService = new ChatService();
+
+module.exports = {
+  ChatService,
+  chatService,
+};

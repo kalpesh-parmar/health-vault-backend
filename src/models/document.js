@@ -41,6 +41,7 @@ const document = pgTable(
     hospitalName: varchar("hospital_name", { length: 255 }),
     doctorName: varchar("doctor_name", { length: 255 }),
     remarks: text("remarks"),
+    summaryGujarati: text("summary_gujarati"),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

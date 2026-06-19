@@ -14,7 +14,8 @@ const fileRoutes = require("./file.route");
 const cronRoutes = require("./cron.route");
 const refillRoutes = require("./refillCount.route");
 const chatSessionRoutes = require("./chatSession.route");
-const ocrHealthService = require("../services/aiService/ocr/ocrHealthService");
+const { ocrService } = require("../services/ai");
+const v1Routes = require("./v1.route");
 
 const router = express.Router();
 
@@ -43,7 +44,7 @@ router.get("/health", async (_req, res) => {
 // OCR Health Check
 router.get("/health/ocr", async (_req, res) => {
   try {
-    const health = await ocrHealthService.check();
+    const health = await ocrService.checkHealth();
     const code = health.status === "ok" ? StatusCodes.OK : StatusCodes.SERVICE_UNAVAILABLE;
     res.status(code).json(health);
   } catch (error) {
@@ -67,6 +68,7 @@ router.use("/cron", cronRoutes);
 router.use("/refill", refillRoutes);
 router.use("/chat", chatSessionRoutes);
 router.use("/file", fileRoutes);
+router.use("/v1", v1Routes);
 
 // Export router
 module.exports = router;

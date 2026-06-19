@@ -1,21 +1,38 @@
-const { errorConstants } = require("../constants/errorConstants");
-const { UnauthorizedException } = require("../exceptions/appError");
+const { SessionExpiredException } = require("../exceptions/appError");
 const sessionRepository = require("../repositories/sessionRepository");
+const patientRepository = require("../repositories/patientRepository");
 const JwtUtils = require("../utils/jwtUtils");
 
 async function verifyToken(req, _res, next) {
   try {
-    const token = JwtUtils.getBearerToken(req.headers.authorization);
-    const payload = JwtUtils.verifyAccessToken(token);
-
-    if (!payload.sessionId || !payload.userId) {
-      throw new UnauthorizedException(errorConstants.INVALID_TOKEN);
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      throw new SessionExpiredException("User not found or session expired");
     }
 
-    const activeSession = await sessionRepository.findActiveById(payload.sessionId);
+    let token;
+    let payload;
+    try {
+      token = JwtUtils.getBearerToken(authHeader);
+      payload = JwtUtils.verifyAccessToken(token);
+    } catch {
+      throw new SessionExpiredException("User not found or session expired");
+    }
 
+    if (!payload.sessionId || !payload.userId || payload.tokenType !== "access") {
+      throw new SessionExpiredException("User not found or session expired");
+    }
+
+    // Verify user exists and is ACTIVE
+    const user = await patientRepository.findById(payload.userId);
+    if (!user || user.status !== "ACTIVE") {
+      throw new SessionExpiredException("User not found or session expired");
+    }
+
+    // Verify session exists and is ACTIVE
+    const activeSession = await sessionRepository.findActiveById(payload.sessionId);
     if (!activeSession || activeSession.userId !== payload.userId) {
-      throw new UnauthorizedException(errorConstants.INVALID_SESSION_ID);
+      throw new SessionExpiredException("User not found or session expired");
     }
 
     req.auth = {
@@ -24,6 +41,7 @@ async function verifyToken(req, _res, next) {
       sessionId: activeSession.id,
       token,
       userId: activeSession.userId,
+      user,
     };
 
     return next();
