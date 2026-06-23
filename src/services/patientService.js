@@ -34,6 +34,7 @@ const { socialLogin } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 const { providerType } = require("../enums/providerType");
 const googleAuth = require("./providerService/googleService");
+const facebookAuth = require("./providerService/facebookService");
 const authProviderRepository = require("../repositories/authProviderRepository");
 
 // async function googleLogin(payload) {
@@ -431,7 +432,33 @@ class PatientService {
           }
           break;
         }
-        case providerType.FACEBOOK:
+        case providerType.FACEBOOK: {
+          try {
+            if (!token) {
+              throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
+            }
+
+            const facebookUser = await facebookAuth.verifyToken(token);
+
+            userInfo.providerUserId = facebookUser.id;
+            userInfo.email = facebookUser.email;
+            userInfo.firstName = facebookUser.first_name || "User";
+            userInfo.lastName = facebookUser.last_name || "";
+          } catch (err) {
+            if (env.enableDummyAuth) {
+              userInfo = {
+                providerUserId: `dummy-facebook-id-${token || "mock"}`,
+                email: "dummy-facebook-user@example.com",
+                firstName: "Dummy",
+                lastName: "FacebookUser",
+              };
+            } else {
+              console.error(err);
+              throw new UnauthorizedException("Invalid Facebook token");
+            }
+          }
+          break;
+        }
         case providerType.APPLE:
         case providerType.MICROSOFT: {
           if (env.enableDummyAuth || token) {
