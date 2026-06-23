@@ -1,4 +1,4 @@
-const { boolean, index, pgTable, timestamp, uuid, varchar } = require("drizzle-orm/pg-core");
+const { boolean, index, pgTable, timestamp, uuid, varchar, text } = require("drizzle-orm/pg-core");
 
 const { patient } = require("./patient");
 
@@ -16,6 +16,14 @@ const session = pgTable(
     deviceToken: varchar("device_token", { length: 500 }),
     isActive: boolean("is_active").default(true).notNull(),
     softDelete: boolean("soft_delete").default(false).notNull(),
+
+    // Fields from user_sessions
+    refreshToken: text("refresh_token"),
+    deviceInfo: text("device_info"),
+    ipAddress: varchar("ip_address", { length: 45 }),
+    expiresAt: timestamp("expires_at"),
+    isRevoked: boolean("is_revoked").default(false).notNull(),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

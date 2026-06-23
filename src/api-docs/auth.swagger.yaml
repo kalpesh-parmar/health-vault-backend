@@ -57,20 +57,71 @@ components:
         password:
           type: string
 
+    FirebaseLoginRequest:
+      type: object
+      properties:
+        deviceToken:
+          type: string
+          nullable: true
+        firebaseToken:
+          type: string
+        firebaseIdToken:
+          type: string
+
+    SocialLoginRequest:
+      type: object
+      required: [provider]
+      properties:
+        deviceToken:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          enum: [google, facebook, apple, email, mobile, microsoft]
+        token:
+          type: string
+
 paths:
-  /auth/login:
+  /auth/firebase-login:
     post:
       tags: [Auth]
-      summary: Login
+      summary: Firebase Login
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LoginRequest"
+              $ref: "#/components/schemas/FirebaseLoginRequest"
       responses:
         "200": { description: Success }
+
+  /auth/social-login:
+    post:
+      tags: [Auth]
+      summary: Social Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SocialLoginRequest"
+      responses:
+        "200": { description: Success }
+  # /auth/login:
+  #   post:
+  #     tags: [Auth]
+  #     summary: Login
+  #     security: []
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/LoginRequest"
+  #     responses:
+  #       "200": { description: Success }
 
   /auth/refresh-token:
     post:
@@ -84,53 +135,53 @@ paths:
       responses:
         "200": { description: Success }
 
-  /auth/request-otp:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmailRequest"
-      responses:
-        "200": { description: OTP sent }
+  # /auth/request-otp:
+  #   post:
+  #     tags: [Auth]
+  #     security: []
+  #     requestBody:
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/EmailRequest"
+  #     responses:
+  #       "200": { description: OTP sent }
 
-  /auth/forgot-password:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmailRequest"
-      responses:
-        "200": { description: OTP sent }
+  # /auth/forgot-password:
+  #   post:
+  #     tags: [Auth]
+  #     security: []
+  #     requestBody:
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/EmailRequest"
+  #     responses:
+  #       "200": { description: OTP sent }
 
-  /auth/verify-otp:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VerifyOtpRequest"
-      responses:
-        "200": { description: Verified }
+  # /auth/verify-otp:
+  #   post:
+  #     tags: [Auth]
+  #     security: []
+  #     requestBody:
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/VerifyOtpRequest"
+  #     responses:
+  #       "200": { description: Verified }
 
-  /auth/reset-password:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResetPasswordRequest"
-      responses:
-        "200": { description: Reset done }
+  # /auth/reset-password:
+  #   post:
+  #     tags: [Auth]
+  #     security: []
+  #     requestBody:
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/ResetPasswordRequest"
+  #     responses:
+  #       "200": { description: Reset done }
 
   /auth/logout:
     post:

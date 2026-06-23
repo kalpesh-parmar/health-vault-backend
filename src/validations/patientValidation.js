@@ -132,6 +132,7 @@ const firebaseLoginSchema = z
 const socialLogin = z.object({
   deviceToken: z.string().max(500).optional().nullable(),
   provider: z.enum(providerValues),
+  token: z.string().optional(),
 });
 
 const refreshTokenSchema = z

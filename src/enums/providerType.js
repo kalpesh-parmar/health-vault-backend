@@ -4,6 +4,7 @@ const providerType = Object.freeze({
   APPLE: "apple",
   EMAIL: "email",
   MOBILE: "mobile",
+  MICROSOFT: "microsoft",
 });
 const providerValues = Object.values(providerType);
 module.exports = { providerType, providerValues };

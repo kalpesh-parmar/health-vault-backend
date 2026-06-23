@@ -50,6 +50,27 @@
       "when": 1781854664678,
       "tag": "0006_fat_adam_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781875373423,
+      "tag": "0007_bumpy_agent_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782196294550,
+      "tag": "0008_solid_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782196526475,
+      "tag": "0009_wealthy_young_avengers",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,96 @@
+openapi: 3.0.0
+
+paths:
+  /v1/ocr/extract:
+    post:
+      tags: [Intelligent Onboarding]
+      summary: Extract user details from uploaded medical document (synchronous)
+      description: |
+        Uploads a medical report document, runs OCR + AI extraction synchronously,
+        and extracts structured patient information (first/last name, gender, DOB, blood group, allergies)
+        to pre-fill signup/onboarding details.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Medical report (PDF or Image) to extract data from
+      responses:
+        "200":
+          description: Successful extraction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    type: object
+                    properties:
+                      document:
+                        type: object
+                      ocr:
+                        type: object
+                      structuredData:
+                        type: object
+                        description: Pre-filled patient fields
+
+  /v1/onboarding/chat:
+    post:
+      tags: [Intelligent Onboarding]
+      summary: Intelligent onboarding chat interaction
+      description: |
+        Interact with the onboarding AI chat assistant to complete missing details.
+        The AI checks required fields and prompts the user for missing fields.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, state]
+              properties:
+                message:
+                  type: string
+                  description: User message/response to the AI question
+                  example: "English"
+                history:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      content:
+                        type: string
+                state:
+                  type: object
+                  description: Onboarding state dictionary to track missing fields
+                  example:
+                    { "firstName": null, "lastName": null, "gender": null, "dateOfBirth": null }
+      responses:
+        "200":
+          description: AI response and updated state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    type: object

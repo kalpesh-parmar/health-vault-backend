@@ -32,11 +32,7 @@ const patient = pgTable(
     status: userStatusEnum("status").default(USER_STATUS.ACTIVE).notNull(),
     loginAttempts: integer("login_attempts").default(0).notNull(),
     blockedAt: timestamp("blocked_at"),
-    otp: varchar("otp", { length: 10 }),
-    otpSendDateTime: timestamp("otp_send_date_time"),
-    otpExpiredDateTime: timestamp("otp_expired_date_time"),
     isVerified: boolean("is_verified").default(false).notNull(),
-    otpVerifiedAt: timestamp("otp_verified_at"),
     gender: genderEnum("gender"),
 
     // Phone authentication fields
@@ -46,10 +42,16 @@ const patient = pgTable(
     isActive: boolean("is_active").default(true).notNull(),
     lastLoginAt: timestamp("last_login_at"),
 
+    // Social and verification fields
+    isMobileVerified: boolean("is_mobile_verified").default(false).notNull(),
+    isEmailVerified: boolean("is_email_verified").default(false).notNull(),
+    onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
+
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),
     profileImageKey: text("profile_image_key"),
     bloodGroup: varchar("blood_group", { length: 8 }),
+    bloodType: varchar("blood_type", { length: 255 }),
     allergies: text("allergies").array(),
     provider: providerEnum("provider"),
     providerId: integer("provider_id"),

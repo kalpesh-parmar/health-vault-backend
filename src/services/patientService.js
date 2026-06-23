@@ -34,24 +34,25 @@ const { socialLogin } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 const { providerType } = require("../enums/providerType");
 const googleAuth = require("./providerService/googleService");
+const authProviderRepository = require("../repositories/authProviderRepository");
 
-async function googleLogin(payload) {
-  const { token } = payload;
-  if (!token) {
-    throw InvalidRequestException(errorConstants.TOKEN_REQUIRED);
-  }
-  const ticket = googleAuth.ticket(token);
-  const googleUser = ticket.getPayload();
-  // const providerId = googleUser.sub;
-  const email = googleUser.email;
-  // const name = googleUser.name;
-  // const patient = {providerId,email,name};
-  const existingPatient = await patientRepository.findByEmail(email);
-  if (existingPatient) {
-    // return loginPatient(patient);
-  }
-  return existingPatient;
-}
+// async function googleLogin(payload) {
+//   const { token } = payload;
+//   if (!token) {
+//     throw InvalidRequestException(errorConstants.TOKEN_REQUIRED);
+//   }
+//   const ticket = googleAuth.ticket(token);
+//   const googleUser = ticket.getPayload();
+//   // const providerId = googleUser.sub;
+//   const email = googleUser.email;
+//   // const name = googleUser.name;
+//   // const patient = {providerId,email,name};
+//   const existingPatient = await patientRepository.findByEmail(email);
+//   if (existingPatient) {
+//     // return loginPatient(patient);
+//   }
+//   return existingPatient;
+// }
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const patientCode = generateNumericPatientCode();
@@ -384,31 +385,183 @@ class PatientService {
   }
   async socialLogin(payload) {
     const data = await validateSchema(socialLogin, payload);
-    await PatientService.providerService(data);
-    return data;
-  }
-  async providerService(data) {
-    const { provider } = data;
+    const { provider, token } = data;
 
-    switch (provider) {
-      case providerType.GOOGLE:
-        return googleLogin(data);
+    let userInfo = {
+      providerUserId: null,
+      email: null,
+      firstName: null,
+      lastName: null,
+      mobile: null,
+    };
 
-      // case providerType.FACEBOOK:
-      //   return facebookLogin(data);
-
-      // case providerType.APPLE:
-      //   return appleLogin(data);
-
-      // case providerType.EMAIL:
-      //   return emailLogin(data);
-
-      // case providerType.MOBILE:
-      //   return mobileLogin(data);
-
-      default:
-        throw new Error("Invalid provider");
+    if (env.enableDummyAuth && token && token.startsWith("dummy-")) {
+      userInfo = {
+        providerUserId: `mock-uid-${provider}-${token}`,
+        email: `${provider}-mockuser@example.com`,
+        firstName: "Mock",
+        lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+        mobile: provider === "mobile" ? "1234567890" : null,
+      };
+    } else {
+      switch (provider) {
+        case providerType.GOOGLE: {
+          try {
+            if (!token) {
+              throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
+            }
+            const ticket = googleAuth.ticket(token);
+            const googleUser = ticket.getPayload();
+            userInfo.providerUserId = googleUser.sub;
+            userInfo.email = googleUser.email;
+            userInfo.firstName = googleUser.given_name || "User";
+            userInfo.lastName = googleUser.family_name || "";
+          } catch (err) {
+            if (env.enableDummyAuth) {
+              userInfo = {
+                providerUserId: `dummy-google-id-${token || "mock"}`,
+                email: "dummy-google-user@example.com",
+                firstName: "Dummy",
+                lastName: "GoogleUser",
+              };
+            } else {
+              console.error(err);
+              throw new UnauthorizedException("Invalid Google token");
+            }
+          }
+          break;
+        }
+        case providerType.FACEBOOK:
+        case providerType.APPLE:
+        case providerType.MICROSOFT: {
+          if (env.enableDummyAuth || token) {
+            userInfo = {
+              providerUserId: `dummy-${provider}-id-${token || "token"}`,
+              email: `dummy-${provider}-user@example.com`,
+              firstName: "Dummy",
+              lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+            };
+          } else {
+            throw new UnauthorizedException(`Token required for ${provider}`);
+          }
+          break;
+        }
+        case providerType.MOBILE: {
+          if (token) {
+            userInfo.providerUserId = token;
+            userInfo.mobile = token;
+            userInfo.firstName = "User";
+            userInfo.lastName = token;
+          } else {
+            throw new UnauthorizedException("Mobile number/token is required");
+          }
+          break;
+        }
+        default:
+          throw new InvalidRequestException("Unsupported login provider");
+      }
     }
+
+    // Step 3: Find user by provider
+    let authRec = await authProviderRepository.findByProvider(provider, userInfo.providerUserId);
+    let patientUser = null;
+
+    if (authRec) {
+      patientUser = await patientRepository.findById(authRec.userId);
+    }
+
+    let isNewUser = false;
+    if (!patientUser) {
+      // User not exists for this provider, check by email or mobile to link or create new
+      if (userInfo.email) {
+        patientUser = await patientRepository.findByEmail(userInfo.email);
+      }
+      if (!patientUser && userInfo.mobile) {
+        patientUser = await patientRepository.findByMobile(userInfo.mobile);
+      }
+
+      if (patientUser) {
+        // Account linking (exists under different provider or email)
+        await authProviderRepository.create({
+          userId: patientUser.id,
+          providerType: provider,
+          providerUserId: userInfo.providerUserId,
+          email: userInfo.email,
+        });
+      } else {
+        // Create new user
+        isNewUser = true;
+        const patientCode = await createUniquePatientCode();
+        patientUser = await patientRepository.create({
+          patientCode,
+          mobile: userInfo.mobile,
+          email: userInfo.email,
+          firstName: userInfo.firstName,
+          lastName: userInfo.lastName,
+          fullName:
+            userInfo.firstName && userInfo.lastName
+              ? `${userInfo.firstName} ${userInfo.lastName}`
+              : null,
+          isActive: true,
+          status: USER_STATUS.ACTIVE,
+          isVerified: true,
+          isMobileVerified: provider === "mobile",
+          isEmailVerified: provider !== "mobile",
+          onboardingCompleted: false,
+          lastLoginAt: new Date(),
+        });
+
+        // Link with auth_providers
+        await authProviderRepository.create({
+          userId: patientUser.id,
+          providerType: provider,
+          providerUserId: userInfo.providerUserId,
+          email: userInfo.email,
+        });
+      }
+    } else {
+      assertPatientCanAuthenticate(patientUser);
+    }
+
+    // Generate Tokens
+    patientUser = await patientRepository.updateById(patientUser.id, {
+      lastLoginAt: new Date(),
+    });
+
+    const tokens = await persistSession(patientUser, data.deviceToken);
+
+    // Check Onboarding status
+    const isOnboardingCompleted = !!(
+      patientUser.firstName &&
+      patientUser.firstName !== "User" &&
+      patientUser.lastName &&
+      patientUser.gender &&
+      patientUser.dateOfBirth
+    );
+
+    if (isOnboardingCompleted !== patientUser.onboardingCompleted) {
+      await patientRepository.updateById(patientUser.id, {
+        onboardingCompleted: isOnboardingCompleted,
+      });
+      patientUser.onboardingCompleted = isOnboardingCompleted;
+    }
+
+    return {
+      success: true,
+      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      sessionId: tokens.sessionId,
+      isNewUser,
+      isOnboardingCompleted,
+      user: {
+        id: patientUser.id,
+        name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
+        mobile: patientUser.mobile || "",
+        email: patientUser.email || "",
+        role: "patient",
+      },
+    };
   }
 }
 
