@@ -33,9 +33,10 @@ const emailService = require("./emailService");
 const { socialLogin } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 const { providerType } = require("../enums/providerType");
-const googleAuth = require("./providerService/googleService");
-const facebookAuth = require("./providerService/facebookService");
 const authProviderRepository = require("../repositories/authProviderRepository");
+const { googleLogin } = require("./providerService/googleService");
+const { facebookLogin } = require("./providerService/facebookService");
+const { microsoftLogin } = require("./providerService/microsoftService");
 
 // async function googleLogin(payload) {
 //   const { token } = payload;
@@ -139,7 +140,7 @@ class PatientService {
 
   async firebaseLogin(payload) {
     const data = await validateSchema(firebaseLoginSchema, payload);
-    const tokenToVerify = data.firebaseIdToken || data.firebaseToken;
+    const tokenToVerify = data.firebaseIdToken;
 
     let decodedToken;
     if (env.enableDummyAuth && tokenToVerify === "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2") {
@@ -407,81 +408,18 @@ class PatientService {
     } else {
       switch (provider) {
         case providerType.GOOGLE: {
-          try {
-            if (!token) {
-              throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
-            }
-            const ticket = googleAuth.ticket(token);
-            const googleUser = ticket.getPayload();
-            userInfo.providerUserId = googleUser.sub;
-            userInfo.email = googleUser.email;
-            userInfo.firstName = googleUser.given_name || "User";
-            userInfo.lastName = googleUser.family_name || "";
-          } catch (err) {
-            if (env.enableDummyAuth) {
-              userInfo = {
-                providerUserId: `dummy-google-id-${token || "mock"}`,
-                email: "dummy-google-user@example.com",
-                firstName: "Dummy",
-                lastName: "GoogleUser",
-              };
-            } else {
-              console.error(err);
-              throw new UnauthorizedException("Invalid Google token");
-            }
-          }
+          userInfo = await googleLogin(token, userInfo);
           break;
         }
         case providerType.FACEBOOK: {
-          try {
-            if (!token) {
-              throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
-            }
-
-            const facebookUser = await facebookAuth.verifyToken(token);
-
-            userInfo.providerUserId = facebookUser.id;
-            userInfo.email = facebookUser.email;
-            userInfo.firstName = facebookUser.first_name || "User";
-            userInfo.lastName = facebookUser.last_name || "";
-          } catch (err) {
-            if (env.enableDummyAuth) {
-              userInfo = {
-                providerUserId: `dummy-facebook-id-${token || "mock"}`,
-                email: "dummy-facebook-user@example.com",
-                firstName: "Dummy",
-                lastName: "FacebookUser",
-              };
-            } else {
-              console.error(err);
-              throw new UnauthorizedException("Invalid Facebook token");
-            }
-          }
+          userInfo = await facebookLogin(token, userInfo);
           break;
         }
-        case providerType.APPLE:
+        case providerType.APPLE: {
+          break;
+        }
         case providerType.MICROSOFT: {
-          if (env.enableDummyAuth || token) {
-            userInfo = {
-              providerUserId: `dummy-${provider}-id-${token || "token"}`,
-              email: `dummy-${provider}-user@example.com`,
-              firstName: "Dummy",
-              lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
-            };
-          } else {
-            throw new UnauthorizedException(`Token required for ${provider}`);
-          }
-          break;
-        }
-        case providerType.MOBILE: {
-          if (token) {
-            userInfo.providerUserId = token;
-            userInfo.mobile = token;
-            userInfo.firstName = "User";
-            userInfo.lastName = token;
-          } else {
-            throw new UnauthorizedException("Mobile number/token is required");
-          }
+          userInfo = await microsoftLogin(token, userInfo);
           break;
         }
         default:

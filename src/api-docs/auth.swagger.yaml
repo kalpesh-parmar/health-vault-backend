@@ -63,8 +63,8 @@ components:
         deviceToken:
           type: string
           nullable: true
-        firebaseToken:
-          type: string
+        # firebaseToken:
+        #   type: string
         firebaseIdToken:
           type: string
 
@@ -78,8 +78,33 @@ components:
         provider:
           type: string
           enum: [google, facebook, apple, email, mobile, microsoft]
-        token:
+        providerToken:
           type: string
+      examples:
+        google:
+          summary: Google social login
+          value:
+            provider: google
+            token: "your-google-id-token"
+            deviceToken: "DEVICE_TOKEN"
+        facebook:
+          summary: Facebook social login
+          value:
+            provider: facebook
+            token: "your-facebook-access-token"
+            deviceToken: "DEVICE_TOKEN"
+        microsoft:
+          summary: Microsoft social login
+          value:
+            provider: microsoft
+            token: "your-microsoft-id-token"
+            deviceToken: "DEVICE_TOKEN"
+        microsoftDummy:
+          summary: Microsoft dummy login (if ENABLE_DUMMY_AUTH=true)
+          value:
+            provider: microsoft
+            token: "dummy-microsoft-token-123"
+            deviceToken: "DEVICE_TOKEN"
 
 paths:
   /auth/firebase-login:
@@ -108,7 +133,13 @@ paths:
             schema:
               $ref: "#/components/schemas/SocialLoginRequest"
       responses:
-        "200": { description: Success }
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Auth response with access and refresh tokens
   # /auth/login:
   #   post:
   #     tags: [Auth]

@@ -1,34 +1,34 @@
-const axios = require("axios");
 const { env } = require("../../configs/env");
+const { errorConstants } = require("../../constants/errorConstants");
+const { InvalidRequestException, UnauthorizedException } = require("../../exceptions/appError");
+const facebookAuth = require("../../utils/facebookUtils");
 
-class FacebookAuth {
-  async verifyToken(userAccessToken) {
-    // Step 1: Validate token with Facebook
-    const { data } = await axios.get("https://graph.facebook.com/debug_token", {
-      params: {
-        input_token: userAccessToken,
-        access_token: `${env.FACEBOOK_APP_ID}|${env.FACEBOOK_APP_SECRET}`,
-      },
-    });
-
-    if (!data?.data?.is_valid) {
-      throw new Error("Invalid Facebook token");
+async function facebookLogin(token, userInfo) {
+  try {
+    if (!token) {
+      throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
     }
 
-    if (data.data.app_id !== env.facebookAppId) {
-      throw new Error("Token does not belong to this application");
+    const facebookUser = await facebookAuth.verifyToken(token);
+
+    userInfo.providerUserId = facebookUser.id;
+    userInfo.email = facebookUser.email;
+    userInfo.firstName = facebookUser.first_name || "User";
+    userInfo.lastName = facebookUser.last_name || "";
+  } catch (err) {
+    if (env.enableDummyAuth) {
+      userInfo = {
+        providerUserId: `dummy-facebook-id-${token || "mock"}`,
+        email: "dummy-facebook-user@example.com",
+        firstName: "Dummy",
+        lastName: "FacebookUser",
+      };
+    } else {
+      console.error(err);
+      throw new UnauthorizedException("Invalid Facebook token");
     }
-
-    // Step 2: Fetch user profile
-    const { data: user } = await axios.get("https://graph.facebook.com/me", {
-      params: {
-        fields: "id,email,first_name,last_name,name",
-        access_token: userAccessToken,
-      },
-    });
-
-    return user;
   }
+  return userInfo;
 }
 
-module.exports = new FacebookAuth();
+module.exports = { facebookLogin };

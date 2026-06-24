@@ -120,19 +120,18 @@ const updatePatientSchema = z
 const firebaseLoginSchema = z
   .object({
     deviceToken: z.string().max(500).optional().nullable(),
-    firebaseToken: z.string().min(1).optional(),
     firebaseIdToken: z.string().min(1).optional(),
   })
   .strict()
-  .refine((data) => data.firebaseToken || data.firebaseIdToken, {
-    message: "Either firebaseToken or firebaseIdToken is required",
+  .refine((data) => data.firebaseIdToken, {
+    message: "Firebase ID token is required",
     path: ["firebaseIdToken"],
   });
 
 const socialLogin = z.object({
   deviceToken: z.string().max(500).optional().nullable(),
   provider: z.enum(providerValues),
-  token: z.string().optional(),
+  providerToken: z.string().optional(),
 });
 
 const refreshTokenSchema = z

@@ -146,6 +146,8 @@ const env = Object.freeze({
 
   //client Ids based on Provider
   googleClientId: stringFromEnv("GOOGLE_CLIENT_ID"),
+  microsoftClientId: stringFromEnv("MICROSOFT_CLIENT_ID"),
+  microsoftTenantId: stringFromEnv("MICROSOFT_TENANT_ID") || "common",
   enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", true),
 });
 
