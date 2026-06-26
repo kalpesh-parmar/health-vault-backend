@@ -37,6 +37,7 @@ const messageConstants = Object.freeze({
   PATIENT_PROFILE_FETCHED: "Patient profile fetched successfully",
   FILE_IS_REQUIRED: "File is required",
   DOCUMENT_DOWNLOAD_URL_FETCHED: "Document signed URL  fetched successfully",
+  FAILED_ATTEMPT_LOGGED: "Failed attempt logged",
 
   // medication
   MEDICATION_CREATED: "Medication created successfully",

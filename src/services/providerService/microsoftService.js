@@ -1,15 +1,15 @@
-const { verifyToken } = require("../../utils/microsoftUtils");
 const { UnauthorizedException, InvalidRequestException } = require("../../exceptions/appError");
 const { errorConstants } = require("../../constants/errorConstants");
 const { env } = require("../../configs/env");
+const { verifyFirebaseToken } = require("../../utils/firebaseUtils");
 
-async function microsoftLogin(providerToken, userInfo) {
+async function microsoftLogin(firebaseIdToken, userInfo) {
   try {
-    if (!providerToken) {
+    if (!firebaseIdToken) {
       throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
     }
 
-    const microsoftUser = await verifyToken(providerToken);
+    const microsoftUser = await verifyFirebaseToken(firebaseIdToken);
     userInfo.providerUserId = microsoftUser.id;
     userInfo.email = microsoftUser.email;
     userInfo.firstName = microsoftUser.given_name || "User";
@@ -20,7 +20,7 @@ async function microsoftLogin(providerToken, userInfo) {
   } catch (err) {
     if (env.enableDummyAuth) {
       userInfo = {
-        providerUserId: `dummy-microsoft-id-${providerToken || "mock"}`,
+        providerUserId: `dummy-microsoft-id-${firebaseIdToken || "mock"}`,
         email: "dummy-microsoft-user@example.com",
         firstName: "Dummy",
         lastName: "MicrosoftUser",

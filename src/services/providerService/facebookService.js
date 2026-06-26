@@ -1,16 +1,16 @@
 const { env } = require("../../configs/env");
+const { verifyFirebaseToken } = require("../../configs/firebase");
 const { errorConstants } = require("../../constants/errorConstants");
 const { InvalidRequestException, UnauthorizedException } = require("../../exceptions/appError");
-const facebookAuth = require("../../utils/facebookUtils");
 
-async function facebookLogin(providerToken, userInfo) {
+async function facebookLogin(firebaseIdToken, userInfo) {
   try {
-    if (!providerToken) {
+    if (!firebaseIdToken) {
       throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
     }
 
-    const facebookUser = await facebookAuth.verifyToken(providerToken);
-    userInfo.providerUserId = facebookUser.id;
+    const facebookUser = await verifyFirebaseToken(firebaseIdToken);
+    userInfo.providerUserId = facebookUser.uid;
     userInfo.email = facebookUser.email;
     userInfo.firstName = facebookUser.first_name || "User";
     userInfo.lastName = facebookUser.last_name || "";
@@ -20,7 +20,7 @@ async function facebookLogin(providerToken, userInfo) {
   } catch (err) {
     if (env.enableDummyAuth) {
       userInfo = {
-        providerUserId: `dummy-facebook-id-${providerToken || "mock"}`,
+        providerUserId: `dummy-facebook-id-${firebaseIdToken || "mock"}`,
         email: "dummy-facebook-user@example.com",
         firstName: "Dummy",
         lastName: "FacebookUser",

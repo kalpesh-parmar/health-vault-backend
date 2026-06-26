@@ -8,17 +8,15 @@ class AuthProviderRepository {
     return result[0] || null;
   }
 
-  async findByProvider(providerType, providerUserId) {
+  async findByProvider(provider, providerUserId) {
     const result = await db
       .select()
       .from(authProvider)
       .where(
-        and(
-          eq(authProvider.providerType, providerType),
-          eq(authProvider.providerUserId, providerUserId),
-        ),
+        and(eq(authProvider.provider, provider), eq(authProvider.providerUserId, providerUserId)),
       )
       .limit(1);
+
     return result[0] || null;
   }
 }

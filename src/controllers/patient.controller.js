@@ -52,6 +52,11 @@ async function socialLogin(req, res) {
   return successResponse(res, result, messageConstants.PATIENT_LOGIN_SUCCESS);
 }
 
+async function reportAuthFailure(req, res) {
+  const result = await patientService.reportAuthFailure(req.body);
+  return successResponse(res, result, messageConstants.FAILED_ATTEMPT_LOGGED);
+}
+
 module.exports = {
   deletePatient,
   firebaseLogin,
@@ -63,4 +68,5 @@ module.exports = {
   refreshToken,
   updatePatient,
   socialLogin,
+  reportAuthFailure,
 };
