@@ -71,6 +71,13 @@
       "when": 1782196526475,
       "tag": "0009_wealthy_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782389240284,
+      "tag": "0010_silky_katie_power",
+      "breakpoints": true
     }
   ]
 }

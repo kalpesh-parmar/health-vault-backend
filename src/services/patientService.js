@@ -29,14 +29,14 @@ const {
   validateSchema,
 } = require("../validations");
 const { verifyFirebaseToken } = require("../configs/firebase");
-const emailService = require("./emailService");
-const { socialLogin } = require("../validations/patientValidation");
+const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 const { providerType } = require("../enums/providerType");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const { googleLogin } = require("./providerService/googleService");
 const { facebookLogin } = require("./providerService/facebookService");
 const { microsoftLogin } = require("./providerService/microsoftService");
+const loginAttemptRepository = require("../repositories/loginAttemptRepository");
 
 // async function googleLogin(payload) {
 //   const { token } = payload;
@@ -122,21 +122,21 @@ async function persistSession(existingPatient, deviceToken = null) {
 }
 
 class PatientService {
-  async handleFailedSecurityAttempt(existingPatient) {
-    const nextAttempts = existingPatient.loginAttempts + 1;
-    const shouldBlock = nextAttempts >= env.maxLoginAttempts;
-    const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-      blockedAt: shouldBlock ? new Date() : existingPatient.blockedAt,
-      loginAttempts: nextAttempts,
-      status: shouldBlock ? USER_STATUS.BLOCKED : existingPatient.status,
-    });
+  // async handleFailedSecurityAttempt(existingPatient) {
+  //   const nextAttempts = existingPatient.loginAttempts + 1;
+  //   const shouldBlock = nextAttempts >= env.maxLoginAttempts;
+  //   const updatedPatient = await patientRepository.updateById(existingPatient.id, {
+  //     blockedAt: shouldBlock ? new Date() : existingPatient.blockedAt,
+  //     loginAttempts: nextAttempts,
+  //     status: shouldBlock ? USER_STATUS.BLOCKED : existingPatient.status,
+  //   });
 
-    if (shouldBlock) {
-      await emailService.sendAccountBlockedEmail(updatedPatient);
-    }
+  //   if (shouldBlock) {
+  //     await emailService.sendAccountBlockedEmail(updatedPatient);
+  //   }
 
-    return updatedPatient;
-  }
+  //   return updatedPatient;
+  // }
 
   async firebaseLogin(payload) {
     const data = await validateSchema(firebaseLoginSchema, payload);
@@ -173,6 +173,24 @@ class PatientService {
       countryCode = cleaned.slice(0, cleaned.length - 10);
     }
 
+    // Provide defaults since they are optional in the schema but required for DB checks
+    const provider = data.provider || "mobile";
+    const loginType = data.loginType || "mobile";
+
+    //block check
+    const attemptRecord = await loginAttemptRepository.findAttempt(mobile, provider, loginType);
+
+    if (attemptRecord?.blockedUntil && new Date(attemptRecord.blockedUntil) > new Date()) {
+      const remainingSeconds = Math.ceil(
+        (new Date(attemptRecord.blockedUntil) - new Date()) / 1000,
+      );
+      throw new UnauthorizedException({
+        blocked: true,
+        message: errorConstants.ACCOUNT_BLOCKED,
+        remainingSeconds,
+      });
+    }
+    //block check end
     const firebaseUid = decodedToken.uid;
     let existingPatient = await patientRepository.findByFirebaseUid(firebaseUid);
     if (!existingPatient) {
@@ -217,6 +235,8 @@ class PatientService {
       existingPatient.gender &&
       existingPatient.dateOfBirth
     );
+
+    await loginAttemptRepository.resetAttempts(mobile, provider, loginType);
 
     const tokens = await persistSession(existingPatient, data.deviceToken);
 
@@ -385,9 +405,12 @@ class PatientService {
 
     return sanitizePatient(existingPatient);
   }
+
   async socialLogin(payload) {
     const data = await validateSchema(socialLogin, payload);
-    const { provider, token } = data;
+
+    const { provider, providerToken } = data;
+    const token = providerToken;
 
     let userInfo = {
       providerUserId: null,
@@ -403,31 +426,53 @@ class PatientService {
         email: `${provider}-mockuser@example.com`,
         firstName: "Mock",
         lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
-        mobile: provider === "mobile" ? "1234567890" : null,
+        mobile: null,
       };
     } else {
       switch (provider) {
-        case providerType.GOOGLE: {
+        case providerType.GOOGLE:
           userInfo = await googleLogin(token, userInfo);
           break;
-        }
-        case providerType.FACEBOOK: {
+
+        case providerType.FACEBOOK:
           userInfo = await facebookLogin(token, userInfo);
           break;
-        }
-        case providerType.APPLE: {
-          break;
-        }
-        case providerType.MICROSOFT: {
+
+        // case providerType.APPLE:
+        //   userInfo = await appleLogin(token, userInfo);
+        //   break;
+
+        case providerType.MICROSOFT:
           userInfo = await microsoftLogin(token, userInfo);
           break;
-        }
+
         default:
           throw new InvalidRequestException("Unsupported login provider");
       }
     }
 
-    // Step 3: Find user by provider
+    const identifier = userInfo.email || userInfo.providerUserId;
+
+    // BLOCK CHECK
+    const attemptRecord = await loginAttemptRepository.findAttempt(
+      identifier,
+      provider,
+      data.loginType,
+    );
+
+    if (attemptRecord?.blockedUntil && new Date(attemptRecord.blockedUntil) > new Date()) {
+      const remainingSeconds = Math.ceil(
+        (new Date(attemptRecord.blockedUntil) - new Date()) / 1000,
+      );
+
+      throw new UnauthorizedException({
+        blocked: true,
+        message: errorConstants.ACCOUNT_BLOCKED,
+        remainingSeconds,
+      });
+    }
+
+    // FIND EXISTING PROVIDER LINK
     let authRec = await authProviderRepository.findByProvider(provider, userInfo.providerUserId);
     let patientUser = null;
 
@@ -436,27 +481,35 @@ class PatientService {
     }
 
     let isNewUser = false;
+    // ACCOUNT LINKING / CREATE USER
     if (!patientUser) {
-      // User not exists for this provider, check by email or mobile to link or create new
       if (userInfo.email) {
         patientUser = await patientRepository.findByEmail(userInfo.email);
       }
+
       if (!patientUser && userInfo.mobile) {
         patientUser = await patientRepository.findByMobile(userInfo.mobile);
       }
 
       if (patientUser) {
-        // Account linking (exists under different provider or email)
-        await authProviderRepository.create({
-          userId: patientUser.id,
-          providerType: provider,
-          providerUserId: userInfo.providerUserId,
-          email: userInfo.email,
-        });
+        const existingProvider = await authProviderRepository.findByProvider(
+          provider,
+          userInfo.providerUserId,
+        );
+
+        if (!existingProvider) {
+          await authProviderRepository.create({
+            userId: patientUser.id,
+            provider,
+            providerUserId: userInfo.providerUserId,
+            email: userInfo.email,
+          });
+        }
       } else {
-        // Create new user
         isNewUser = true;
+
         const patientCode = await createUniquePatientCode();
+
         patientUser = await patientRepository.create({
           patientCode,
           mobile: userInfo.mobile,
@@ -470,16 +523,15 @@ class PatientService {
           isActive: true,
           status: USER_STATUS.ACTIVE,
           isVerified: true,
-          isMobileVerified: provider === "mobile",
-          isEmailVerified: provider !== "mobile",
+          isMobileVerified: false,
+          isEmailVerified: true,
           onboardingCompleted: false,
           lastLoginAt: new Date(),
         });
 
-        // Link with auth_providers
         await authProviderRepository.create({
           userId: patientUser.id,
-          providerType: provider,
+          provider,
           providerUserId: userInfo.providerUserId,
           email: userInfo.email,
         });
@@ -487,15 +539,15 @@ class PatientService {
     } else {
       assertPatientCanAuthenticate(patientUser);
     }
-
-    // Generate Tokens
+    // SUCCESS LOGIN
     patientUser = await patientRepository.updateById(patientUser.id, {
       lastLoginAt: new Date(),
     });
 
+    await loginAttemptRepository.resetAttempts(identifier, provider, data.loginType);
+
     const tokens = await persistSession(patientUser, data.deviceToken);
 
-    // Check Onboarding status
     const isOnboardingCompleted = !!(
       patientUser.firstName &&
       patientUser.firstName !== "User" &&
@@ -508,6 +560,7 @@ class PatientService {
       await patientRepository.updateById(patientUser.id, {
         onboardingCompleted: isOnboardingCompleted,
       });
+
       patientUser.onboardingCompleted = isOnboardingCompleted;
     }
 
@@ -519,6 +572,7 @@ class PatientService {
       sessionId: tokens.sessionId,
       isNewUser,
       isOnboardingCompleted,
+
       user: {
         id: patientUser.id,
         name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
@@ -526,6 +580,198 @@ class PatientService {
         email: patientUser.email || "",
         role: "patient",
       },
+    };
+  }
+  // async socialLogin(payload) {
+  //   const data = await validateSchema(socialLogin, payload);
+  //   const { provider, providerToken } = data;
+  //   const token = providerToken;
+
+  //   let userInfo = {
+  //     providerUserId: null,
+  //     email: null,
+  //     firstName: null,
+  //     lastName: null,
+  //     mobile: null,
+  //   };
+
+  //   if (env.enableDummyAuth && token && token.startsWith("dummy-")) {
+  //     userInfo = {
+  //       providerUserId: `mock-uid-${provider}-${token}`,
+  //       email: `${provider}-mockuser@example.com`,
+  //       firstName: "Mock",
+  //       lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+  //       mobile: provider === "mobile" ? "1234567890" : null,
+  //     };
+  //   } else {
+  //     switch (provider) {
+  //       case providerType.GOOGLE: {
+  //         userInfo = await googleLogin(token, userInfo);
+  //         break;
+  //       }
+  //       case providerType.FACEBOOK: {
+  //         userInfo = await facebookLogin(token, userInfo);
+  //         break;
+  //       }
+  //       case providerType.APPLE: {
+  //         break;
+  //       }
+  //       case providerType.MICROSOFT: {
+  //         userInfo = await microsoftLogin(token, userInfo);
+  //         break;
+  //       }
+  //       default:
+  //         throw new InvalidRequestException("Unsupported login provider");
+  //     }
+  //   }
+
+  //   const identifier = userInfo.email || userInfo.providerUserId;
+  //   //block check
+  //   const attemptRecord =await loginAttemptRepository.findAttempt(identifier,provider,data.loginType);
+
+  //   if (attemptRecord?.blockedUntil &&new Date(attemptRecord.blockedUntil) >new Date())
+  //      {
+  //     const remainingSeconds = Math.ceil((new Date(attemptRecord.blockedUntil) - new Date()) / 1000);
+  //     throw new UnauthorizedException({
+  //       blocked: true,
+  //       message: errorConstants.ACCOUNT_BLOCKED,
+  //       remainingSeconds,
+  //     });
+  //   }
+
+  //   // Step 3: Find user by provider
+  //   let authRec = await authProviderRepository.findByProvider(provider, userInfo.providerUserId);
+  //   let patientUser = null;
+
+  //   if (authRec) {
+  //     patientUser = await patientRepository.findById(authRec.userId);
+  //   }
+
+  //   let isNewUser = false;
+  //   if (!patientUser) {
+  //     // User not exists for this provider, check by email or mobile to link or create new
+  //     if (userInfo.email) {
+  //       patientUser = await patientRepository.findByEmail(userInfo.email);
+  //     }
+  //     if (!patientUser && userInfo.mobile) {
+  //       patientUser = await patientRepository.findByMobile(userInfo.mobile);
+  //     }
+
+  //     if (patientUser) {
+  //       // Account linking (exists under different provider or email)
+  //       await authProviderRepository.create({
+  //         userId: patientUser.id,
+  //         providerType: provider,
+  //         providerUserId: userInfo.providerUserId,
+  //         email: userInfo.email,
+  //       });
+  //     } else {
+  //       // Create new user
+  //       isNewUser = true;
+  //       const patientCode = await createUniquePatientCode();
+  //       patientUser = await patientRepository.create({
+  //         patientCode,
+  //         mobile: userInfo.mobile,
+  //         email: userInfo.email,
+  //         firstName: userInfo.firstName,
+  //         lastName: userInfo.lastName,
+  //         fullName:
+  //           userInfo.firstName && userInfo.lastName
+  //             ? `${userInfo.firstName} ${userInfo.lastName}`
+  //             : null,
+  //         isActive: true,
+  //         status: USER_STATUS.ACTIVE,
+  //         isVerified: true,
+  //         isMobileVerified: provider === "mobile",
+  //         isEmailVerified: provider !== "mobile",
+  //         onboardingCompleted: false,
+  //         lastLoginAt: new Date(),
+  //       });
+
+  //       // Link with auth_providers
+  //       await authProviderRepository.create({
+  //         userId: patientUser.id,
+  //         providerType: provider,
+  //         providerUserId: userInfo.providerUserId,
+  //         email: userInfo.email,
+  //       });
+  //     }
+  //   } else {
+  //     assertPatientCanAuthenticate(patientUser);
+  //   }
+
+  //   // Generate Tokens
+  //   patientUser = await patientRepository.updateById(patientUser.id, {
+  //     lastLoginAt: new Date(),
+  //   });
+
+  //   await loginAttemptRepository.resetAttempts(identifier, provider);
+
+  //   const tokens = await persistSession(patientUser, data.deviceToken);
+
+  //   // Check Onboarding status
+  //   const isOnboardingCompleted = !!(
+  //     patientUser.firstName &&
+  //     patientUser.firstName !== "User" &&
+  //     patientUser.lastName &&
+  //     patientUser.gender &&
+  //     patientUser.dateOfBirth
+  //   );
+
+  //   if (isOnboardingCompleted !== patientUser.onboardingCompleted) {
+  //     await patientRepository.updateById(patientUser.id, {
+  //       onboardingCompleted: isOnboardingCompleted,
+  //     });
+  //     patientUser.onboardingCompleted = isOnboardingCompleted;
+  //   }
+
+  //   return {
+  //     success: true,
+  //     token: tokens.accessToken,
+  //     accessToken: tokens.accessToken,
+  //     refreshToken: tokens.refreshToken,
+  //     sessionId: tokens.sessionId,
+  //     isNewUser,
+  //     isOnboardingCompleted,
+  //     user: {
+  //       id: patientUser.id,
+  //       name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
+  //       mobile: patientUser.mobile || "",
+  //       email: patientUser.email || "",
+  //       role: "patient",
+  //     },
+  //   };
+  // }
+
+  async reportAuthFailure(payload) {
+    const data = await validateSchema(authFailureSchema, payload);
+
+    const { identifier, provider, loginType } = data;
+
+    const attemptRecord = await loginAttemptRepository.incrementFailedAttempt(
+      identifier,
+      provider,
+      loginType,
+    );
+
+    if (attemptRecord.failedAttempts >= env.maxLoginAttempts) {
+      const blockedUntil = new Date(Date.now() + env.lockTimeMinutes * 60 * 1000);
+
+      await loginAttemptRepository.blockMethod(attemptRecord.id, blockedUntil);
+
+      throw new UnauthorizedException({
+        blocked: true,
+        message: errorConstants.ACCOUNT_BLOCKED,
+        blockedUntil,
+        remainingAttempts: 0,
+      });
+    }
+
+    return {
+      success: true,
+      blocked: false,
+      failedAttempts: attemptRecord.failedAttempts,
+      remainingAttempts: env.maxLoginAttempts - attemptRecord.failedAttempts,
     };
   }
 }

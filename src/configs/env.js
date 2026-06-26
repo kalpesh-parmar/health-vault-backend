@@ -79,6 +79,7 @@ const env = Object.freeze({
 
   // Security / Limits
   maxLoginAttempts: numberFromEnv("MAX_LOGIN_ATTEMPTS", 3),
+  lockTimeMinutes: numberFromEnv("LOCK_TIME_MINUTES", 15),
   otpExpiryMinutes: numberFromEnv("OTP_EXPIRY_MINUTES", 10),
   passwordResetWindowMinutes: numberFromEnv("PASSWORD_RESET_WINDOW_MINUTES", 15),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",

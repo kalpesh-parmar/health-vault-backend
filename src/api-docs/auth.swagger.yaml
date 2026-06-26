@@ -11,106 +11,94 @@ components:
       bearerFormat: JWT
 
   schemas:
-    LoginRequest:
-      type: object
-      required: [email, password]
-      properties:
-        email:
-          type: string
-          format: email
-        password:
-          type: string
-        deviceToken:
-          type: string
-          nullable: true
-
-    RefreshTokenRequest:
-      type: object
-      required: [refreshToken]
-      properties:
-        refreshToken:
-          type: string
-
-    EmailRequest:
-      type: object
-      required: [email]
-      properties:
-        email:
-          type: string
-          format: email
-
-    VerifyOtpRequest:
-      type: object
-      required: [email, otp]
-      properties:
-        email:
-          type: string
-        otp:
-          type: string
-
-    ResetPasswordRequest:
-      type: object
-      required: [email, password]
-      properties:
-        email:
-          type: string
-        password:
-          type: string
-
     FirebaseLoginRequest:
       type: object
+      required:
+        - firebaseIdToken
       properties:
+        firebaseIdToken:
+          type: string
         deviceToken:
           type: string
           nullable: true
-        # firebaseToken:
-        #   type: string
-        firebaseIdToken:
+        loginType:
+          type: string
+          enum:
+            - mobile
+            - social
+        provider:
+          type: string
+          enum:
+            - google
+            - facebook
+            - apple
+            - microsoft
+            - mobile
+        providerToken:
           type: string
 
     SocialLoginRequest:
       type: object
-      required: [provider]
+      required:
+        - provider
+        - loginType
       properties:
+        provider:
+          type: string
+          enum:
+            - google
+            - facebook
+            - apple
+            - microsoft
+            - mobile
+        providerToken:
+          type: string
         deviceToken:
           type: string
           nullable: true
+        loginType:
+          type: string
+          enum:
+            - mobile
+            - social
+
+    AuthFailureRequest:
+      type: object
+      required:
+        - provider
+        - loginType
+      properties:
+        identifier:
+          type: string
+          example: user@gmail.com
         provider:
           type: string
-          enum: [google, facebook, apple, email, mobile, microsoft]
-        providerToken:
+          enum:
+            - google
+            - facebook
+            - apple
+            - microsoft
+            - mobile
+        loginType:
           type: string
-      examples:
-        google:
-          summary: Google social login
-          value:
-            provider: google
-            token: "your-google-id-token"
-            deviceToken: "DEVICE_TOKEN"
-        facebook:
-          summary: Facebook social login
-          value:
-            provider: facebook
-            token: "your-facebook-access-token"
-            deviceToken: "DEVICE_TOKEN"
-        microsoft:
-          summary: Microsoft social login
-          value:
-            provider: microsoft
-            token: "your-microsoft-id-token"
-            deviceToken: "DEVICE_TOKEN"
-        microsoftDummy:
-          summary: Microsoft dummy login (if ENABLE_DUMMY_AUTH=true)
-          value:
-            provider: microsoft
-            token: "dummy-microsoft-token-123"
-            deviceToken: "DEVICE_TOKEN"
+          enum:
+            - mobile
+            - social
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
 
 paths:
   /auth/firebase-login:
     post:
-      tags: [Auth]
-      summary: Firebase Login
+      tags:
+        - Auth
+      summary: Firebase Mobile Login
       security: []
       requestBody:
         required: true
@@ -118,12 +106,23 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/FirebaseLoginRequest"
+            examples:
+              mobileLogin:
+                value:
+                  firebaseIdToken: "firebase-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  provider: "mobile"
+                  loginType: "mobile"
       responses:
-        "200": { description: Success }
+        "200":
+          description: Login Success
+        "401":
+          description: Login blocked
 
   /auth/social-login:
     post:
-      tags: [Auth]
+      tags:
+        - Auth
       summary: Social Login
       security: []
       requestBody:
@@ -132,92 +131,81 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/SocialLoginRequest"
+            examples:
+              google:
+                value:
+                  provider: google
+                  providerToken: "google-id-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  loginType: social
+              facebook:
+                value:
+                  provider: facebook
+                  providerToken: "facebook-access-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  loginType: social
+              microsoft:
+                value:
+                  provider: microsoft
+                  providerToken: "microsoft-id-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  loginType: social
       responses:
         "200":
-          description: Success
-          content:
-            application/json:
-              schema:
-                type: object
-                description: Auth response with access and refresh tokens
-  # /auth/login:
-  #   post:
-  #     tags: [Auth]
-  #     summary: Login
-  #     security: []
-  #     requestBody:
-  #       required: true
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/LoginRequest"
-  #     responses:
-  #       "200": { description: Success }
+          description: Login Success
+        "401":
+          description: Login blocked
+
+  /auth/auth-failure:
+    post:
+      tags:
+        - Auth
+      summary: Report Failed Authentication Attempt
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthFailureRequest"
+            examples:
+              mobileFailure:
+                value:
+                  identifier: "9876543210"
+                  provider: "mobile"
+                  loginType: "mobile"
+              googleFailure:
+                value:
+                  identifier: "user@gmail.com"
+                  provider: "google"
+                  loginType: "social"
+      responses:
+        "200":
+          description: Failed attempt recorded
+        "401":
+          description: Account blocked after max attempts
 
   /auth/refresh-token:
     post:
-      tags: [Auth]
+      tags:
+        - Auth
       security: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/RefreshTokenRequest"
       responses:
-        "200": { description: Success }
-
-  # /auth/request-otp:
-  #   post:
-  #     tags: [Auth]
-  #     security: []
-  #     requestBody:
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/EmailRequest"
-  #     responses:
-  #       "200": { description: OTP sent }
-
-  # /auth/forgot-password:
-  #   post:
-  #     tags: [Auth]
-  #     security: []
-  #     requestBody:
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/EmailRequest"
-  #     responses:
-  #       "200": { description: OTP sent }
-
-  # /auth/verify-otp:
-  #   post:
-  #     tags: [Auth]
-  #     security: []
-  #     requestBody:
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/VerifyOtpRequest"
-  #     responses:
-  #       "200": { description: Verified }
-
-  # /auth/reset-password:
-  #   post:
-  #     tags: [Auth]
-  #     security: []
-  #     requestBody:
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/ResetPasswordRequest"
-  #     responses:
-  #       "200": { description: Reset done }
+        "200":
+          description: Token refreshed
 
   /auth/logout:
     post:
-      tags: [Auth]
+      tags:
+        - Auth
       security:
         - bearerAuth: []
       responses:
-        "200": { description: Logout success }
+        "200":
+          description: Logout success

@@ -5,6 +5,7 @@ const { genderTypeValue } = require("../enums/genderType");
 const { userStatusValues } = require("../enums/userStatus.enum");
 // const { provider } = require("../services/objectStorageService");
 const { providerValues } = require("../enums/providerType");
+const { loginTypeValues } = require("../enums/loginType.enum");
 
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const uppercaseRegex = /[A-Z]/;
@@ -121,6 +122,9 @@ const firebaseLoginSchema = z
   .object({
     deviceToken: z.string().max(500).optional().nullable(),
     firebaseIdToken: z.string().min(1).optional(),
+    loginType: z.enum(loginTypeValues).optional(),
+    provider: z.enum(providerValues).optional(),
+    providerToken: z.string().optional(),
   })
   .strict()
   .refine((data) => data.firebaseIdToken, {
@@ -130,8 +134,15 @@ const firebaseLoginSchema = z
 
 const socialLogin = z.object({
   deviceToken: z.string().max(500).optional().nullable(),
+  loginType: z.enum(loginTypeValues),
   provider: z.enum(providerValues),
   providerToken: z.string().optional(),
+});
+
+const authFailureSchema = z.object({
+  identifier: z.string().min(1).optional(),
+  provider: z.enum(providerValues),
+  loginType: z.enum(loginTypeValues),
 });
 
 const refreshTokenSchema = z
@@ -163,4 +174,5 @@ module.exports = {
   updatePatientSchema,
   calculateAge,
   socialLogin,
+  authFailureSchema,
 };
