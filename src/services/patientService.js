@@ -34,24 +34,8 @@ const { socialLogin, authFailureSchema } = require("../validations/patientValida
 const objectStorageService = require("./objectStorageService");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
+const { providerType } = require("../enums/providerType");
 
-// async function googleLogin(payload) {
-//   const { token } = payload;
-//   if (!token) {
-//     throw InvalidRequestException(errorConstants.TOKEN_REQUIRED);
-//   }
-//   const ticket = googleAuth.ticket(token);
-//   const googleUser = ticket.getPayload();
-//   // const providerId = googleUser.sub;
-//   const email = googleUser.email;
-//   // const name = googleUser.name;
-//   // const patient = {providerId,email,name};
-//   const existingPatient = await patientRepository.findByEmail(email);
-//   if (existingPatient) {
-//     // return loginPatient(patient);
-//   }
-//   return existingPatient;
-// }
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const patientCode = generateNumericPatientCode();
@@ -119,22 +103,6 @@ async function persistSession(existingPatient, deviceToken = null) {
 }
 
 class PatientService {
-  // async handleFailedSecurityAttempt(existingPatient) {
-  //   const nextAttempts = existingPatient.loginAttempts + 1;
-  //   const shouldBlock = nextAttempts >= env.maxLoginAttempts;
-  //   const updatedPatient = await patientRepository.updateById(existingPatient.id, {
-  //     blockedAt: shouldBlock ? new Date() : existingPatient.blockedAt,
-  //     loginAttempts: nextAttempts,
-  //     status: shouldBlock ? USER_STATUS.BLOCKED : existingPatient.status,
-  //   });
-
-  //   if (shouldBlock) {
-  //     await emailService.sendAccountBlockedEmail(updatedPatient);
-  //   }
-
-  //   return updatedPatient;
-  // }
-
   async firebaseLogin(payload) {
     const data = await validateSchema(firebaseLoginSchema, payload);
     const tokenToVerify = data.firebaseIdToken;
@@ -417,7 +385,7 @@ class PatientService {
     let decodedToken;
     if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
       decodedToken = {
-        // uid: `mock-uid-${provider}-${firebaseIdToken}`,
+        uid: `mock-uid-${provider}-${firebaseIdToken}`,
         email: `${provider}-mockuser@example.com`,
         name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
         phone_number: null,
@@ -513,9 +481,10 @@ class PatientService {
 
         const patientCode = await createUniquePatientCode();
 
-        const isMobileVerified = provider === "mobile" && loginType === "mobile";
+        const isMobileVerified = provider === providerType.MOBILE && loginType === loginType.MOBILE;
         const socialProviders = ["google", "facebook", "microsoft", "apple"];
-        const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
+        const isEmailVerified =
+          socialProviders.includes(provider) && loginType === loginType.SOCIAL;
 
         patientUser = await patientRepository.create({
           patientCode,
