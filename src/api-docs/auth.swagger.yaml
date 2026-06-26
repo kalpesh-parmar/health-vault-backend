@@ -51,6 +51,8 @@ components:
             - apple
             - microsoft
             - mobile
+        providerType:
+          type: string
         providerToken:
           type: string
         deviceToken:

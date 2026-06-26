@@ -32,13 +32,8 @@ const {
 const { verifyFirebaseToken } = require("../configs/firebase");
 const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
-const { providerType } = require("../enums/providerType");
 const authProviderRepository = require("../repositories/authProviderRepository");
-// const { googleLogin } = require("./providerService/googleService");
-// const { facebookLogin } = require("./providerService/facebookService");
-// const { microsoftLogin } = require("./providerService/microsoftService");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
-// const { getFirebaeUser, getFirebaseUser } = require("./providerService/firebaseService");
 
 // async function googleLogin(payload) {
 //   const { token } = payload;
@@ -417,76 +412,54 @@ class PatientService {
 
   async socialLogin(payload) {
     const data = await validateSchema(socialLogin, payload);
-    const { provider, firebaseIdToken } = data;
+    const { provider, loginType, firebaseIdToken, deviceToken } = data;
 
-    let userInfo = {
-      provider: data.provider,
-      providerUserId: null,
-      email: null,
-      firstName: null,
-      lastName: null,
-      mobile: null,
-    };
-
+    let decodedToken;
     if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
-      userInfo = {
-        providerUserId: `mock-uid-${provider}-${firebaseIdToken}`,
+      decodedToken = {
+        // uid: `mock-uid-${provider}-${firebaseIdToken}`,
         email: `${provider}-mockuser@example.com`,
-        firstName: "Mock",
-        lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
-        mobile: null,
+        name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+        phone_number: null,
       };
     } else {
-      // switch (provider) {
-      //   case providerType.GOOGLE: {
-      //     // userInfo = await googleLogin(providerToken, userInfo);
-      //     userInfo = await firebaseLogin(firebaseIdToken, userInfo);
-      //     break;
-      //   }
-      //   case providerType.MOBILE: {
-      //     // console.log("userInfo===",payload);
-      //     userInfo = await this.firebaseLogin(firebaseIdToken,userInfo);
-      //     break;
-      //   }
-      //   case providerType.FACEBOOK: {
-      //     userInfo = await facebookLogin(firebaseIdToken, userInfo);
-      //     break;
-      //   }
-      //   case providerType.APPLE: {
-      //     break;
-      //   }
-      //   case providerType.MICROSOFT: {
-      //     userInfo = await microsoftLogin(firebaseIdToken, userInfo);
-      //     break;
-      //   }
-      //   default:
-      //     throw new InvalidRequestException("Unsupported login provider");
-      // }
-      // const userInfo = await getFirebaseUser(data.firebaseIdToken);
-
-      const providerMap = {
-        "google.com": providerType.GOOGLE,
-        "facebook.com": providerType.FACEBOOK,
-        "microsoft.com": providerType.MICROSOFT,
-        "apple.com": providerType.APPLE,
-        phone: providerType.MOBILE,
-      };
-
-      const provider = providerMap[userInfo.provider];
-
-      if (!provider) {
-        throw new InvalidRequestException("Unsupported provider");
+      if (!firebaseIdToken) {
+        throw new InvalidRequestException("Firebase ID token is required");
+      }
+      try {
+        decodedToken = await verifyFirebaseToken(firebaseIdToken);
+      } catch (error) {
+        console.error("Firebase ID Token verification failed:", error);
+        throw new UnauthorizedException("Invalid Firebase token");
       }
     }
 
-    const identifier = userInfo.email || userInfo.providerUserId;
+    let mobile = null;
+    let countryCode = null;
+    if (decodedToken.phone_number) {
+      const cleaned = decodedToken.phone_number.replace(/[^+\d]/g, "");
+      mobile = cleaned;
+      if (cleaned.startsWith("+") && cleaned.length > 10) {
+        mobile = cleaned.slice(-10);
+        countryCode = cleaned.slice(0, cleaned.length - 10);
+      }
+    }
+
+    const email = decodedToken.email || null;
+    let firstName = null;
+    let lastName = null;
+    if (decodedToken.name) {
+      const nameParts = decodedToken.name.trim().split(/\s+/);
+      firstName = nameParts[0] || null;
+      lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
+    }
+    const firebaseUid = decodedToken.uid;
+    const providerUserId = firebaseUid; // Or decodedToken.sub
+
+    const identifier = email || mobile || firebaseUid;
 
     // BLOCK CHECK
-    const attemptRecord = await loginAttemptRepository.findAttempt(
-      identifier,
-      provider,
-      data.loginType,
-    );
+    const attemptRecord = await loginAttemptRepository.findAttempt(identifier, provider, loginType);
 
     if (attemptRecord?.blockedUntil && new Date(attemptRecord.blockedUntil) > new Date()) {
       const remainingSeconds = Math.ceil(
@@ -501,7 +474,7 @@ class PatientService {
     }
 
     // FIND EXISTING PROVIDER LINK
-    let authRec = await authProviderRepository.findByProvider(provider, userInfo.providerUserId);
+    let authRec = await authProviderRepository.findByProvider(provider, providerUserId);
     let patientUser = null;
 
     if (authRec) {
@@ -511,26 +484,28 @@ class PatientService {
     let isNewUser = false;
     // ACCOUNT LINKING / CREATE USER
     if (!patientUser) {
-      if (userInfo.email) {
-        patientUser = await patientRepository.findByEmail(userInfo.email);
+      if (email) {
+        patientUser = await patientRepository.findByEmail(email);
       }
-
-      if (!patientUser && userInfo.mobile) {
-        patientUser = await patientRepository.findByMobile(userInfo.mobile);
+      if (!patientUser && mobile) {
+        patientUser = await patientRepository.findByMobile(mobile);
+      }
+      if (!patientUser && firebaseUid) {
+        patientUser = await patientRepository.findByFirebaseUid(firebaseUid);
       }
 
       if (patientUser) {
         const existingProvider = await authProviderRepository.findByProvider(
           provider,
-          userInfo.providerUserId,
+          providerUserId,
         );
 
         if (!existingProvider) {
           await authProviderRepository.create({
             userId: patientUser.id,
             provider,
-            providerUserId: userInfo.providerUserId,
-            email: userInfo.email,
+            providerUserId: providerUserId,
+            email: email,
           });
         }
       } else {
@@ -538,21 +513,24 @@ class PatientService {
 
         const patientCode = await createUniquePatientCode();
 
+        const isMobileVerified = provider === "mobile" && loginType === "mobile";
+        const socialProviders = ["google", "facebook", "microsoft", "apple"];
+        const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
+
         patientUser = await patientRepository.create({
           patientCode,
-          mobile: userInfo.mobile,
-          email: userInfo.email,
-          firstName: userInfo.firstName,
-          lastName: userInfo.lastName,
-          fullName:
-            userInfo.firstName && userInfo.lastName
-              ? `${userInfo.firstName} ${userInfo.lastName}`
-              : null,
+          firebaseUid,
+          mobile: mobile,
+          countryCode: countryCode,
+          email: email,
+          firstName: firstName,
+          lastName: lastName,
+          fullName: decodedToken.name || null,
           isActive: true,
           status: USER_STATUS.ACTIVE,
           isVerified: true,
-          isMobileVerified: userInfo.provider === providerType.MOBILE,
-          isEmailVerified: userInfo.provider !== providerType.MOBILE && !!userInfo.email,
+          isMobileVerified: isMobileVerified,
+          isEmailVerified: isEmailVerified,
           onboardingCompleted: false,
           lastLoginAt: new Date(),
         });
@@ -560,8 +538,8 @@ class PatientService {
         await authProviderRepository.create({
           userId: patientUser.id,
           provider,
-          providerUserId: userInfo.providerUserId,
-          email: userInfo.email,
+          providerUserId: providerUserId,
+          email: email,
         });
       }
     } else {
@@ -570,11 +548,12 @@ class PatientService {
     // SUCCESS LOGIN
     patientUser = await patientRepository.updateById(patientUser.id, {
       lastLoginAt: new Date(),
+      firebaseUid,
     });
 
-    await loginAttemptRepository.resetAttempts(identifier, provider, data.loginType);
+    await loginAttemptRepository.resetAttempts(identifier, provider, loginType);
 
-    const tokens = await persistSession(patientUser, data.deviceToken);
+    const tokens = await persistSession(patientUser, deviceToken);
 
     const isOnboardingCompleted = !!(
       patientUser.firstName &&
