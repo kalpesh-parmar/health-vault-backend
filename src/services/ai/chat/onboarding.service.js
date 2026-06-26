@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 const { ollamaClient } = require("../clients/ollamaClient");
 const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
@@ -808,25 +809,40 @@ class OnboardingService {
     }
 
     // 4. Resolve next step after updates
-    // If the step is REGISTER_USER, perform DB operations but return REGISTER_USER step
+    // 4. Resolve next step after updates
+    // If the step is REGISTER_USER, mark as completed
     if (state.currentStep === "REGISTER_USER") {
-      if (userId) {
-        await patientRepository.updateById(userId, {
-          firstName: state.existingUserData.firstName,
-          lastName: state.existingUserData.lastName,
-          dateOfBirth: state.existingUserData.dateOfBirth
-            ? new Date(state.existingUserData.dateOfBirth)
-            : null,
-          gender: state.existingUserData.gender,
-          email: state.existingUserData.email || null,
-          bloodGroup: state.existingUserData.bloodGroup || null,
-          allergies: state.existingUserData.allergies || [],
-          status: "ACTIVE",
-          isVerified: true,
-          onboardingCompleted: true,
-        });
-      }
       state.isOnboardingCompleted = true;
+    }
+
+    if (userId && state.existingUserData) {
+      const updateData = {};
+      if (
+        state.existingUserData.firstName !== undefined &&
+        state.existingUserData.firstName !== null
+      )
+        updateData.firstName = state.existingUserData.firstName;
+      if (state.existingUserData.lastName !== undefined && state.existingUserData.lastName !== null)
+        updateData.lastName = state.existingUserData.lastName;
+      if (state.existingUserData.dateOfBirth)
+        updateData.dateOfBirth = new Date(state.existingUserData.dateOfBirth);
+      if (state.existingUserData.gender !== undefined && state.existingUserData.gender !== null)
+        updateData.gender = state.existingUserData.gender;
+      if (state.existingUserData.email) updateData.email = state.existingUserData.email;
+      if (state.existingUserData.bloodGroup)
+        updateData.bloodGroup = state.existingUserData.bloodGroup;
+      if (state.existingUserData.allergies && state.existingUserData.allergies.length > 0)
+        updateData.allergies = state.existingUserData.allergies;
+
+      if (state.isOnboardingCompleted) {
+        updateData.status = "ACTIVE";
+        updateData.isVerified = true;
+        updateData.onboardingCompleted = true;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await patientRepository.updateById(userId, updateData);
+      }
     }
 
     // Persist onboarding state to database for resumption on app reopen

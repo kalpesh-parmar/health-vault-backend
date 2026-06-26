@@ -136,6 +136,7 @@ const socialLogin = z.object({
   deviceToken: z.string().max(500).optional().nullable(),
   loginType: z.enum(loginTypeValues),
   provider: z.enum(providerValues),
+  providerType: z.string().optional(),
   providerToken: z.string().optional(),
   firebaseIdToken: z.string().min(1).optional(),
 });
