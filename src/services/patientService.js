@@ -35,6 +35,7 @@ const objectStorageService = require("./objectStorageService");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
 const { providerType } = require("../enums/providerType");
+const { loginType: loginTypeEnum } = require("../enums/loginType.enum");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -328,6 +329,7 @@ class PatientService {
 
     // Revoke all sessions for this patient on deletion
     await sessionRepository.deleteByPatientId(params.id);
+    await authProviderRepository.softDeleteByUserId(params.id);
 
     const deletedPatient = await patientRepository.softDeleteById(params.id);
 
@@ -343,6 +345,7 @@ class PatientService {
 
     await sessionRepository.deleteByPatientId(params.id);
     await documentRepository.deleteByPatientId(params.id);
+    await authProviderRepository.hardDeleteByUserId(params.id);
 
     const deletedPatient = await patientRepository.hardDeleteById(params.id);
 
@@ -481,10 +484,11 @@ class PatientService {
 
         const patientCode = await createUniquePatientCode();
 
-        const isMobileVerified = provider === providerType.MOBILE && loginType === loginType.MOBILE;
+        const isMobileVerified =
+          provider === providerType.MOBILE && loginType === loginTypeEnum.MOBILE;
         const socialProviders = ["google", "facebook", "microsoft", "apple"];
         const isEmailVerified =
-          socialProviders.includes(provider) && loginType === loginType.SOCIAL;
+          socialProviders.includes(provider) && loginType === loginTypeEnum.SOCIAL;
 
         patientUser = await patientRepository.create({
           patientCode,

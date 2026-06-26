@@ -1,0 +1,1 @@
+ALTER TABLE "auth_providers" ADD COLUMN "soft_delete" boolean DEFAULT false NOT NULL;
