@@ -5,11 +5,11 @@ const client = new OAuth2Client(env.googleClientId);
 
 class googleAuth {
   async ticket(token) {
-    await client.verifyIdToken({
+    const ticket = await client.verifyIdToken({
       idToken: token,
-      audience: env.googleClientId,
+      audience: env.googleWebClientId,
     });
-    // return ticket;
+    return ticket;
   }
 }
-module.exports = googleAuth;
+module.exports = new googleAuth();

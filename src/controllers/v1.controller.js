@@ -1,6 +1,8 @@
 const { StatusCodes } = require("http-status-codes");
 const { ocrService, onboardingService } = require("../services/ai");
 const { NonMedicalDocumentException } = require("../exceptions/appError");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const patientRepository = require("../repositories/patientRepository");
 
 async function ocrExtract(req, res, next) {
   const startTime = Date.now();
@@ -133,7 +135,60 @@ async function onboardingChat(req, res, next) {
   }
 }
 
+async function getOnboardingStatus(req, res, next) {
+  try {
+    const userId = req.auth?.userId;
+    if (!userId) {
+      return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
+    }
+
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      return res.status(StatusCodes.NOT_FOUND).json({ error: "Patient not found" });
+    }
+
+    const isOnboardingCompleted = !!(
+      patient.firstName &&
+      patient.firstName !== "User" &&
+      patient.lastName &&
+      patient.gender &&
+      patient.dateOfBirth
+    );
+
+    // If onboarding is already completed, return completed status
+    if (isOnboardingCompleted) {
+      return res.status(StatusCodes.OK).json({
+        status: "SUCCESS",
+        data: {
+          isOnboardingCompleted: true,
+          currentStep: "COMPLETE",
+          resumableState: null,
+        },
+      });
+    }
+
+    // Get saved onboarding state for resumption
+    const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+
+    const currentStep = onboardingRecord?.data?.currentStep || "ASK_LANGUAGE";
+    const resumableState = onboardingRecord?.data || null;
+
+    return res.status(StatusCodes.OK).json({
+      status: "SUCCESS",
+      data: {
+        isOnboardingCompleted: false,
+        currentStep,
+        resumableState,
+      },
+    });
+  } catch (error) {
+    console.error("[OnboardingController] getOnboardingStatus failed:", error);
+    return next(error);
+  }
+}
+
 module.exports = {
   ocrExtract,
   onboardingChat,
+  getOnboardingStatus,
 };

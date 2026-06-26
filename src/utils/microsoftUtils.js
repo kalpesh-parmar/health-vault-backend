@@ -57,8 +57,8 @@ function normalizeMicrosoftPayload(payload) {
   };
 }
 
-async function verifyToken(token) {
-  if (!token) {
+async function verifyToken(providerToken) {
+  if (!providerToken) {
     throw new InvalidRequestException("Microsoft token is required");
   }
 
@@ -66,7 +66,7 @@ async function verifyToken(token) {
     throw new Error("MICROSOFT_CLIENT_ID is required for Microsoft login flow");
   }
 
-  const decoded = jwt.decode(token, { complete: true });
+  const decoded = jwt.decode(providerToken, { complete: true });
   if (!decoded || !decoded.header || !decoded.header.kid) {
     throw new UnauthorizedException("Invalid Microsoft token");
   }
@@ -81,7 +81,7 @@ async function verifyToken(token) {
   const publicKey = jwkToPem(signingKey);
   let verified;
   try {
-    verified = jwt.verify(token, publicKey, {
+    verified = jwt.verify(providerToken, publicKey, {
       audience: env.microsoftClientId,
       issuer: `https://login.microsoftonline.com/${tenant}/v2.0`,
       algorithms: ["RS256"],

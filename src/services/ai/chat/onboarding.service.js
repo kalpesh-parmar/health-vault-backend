@@ -1,6 +1,7 @@
 const { ollamaClient } = require("../clients/ollamaClient");
 const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
+const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -689,26 +690,22 @@ class OnboardingService {
       if (uData.phoneNumber === "") uData.phoneNumber = null;
       if (uData.address === "") uData.address = null;
     }
-
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
       state.currentStep = computeCurrentStep(state);
     }
-
     // 1. If onboarding is completed, return completed status immediately
     if (state.isOnboardingCompleted) {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
       const step = getNextStep(state);
       return createResponse(step, state);
     }
-
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
 
     // 2. Process incoming user message based on current expected step BEFORE update
     if (!isInitCall) {
       await updateStateFromMessage(state, msg);
     }
-
     // Extra safeguard: if a document has already been uploaded/extracted in UPLOAD flow,
     // ensure we don't get stuck in upload/confirm steps.
     const isDocUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
@@ -826,9 +823,42 @@ class OnboardingService {
           allergies: state.existingUserData.allergies || [],
           status: "ACTIVE",
           isVerified: true,
+          onboardingCompleted: true,
         });
       }
       state.isOnboardingCompleted = true;
+    }
+
+    // Persist onboarding state to database for resumption on app reopen
+    if (userId) {
+      const existingRecord = await userOnboardingRepository.findByUserId(userId);
+      const stateToSave = {
+        preferredLanguage: state.preferredLanguage,
+        flowMode: state.flowMode,
+        currentStep: state.currentStep,
+        documentUploaded: state.documentUploaded,
+        documentConfirmed: state.documentConfirmed,
+        documentExtracted: state.documentExtracted,
+        isOnboardingCompleted: state.isOnboardingCompleted,
+        existingUserData: state.existingUserData,
+        bloodGroupSkipped: state.bloodGroupSkipped,
+        allergiesSkipped: state.allergiesSkipped,
+        uploadedMedicalDocument: state.uploadedMedicalDocument,
+      };
+
+      if (existingRecord) {
+        await userOnboardingRepository.updateByUserId(userId, {
+          data: stateToSave,
+          isCompleted: state.isOnboardingCompleted,
+        });
+      } else {
+        await userOnboardingRepository.create({
+          userId,
+          data: stateToSave,
+          isCompleted: state.isOnboardingCompleted,
+          step: 1,
+        });
+      }
     }
 
     const nextStep = getNextStep(state);

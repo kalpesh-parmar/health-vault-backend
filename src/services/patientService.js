@@ -13,6 +13,7 @@ const {
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const sessionRepository = require("../repositories/sessionRepository");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const {
   generateNumericPatientCode,
   hashToken,
@@ -220,6 +221,11 @@ class PatientService {
 
     const tokens = await persistSession(existingPatient, data.deviceToken);
 
+    // Get onboarding state for resumption
+    const onboardingState = isOnboardingCompleted
+      ? null
+      : await userOnboardingRepository.findByUserId(existingPatient.id);
+
     return {
       success: true,
       token: tokens.accessToken,
@@ -228,6 +234,8 @@ class PatientService {
       sessionId: tokens.sessionId,
       isNewUser,
       isOnboardingCompleted,
+      onboardingStep: onboardingState?.data?.currentStep || (isNewUser ? "ASK_LANGUAGE" : null),
+      onboardingData: onboardingState?.data || null,
       user: {
         id: existingPatient.id,
         name: existingPatient.fullName || `User ${existingPatient.mobile}`,
@@ -387,7 +395,7 @@ class PatientService {
   }
   async socialLogin(payload) {
     const data = await validateSchema(socialLogin, payload);
-    const { provider, token } = data;
+    const { provider, providerToken } = data;
 
     let userInfo = {
       providerUserId: null,
@@ -397,9 +405,9 @@ class PatientService {
       mobile: null,
     };
 
-    if (env.enableDummyAuth && token && token.startsWith("dummy-")) {
+    if (env.enableDummyAuth && providerToken && providerToken.startsWith("dummy-")) {
       userInfo = {
-        providerUserId: `mock-uid-${provider}-${token}`,
+        providerUserId: `mock-uid-${provider}-${providerToken}`,
         email: `${provider}-mockuser@example.com`,
         firstName: "Mock",
         lastName: `${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
@@ -408,18 +416,18 @@ class PatientService {
     } else {
       switch (provider) {
         case providerType.GOOGLE: {
-          userInfo = await googleLogin(token, userInfo);
+          userInfo = await googleLogin(providerToken, userInfo);
           break;
         }
         case providerType.FACEBOOK: {
-          userInfo = await facebookLogin(token, userInfo);
+          userInfo = await facebookLogin(providerToken, userInfo);
           break;
         }
         case providerType.APPLE: {
           break;
         }
         case providerType.MICROSOFT: {
-          userInfo = await microsoftLogin(token, userInfo);
+          userInfo = await microsoftLogin(providerToken, userInfo);
           break;
         }
         default:
@@ -511,6 +519,11 @@ class PatientService {
       patientUser.onboardingCompleted = isOnboardingCompleted;
     }
 
+    // Get onboarding state for resumption
+    const onboardingState = isOnboardingCompleted
+      ? null
+      : await userOnboardingRepository.findByUserId(patientUser.id);
+
     return {
       success: true,
       token: tokens.accessToken,
@@ -519,6 +532,8 @@ class PatientService {
       sessionId: tokens.sessionId,
       isNewUser,
       isOnboardingCompleted,
+      onboardingStep: onboardingState?.data?.currentStep || (isNewUser ? "ASK_LANGUAGE" : null),
+      onboardingData: onboardingState?.data || null,
       user: {
         id: patientUser.id,
         name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,

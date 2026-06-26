@@ -106,11 +106,91 @@ components:
             token: "dummy-microsoft-token-123"
             deviceToken: "DEVICE_TOKEN"
 
+    OnboardingData:
+      type: object
+      description: Onboarding state for resumption
+      properties:
+        preferredLanguage:
+          type: string
+          enum: [english, gujarati]
+        flowMode:
+          type: string
+          enum: [UPLOAD, MANUAL]
+        currentStep:
+          type: string
+          description: Current step in the onboarding process
+        existingUserData:
+          type: object
+          properties:
+            firstName:
+              type: string
+            lastName:
+              type: string
+            dateOfBirth:
+              type: string
+              format: date
+            gender:
+              type: string
+              enum: [male, female]
+            email:
+              type: string
+            bloodGroup:
+              type: string
+            allergies:
+              type: array
+              items:
+                type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        accessToken:
+          type: string
+          description: JWT access token
+        refreshToken:
+          type: string
+          description: JWT refresh token
+        sessionId:
+          type: string
+        isNewUser:
+          type: boolean
+          description: Indicates if this is a newly registered user
+        isOnboardingCompleted:
+          type: boolean
+          description: Indicates if onboarding is already completed
+        onboardingStep:
+          type: string
+          nullable: true
+          description: Current step in onboarding (e.g., ASK_LANGUAGE, ASK_FIRST_NAME). Null if onboarding is completed
+        onboardingData:
+          $ref: "#/components/schemas/OnboardingData"
+          nullable: true
+          description: Saved onboarding state for resumption. Contains the user's progress and answers
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            mobile:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+
 paths:
   /auth/firebase-login:
     post:
       tags: [Auth]
-      summary: Firebase Login
+      summary: Firebase Login with Onboarding Support
+      description: |
+        Login using Firebase authentication. Returns access token and session information.
+        If onboarding is not completed, returns the current onboarding step and saved state
+        for resumption. If user closes and reopens the app, they can resume from the same step.
       security: []
       requestBody:
         required: true
@@ -119,12 +199,28 @@ paths:
             schema:
               $ref: "#/components/schemas/FirebaseLoginRequest"
       responses:
-        "200": { description: Success }
+        "200":
+          description: Login successful with onboarding status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    $ref: "#/components/schemas/AuthResponse"
 
   /auth/social-login:
     post:
       tags: [Auth]
-      summary: Social Login
+      summary: Social Login (Google, Facebook, Microsoft) with Onboarding Support
+      description: |
+        Login using social providers. Supports account linking:
+        - If user logs in with a new provider but same email/phone, account is linked
+        - If onboarding is not completed, returns current onboarding step and saved state
+        - When user reopens app, they continue from where they left off in onboarding
       security: []
       requestBody:
         required: true
@@ -134,12 +230,40 @@ paths:
               $ref: "#/components/schemas/SocialLoginRequest"
       responses:
         "200":
-          description: Success
+          description: Login successful with onboarding status and resumable state
           content:
             application/json:
               schema:
                 type: object
-                description: Auth response with access and refresh tokens
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    $ref: "#/components/schemas/AuthResponse"
+                    example:
+                      success: true
+                      accessToken: "eyJhbGc..."
+                      refreshToken: "eyJhbGc..."
+                      sessionId: "uuid-session-id"
+                      isNewUser: true
+                      isOnboardingCompleted: false
+                      onboardingStep: "ASK_LANGUAGE"
+                      onboardingData:
+                        preferredLanguage: null
+                        flowMode: null
+                        currentStep: "ASK_LANGUAGE"
+                        existingUserData:
+                          firstName: null
+                          lastName: null
+                          dateOfBirth: null
+                          gender: null
+                      user:
+                        id: "user-uuid"
+                        name: "User Email"
+                        mobile: ""
+                        email: "user@example.com"
+                        role: "patient"
   # /auth/login:
   #   post:
   #     tags: [Auth]

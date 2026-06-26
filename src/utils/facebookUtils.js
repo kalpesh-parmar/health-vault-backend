@@ -7,7 +7,7 @@ class FacebookAuth {
     const { data } = await axios.get("https://graph.facebook.com/debug_token", {
       params: {
         input_token: userAccessToken,
-        access_token: `${env.FACEBOOK_APP_ID}|${env.FACEBOOK_APP_SECRET}`,
+        access_token: `${env.facebookAppId}|${env.facebookAppSecret}`,
       },
     });
 

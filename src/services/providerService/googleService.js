@@ -3,21 +3,24 @@ const { errorConstants } = require("../../constants/errorConstants");
 const { InvalidRequestException, UnauthorizedException } = require("../../exceptions/appError");
 const googleAuth = require("../../utils/googleUtils");
 
-async function googleLogin(token, userInfo) {
+async function googleLogin(providerToken, userInfo) {
   try {
-    if (!token) {
+    if (!providerToken) {
       throw new InvalidRequestException(errorConstants.TOKEN_REQUIRED);
     }
-    const ticket = googleAuth.ticket(token);
+    const ticket = await googleAuth.ticket(providerToken);
     const googleUser = ticket.getPayload();
     userInfo.providerUserId = googleUser.sub;
     userInfo.email = googleUser.email;
     userInfo.firstName = googleUser.given_name || "User";
     userInfo.lastName = googleUser.family_name || "";
+    if (googleUser.picture) {
+      userInfo.avatarUrl = googleUser.picture;
+    }
   } catch (err) {
     if (env.enableDummyAuth) {
       userInfo = {
-        providerUserId: `dummy-google-id-${token || "mock"}`,
+        providerUserId: `dummy-google-id-${providerToken || "mock"}`,
         email: "dummy-google-user@example.com",
         firstName: "Dummy",
         lastName: "GoogleUser",

@@ -145,7 +145,10 @@ const env = Object.freeze({
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
 
   //client Ids based on Provider
+  facebookAppId: stringFromEnv("FACEBOOK_APP_ID"),
+  facebookAppSecret: stringFromEnv("FACEBOOK_APP_SECRET"),
   googleClientId: stringFromEnv("GOOGLE_CLIENT_ID"),
+  googleWebClientId: stringFromEnv("GOOGLE_WEB_CLIENT_ID"),
   microsoftClientId: stringFromEnv("MICROSOFT_CLIENT_ID"),
   microsoftTenantId: stringFromEnv("MICROSOFT_TENANT_ID") || "common",
   enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", true),

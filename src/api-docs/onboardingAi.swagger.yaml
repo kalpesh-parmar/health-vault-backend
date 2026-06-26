@@ -1,5 +1,12 @@
 openapi: 3.0.0
 
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
 paths:
   /v1/ocr/extract:
     post:
@@ -48,10 +55,12 @@ paths:
   /v1/onboarding/chat:
     post:
       tags: [Intelligent Onboarding]
-      summary: Intelligent onboarding chat interaction
+      summary: Intelligent onboarding chat interaction with state persistence
       description: |
         Interact with the onboarding AI chat assistant to complete missing details.
         The AI checks required fields and prompts the user for missing fields.
+        **State is automatically saved to the database after each interaction**,
+        allowing users to resume onboarding if they close and reopen the app.
       security:
         - bearerAuth: []
       requestBody:
@@ -94,3 +103,52 @@ paths:
                     example: SUCCESS
                   data:
                     type: object
+
+  /v1/onboarding/status:
+    get:
+      tags: [Intelligent Onboarding]
+      summary: Get current onboarding status and resumable state
+      description: |
+        Retrieves the current onboarding status for the user.
+        Returns the current step and saved state data if onboarding is incomplete,
+        or completion status if already done.
+        Useful for resuming onboarding when user reopens the app.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current onboarding status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    type: object
+                    properties:
+                      isOnboardingCompleted:
+                        type: boolean
+                        description: Whether onboarding is already completed
+                        example: false
+                      currentStep:
+                        type: string
+                        description: Current step in the onboarding process
+                        example: "ASK_LANGUAGE"
+                      resumableState:
+                        type: object
+                        nullable: true
+                        description: Complete onboarding state for resumption
+                        properties:
+                          preferredLanguage:
+                            type: string
+                            enum: [english, gujarati]
+                          flowMode:
+                            type: string
+                            enum: [UPLOAD, MANUAL]
+                          currentStep:
+                            type: string
+                          existingUserData:
+                            type: object
