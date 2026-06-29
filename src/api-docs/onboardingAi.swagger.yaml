@@ -144,7 +144,7 @@ paths:
                         properties:
                           preferredLanguage:
                             type: string
-                            enum: [english, gujarati]
+                            enum: [english, gujarati, hindi, marathi, tamil]
                           flowMode:
                             type: string
                             enum: [UPLOAD, MANUAL]
