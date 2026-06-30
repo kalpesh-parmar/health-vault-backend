@@ -293,13 +293,13 @@ function computeCurrentStep(state) {
   if (!state.preferredLanguage) return "ASK_LANGUAGE";
   if (!state.flowMode) return "ASK_UPLOAD_OR_SKIP";
 
-  if (state.hasSocialData && state.socialDataConfirmed === undefined) {
-    return "ASK_USE_SOCIAL_LOGIN_INFO";
-  }
-
   if (state.flowMode === "UPLOAD") {
     const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
     if (!isUploaded) return "ASK_UPLOAD_DOCUMENT";
+
+    if (state.documentExtracted && state.hasSocialData && !state.socialDataConfirmed) {
+      return "ASK_USE_SOCIAL_LOGIN_INFO";
+    }
   }
 
   return getNextRequiredOrOptionalStep(state);
@@ -352,31 +352,62 @@ async function updateStateFromMessage(state, message) {
       const fmVal = localParseInput("flowMode", msg);
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
+        if (fmVal === "MANUAL" && state.hasSocialData) {
+          state.socialDataConfirmed = true;
+          if (state.socialData) {
+            state.existingUserData.firstName =
+              state.socialData.firstName || state.existingUserData.firstName;
+            state.existingUserData.lastName =
+              state.socialData.lastName || state.existingUserData.lastName;
+            state.existingUserData.email = state.socialData.email || state.existingUserData.email;
+            state.existingUserData.gender =
+              state.socialData.gender || state.existingUserData.gender;
+            state.existingUserData.dateOfBirth =
+              state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
+          }
+        }
         state.currentStep = computeCurrentStep(state);
       } else {
         const extractedFM = await extractFieldFromMessage("flowMode", msg, state.preferredLanguage);
         if (extractedFM === "UPLOAD" || extractedFM === "MANUAL") {
           state.flowMode = extractedFM;
+          if (extractedFM === "MANUAL" && state.hasSocialData) {
+            state.socialDataConfirmed = true;
+            if (state.socialData) {
+              state.existingUserData.firstName =
+                state.socialData.firstName || state.existingUserData.firstName;
+              state.existingUserData.lastName =
+                state.socialData.lastName || state.existingUserData.lastName;
+              state.existingUserData.email = state.socialData.email || state.existingUserData.email;
+              state.existingUserData.gender =
+                state.socialData.gender || state.existingUserData.gender;
+              state.existingUserData.dateOfBirth =
+                state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
+            }
+          }
           state.currentStep = computeCurrentStep(state);
         }
       }
       break;
     }
     case "ASK_USE_SOCIAL_LOGIN_INFO": {
-      const isYes =
-        msg.toLowerCase().includes("yes") ||
-        msg.toLowerCase().includes("હા") ||
-        msg.toLowerCase().includes("हाँ") ||
-        msg.toLowerCase().includes("हो") ||
-        msg.toLowerCase().includes("ஆம்");
-      const isNo =
-        msg.toLowerCase().includes("no") ||
-        msg.toLowerCase().includes("ના") ||
-        msg.toLowerCase().includes("नहीं") ||
-        msg.toLowerCase().includes("नाही") ||
-        msg.toLowerCase().includes("இல்லை");
+      const msgUpper = msg.toUpperCase();
+      const isSocial =
+        msgUpper.includes("SOCIAL") ||
+        msgUpper.includes("YES") ||
+        msgUpper.includes("હા") ||
+        msgUpper.includes("हाँ") ||
+        msgUpper.includes("हो") ||
+        msgUpper.includes("ஆம்");
+      const isDocument =
+        msgUpper.includes("DOCUMENT") ||
+        msgUpper.includes("NO") ||
+        msgUpper.includes("ના") ||
+        msgUpper.includes("नहीं") ||
+        msgUpper.includes("नाही") ||
+        msgUpper.includes("இல்லை");
 
-      if (isYes) {
+      if (isSocial) {
         state.socialDataConfirmed = true;
         if (state.socialData) {
           state.existingUserData.firstName =
@@ -389,8 +420,8 @@ async function updateStateFromMessage(state, message) {
             state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
         }
         state.currentStep = computeCurrentStep(state);
-      } else if (isNo) {
-        state.socialDataConfirmed = false;
+      } else if (isDocument) {
+        state.socialDataConfirmed = true; // Conflict is resolved, keep document data
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -545,6 +576,13 @@ async function updateStateFromMessage(state, message) {
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
+
+    case "REGISTER_USER":
+    case "COMPLETE":
+    case "POST_ONBOARDING": {
+      state.currentStep = computeCurrentStep(state);
+      break;
+    }
   }
 }
 
@@ -568,14 +606,16 @@ function getNextStep(state) {
     case "ASK_UPLOAD_OR_SKIP":
       return {
         action: "ASK_UPLOAD_OR_SKIP",
-        message_en: "Would you like to upload your medical report or enter details manually?",
-        message_gu: "શું તમે મેડિકલ રિપોર્ટ અપલોડ કરવા માંગો છો કે માહિતી જાતે ભરવા માંગો છો?",
+        message_en:
+          "I will now chat with you in English. Would you like to upload your medical report or enter details manually?",
+        message_gu:
+          "હું હવે તમારી સાથે ગુજરાતીમાં ચેટ કરીશ. શું તમે મેડિકલ રિપોર્ટ અપલોડ કરવા માંગો છો કે માહિતી જાતે ભરવા માંગો છો?",
         message_hi:
-          "क्या आप अपनी मेडिकल रिपोर्ट अपलोड करना चाहेंगे या मैन्युअल रूप से विवरण दर्ज करना चाहेंगे?",
+          "अब मैं आपसे हिंदी में बात करूंगा। क्या आप अपनी मेडिकल रिपोर्ट अपलोड करना चाहेंगे या मैन्युअल रूप से विवरण दर्ज करना चाहेंगे?",
         message_mr:
-          "तुम्ही तुमचा वैद्यकीय अहवाल अपलोड करू इच्छिता की व्यक्तिशः माहिती प्रविष्ट करू इच्छिता?",
+          "मी आता तुमच्याशी मराठीत संवाद साधेन. तुम्ही तुमचा वैद्यकीय अहवाल अपलोड करू इच्छिता की व्यक्तिशः माहिती प्रविष्ट करू इच्छिता?",
         message_ta:
-          "உங்கள் மருத்துவ அறிக்கையை பதிவேற்ற விரும்புகிறீர்களா அல்லது விவரங்களை கைமுறையாக உள்ளிட விரும்புகிறீர்களா?",
+          "நான் இப்போது உங்களுடன் தமிழில் உரையாடுவேன். உங்கள் மருத்துவ அறிக்கையை பதிவேற்ற விரும்புகிறீர்களா அல்லது விவரங்களை கைமுறையாக உள்ளிட விரும்புகிறீர்களா?",
         options: [
           {
             label_en: "Upload Medical Report",
@@ -596,38 +636,49 @@ function getNextStep(state) {
         ],
       };
 
-    case "ASK_USE_SOCIAL_LOGIN_INFO":
+    case "ASK_USE_SOCIAL_LOGIN_INFO": {
+      const formatProfile = (data) => {
+        if (!data) return "N/A";
+        const parts = [];
+        if (data.firstName || data.lastName)
+          parts.push(`Name: ${data.firstName || ""} ${data.lastName || ""}`.trim());
+        if (data.dateOfBirth) parts.push(`DOB: ${data.dateOfBirth}`);
+        if (data.gender) parts.push(`Gender: ${data.gender}`);
+        if (data.email) parts.push(`Email: ${data.email}`);
+        if (data.phoneNumber) parts.push(`Phone: ${data.phoneNumber}`);
+        return parts.join(", ");
+      };
+
+      const socialProfile = formatProfile(state.socialData);
+      const docProfile = formatProfile(state.existingUserData);
+
       return {
         action: "ASK_USE_SOCIAL_LOGIN_INFO",
-        message_en:
-          "We found your existing profile details from your social login. Would you like to use this information?",
-        message_gu:
-          "અમને સોશિયલ લોગિન પરથી તમારી પ્રોફાઇલ માહિતી મળી છે. શું તમે આ માહિતીનો ઉપયોગ કરવા માંગો છો?",
-        message_hi:
-          "हमें सोशल लॉगिन से आपकी प्रोफ़ाइल जानकारी मिली है। क्या आप इस जानकारी का उपयोग करना चाहेंगे?",
-        message_mr:
-          "आम्हाला सोशल लॉगिनवरून तुमची प्रोफाइल माहिती मिळाली आहे. तुम्ही ही माहिती वापरू इच्छिता का?",
-        message_ta:
-          "உங்கள் சமூக உள்நுழைவிலிருந்து உங்கள் சுயவிவர விவரங்களை நாங்கள் கண்டறிந்துள்ளோம். இந்த தகவலை பயன்படுத்த விரும்புகிறீர்களா?",
+        message_en: `We found a difference in your profiles. Social Login: [${socialProfile}] vs Document: [${docProfile}]. Which profile details do you prefer to keep?`,
+        message_gu: `અમને તમારી પ્રોફાઇલમાં તફાવત મળ્યો છે. સોશિયલ લોગિન: [${socialProfile}] વિરુદ્ધ દસ્તાવેજ: [${docProfile}]. તમે કઈ પ્રોફાઇલ વિગતો રાખવાનું પસંદ કરશો?`,
+        message_hi: `हमें आपकी प्रोफ़ाइल में अंतर मिला है। सोशल लॉगिन: [${socialProfile}] बनाम दस्तावेज़: [${docProfile}]। आप कौन सा प्रोफ़ाइल विवरण रखना पसंद करेंगे?`,
+        message_mr: `आम्हाला तुमच्या प्रोफाइलमध्ये फरक आढळला आहे. सोशल लॉगिन: [${socialProfile}] विरुद्ध दस्तऐवज: [${docProfile}]. तुम्हाला कोणते प्रोफाइल तपशील ठेवायला आवडेल?`,
+        message_ta: `உங்கள் சுயவிவரங்களில் ஒரு வித்தியாசத்தை நாங்கள் கண்டறிந்துள்ளோம். சமூக உள்நுழைவு: [${socialProfile}] எதிர் ஆவணம்: [${docProfile}]. எந்த சுயவிவர விவரங்களை வைத்திருக்க விரும்புகிறீர்கள்?`,
         options: [
           {
-            label_en: "Yes",
-            label_gu: "હા",
-            label_hi: "हाँ",
-            label_mr: "होय",
-            label_ta: "ஆம்",
-            value: "YES",
+            label_en: "Use Social Login",
+            label_gu: "સોશિયલ લોગિન વાપરો",
+            label_hi: "सोशल लॉगिन का उपयोग करें",
+            label_mr: "सोशल लॉगिन वापरा",
+            label_ta: "சமூக உள்நுழைவைப் பயன்படுத்துக",
+            value: "SOCIAL",
           },
           {
-            label_en: "No",
-            label_gu: "ના",
-            label_hi: "नहीं",
-            label_mr: "नाही",
-            label_ta: "இல்லை",
-            value: "NO",
+            label_en: "Use Document",
+            label_gu: "દસ્તાવેજ વાપરો",
+            label_hi: "दस्तावेज़ का उपयोग करें",
+            label_mr: "दस्तऐवज वापरा",
+            label_ta: "ஆவணத்தைப் பயன்படுத்துக",
+            value: "DOCUMENT",
           },
         ],
       };
+    }
 
     case "ASK_UPLOAD_DOCUMENT":
       return {
@@ -765,14 +816,176 @@ function getNextStep(state) {
         ],
       };
 
+    case "ASK_EMAIL":
+      return {
+        action: "ASK_EMAIL",
+        message_en: "Please provide your Email (Optional).",
+        message_gu: "કૃપા કરીને તમારું ઇમેઇલ આપો (વૈકલ્પિક).",
+        message_hi: "कृपया अपना ईमेल प्रदान करें (वैकल्पिक)।",
+        message_mr: "कृपया तुमचा ईमेल द्या (पर्यायी).",
+        message_ta: "உங்கள் மின்னஞ்சலை வழங்கவும் (விருப்பம்).",
+      };
+
+    case "ASK_MEDICAL_CONDITIONS":
+      return {
+        action: "ASK_MEDICAL_CONDITIONS",
+        message_en: "Do you have any other medical conditions? (Optional)",
+        message_gu: "શું તમને અન્ય કોઈ તબીબી પરિસ્થિતિઓ છે? (વૈકલ્પિક)",
+        message_hi: "क्या आपको कोई अन्य चिकित्सीय स्थिति है? (वैकल्पिक)",
+        message_mr: "तुम्हाला इतर काही वैद्यकीय समस्या आहेत का? (पर्यायी)",
+        message_ta: "உங்களுக்கு வேறு ஏதேனும் மருத்துவ நிலைமைகள் உள்ளதா? (விருப்பம்)",
+      };
+
+    case "ASK_OPTIONAL_DETAILS_PROMPT":
+      return {
+        action: "ASK_OPTIONAL_DETAILS_PROMPT",
+        message_en:
+          "Would you like to add more details? (Email, Blood Group, Allergies, Other Medical Conditions)",
+        message_gu:
+          "શું તમે વધુ વિગતો ઉમેરવા માંગો છો? (ઇમેઇલ, બ્લડ ગ્રુપ, એલર્જી, અન્ય તબીબી પરિસ્થિતિઓ)",
+        message_hi:
+          "क्या आप और विवरण जोड़ना चाहेंगे? (ईमेल, रक्त समूह, एलर्जी, अन्य चिकित्सीय स्थितियां)",
+        message_mr:
+          "तुम्हाला अधिक तपशील जोडायचे आहेत का? (ईमेल, रक्तगट, ऍलर्जी, इतर वैद्यकीय समस्या)",
+        message_ta:
+          "மேலும் விவரங்களைச் சேர்க்க விரும்புகிறீர்களா? (மின்னஞ்சல், இரத்த வகை, ஒவ்வாமை, பிற மருத்துவ நிலைமைகள்)",
+        options: [
+          {
+            label_en: "Add Details",
+            label_gu: "વિગતો ઉમેરો",
+            label_hi: "विवरण जोड़ें",
+            label_mr: "तपशील जोडा",
+            label_ta: "விவரங்களைச் சேர்க்கவும்",
+            value: "YES",
+          },
+          {
+            label_en: "Skip",
+            label_gu: "સ્કિપ કરો",
+            label_hi: "छोड़ें",
+            label_mr: "वगळा",
+            label_ta: "தவிர்",
+            value: "SKIP",
+          },
+        ],
+      };
+
+    case "ASK_ADD_FOUND_MEDICINES":
+      return {
+        action: "ASK_ADD_FOUND_MEDICINES",
+        message_en:
+          "We found medicines in your medical document. Do you want to add these medicines?",
+        message_gu: "અમને તમારા મેડિકલ ડોક્યુમેન્ટમાં દવાઓ મળી છે. શું તમે આ દવાઓ ઉમેરવા માંગો છો?",
+        message_hi:
+          "हमें आपके मेडिकल दस्तावेज़ में दवाएं मिली हैं। क्या आप इन दवाओं को जोड़ना चाहते हैं?",
+        message_mr:
+          "आम्हाला तुमच्या वैद्यकीय दस्तऐवजात औषधे आढळली आहेत. तुम्हाला ही औषधे जोडायची आहेत का?",
+        message_ta:
+          "உங்கள் மருத்துவ ஆவணத்தில் மருந்துகளைக் கண்டறிந்துள்ளோம். இந்த மருந்துகளைச் சேர்க்க விரும்புகிறீர்களா?",
+        options: [
+          {
+            label_en: "Yes, Add",
+            label_gu: "હા, ઉમેરો",
+            label_hi: "हाँ, जोड़ें",
+            label_mr: "होय, जोडा",
+            label_ta: "ஆம், சேர்க்கவும்",
+            value: "YES",
+          },
+          {
+            label_en: "No, Skip",
+            label_gu: "ના, સ્કિપ કરો",
+            label_hi: "नहीं, छोड़ें",
+            label_mr: "नाही, वगळा",
+            label_ta: "இல்லை, தவிர்",
+            value: "NO",
+          },
+        ],
+      };
+
+    case "ASK_NO_MEDICINES_ACTION":
+      return {
+        action: "ASK_NO_MEDICINES_ACTION",
+        message_en: "No medicines found in your document. What would you like to do?",
+        message_gu: "તમારા ડોક્યુમેન્ટમાં કોઈ દવાઓ મળી નથી. તમે શું કરવા માંગો છો?",
+        message_hi: "आपके दस्तावेज़ में कोई दवाएं नहीं मिलीं। आप क्या करना चाहेंगे?",
+        message_mr: "तुमच्या दस्तऐवजात कोणतीही औषधे आढळली नाहीत. तुम्हाला काय करायचे आहे?",
+        message_ta:
+          "உங்கள் ஆவணத்தில் எந்த மருந்துகளும் காணப்படவில்லை. நீங்கள் என்ன செய்ய விரும்புகிறீர்கள்?",
+        options: [
+          {
+            label_en: "Go to Dashboard",
+            label_gu: "ડેશબોર્ડ પર જાઓ",
+            label_hi: "डैशबोर्ड पर जाएं",
+            label_mr: "डॅशबोर्डवर जा",
+            label_ta: "கட்டுப்பாட்டகத்திற்குச் செல்க",
+            value: "DASHBOARD",
+          },
+          {
+            label_en: "Add medicine manually",
+            label_gu: "દવા મેન્યુઅલી ઉમેરો",
+            label_hi: "मैन्युअल रूप से दवा जोड़ें",
+            label_mr: "औषध मॅन्युअली जोडा",
+            label_ta: "மருந்தை கைமுறையாகச் சேர்க்கவும்",
+            value: "MANUAL",
+          },
+        ],
+      };
+
+    case "ASK_CONFIRM_MEDICINE_LIST":
+      return {
+        action: "ASK_CONFIRM_MEDICINE_LIST",
+        message_en: "Please confirm the medicines you want to add.",
+        message_gu: "કૃપા કરીને તમે જે દવાઓ ઉમેરવા માંગો છો તેની પુષ્ટિ કરો.",
+        message_hi: "कृपया उन दवाओं की पुष्टि करें जिन्हें आप जोड़ना चाहते हैं।",
+        message_mr: "कृपया तुम्हाला जी औषधे जोडायची आहेत त्यांची पुष्टी करा.",
+        message_ta: "நீங்கள் சேர்க்க விரும்பும் மருந்துகளை உறுதிப்படுத்தவும்.",
+        options: [
+          {
+            label_en: "Confirm All",
+            label_gu: "બધાની પુષ્ટિ કરો",
+            label_hi: "सभी की पुष्टि करें",
+            label_mr: "सर्वांची पुष्टी करा",
+            label_ta: "அனைத்தையும் உறுதிப்படுத்துக",
+            value: "CONFIRM",
+          },
+          {
+            label_en: "Edit List",
+            label_gu: "યાદીમાં ફેરફાર કરો",
+            label_hi: "सूची संपादित करें",
+            label_mr: "यादी संपादित करा",
+            label_ta: "பட்டியலைத் திருத்துக",
+            value: "EDIT",
+          },
+        ],
+      };
+
+    case "ASK_MEDICINE_DETAILS":
+      return {
+        action: "ASK_MEDICINE_DETAILS",
+        message_en: "Please provide details for the medicine.",
+        message_gu: "કૃપા કરીને દવાની વિગતો આપો.",
+        message_hi: "कृपया दवा का विवरण प्रदान करें।",
+        message_mr: "कृपया औषधाचे तपशील द्या.",
+        message_ta: "தயவுசெய்து மருந்தின் விவரங்களை வழங்கவும்.",
+      };
+
+    case "ASK_ADD_MEDICINE_MANUALLY":
+      return {
+        action: "ASK_ADD_MEDICINE_MANUALLY",
+        message_en: "Please enter medicine details.",
+        message_gu: "કૃપા કરીને દવાની વિગતો દાખલ કરો.",
+        message_hi: "कृपया दवा का विवरण दर्ज करें।",
+        message_mr: "कृपया औषधाचे तपशील प्रविष्ट करा.",
+        message_ta: "தயவுசெய்து மருந்து விவரங்களை உள்ளிடவும்.",
+      };
+
     case "REGISTER_USER":
       return {
         action: "REGISTER_USER",
-        message_en: "Registration is processing...",
-        message_gu: "નોંધણી પ્રક્રિયા ચાલુ છે...",
-        message_hi: "पंजीकरण प्रक्रिया चल रही है...",
-        message_mr: "नोंदणी प्रक्रिया सुरू आहे...",
-        message_ta: "பதிவு செய்யப்படுகிறது...",
+        message_en: "Your registration is completed successfully.",
+        message_gu: "તમારી નોંધણી સફળતાપૂર્વક પૂર્ણ થઈ ગઈ છે.",
+        message_hi: "आपका पंजीकरण सफलतापूर्वक पूरा हो गया है।",
+        message_mr: "तुमची नोंदणी यशस्वीरित्या पूर्ण झाली आहे.",
+        message_ta: "உங்கள் பதிவு வெற்றிகரமாக முடிந்தது.",
       };
 
     case "COMPLETE":
@@ -930,95 +1143,144 @@ class OnboardingService {
       }
     }
 
-    // 3. If Medical Document uploaded in UPLOAD flow, perform extraction using Qwen3
+    // 3. If Medical Document uploaded in UPLOAD flow, perform extraction using Qwen3 or use pre-extracted data
     if (
       state.flowMode === "UPLOAD" &&
       (state.uploadedMedicalDocument || state.documentUploaded) &&
-      state.documentText &&
+      (state.documentText || state.documentData) &&
       !state.documentExtracted
     ) {
-      console.log("[OnboardingService] Processing medical document for extraction...");
-      try {
-        const extractionMessages = [
-          { role: "system", content: ONBOARDING_SYSTEM_PROMPT },
-          { role: "user", content: `Document OCR Text:\n${state.documentText}` },
-        ];
+      if (state.documentData) {
+        console.log("[OnboardingService] Using pre-extracted document data from state...");
+        const extracted = state.documentData;
 
-        let chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
-          temperature: 0.2,
-          maxTokens: 1024,
-          think: false,
-          returnFullResponse: true,
-        });
+        if (extracted.firstName || extracted.lastName) {
+          state.existingUserData.firstName =
+            extracted.firstName || state.existingUserData.firstName;
+          state.existingUserData.lastName = extracted.lastName || state.existingUserData.lastName;
+        }
 
-        if (chatResponse.done_reason === "length") {
-          console.warn(
-            "[OnboardingService] Document extraction truncated. Retrying with maxTokens 2048...",
+        if (extracted.dateOfBirth) {
+          state.existingUserData.dateOfBirth = normalizeDOB(extracted.dateOfBirth);
+        }
+
+        if (extracted.gender) {
+          state.existingUserData.gender = normalizeGender(extracted.gender);
+        }
+
+        if (extracted.email) {
+          state.existingUserData.email = extracted.email.trim();
+        }
+
+        if (extracted.bloodGroup) {
+          state.existingUserData.bloodGroup = normalizeBloodGroup(extracted.bloodGroup);
+        }
+
+        if (Array.isArray(extracted.allergies)) {
+          state.existingUserData.allergies = extracted.allergies.map((a) => String(a).trim());
+        }
+
+        if (extracted.phoneNumber) {
+          state.existingUserData.phoneNumber = extracted.phoneNumber.trim();
+        }
+
+        if (Array.isArray(extracted.medicalConditions)) {
+          state.existingUserData.medicalConditions = extracted.medicalConditions.map((c) =>
+            String(c).trim(),
           );
-          chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
+        }
+
+        if (extracted.address) {
+          state.existingUserData.address = extracted.address.trim();
+        }
+
+        state.documentExtracted = true;
+        state.documentUploaded = true;
+        state.documentConfirmed = true; // Auto-confirm document
+        state.currentStep = computeCurrentStep(state);
+      } else if (state.documentText) {
+        console.log("[OnboardingService] Processing medical document for extraction...");
+        try {
+          const extractionMessages = [
+            { role: "system", content: ONBOARDING_SYSTEM_PROMPT },
+            { role: "user", content: `Document OCR Text:\n${state.documentText}` },
+          ];
+
+          let chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
             temperature: 0.2,
-            maxTokens: 2048,
+            maxTokens: 1024,
             think: false,
             returnFullResponse: true,
           });
-        }
 
-        if (chatResponse.text) {
-          const extracted = cleanAndParseJson(chatResponse.text);
-          console.log("[OnboardingService] Extraction complete:", extracted);
-
-          if (extracted.firstName || extracted.lastName) {
-            const fullName = `${extracted.firstName || ""} ${extracted.lastName || ""}`.trim();
-            const { firstName, lastName } = splitName(fullName);
-            state.existingUserData.firstName = firstName || null;
-            state.existingUserData.lastName = lastName || null;
-          }
-
-          if (extracted.dateOfBirth) {
-            state.existingUserData.dateOfBirth = normalizeDOB(extracted.dateOfBirth);
-          }
-
-          if (extracted.gender) {
-            state.existingUserData.gender = normalizeGender(extracted.gender);
-          }
-
-          if (extracted.email) {
-            state.existingUserData.email = extracted.email.trim();
-          }
-
-          if (extracted.bloodGroup) {
-            state.existingUserData.bloodGroup = normalizeBloodGroup(extracted.bloodGroup);
-          }
-
-          if (Array.isArray(extracted.allergies)) {
-            state.existingUserData.allergies = extracted.allergies.map((a) => String(a).trim());
-          }
-
-          if (extracted.phoneNumber) {
-            state.existingUserData.phoneNumber = extracted.phoneNumber.trim();
-          }
-
-          if (Array.isArray(extracted.medicalConditions)) {
-            state.existingUserData.medicalConditions = extracted.medicalConditions.map((c) =>
-              String(c).trim(),
+          if (chatResponse.done_reason === "length") {
+            console.warn(
+              "[OnboardingService] Document extraction truncated. Retrying with maxTokens 2048...",
             );
+            chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
+              temperature: 0.2,
+              maxTokens: 2048,
+              think: false,
+              returnFullResponse: true,
+            });
           }
 
-          if (extracted.address) {
-            state.existingUserData.address = extracted.address.trim();
+          if (chatResponse.text) {
+            const extracted = cleanAndParseJson(chatResponse.text);
+            console.log("[OnboardingService] Extraction complete:", extracted);
+
+            if (extracted.firstName || extracted.lastName) {
+              const fullName = `${extracted.firstName || ""} ${extracted.lastName || ""}`.trim();
+              const { firstName, lastName } = splitName(fullName);
+              state.existingUserData.firstName = firstName || null;
+              state.existingUserData.lastName = lastName || null;
+            }
+
+            if (extracted.dateOfBirth) {
+              state.existingUserData.dateOfBirth = normalizeDOB(extracted.dateOfBirth);
+            }
+
+            if (extracted.gender) {
+              state.existingUserData.gender = normalizeGender(extracted.gender);
+            }
+
+            if (extracted.email) {
+              state.existingUserData.email = extracted.email.trim();
+            }
+
+            if (extracted.bloodGroup) {
+              state.existingUserData.bloodGroup = normalizeBloodGroup(extracted.bloodGroup);
+            }
+
+            if (Array.isArray(extracted.allergies)) {
+              state.existingUserData.allergies = extracted.allergies.map((a) => String(a).trim());
+            }
+
+            if (extracted.phoneNumber) {
+              state.existingUserData.phoneNumber = extracted.phoneNumber.trim();
+            }
+
+            if (Array.isArray(extracted.medicalConditions)) {
+              state.existingUserData.medicalConditions = extracted.medicalConditions.map((c) =>
+                String(c).trim(),
+              );
+            }
+
+            if (extracted.address) {
+              state.existingUserData.address = extracted.address.trim();
+            }
           }
+        } catch (err) {
+          console.error("[OnboardingService] Document extraction failure:", err);
         }
-      } catch (err) {
-        console.error("[OnboardingService] Document extraction failure:", err);
-      }
-      state.documentExtracted = true;
+        state.documentExtracted = true;
 
-      state.documentUploaded = true;
-      state.documentConfirmed = true;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
+        state.documentUploaded = true;
+        state.documentConfirmed = true;
+        state.currentStep = computeCurrentStep(state);
+      }
     }
 
-    // 4. Resolve next step after updates
     // 4. Resolve next step after updates
     // If the step is REGISTER_USER, mark as completed
     if (state.currentStep === "REGISTER_USER") {

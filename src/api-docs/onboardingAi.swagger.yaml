@@ -58,7 +58,7 @@ paths:
       summary: Intelligent onboarding chat interaction with state persistence
       description: |
         Interact with the onboarding AI chat assistant to complete missing details.
-        The AI checks required fields and prompts the user for missing fields.
+        The flow supports Social Merge, Optional Details (Email, Blood Group, Allergies, Medical Conditions), and Prescription Medicine Confirmation.
         **State is automatically saved to the database after each interaction**,
         allowing users to resume onboarding if they close and reopen the app.
       security:

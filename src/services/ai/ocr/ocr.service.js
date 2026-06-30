@@ -40,6 +40,7 @@ const { document } = require("../../../models/document");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { fileTypeValue } = require("../../../enums/fileType");
 const uploadFileService = require("../../uploadFileService");
+const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 
 const TestResultSchema = z.object({
   testName: z.string().nullable().default(null),
@@ -889,13 +890,14 @@ ${rawText}
     return JSON.stringify(mapped);
   }
 
-  async generateSummary(rawText) {
+  async generateSummary(rawText, language = "Gujarati") {
     if (!rawText || !rawText.trim()) {
       return "";
     }
 
-    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear Gujarati.
-Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal Gujarati translations for these terms are uncommon, awkward, and confusing for patients.
+    const prompt = `You are a helpful medical interpreter. Summarize the following medical document in simple, clear ${language}.
+Interpret the results for the patient (e.g. if hemoglobin is low, mention it might indicate anemia) rather than just listing raw numbers line by line.
+Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal translations for these terms are uncommon, awkward, and confusing for patients.
 The summary should be easy to understand for a layperson.
 Limit the summary to 150-200 words.
 Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
@@ -1131,14 +1133,52 @@ ${rawText}
     const tExtractStart = Date.now();
     const structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
     console.log(
-      `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
+      `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating summary...`,
     );
 
-    // 4. Generate summary in Gujarati
+    // 3.5 Fetch user preferred language
+    let preferredLanguage = "Gujarati";
+    if (userId) {
+      try {
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+          preferredLanguage = onboardingRecord.data.preferredLanguage;
+          // Capitalize first letter for prompt
+          preferredLanguage =
+            preferredLanguage.charAt(0).toUpperCase() + preferredLanguage.slice(1);
+        }
+      } catch (err) {
+        console.error(
+          `[OcrService] Failed to fetch language for user ${userId}, defaulting to Gujarati`,
+          err,
+        );
+      }
+    }
+
+    // 4. Generate summaries
     const tSummaryStart = Date.now();
-    const summaryGujarati = await this.generateSummary(ocrResult.rawText);
+    let summaryEnglish = "";
+    let summaryLocal = "";
+
+    // Always generate English first
+    summaryEnglish = await this.generateSummary(ocrResult.rawText, "English");
+    console.log(`[OcrService] [SUMMARY] English summary generated.`);
+
+    // If their preferred language isn't English, generate the local one too
+    if (preferredLanguage.toLowerCase() !== "english") {
+      summaryLocal = await this.generateSummary(ocrResult.rawText, preferredLanguage);
+      console.log(`[OcrService] [SUMMARY] ${preferredLanguage} summary generated.`);
+    } else {
+      summaryLocal = summaryEnglish;
+    }
+
+    // Attach both summaries directly into the structured JSON data so we don't need database schema changes
+    structuredData.summaryEnglish = summaryEnglish;
+    structuredData.summaryLocal = summaryLocal;
+    structuredData.summaryLanguage = preferredLanguage;
+
     console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summary generated. Saving to database...`,
+      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated. Saving to database...`,
     );
 
     // 5. Store in database
@@ -1170,7 +1210,8 @@ ${rawText}
         hospitalName: structuredData.hospitalName || null,
         doctorName: structuredData.doctorName || null,
         remarks: structuredData.remarks || null,
-        summaryGujarati,
+        // We will keep putting the local one in summaryGujarati for backward compatibility
+        summaryGujarati: summaryLocal,
       })
       .returning();
     console.log(
@@ -1187,7 +1228,8 @@ ${rawText}
         language: ocrResult.detectedLanguages?.join(",") || "en",
       },
       structured: {
-        summary: summaryGujarati,
+        summary: summaryLocal,
+        summaryEnglish: summaryEnglish,
         observations: Array.isArray(structuredData.diagnosis)
           ? structuredData.diagnosis
           : structuredData.diagnosis
