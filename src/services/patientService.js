@@ -22,7 +22,6 @@ const {
 } = require("../utils/commonUtils");
 const JwtUtils = require("../utils/jwtUtils");
 const {
-  firebaseLoginSchema,
   idParamSchema,
   listPatientsQuerySchema,
   refreshTokenSchema,
@@ -34,7 +33,6 @@ const { socialLogin, authFailureSchema } = require("../validations/patientValida
 const objectStorageService = require("./objectStorageService");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
-const { providerType } = require("../enums/providerType");
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -103,132 +101,6 @@ async function persistSession(existingPatient, deviceToken = null) {
 }
 
 class PatientService {
-  async firebaseLogin(payload) {
-    const data = await validateSchema(firebaseLoginSchema, payload);
-    const tokenToVerify = data.firebaseIdToken;
-
-    let decodedToken;
-    if (env.enableDummyAuth && tokenToVerify === "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2") {
-      console.log("[DUMMY_AUTH] Bypassing Firebase authentication. Using mock user credentials.");
-      decodedToken = {
-        uid: "msAipc6g4vNEQl24OePv56pe6Qy2",
-        phone_number: "+911111111111",
-      };
-    } else {
-      console.log("[FIREBASE_AUTH] Verifying ID token with Firebase Admin SDK.");
-      try {
-        decodedToken = await verifyFirebaseToken(tokenToVerify);
-      } catch (error) {
-        console.error("Firebase ID Token verification failed:", error);
-        throw new UnauthorizedException("Invalid Firebase token");
-      }
-    }
-
-    const mobileFull = decodedToken.phone_number;
-    if (!mobileFull) {
-      throw new InvalidRequestException("Firebase token does not contain a phone number");
-    }
-
-    // Helper to extract countryCode and mobile
-    const cleaned = mobileFull.replace(/[^+\d]/g, "");
-    let mobile = cleaned;
-    let countryCode = null;
-    if (cleaned.startsWith("+") && cleaned.length > 10) {
-      mobile = cleaned.slice(-10);
-      countryCode = cleaned.slice(0, cleaned.length - 10);
-    }
-
-    // Provide defaults since they are optional in the schema but required for DB checks
-    const provider = data.provider;
-    const loginType = data.loginType;
-
-    //block check
-    const attemptRecord = await loginAttemptRepository.findAttempt(mobile, provider, loginType);
-
-    if (attemptRecord?.blockedUntil && new Date(attemptRecord.blockedUntil) > new Date()) {
-      const remainingSeconds = Math.ceil(
-        (new Date(attemptRecord.blockedUntil) - new Date()) / 1000,
-      );
-      throw new UnauthorizedException({
-        blocked: true,
-        message: errorConstants.ACCOUNT_BLOCKED,
-        remainingSeconds,
-      });
-    }
-    //block check end
-    const firebaseUid = decodedToken.uid;
-    let existingPatient = await patientRepository.findByFirebaseUid(firebaseUid);
-    if (!existingPatient) {
-      existingPatient = await patientRepository.findByMobile(mobile);
-    }
-
-    let isNewUser = false;
-    if (!existingPatient) {
-      isNewUser = true;
-      const patientCode = await createUniquePatientCode();
-      existingPatient = await patientRepository.create({
-        patientCode,
-        mobile,
-        countryCode,
-        firebaseUid,
-        isActive: true,
-        status: USER_STATUS.ACTIVE,
-        firstName: null,
-        lastName: null,
-        fullName: null,
-        gender: null,
-        dateOfBirth: null,
-        bloodGroup: null,
-        allergies: null,
-        isVerified: true,
-        lastLoginAt: new Date(),
-      });
-    } else {
-      assertPatientCanAuthenticate(existingPatient);
-      isNewUser = false;
-      existingPatient = await patientRepository.updateById(existingPatient.id, {
-        lastLoginAt: new Date(),
-        firebaseUid,
-      });
-    }
-
-    const isOnboardingCompleted = !!(
-      existingPatient.firstName &&
-      existingPatient.firstName !== "User" &&
-      existingPatient.lastName &&
-      !existingPatient.lastName.startsWith("+") &&
-      existingPatient.gender &&
-      existingPatient.dateOfBirth
-    );
-
-    await loginAttemptRepository.resetAttempts(mobile, provider, loginType);
-
-    const tokens = await persistSession(existingPatient, data.deviceToken);
-
-    // Get onboarding state for resumption
-    const onboardingState = isOnboardingCompleted
-      ? null
-      : await userOnboardingRepository.findByUserId(existingPatient.id);
-
-    return {
-      success: true,
-      token: tokens.accessToken,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      sessionId: tokens.sessionId,
-      isNewUser,
-      isOnboardingCompleted,
-      onboardingStep: onboardingState?.data?.currentStep || (isNewUser ? "ASK_LANGUAGE" : null),
-      onboardingData: onboardingState?.data || null,
-      user: {
-        id: existingPatient.id,
-        name: existingPatient.fullName || `User ${existingPatient.mobile}`,
-        mobile: existingPatient.mobile || "",
-        role: "patient",
-      },
-    };
-  }
-
   async refreshToken(payload) {
     const data = await validateSchema(refreshTokenSchema, payload);
     const refreshPayload = JwtUtils.verifyRefreshToken(data.refreshToken);
@@ -388,7 +260,7 @@ class PatientService {
         uid: `mock-uid-${provider}-${firebaseIdToken}`,
         email: `${provider}-mockuser@example.com`,
         name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
-        phone_number: null,
+        phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
       };
     } else {
       if (!firebaseIdToken) {
@@ -424,21 +296,28 @@ class PatientService {
     const firebaseUid = decodedToken.uid;
     const providerUserId = firebaseUid; // Or decodedToken.sub
 
-    const identifier = email || mobile || firebaseUid;
+    const identifier = firebaseUid;
 
     // BLOCK CHECK
     const attemptRecord = await loginAttemptRepository.findAttempt(identifier, provider, loginType);
 
-    if (attemptRecord?.blockedUntil && new Date(attemptRecord.blockedUntil) > new Date()) {
-      const remainingSeconds = Math.ceil(
-        (new Date(attemptRecord.blockedUntil) - new Date()) / 1000,
-      );
+    if (attemptRecord?.blockedUntil) {
+      if (new Date(attemptRecord.blockedUntil) > new Date()) {
+        const remainingSeconds = Math.ceil(
+          (new Date(attemptRecord.blockedUntil) - new Date()) / 1000,
+        );
 
-      throw new UnauthorizedException({
-        blocked: true,
-        message: errorConstants.ACCOUNT_BLOCKED,
-        remainingSeconds,
-      });
+        throw new UnauthorizedException({
+          blocked: true,
+          message: `User is blocked try again after ${new Date(attemptRecord.blockedUntil).toLocaleString()}`,
+          remainingSeconds,
+        });
+      } else {
+        const patientToUnblock = await patientRepository.findByFirebaseUid(firebaseUid);
+        if (patientToUnblock && patientToUnblock.status === USER_STATUS.BLOCKED) {
+          await patientRepository.updateById(patientToUnblock.id, { status: USER_STATUS.ACTIVE });
+        }
+      }
     }
 
     // FIND EXISTING PROVIDER LINK
@@ -481,10 +360,9 @@ class PatientService {
 
         const patientCode = await createUniquePatientCode();
 
-        const isMobileVerified = provider === providerType.MOBILE && loginType === loginType.MOBILE;
-        const socialProviders = ["google", "facebook", "microsoft", "apple"];
-        const isEmailVerified =
-          socialProviders.includes(provider) && loginType === loginType.SOCIAL;
+        const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
+        const socialProviders = ["google", "facebook", "microsoft"];
+        const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
 
         patientUser = await patientRepository.create({
           patientCode,
@@ -515,10 +393,25 @@ class PatientService {
       assertPatientCanAuthenticate(patientUser);
     }
     // SUCCESS LOGIN
-    patientUser = await patientRepository.updateById(patientUser.id, {
+    const updateData = {
       lastLoginAt: new Date(),
       firebaseUid,
-    });
+    };
+
+    if (provider === "mobile" && loginType === "mobile" && !!mobile) {
+      updateData.isMobileVerified = true;
+      if (!patientUser.mobile) {
+        updateData.mobile = mobile;
+        updateData.countryCode = countryCode;
+      }
+    }
+
+    const socialProvidersList = ["google", "facebook", "microsoft"];
+    if (socialProvidersList.includes(provider) && loginType === "social") {
+      updateData.isEmailVerified = true;
+    }
+
+    patientUser = await patientRepository.updateById(patientUser.id, updateData);
 
     await loginAttemptRepository.resetAttempts(identifier, provider, loginType);
 
@@ -575,14 +468,26 @@ class PatientService {
       loginType,
     );
 
+    if (attemptRecord.failedAttempts === 1 && !attemptRecord.blockedUntil) {
+      const patientRecord = await patientRepository.findByFirebaseUid(identifier);
+      if (patientRecord && patientRecord.status === USER_STATUS.BLOCKED) {
+        await patientRepository.updateById(patientRecord.id, { status: USER_STATUS.ACTIVE });
+      }
+    }
+
     if (attemptRecord.failedAttempts >= env.maxLoginAttempts) {
       const blockedUntil = new Date(Date.now() + env.lockTimeMinutes * 60 * 1000);
 
       await loginAttemptRepository.blockMethod(attemptRecord.id, blockedUntil);
 
+      const patientRecord = await patientRepository.findByFirebaseUid(identifier);
+      if (patientRecord) {
+        await patientRepository.updateById(patientRecord.id, { status: USER_STATUS.BLOCKED });
+      }
+
       throw new UnauthorizedException({
         blocked: true,
-        message: errorConstants.ACCOUNT_BLOCKED,
+        message: `User is blocked try again after ${blockedUntil.toLocaleString()}`,
         blockedUntil,
         remainingAttempts: 0,
       });
@@ -592,7 +497,7 @@ class PatientService {
       success: true,
       blocked: false,
       failedAttempts: attemptRecord.failedAttempts,
-      remainingAttempts: env.maxLoginAttempts - attemptRecord.failedAttempts,
+      remainingAttempts: 3 - attemptRecord.failedAttempts,
     };
   }
 }

@@ -551,7 +551,7 @@ class OcrService {
     return this.cleanAndParseJSON(responseText, { traceId, jobId });
   }
 
-  async extractText(file) {
+  async extractText(file, userLanguage = "english") {
     const isPdf =
       file.mimeType === "application/pdf" ||
       file.originalname?.toLowerCase().endsWith(".pdf") ||
@@ -589,6 +589,13 @@ class OcrService {
     const detectedLanguages = ["english"];
     if (hasGujarati) {
       detectedLanguages.push("gujarati");
+    }
+    if (
+      userLanguage &&
+      userLanguage.toLowerCase() !== "english" &&
+      !detectedLanguages.includes(userLanguage.toLowerCase())
+    ) {
+      detectedLanguages.push(userLanguage.toLowerCase());
     }
 
     return {
@@ -889,13 +896,15 @@ ${rawText}
     return JSON.stringify(mapped);
   }
 
-  async generateSummary(rawText) {
+  async generateSummary(rawText, language = "gujarati") {
     if (!rawText || !rawText.trim()) {
       return "";
     }
 
-    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear Gujarati.
-Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal Gujarati translations for these terms are uncommon, awkward, and confusing for patients.
+    const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
+
+    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear ${langDisplay}.
+Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
 The summary should be easy to understand for a layperson.
 Limit the summary to 150-200 words.
 Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
@@ -1095,6 +1104,23 @@ ${rawText}
   async processAndStoreSynchronously({ file, userId }) {
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
+    // Fetch preferred language from onboarding state
+    let preferredLanguage = "gujarati";
+    if (userId) {
+      try {
+        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+          preferredLanguage = onboardingRecord.data.preferredLanguage;
+        }
+      } catch (err) {
+        console.warn(
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          err.message,
+        );
+      }
+    }
+
     // 0. Classify document before upload
     const tClassifyStart = Date.now();
     const {
@@ -1122,7 +1148,7 @@ ${rawText}
 
     // 2. Perform OCR
     const tOcrStart = Date.now();
-    const ocrResult = await this.extractText(file);
+    const ocrResult = await this.extractText(file, preferredLanguage);
     console.log(
       `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
     );
@@ -1134,11 +1160,11 @@ ${rawText}
       `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
     );
 
-    // 4. Generate summary in Gujarati
+    // 4. Generate summary in selected language
     const tSummaryStart = Date.now();
-    const summaryGujarati = await this.generateSummary(ocrResult.rawText);
+    const summaryGujarati = await this.generateSummary(ocrResult.rawText, preferredLanguage);
     console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summary generated. Saving to database...`,
+      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summary generated in ${preferredLanguage}. Saving to database...`,
     );
 
     // 5. Store in database

@@ -82,11 +82,13 @@ Only if needed.
 Provide one practical and encouraging tip.`;
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
-Analyze the provided document (text or image) and determine if it is a medical document.
+Analyze the provided document (which may be an image of a document or text) and determine if it is a medical document. 
+CRITICAL INSTRUCTION: If you are provided an image, carefully READ the text inside it. A photograph or scan of a medical report is completely valid and MUST NOT be rejected just because it is in an image format.
 
 Accept ONLY these medical document types:
 - BLOOD_TEST (Blood Test Reports)
 - LAB_REPORT (Lab Reports)
+- SONOGRAPHY SUMMARY
 - CBC_REPORT (CBC Reports)
 - PRESCRIPTION (Prescription Slips)
 - RADIOLOGY_REPORT (Radiology Reports)
@@ -99,9 +101,11 @@ Accept ONLY these medical document types:
 - HOSPITAL_BILL (Hospital Bills)
 - CLINICAL_NOTE (Clinical Notes)
 - PHARMACY_BILL (Pharmacy Bills)
+- MEDICAL_CHART (Medical Charts, Heart Rate, Cardiograms, ECG, EKG)
+- OTHER_MEDICAL_DOCUMENT (Any other valid medical reports, charts, or records)
 
 Reject immediately:
-- Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, Payment Receipts, Selfies, Family Photos, Random Images, Chat Screenshots, Social Media Images, or any non-medical document.
+- Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, Payment Receipts, Selfies, Family Photos, Chat Screenshots, Social Media Images, or any completely non-medical document.
 
 You MUST return a STRICT JSON response only. Do NOT include markdown code blocks (such as \`\`\`json) or any explanations.
 
