@@ -109,13 +109,24 @@ class PatientService {
     const tokenToVerify = data.firebaseIdToken;
 
     let decodedToken;
-    if (env.enableDummyAuth && tokenToVerify === "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2") {
-      console.log("[DUMMY_AUTH] Bypassing Firebase authentication. Using mock user credentials.");
-      decodedToken = {
-        uid: "msAipc6g4vNEQl24OePv56pe6Qy2",
-        phone_number: "+911111111111",
-      };
-    } else {
+    if (env.enableDummyAuth) {
+      if (tokenToVerify === "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2") {
+        console.log("[DUMMY_AUTH] Bypassing Firebase authentication. Using mock user credentials.");
+        decodedToken = {
+          uid: "msAipc6g4vNEQl24OePv56pe6Qy2",
+          phone_number: "+911111111111",
+        };
+      } else if (tokenToVerify.startsWith("dummy-mobile-")) {
+        const mockPhone = tokenToVerify.replace("dummy-mobile-", "");
+        console.log(`[DUMMY_AUTH] Using dynamic mock user with phone: ${mockPhone}`);
+        decodedToken = {
+          uid: `mock-uid-mobile-${mockPhone}`,
+          phone_number: `+91${mockPhone}`,
+        };
+      }
+    }
+
+    if (!decodedToken) {
       console.log("[FIREBASE_AUTH] Verifying ID token with Firebase Admin SDK.");
       try {
         decodedToken = await verifyFirebaseToken(tokenToVerify);

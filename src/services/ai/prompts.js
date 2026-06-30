@@ -99,6 +99,8 @@ Accept ONLY these medical document types:
 - HOSPITAL_BILL (Hospital Bills)
 - CLINICAL_NOTE (Clinical Notes)
 - PHARMACY_BILL (Pharmacy Bills)
+- BODY_SCAN_REPORT (Body Scan Reports)
+- ANY_OTHER_MEDICAL_REPORT (Any other medical related reports)
 
 Reject immediately:
 - Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, Payment Receipts, Selfies, Family Photos, Random Images, Chat Screenshots, Social Media Images, or any non-medical document.
@@ -110,7 +112,7 @@ If it is NOT a medical document:
 {
   "isMedicalDocument": false,
   "documentType": null,
-  "reason": "The uploaded file is not a medical document.",
+  "reason": "Explain briefly why it is rejected (e.g. 'It is a selfie')",
   "data": null
 }
 
@@ -160,10 +162,12 @@ JSON format:
   "medications": [
     {
       "name": "Medicine Name",
-      "dosage": "Dosage",
-      "frequency": "Frequency",
+      "dosage": "Dosage/Strength",
+      "timeOfDay": "Time/Day",
       "duration": "Duration",
-      "instructions": "Instructions"
+      "qty": "Quantity",
+      "instructions": "Instructions",
+      "type": "Type (tablet, syrup, injection, etc.)"
     }
   ],
   "diagnosis": "Diagnosis text or null",
@@ -230,10 +234,12 @@ JSON format schema:
   "medications": [
     {
       "name": "Medicine Name",
-      "dosage": "Dosage",
-      "frequency": "Frequency",
+      "dosage": "Dosage/Strength",
+      "timeOfDay": "Time/Day",
       "duration": "Duration",
-      "instructions": "Instructions"
+      "qty": "Quantity",
+      "instructions": "Instructions",
+      "type": "Type (tablet, syrup, injection, etc.)"
     }
   ],
   "labTests": [
@@ -307,6 +313,8 @@ Accept ONLY these medical document types:
 - Medical invoice (or hospital bills / pharmacy bills)
 - Vaccination record
 - Insurance medical report
+- Body Scan report
+- Any other medical related reports
 
 Reject immediately:
 - Profile picture, Selfie, Family photo, Pet photo, Food image, Landscape image, Social media screenshot, Meme, Wallpaper, Random gallery photo, Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, or any non-medical document.
@@ -325,7 +333,7 @@ If it is NOT a medical document:
 {
   "isMedicalDocument": false,
   "confidence": 0.92,
-  "reason": "Profile Picture"
+  "reason": "Explain briefly why it is rejected (e.g. 'This is an ID card')"
 }`;
 
 module.exports = {
