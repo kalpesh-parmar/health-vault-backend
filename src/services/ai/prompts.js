@@ -100,7 +100,16 @@ Accept ONLY these medical document types:
 - CLINICAL_NOTE (Clinical Notes)
 - PHARMACY_BILL (Pharmacy Bills)
 - BODY_SCAN_REPORT (Body Scan Reports)
+- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
+- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
+- MEDICAL_REPORT (Any valid medical report not listed above)
 - ANY_OTHER_MEDICAL_REPORT (Any other medical related reports)
+
+Do NOT reject a medical graph or waveform-based report if it shows:
+- ECG/EKG lines, cardiogram waveforms, heart rate charts
+- Medical chart plots, trend graphs, or clinical measurement graphs
+- Medical tables with lab results, vital signs, or diagnostic values
+- Doctor/hospital details, patient metadata, or medical report headers
 
 Reject immediately:
 - Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, Payment Receipts, Selfies, Family Photos, Random Images, Chat Screenshots, Social Media Images, or any non-medical document.
@@ -120,7 +129,15 @@ If it IS a medical document:
 {
   "isMedicalDocument": true,
   "documentType": "LAB_REPORT"
-}`;
+}
+
+If it is a medical document that does not match the listed categories,
+return:
+{
+  "isMedicalDocument": true,
+  "documentType": "MEDICAL_REPORT"
+}
+`;
 
 const OCR_PROMPT = `You are a precise medical OCR and data extraction engine.
 Extract all visible text and structured information from the provided document.
@@ -315,6 +332,8 @@ Accept ONLY these medical document types:
 - Insurance medical report
 - Body Scan report
 - GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
+- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
+- MEDICAL_REPORT (Any valid medical report not listed above)
 - Any other medical related reports
 
 Reject immediately:
@@ -352,6 +371,41 @@ Return ONLY a valid JSON object strictly matching this schema:
   }
 }`;
 
+const GRAPHICAL_REPORT_EXTRACTION_PROMPT = `You are a precise medical chart interpretation engine.
+Analyze the provided medical chart image. The image may be an ECG, EKG, cardiogram, heart rate waveform, or other graphical medical report.
+Extract any visible text, patient/hospital/doctor metadata, and a clear structured clinical interpretation.
+
+Rules:
+1. Use only the image content. Do not hallucinate information.
+2. If a field is missing, set it to null or an empty array as specified.
+3. Return ONLY a valid JSON object. Do NOT wrap in markdown code blocks or add explanations.
+
+JSON format:
+{
+  "success": true,
+  "documentType": "MEDICAL_CHART",
+  "chartType": "ECG" or "EKG" or "CARDIOGRAM" or null,
+  "patientName": "Patient Name or null",
+  "reportDate": "YYYY-MM-DD or null",
+  "doctorName": "Doctor Name or null",
+  "hospitalName": "Hospital/Clinic Name or null",
+  "primaryFinding": "Short clinical finding or null",
+  "impression": "Short clinical impression or null",
+  "diagnosis": [],
+  "ecgFindings": [],
+  "heartRate": "Beats per minute or null",
+  "rhythm": "Rhythm description or null",
+  "intervals": {
+    "PR": "ms or null",
+    "QRS": "ms or null",
+    "QT": "ms or null"
+  },
+  "summary": "Short summary or null",
+  "rawText": "Transcribed text from the image or null"
+}
+
+If the visible image contains both text and waveform data, capture both in the response. Format dates as YYYY-MM-DD when possible.`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -361,6 +415,7 @@ module.exports = {
   OCR_PROMPT,
   PLAIN_TEXT_OCR_PROMPT,
   STRUCTURED_EXTRACTION_PROMPT,
+  GRAPHICAL_REPORT_EXTRACTION_PROMPT,
   ONBOARDING_SYSTEM_PROMPT,
   CLASSIFICATION_PROMPT,
   GRAPHICAL_ANALYSIS_PROMPT,

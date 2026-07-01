@@ -1,0 +1,1 @@
+ALTER TABLE "documents" RENAME COLUMN "summary_gujarati" TO "summary_in_preferred_language";

@@ -16,6 +16,7 @@ paths:
         Uploads a medical report document, runs OCR + AI extraction synchronously,
         and extracts structured patient information (first/last name, gender, DOB, blood group, allergies)
         to pre-fill signup/onboarding details.
+        Supports PDF or image medical reports, including graphical charts such as ECG / cardiogram images.
       security:
         - bearerAuth: []
       requestBody:

@@ -71,6 +71,37 @@ class MedicalDocumentClassifierService {
           return JSON.parse(raw.slice(firstBrace, lastBrace + 1));
         },
       },
+      {
+        name: "key_value_fallback",
+        fn: () => {
+          const obj = {};
+          const lines = raw.split(/\r?\n/);
+          for (const line of lines) {
+            const match = line.match(/^\s*([a-zA-Z0-9_]+)\s*:\s*(.+)$/);
+            if (!match) continue;
+            const key = match[1].trim();
+            let value = match[2].trim();
+            if (/^true$/i.test(value)) value = true;
+            else if (/^false$/i.test(value)) value = false;
+            else if (!Number.isNaN(Number(value))) value = Number(value);
+            else if (
+              (value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith("'") && value.endsWith("'"))
+            ) {
+              value = value.slice(1, -1);
+            }
+            obj[key] = value;
+          }
+          if (typeof obj.isMedicalDocument !== "boolean") {
+            if (obj.documentType) {
+              obj.isMedicalDocument = true;
+            } else {
+              throw new Error("No valid isMedicalDocument field found");
+            }
+          }
+          return obj;
+        },
+      },
     ];
 
     for (const strategy of strategies) {

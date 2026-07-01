@@ -6,13 +6,7 @@ const { z } = require("zod");
 const { env } = require("../../../configs/env");
 const { ollamaClient } = require("../clients/ollamaClient");
 const { NonMedicalDocumentException } = require("../../../exceptions/appError");
-const {
-  // CLASSIFICATION_PROMPT,
-  // GRAPHICAL_ANALYSIS_PROMPT,
-  PLAIN_TEXT_OCR_PROMPT,
-  VALIDATION_PROMPT,
-  STRUCTURED_EXTRACTION_PROMPT,
-} = require("../prompts");
+const prompts = require("../prompts");
 const sharp = require("sharp");
 
 async function preprocessImage(imageBuffer) {
@@ -42,16 +36,10 @@ async function preprocessImage(imageBuffer) {
 
 // DB dependencies for processAndStoreSynchronously
 const { db } = require("../../../configs/db");
-const {
-  // documentOcrRawData,
-  // documentPages,
-  medicalGraph,
-} = require("../../../models/documentArtifacts");
+const { document } = require("../../../models/document");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { fileTypeValue } = require("../../../enums/fileType");
 const uploadFileService = require("../../uploadFileService");
-const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
-const { document } = require("../../../models/document");
 
 const TestResultSchema = z.object({
   testName: z.string().nullable().default(null),
@@ -459,6 +447,33 @@ class OcrService {
         },
       },
       {
+        name: "key_value_fallback",
+        fn: () => {
+          const obj = {};
+          const lines = raw.split(/\r?\n/);
+          for (const line of lines) {
+            const match = line.match(/^\s*(\w+)\s*:\s*(.+)$/);
+            if (!match) continue;
+            const key = match[1].trim();
+            let value = match[2].trim();
+            if (/^true$/i.test(value)) value = true;
+            else if (/^false$/i.test(value)) value = false;
+            else if (!Number.isNaN(Number(value))) value = Number(value);
+            else if (
+              (value.startsWith('"') && value.endsWith('"')) ||
+              (value.startsWith("'") && value.endsWith("'"))
+            ) {
+              value = value.slice(1, -1);
+            }
+            obj[key] = value;
+          }
+          if (Object.keys(obj).length === 0) {
+            throw new Error("No key-value structure found");
+          }
+          return obj;
+        },
+      },
+      {
         name: "truncated_repair",
         fn: () => {
           const firstBrace = raw.indexOf("{");
@@ -538,7 +553,7 @@ class OcrService {
 
     if (isPdf) {
       const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+      const prompt = `${prompts.VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
 
       console.log("[OcrService] Validating PDF document...");
       responseText = await ollamaClient.generate(prompt, "qwen2.5:14b", { temperature: 0 });
@@ -548,7 +563,7 @@ class OcrService {
       const messages = [
         {
           role: "user",
-          content: VALIDATION_PROMPT,
+          content: prompts.VALIDATION_PROMPT,
           images: [base64Image],
         },
       ];
@@ -560,7 +575,35 @@ class OcrService {
     const traceId = file.traceId || "N/A";
     const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
 
-    return this.cleanAndParseJSON(responseText, { traceId, jobId });
+    const validation = this.cleanAndParseJSON(responseText, { traceId, jobId });
+    const shouldRunFallback =
+      validation.status === "FAILED" ||
+      validation.isMedicalDocument !== true ||
+      !validation.documentType;
+
+    if (shouldRunFallback) {
+      try {
+        const {
+          medicalDocumentClassifierService,
+        } = require("../classifier/medicalDocumentClassifier.service");
+        const fallback = await medicalDocumentClassifierService.classify(file);
+        if (fallback && fallback.isMedicalDocument) {
+          return {
+            status: "SUCCESS",
+            ...fallback,
+          };
+        }
+        if (validation.status === "SUCCESS" && validation.isMedicalDocument === false) {
+          return validation;
+        }
+      } catch (fallbackError) {
+        console.warn(
+          `[OcrService] Validation fallback classifier failed: ${fallbackError.message}`,
+        );
+      }
+    }
+
+    return validation;
   }
 
   async extractText(file, userLanguage = "english") {
@@ -587,7 +630,7 @@ class OcrService {
       const messages = [
         {
           role: "user",
-          content: PLAIN_TEXT_OCR_PROMPT,
+          content: prompts.PLAIN_TEXT_OCR_PROMPT,
           images: [base64Images[i]],
         },
       ];
@@ -614,6 +657,131 @@ class OcrService {
       rawText,
       detectedLanguages,
       pageCount: base64Images.length,
+    };
+  }
+
+  isGraphicalDocumentType(documentType) {
+    if (!documentType) return false;
+    const normalized = String(documentType).trim().toLowerCase();
+    return (
+      normalized.includes("medical_chart") ||
+      normalized.includes("graphical_report") ||
+      normalized.includes("body_scan_report") ||
+      normalized.includes("ecg") ||
+      normalized.includes("ekg") ||
+      normalized.includes("cardiogram") ||
+      normalized.includes("waveform") ||
+      normalized.includes("chart") ||
+      normalized.includes("graph")
+    );
+  }
+
+  async extractGraphicalMedicalData(file, userLanguage = "english") {
+    const isPdf =
+      file.mimeType === "application/pdf" ||
+      file.originalname?.toLowerCase().endsWith(".pdf") ||
+      file.filename?.toLowerCase().endsWith(".pdf");
+
+    let base64Images = [];
+    if (isPdf) {
+      base64Images = await this.convertPdfToImages(file.buffer);
+    } else {
+      const processedBuffer = await preprocessImage(file.buffer);
+      base64Images = [processedBuffer.toString("base64")];
+    }
+
+    const pageResults = [];
+    for (let i = 0; i < base64Images.length; i++) {
+      const messages = [
+        {
+          role: "user",
+          content: prompts.GRAPHICAL_REPORT_EXTRACTION_PROMPT,
+          images: [base64Images[i]],
+        },
+      ];
+
+      const responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+        temperature: 0,
+      });
+
+      const parsed = this.cleanAndParseJSON(responseText);
+      if (parsed.status === "FAILED" || parsed.success !== true) {
+        throw new Error("Graphical medical document extraction failed");
+      }
+
+      pageResults.push(parsed);
+    }
+
+    const combined = {
+      success: true,
+      documentType: "MEDICAL_CHART",
+      chartType: pageResults.find((item) => item.chartType)?.chartType || null,
+      patientName: pageResults.find((item) => item.patientName)?.patientName || null,
+      reportDate: pageResults.find((item) => item.reportDate)?.reportDate || null,
+      doctorName: pageResults.find((item) => item.doctorName)?.doctorName || null,
+      hospitalName: pageResults.find((item) => item.hospitalName)?.hospitalName || null,
+      primaryFinding:
+        pageResults
+          .map((item) => item.primaryFinding)
+          .filter(Boolean)
+          .join(" / ") || null,
+      impression:
+        pageResults
+          .map((item) => item.impression)
+          .filter(Boolean)
+          .join(" / ") || null,
+      diagnosis: uniqueStrings(pageResults.flatMap((item) => asArray(item.diagnosis))),
+      ecgFindings: uniqueStrings(pageResults.flatMap((item) => asArray(item.ecgFindings))),
+      heartRate:
+        pageResults.find((item) => item.heartRate && String(item.heartRate).trim())?.heartRate ||
+        null,
+      rhythm: pageResults.find((item) => item.rhythm && String(item.rhythm).trim())?.rhythm || null,
+      intervals: pageResults.reduce(
+        (acc, item) => {
+          const intervals = item.intervals || {};
+          return {
+            PR: acc.PR || intervals.PR || null,
+            QRS: acc.QRS || intervals.QRS || null,
+            QT: acc.QT || intervals.QT || null,
+          };
+        },
+        { PR: null, QRS: null, QT: null },
+      ),
+      summary:
+        pageResults
+          .map((item) => item.summary)
+          .filter(Boolean)
+          .join(" ")
+          .trim() || null,
+      rawText:
+        pageResults
+          .map((item) => item.rawText)
+          .filter(Boolean)
+          .join("\n\n")
+          .trim() || null,
+    };
+
+    const hasGujarati = /[\u0A80-\u0AFF]/.test(combined.rawText || "");
+    const detectedLanguages = ["english"];
+    if (hasGujarati) {
+      detectedLanguages.push("gujarati");
+    }
+    if (
+      userLanguage &&
+      userLanguage.toLowerCase() !== "english" &&
+      !detectedLanguages.includes(userLanguage.toLowerCase())
+    ) {
+      detectedLanguages.push(userLanguage.toLowerCase());
+    }
+
+    return {
+      rawText: combined.rawText || combined.summary || "",
+      detectedLanguages,
+      pageCount: base64Images.length,
+      structuredData: {
+        ...combined,
+        remarks: combined.impression || combined.primaryFinding || null,
+      },
     };
   }
 
@@ -804,7 +972,7 @@ ${rawText}
       const messages = [
         {
           role: "user",
-          content: PLAIN_TEXT_OCR_PROMPT,
+          content: prompts.PLAIN_TEXT_OCR_PROMPT,
           images: [base64Image],
         },
       ];
@@ -823,7 +991,7 @@ ${rawText}
       throw new Error("OCR produced no usable text");
     }
 
-    const structurePrompt = STRUCTURED_EXTRACTION_PROMPT(rawText);
+    const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
       "[OcrService] Redesigned Pipeline Step 2: Querying qwen2.5:14b for STRUCTURED EXTRACTION...",
@@ -908,14 +1076,15 @@ ${rawText}
     return JSON.stringify(mapped);
   }
 
-  async generateSummary(rawText, language = "Gujarati") {
+  async generateSummary(rawText, language = "gujarati") {
     if (!rawText || !rawText.trim()) {
       return "";
     }
 
-    const prompt = `You are a helpful medical interpreter. Summarize the following medical document in simple, clear ${language}.
-Interpret the results for the patient (e.g. if hemoglobin is low, mention it might indicate anemia) rather than just listing raw numbers line by line.
-Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal translations for these terms are uncommon, awkward, and confusing for patients.
+    const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
+
+    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear ${langDisplay}.
+Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
 The summary should be easy to understand for a layperson.
 Limit the summary to 150-200 words.
 Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
@@ -1132,27 +1301,9 @@ ${rawText}
       }
     }
 
-    // 0. Classify document before upload
-    const tClassifyStart = Date.now();
-    const {
-      medicalDocumentClassifierService,
-    } = require("../classifier/medicalDocumentClassifier.service");
-    const classification = await medicalDocumentClassifierService.classify(file);
-    console.log(
-      `[OcrService] [CLASSIFY] Duration: ${Date.now() - tClassifyStart}ms. Result:`,
-      classification,
-    );
-    if (classification.documentType === "GRAPHICAL_REPORT") {
-      return this.analyzeGraphicalDocument(file, userId);
-    }
-    if (!classification.isMedicalDocument) {
-      throw new NonMedicalDocumentException(
-        classification.reason || "The uploaded file is not a medical document.",
-        classification,
-      );
-    }
-
-    // 1. Upload file
+    // 0. Upload file and validate it as a medical document.
+    // `uploadFileService.uploadFile` already runs AI validation for PATIENT_DOCUMENT,
+    // so this avoids duplicate classifier logic and keeps v1/ocr/extract aligned with the document OCR pipeline.
     const tUploadStart = Date.now();
     const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
     console.log(
@@ -1161,62 +1312,47 @@ ${rawText}
 
     // 2. Perform OCR
     const tOcrStart = Date.now();
-    const ocrResult = await this.extractText(file, preferredLanguage);
-    console.log(
-      `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
-    );
+    const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
+    let ocrResult;
+    let structuredData;
 
-    // 3. Extract structured medical data
-    const tExtractStart = Date.now();
-    const structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
-    console.log(
-      `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating summary...`,
-    );
-
-    // 3.5 Fetch user preferred language
-    // let preferredLanguage = "Gujarati";
-    if (userId) {
-      try {
-        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
-          preferredLanguage = onboardingRecord.data.preferredLanguage;
-          // Capitalize first letter for prompt
-          preferredLanguage =
-            preferredLanguage.charAt(0).toUpperCase() + preferredLanguage.slice(1);
-        }
-      } catch (err) {
-        console.error(
-          `[OcrService] Failed to fetch language for user ${userId}, defaulting to Gujarati`,
-          err,
-        );
-      }
-    }
-
-    // 4. Generate summaries
-    const tSummaryStart = Date.now();
-    let summaryEnglish = "";
-    let summaryLocal = "";
-
-    // Always generate English first
-    summaryEnglish = await this.generateSummary(ocrResult.rawText, "English");
-    console.log(`[OcrService] [SUMMARY] English summary generated.`);
-
-    // If their preferred language isn't English, generate the local one too
-    if (preferredLanguage.toLowerCase() !== "english") {
-      summaryLocal = await this.generateSummary(ocrResult.rawText, preferredLanguage);
-      console.log(`[OcrService] [SUMMARY] ${preferredLanguage} summary generated.`);
+    if (isGraphicalDocument) {
+      ocrResult = await this.extractGraphicalMedicalData(file, preferredLanguage);
+      structuredData = ocrResult.structuredData;
+      console.log(
+        `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Graphical report detected. Page count = ${ocrResult.pageCount}.`,
+      );
+      console.log(
+        `[OcrService] [EXTRACT] Graphical structured extraction complete. Generating Gujarati summary...`,
+      );
     } else {
-      summaryLocal = summaryEnglish;
+      ocrResult = await this.extractText(file, preferredLanguage);
+      console.log(
+        `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
+      );
+
+      // 3. Extract structured medical data
+      const tExtractStart = Date.now();
+      structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+      console.log(
+        `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
+      );
     }
 
-    // Attach both summaries directly into the structured JSON data so we don't need database schema changes
-    structuredData.summaryEnglish = summaryEnglish;
-    structuredData.summaryLocal = summaryLocal;
-    structuredData.summaryLanguage = preferredLanguage;
-
-    console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated. Saving to database...`,
+    // 4. Generate summaries in English and preferred language
+    const tSummaryStart = Date.now();
+    const summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+    const summaryPreferredLanguage = await this.generateSummary(
+      ocrResult.rawText,
+      preferredLanguage,
     );
+    console.log(
+      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
+    );
+
+    // Ensure controller response contains both summaries
+    structuredData.summaryEnglish = summaryEnglish;
+    structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
 
     // 5. Store in database
     const tDbStart = Date.now();
@@ -1247,8 +1383,8 @@ ${rawText}
         hospitalName: structuredData.hospitalName || null,
         doctorName: structuredData.doctorName || null,
         remarks: structuredData.remarks || null,
-        // We will keep putting the local one in summaryGujarati for backward compatibility
-        summaryGujarati: summaryLocal,
+        summaryEnglish,
+        summaryInPreferredLanguage: summaryPreferredLanguage,
       })
       .returning();
     console.log(
@@ -1265,8 +1401,7 @@ ${rawText}
         language: ocrResult.detectedLanguages?.join(",") || "en",
       },
       structured: {
-        summary: summaryLocal,
-        summaryEnglish: summaryEnglish,
+        summary: summaryPreferredLanguage,
         observations: Array.isArray(structuredData.diagnosis)
           ? structuredData.diagnosis
           : structuredData.diagnosis
@@ -1284,48 +1419,6 @@ ${rawText}
       ocrResult,
       structuredData,
     };
-  }
-  //New Method: analyzeGraphicalDocument(file) which uses the vision model (ollamaClient.chat) to visually interpret the file and return structured JSON.
-
-  async analyzeGraphicalDocument(file, userId) {
-    // 1. Upload image to S3 (temporary for vision analysis)
-    const uploadResult = await uploadFileService.uploadFile(file, "TEMP_GRAPHICAL_DOC", userId);
-
-    const tAnalyzeStart = Date.now();
-    try {
-      // 2. Analyze using vision model
-      const visionResult = await this.extractTextFromImageUsingVision(
-        uploadResult.data.filePath,
-        "en",
-      );
-      console.log(`[OcrService] [VISION] Analyzed in ${Date.now() - tAnalyzeStart}ms`);
-
-      // 3. Clean and parse JSON
-      const structuredData = this.cleanAndParseJSON(visionResult);
-
-      // 4. Store in database (separate table? or use existing structure?)
-      // Option A: Store in new medicalGraph table
-      const [graph] = await db
-        .insert(medicalGraph)
-        .values({
-          documentId: null, // Optional link
-          userId: userId || null,
-          graphType: "medical_chart", // Or based on type detected
-          analysisData: structuredData,
-          analysisStatus: "COMPLETED",
-        })
-        .returning();
-
-      return { graph, analysisResult: structuredData };
-    } finally {
-      // 5. Delete temporary upload
-      try {
-        await uploadFileService.deleteFile(uploadResult.data.fileKey);
-        console.log(`[OcrService] Deleted temporary upload: ${uploadResult.data.fileKey}`);
-      } catch (deleteErr) {
-        console.warn("[OcrService] Failed to delete temporary upload", deleteErr);
-      }
-    }
   }
 }
 
