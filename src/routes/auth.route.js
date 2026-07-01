@@ -4,7 +4,7 @@ const patientController = require("../controllers/patient.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
 router.post("/social-login", patientController.socialLogin);
-router.post("/firebase-login", patientController.firebaseLogin);
+// router.post("/firebase-login", patientController.firebaseLogin);
 router.post("/refresh-token", patientController.refreshToken);
 router.post("/logout", verifyToken, patientController.logoutPatient);
 router.post("/auth-failure", patientController.reportAuthFailure);

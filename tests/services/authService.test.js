@@ -2,10 +2,20 @@
 const patientService = require("../../src/services/patientService");
 const patientRepository = require("../../src/repositories/patientRepository");
 const sessionRepository = require("../../src/repositories/sessionRepository");
-const { verifyFirebaseToken } = require("../../src/configs/firebase");
+const loginAttemptRepository = require("../../src/repositories/loginAttemptRepository");
+const userOnboardingRepository = require("../../src/repositories/userOnboardingRepository");
+const authProviderRepository = require("../../src/repositories/authProviderRepository");
+const {
+  verifyFirebaseToken,
+  findOrCreateFirebaseUser,
+  createCustomFirebaseToken,
+} = require("../../src/configs/firebase");
 
 jest.mock("../../src/repositories/patientRepository");
 jest.mock("../../src/repositories/sessionRepository");
+jest.mock("../../src/repositories/loginAttemptRepository");
+jest.mock("../../src/repositories/userOnboardingRepository");
+jest.mock("../../src/repositories/authProviderRepository");
 jest.mock("../../src/configs/firebase");
 jest.mock("../../src/configs/env", () => {
   const actual = jest.requireActual("../../src/configs/env");
@@ -13,16 +23,25 @@ jest.mock("../../src/configs/env", () => {
     env: {
       ...actual.env,
       enableDummyAuth: true,
+      microsoftClientId: "test-client-id",
     },
   };
 });
 
-describe("PatientService - Firebase Login", () => {
+describe("PatientService - Social/Mobile Login", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Reset all mock behaviors to prevent state leakage
+    jest.resetAllMocks();
+
+    // Default mocks for helper repositories to avoid hitting the actual database
+    loginAttemptRepository.findAttempt.mockResolvedValue(null);
+    loginAttemptRepository.resetAttempts.mockResolvedValue({});
+    authProviderRepository.findByProvider.mockResolvedValue(null);
+    authProviderRepository.create.mockResolvedValue({});
+    userOnboardingRepository.findByUserId.mockResolvedValue(null);
   });
 
-  it("should successfully login an existing patient", async () => {
+  it("should successfully login an existing mobile patient", async () => {
     const mockToken = "mock-firebase-token";
     const mockDecodedToken = {
       phone_number: "+919999999999",
@@ -44,8 +63,10 @@ describe("PatientService - Firebase Login", () => {
     patientRepository.updateById.mockResolvedValue(mockPatient);
     sessionRepository.create.mockResolvedValue({});
 
-    const result = await patientService.firebaseLogin({
-      firebaseToken: mockToken,
+    const result = await patientService.socialLogin({
+      loginType: "mobile",
+      provider: "mobile",
+      firebaseIdToken: mockToken,
       deviceToken: "mock-device-token",
     });
 
@@ -58,7 +79,7 @@ describe("PatientService - Firebase Login", () => {
     expect(result.refreshToken).toBeDefined();
   });
 
-  it("should automatically register a new patient if they do not exist", async () => {
+  it("should automatically register a new mobile patient if they do not exist", async () => {
     const mockToken = "mock-firebase-token-new";
     const mockDecodedToken = {
       phone_number: "+918888888888",
@@ -78,10 +99,13 @@ describe("PatientService - Firebase Login", () => {
     };
 
     patientRepository.create.mockResolvedValue(mockCreatedPatient);
+    patientRepository.updateById.mockResolvedValue(mockCreatedPatient);
     sessionRepository.create.mockResolvedValue({});
 
-    const result = await patientService.firebaseLogin({
-      firebaseToken: mockToken,
+    const result = await patientService.socialLogin({
+      loginType: "mobile",
+      provider: "mobile",
+      firebaseIdToken: mockToken,
     });
 
     expect(verifyFirebaseToken).toHaveBeenCalledWith(mockToken);
@@ -96,7 +120,7 @@ describe("PatientService - Firebase Login", () => {
       id: "mock-uuid-dummy",
       mobile: "1111111111",
       countryCode: "+91",
-      firebaseUid: "msAipc6g4vNEQl24OePv56pe6Qy2",
+      firebaseUid: "mock-uid-mobile-dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2",
       fullName: "Dummy User",
       status: "ACTIVE",
     };
@@ -105,12 +129,52 @@ describe("PatientService - Firebase Login", () => {
     patientRepository.updateById.mockResolvedValue(mockPatient);
     sessionRepository.create.mockResolvedValue({});
 
-    const result = await patientService.firebaseLogin({
-      firebaseToken: "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2",
+    const result = await patientService.socialLogin({
+      loginType: "mobile",
+      provider: "mobile",
+      firebaseIdToken: "dummy-token-msAipc6g4vNEQl24OePv56pe6Qy2",
     });
 
     expect(verifyFirebaseToken).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
     expect(result.user.mobile).toBe("1111111111");
+  });
+
+  it("should successfully login with Microsoft using backend Custom Token flow", async () => {
+    // Prefix dummy- to match dummy authorization handling
+    const mockMicrosoftToken = "dummy-microsoft-123";
+
+    const mockPatient = {
+      id: "mock-uuid-microsoft",
+      email: "microsoft-mockuser@example.com",
+      firebaseUid: "microsoft_microsoft-123",
+      fullName: "Mock MicrosoftUser",
+      status: "ACTIVE",
+    };
+
+    findOrCreateFirebaseUser.mockResolvedValue({ uid: "microsoft_microsoft-123" });
+    createCustomFirebaseToken.mockResolvedValue("mock-firebase-custom-token");
+
+    patientRepository.findByEmail.mockResolvedValue(mockPatient);
+    patientRepository.updateById.mockResolvedValue(mockPatient);
+    sessionRepository.create.mockResolvedValue({});
+
+    const result = await patientService.socialLogin({
+      loginType: "social",
+      provider: "microsoft",
+      providerToken: mockMicrosoftToken,
+      deviceToken: "mock-device-token",
+    });
+
+    expect(findOrCreateFirebaseUser).toHaveBeenCalledWith(
+      "microsoft-mockuser@example.com",
+      "Mock MicrosoftUser",
+      "microsoft-123",
+    );
+    expect(createCustomFirebaseToken).toHaveBeenCalledWith("microsoft_microsoft-123");
+    expect(result.success).toBe(true);
+    expect(result.firebaseCustomToken).toBe("mock-firebase-custom-token");
+    expect(result.token).toBeDefined();
+    expect(result.refreshToken).toBeDefined();
   });
 });

@@ -481,7 +481,11 @@ class OcrService {
             }
           }
           const closing = stack.reverse().join("");
-          const repaired = body + closing;
+          let repaired = body;
+          if (inStr) {
+            repaired += '"';
+          }
+          repaired += closing;
           const cleaned = repaired.replace(/,\s*([}\]])/g, "$1");
           return JSON.parse(cleaned);
         },
@@ -518,40 +522,20 @@ class OcrService {
   }
 
   async validateDocument(file) {
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
-    let responseText;
+    const {
+      medicalDocumentClassifierService,
+    } = require("../classifier/medicalDocumentClassifier.service");
 
-    if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+    console.log("[OcrService] Delegating validation to MedicalDocumentClassifierService...");
+    const classification = await medicalDocumentClassifierService.classify(file);
 
-      console.log("[OcrService] Validating PDF document...");
-      responseText = await ollamaClient.generate(prompt, "qwen2.5:14b", { temperature: 0 });
-    } else {
-      const processedBuffer = await preprocessImage(file.buffer);
-      const base64Image = processedBuffer.toString("base64");
-      const messages = [
-        {
-          role: "user",
-          content: prompts.VALIDATION_PROMPT,
-          images: [base64Image],
-        },
-      ];
-
-      console.log("[OcrService] Validating image document using qwen3-vl:latest...");
-      responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
-    }
-
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
-
-    return this.cleanAndParseJSON(responseText, { traceId, jobId });
+    return {
+      status: classification.confidence > 0 ? "SUCCESS" : "FAILED",
+      ...classification,
+    };
   }
 
-  async extractText(file) {
+  async extractText(file, userLanguage = "english") {
     const isPdf =
       file.mimeType === "application/pdf" ||
       file.originalname?.toLowerCase().endsWith(".pdf") ||
@@ -589,6 +573,13 @@ class OcrService {
     const detectedLanguages = ["english"];
     if (hasGujarati) {
       detectedLanguages.push("gujarati");
+    }
+    if (
+      userLanguage &&
+      userLanguage.toLowerCase() !== "english" &&
+      !detectedLanguages.includes(userLanguage.toLowerCase())
+    ) {
+      detectedLanguages.push(userLanguage.toLowerCase());
     }
 
     return {
@@ -889,13 +880,15 @@ ${rawText}
     return JSON.stringify(mapped);
   }
 
-  async generateSummary(rawText) {
+  async generateSummary(rawText, language = "gujarati") {
     if (!rawText || !rawText.trim()) {
       return "";
     }
 
-    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear Gujarati.
-Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal Gujarati translations for these terms are uncommon, awkward, and confusing for patients.
+    const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
+
+    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear ${langDisplay}.
+Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
 The summary should be easy to understand for a layperson.
 Limit the summary to 150-200 words.
 Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
@@ -1095,6 +1088,23 @@ ${rawText}
   async processAndStoreSynchronously({ file, userId }) {
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
+    // Fetch preferred language from onboarding state
+    let preferredLanguage = "gujarati";
+    if (userId) {
+      try {
+        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+          preferredLanguage = onboardingRecord.data.preferredLanguage;
+        }
+      } catch (err) {
+        console.warn(
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          err.message,
+        );
+      }
+    }
+
     // 0. Classify document before upload
     const tClassifyStart = Date.now();
     const {
@@ -1122,7 +1132,7 @@ ${rawText}
 
     // 2. Perform OCR
     const tOcrStart = Date.now();
-    const ocrResult = await this.extractText(file);
+    const ocrResult = await this.extractText(file, preferredLanguage);
     console.log(
       `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
     );
@@ -1134,11 +1144,11 @@ ${rawText}
       `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
     );
 
-    // 4. Generate summary in Gujarati
+    // 4. Generate summary in selected language
     const tSummaryStart = Date.now();
-    const summaryGujarati = await this.generateSummary(ocrResult.rawText);
+    const summaryGujarati = await this.generateSummary(ocrResult.rawText, preferredLanguage);
     console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summary generated. Saving to database...`,
+      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summary generated in ${preferredLanguage}. Saving to database...`,
     );
 
     // 5. Store in database
