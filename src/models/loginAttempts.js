@@ -19,9 +19,7 @@ const loginAttempt = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     loginType: loginTypeEnum("login_type").notNull(),
     provider: providerEnum("provider").notNull(),
-    identifier: varchar("identifier", {
-      length: 255,
-    }).notNull(),
+    identifier: varchar("identifier", { length: 255 }).notNull(),
     failedAttempts: integer("failed_attempts").default(0).notNull(),
     lastAttemptAt: timestamp("last_attempt_at"),
     blockedUntil: timestamp("blocked_until"),

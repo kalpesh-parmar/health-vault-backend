@@ -28,11 +28,121 @@ const {
   updatePatientSchema,
   validateSchema,
 } = require("../validations");
-const { verifyFirebaseToken } = require("../configs/firebase");
+const {
+  verifyFirebaseToken,
+  findOrCreateFirebaseUser,
+  createCustomFirebaseToken,
+} = require("../configs/firebase");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const axios = require("axios");
 const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorageService");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
+
+let cachedKeys = null;
+let keysExpiryTime = 0;
+
+async function getMicrosoftPublicKeys() {
+  const now = Date.now();
+  if (cachedKeys && now < keysExpiryTime) {
+    return cachedKeys;
+  }
+
+  try {
+    const response = await axios.get(
+      "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+    );
+    cachedKeys = response.data.keys;
+    keysExpiryTime = now + 24 * 60 * 60 * 1000; // cache for 24 hours
+    return cachedKeys;
+  } catch (error) {
+    console.error("Failed to fetch Microsoft public keys:", error);
+    throw new Error("Failed to verify Microsoft token due to keys discovery failure");
+  }
+}
+
+async function verifyMicrosoftToken(idToken) {
+  const decoded = jwt.decode(idToken, { complete: true });
+  if (!decoded || !decoded.header || !decoded.header.kid) {
+    throw new Error("Invalid Microsoft ID Token: missing kid in header");
+  }
+
+  const kid = decoded.header.kid;
+  let keys = await getMicrosoftPublicKeys();
+  let jwk = keys.find((key) => key.kid === kid);
+
+  if (!jwk) {
+    // Retry once by clearing cache
+    cachedKeys = null;
+    keysExpiryTime = 0;
+    keys = await getMicrosoftPublicKeys();
+    jwk = keys.find((key) => key.kid === kid);
+    if (!jwk) {
+      throw new Error("Invalid Microsoft ID Token: kid not found in public keys");
+    }
+  }
+
+  // Import JWK key using native Node crypto module
+  let publicKey;
+  try {
+    publicKey = crypto.createPublicKey({
+      key: jwk,
+      format: "jwk",
+    });
+  } catch (error) {
+    console.error("Failed to import JWK key:", error);
+    throw new Error("Failed to verify Microsoft token due to key import error");
+  }
+
+  // Verify signature and claims
+  return new Promise((resolve, reject) => {
+    jwt.verify(
+      idToken,
+      publicKey,
+      {
+        algorithms: ["RS256"],
+      },
+      (err, decodedPayload) => {
+        if (err) {
+          return reject(
+            new Error(`Microsoft ID Token signature verification failed: ${err.message}`),
+          );
+        }
+
+        // Verify audience (aud)
+        const expectedAudience = env.microsoftClientId;
+        if (!expectedAudience) {
+          return reject(new Error("MICROSOFT_CLIENT_ID is not configured in env"));
+        }
+        if (decodedPayload.aud !== expectedAudience) {
+          return reject(
+            new Error(
+              `Audience mismatch. Expected: ${expectedAudience}, got: ${decodedPayload.aud}`,
+            ),
+          );
+        }
+
+        // Verify issuer (iss)
+        const iss = decodedPayload.iss || "";
+        const isValidIssuer =
+          iss.startsWith("https://login.microsoftonline.com/") && iss.endsWith("/v2.0");
+        if (!isValidIssuer) {
+          return reject(new Error(`Invalid issuer: ${iss}`));
+        }
+
+        // Verify expiration (exp)
+        const now = Math.floor(Date.now() / 1000);
+        if (decodedPayload.exp < now) {
+          return reject(new Error("Microsoft ID Token has expired"));
+        }
+
+        return resolve(decodedPayload);
+      },
+    );
+  });
+}
 
 async function createUniquePatientCode() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -200,6 +310,7 @@ class PatientService {
 
     // Revoke all sessions for this patient on deletion
     await sessionRepository.deleteByPatientId(params.id);
+    await authProviderRepository.softDeleteByUserId(params.id);
 
     const deletedPatient = await patientRepository.softDeleteById(params.id);
 
@@ -215,6 +326,7 @@ class PatientService {
 
     await sessionRepository.deleteByPatientId(params.id);
     await documentRepository.deleteByPatientId(params.id);
+    await authProviderRepository.hardDeleteByUserId(params.id);
 
     const deletedPatient = await patientRepository.hardDeleteById(params.id);
 
@@ -255,22 +367,64 @@ class PatientService {
     const { provider, loginType, firebaseIdToken, deviceToken } = data;
 
     let decodedToken;
-    if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
-      decodedToken = {
-        uid: `mock-uid-${provider}-${firebaseIdToken}`,
-        email: `${provider}-mockuser@example.com`,
-        name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
-        phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
-      };
-    } else {
-      if (!firebaseIdToken) {
-        throw new InvalidRequestException("Firebase ID token is required");
+    let customToken = null;
+
+    if (provider === "microsoft") {
+      const providerToken = payload.providerToken;
+      if (env.enableDummyAuth && providerToken && providerToken.startsWith("dummy-")) {
+        decodedToken = {
+          uid: `microsoft_${providerToken.replace("dummy-", "")}`,
+          email: "microsoft-mockuser@example.com",
+          name: "Mock MicrosoftUser",
+        };
+      } else {
+        if (!providerToken) {
+          throw new InvalidRequestException("Microsoft ID token (providerToken) is required");
+        }
+        try {
+          const microsoftPayload = await verifyMicrosoftToken(providerToken);
+          const oid = microsoftPayload.oid || microsoftPayload.sub;
+          decodedToken = {
+            uid: `microsoft_${oid}`,
+            email: microsoftPayload.email || null,
+            name: microsoftPayload.name || null,
+          };
+        } catch (error) {
+          console.error("Microsoft ID Token verification failed:", error);
+          throw new UnauthorizedException("Invalid Microsoft token");
+        }
       }
+
+      // Sync user to Firebase Auth and generate Firebase Custom Token
       try {
-        decodedToken = await verifyFirebaseToken(firebaseIdToken);
+        await findOrCreateFirebaseUser(
+          decodedToken.email,
+          decodedToken.name,
+          decodedToken.uid.replace("microsoft_", ""),
+        );
+        customToken = await createCustomFirebaseToken(decodedToken.uid);
       } catch (error) {
-        console.error("Firebase ID Token verification failed:", error);
-        throw new UnauthorizedException("Invalid Firebase token");
+        console.error("Failed to find/create Firebase user or create custom token:", error);
+        throw new UnauthorizedException("Firebase Custom Token generation failed");
+      }
+    } else {
+      if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
+        decodedToken = {
+          uid: `mock-uid-${provider}-${firebaseIdToken}`,
+          email: `${provider}-mockuser@example.com`,
+          name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+          phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
+        };
+      } else {
+        if (!firebaseIdToken) {
+          throw new InvalidRequestException("Firebase ID token is required");
+        }
+        try {
+          decodedToken = await verifyFirebaseToken(firebaseIdToken);
+        } catch (error) {
+          console.error("Firebase ID Token verification failed:", error);
+          throw new UnauthorizedException("Invalid Firebase token");
+        }
       }
     }
 
@@ -438,7 +592,7 @@ class PatientService {
       ? null
       : await userOnboardingRepository.findByUserId(patientUser.id);
 
-    return {
+    const result = {
       success: true,
       token: tokens.accessToken,
       accessToken: tokens.accessToken,
@@ -456,6 +610,12 @@ class PatientService {
         role: "patient",
       },
     };
+
+    if (customToken) {
+      result.firebaseCustomToken = customToken;
+    }
+
+    return result;
   }
   async reportAuthFailure(payload) {
     const data = await validateSchema(authFailureSchema, payload);

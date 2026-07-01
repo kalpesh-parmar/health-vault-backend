@@ -481,7 +481,11 @@ class OcrService {
             }
           }
           const closing = stack.reverse().join("");
-          const repaired = body + closing;
+          let repaired = body;
+          if (inStr) {
+            repaired += '"';
+          }
+          repaired += closing;
           const cleaned = repaired.replace(/,\s*([}\]])/g, "$1");
           return JSON.parse(cleaned);
         },
@@ -518,37 +522,17 @@ class OcrService {
   }
 
   async validateDocument(file) {
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
-    let responseText;
+    const {
+      medicalDocumentClassifierService,
+    } = require("../classifier/medicalDocumentClassifier.service");
 
-    if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+    console.log("[OcrService] Delegating validation to MedicalDocumentClassifierService...");
+    const classification = await medicalDocumentClassifierService.classify(file);
 
-      console.log("[OcrService] Validating PDF document...");
-      responseText = await ollamaClient.generate(prompt, "qwen2.5:14b", { temperature: 0 });
-    } else {
-      const processedBuffer = await preprocessImage(file.buffer);
-      const base64Image = processedBuffer.toString("base64");
-      const messages = [
-        {
-          role: "user",
-          content: prompts.VALIDATION_PROMPT,
-          images: [base64Image],
-        },
-      ];
-
-      console.log("[OcrService] Validating image document using qwen3-vl:latest...");
-      responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
-    }
-
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
-
-    return this.cleanAndParseJSON(responseText, { traceId, jobId });
+    return {
+      status: classification.confidence > 0 ? "SUCCESS" : "FAILED",
+      ...classification,
+    };
   }
 
   async extractText(file, userLanguage = "english") {

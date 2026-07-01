@@ -13,7 +13,11 @@ class AuthProviderRepository {
       .select()
       .from(authProvider)
       .where(
-        and(eq(authProvider.provider, provider), eq(authProvider.providerUserId, providerUserId)),
+        and(
+          eq(authProvider.provider, provider),
+          eq(authProvider.providerUserId, providerUserId),
+          eq(authProvider.softDelete, false),
+        ),
       )
       .limit(1);
 

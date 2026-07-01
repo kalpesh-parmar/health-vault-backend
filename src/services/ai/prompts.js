@@ -82,7 +82,7 @@ Only if needed.
 Provide one practical and encouraging tip.`;
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
-Analyze the provided document (which may be an image of a document or text) and determine if it is a medical document. 
+Analyze the provided document (which may be an image of a document or text) and determine if it is a medical document.
 CRITICAL INSTRUCTION: If you are provided an image, carefully READ the text inside it. A photograph or scan of a medical report is completely valid and MUST NOT be rejected just because it is in an image format.
 
 Accept ONLY these medical document types:
@@ -297,35 +297,60 @@ Return ONLY a valid JSON object matching this schema:
 Do not explain. Do not output markdown code blocks. Do not output thinking. Response must be parseable by JSON.parse().`;
 
 const CLASSIFICATION_PROMPT = `You are a strict medical document classifier.
-Analyze the provided document (text or image) and determine if it is a medical document.
 
-Accept ONLY these medical document types:
-- Prescription (Prescription Slips)
-- Blood report (Blood Test Reports / CBC Reports / Lab Reports)
-- Lab report
-- CBC report
-- X-ray report
-- MRI report
-- CT Scan report
-- Hospital discharge summary
-- Medical invoice (or hospital bills / pharmacy bills)
-- Vaccination record
-- Insurance medical report
+Your task is to determine whether the provided input (image or extracted text) is a valid medical document.
+
+Accept ONLY these document types:
+- Prescription
+- Blood Report
+- Lab Report
+- CBC Report
+- X-Ray Report
+- MRI Report
+- CT Scan Report
+- Hospital Discharge Summary
+- Medical Invoice
+- Hospital Bill
+- Pharmacy Bill
+- Vaccination Record
+- Insurance Medical Report
 
 Reject immediately:
-- Profile picture, Selfie, Family photo, Pet photo, Food image, Landscape image, Social media screenshot, Meme, Wallpaper, Random gallery photo, Aadhaar Card, PAN Card, Passport, Driving License, Bank Statements, or any non-medical document.
+- Profile picture
+- Selfie
+- Family photo
+- Pet photo
+- Food image
+- Landscape image
+- Social media screenshot
+- Meme
+- Wallpaper
+- Aadhaar Card
+- PAN Card
+- Passport
+- Driving License
+- Bank Statement
+- Any non-medical document
 
-You MUST return a STRICT JSON response only. Do NOT include markdown code blocks (such as \`\`\`json) or any explanations.
+IMPORTANT RULES:
+- Return ONLY a single valid JSON object.
+- Do NOT include <think>, </think>, reasoning, analysis, explanations, markdown, or code fences.
+- Do NOT wrap the JSON inside \`\`\`.
+- Do NOT output any text before or after the JSON.
+- The response must be directly parsable using JSON.parse().
 
-JSON format:
-If it IS a medical document:
+Return one of the following:
+
+If the document IS medical:
+
 {
   "isMedicalDocument": true,
   "confidence": 0.95,
   "documentType": "Prescription"
 }
 
-If it is NOT a medical document:
+If the document is NOT medical:
+
 {
   "isMedicalDocument": false,
   "confidence": 0.92,
