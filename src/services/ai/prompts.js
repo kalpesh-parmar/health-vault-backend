@@ -314,6 +314,7 @@ Accept ONLY these medical document types:
 - Vaccination record
 - Insurance medical report
 - Body Scan report
+- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
 - Any other medical related reports
 
 Reject immediately:
@@ -336,6 +337,21 @@ If it is NOT a medical document:
   "reason": "Explain briefly why it is rejected (e.g. 'This is an ID card')"
 }`;
 
+const GRAPHICAL_ANALYSIS_PROMPT = `You are an expert medical AI specializing in interpreting graphical medical reports such as ECGs, Cardiograms, and charts.
+Please analyze the provided graphical document and extract the relevant medical insights.
+If the graph contains a continuous wave (like an ECG), do your best to approximate key metadata (like Heart Rate, PR interval, QRS duration, Rhythm) and describe the overall diagnosis in the text description.
+
+Return ONLY a valid JSON object strictly matching this schema:
+{
+  "title": "String (e.g. ECG Report, Heart Rate Monitor)",
+  "graphType": "String (e.g. ECG, Cardiogram, Vital Trends)",
+  "description": "String (A detailed textual description/diagnosis based on the graph)",
+  "unit": "String (e.g. bpm, ms, mV) or null",
+  "metadata": {
+    "key_metrics": "Any key metrics you can extract, e.g. HR=72bpm"
+  }
+}`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -347,4 +363,5 @@ module.exports = {
   STRUCTURED_EXTRACTION_PROMPT,
   ONBOARDING_SYSTEM_PROMPT,
   CLASSIFICATION_PROMPT,
+  GRAPHICAL_ANALYSIS_PROMPT,
 };

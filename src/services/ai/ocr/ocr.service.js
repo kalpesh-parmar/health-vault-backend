@@ -6,7 +6,13 @@ const { z } = require("zod");
 const { env } = require("../../../configs/env");
 const { ollamaClient } = require("../clients/ollamaClient");
 const { NonMedicalDocumentException } = require("../../../exceptions/appError");
-const prompts = require("../prompts");
+const {
+  // CLASSIFICATION_PROMPT,
+  // GRAPHICAL_ANALYSIS_PROMPT,
+  PLAIN_TEXT_OCR_PROMPT,
+  VALIDATION_PROMPT,
+  STRUCTURED_EXTRACTION_PROMPT,
+} = require("../prompts");
 const sharp = require("sharp");
 
 async function preprocessImage(imageBuffer) {
@@ -36,11 +42,16 @@ async function preprocessImage(imageBuffer) {
 
 // DB dependencies for processAndStoreSynchronously
 const { db } = require("../../../configs/db");
-const { document } = require("../../../models/document");
+const {
+  // documentOcrRawData,
+  // documentPages,
+  medicalGraph,
+} = require("../../../models/documentArtifacts");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { fileTypeValue } = require("../../../enums/fileType");
 const uploadFileService = require("../../uploadFileService");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const { document } = require("../../../models/document");
 
 const TestResultSchema = z.object({
   testName: z.string().nullable().default(null),
@@ -527,7 +538,7 @@ class OcrService {
 
     if (isPdf) {
       const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+      const prompt = `${VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
 
       console.log("[OcrService] Validating PDF document...");
       responseText = await ollamaClient.generate(prompt, "qwen2.5:14b", { temperature: 0 });
@@ -537,7 +548,7 @@ class OcrService {
       const messages = [
         {
           role: "user",
-          content: prompts.VALIDATION_PROMPT,
+          content: VALIDATION_PROMPT,
           images: [base64Image],
         },
       ];
@@ -552,7 +563,7 @@ class OcrService {
     return this.cleanAndParseJSON(responseText, { traceId, jobId });
   }
 
-  async extractText(file) {
+  async extractText(file, userLanguage = "english") {
     const isPdf =
       file.mimeType === "application/pdf" ||
       file.originalname?.toLowerCase().endsWith(".pdf") ||
@@ -576,7 +587,7 @@ class OcrService {
       const messages = [
         {
           role: "user",
-          content: prompts.PLAIN_TEXT_OCR_PROMPT,
+          content: PLAIN_TEXT_OCR_PROMPT,
           images: [base64Images[i]],
         },
       ];
@@ -590,6 +601,13 @@ class OcrService {
     const detectedLanguages = ["english"];
     if (hasGujarati) {
       detectedLanguages.push("gujarati");
+    }
+    if (
+      userLanguage &&
+      userLanguage.toLowerCase() !== "english" &&
+      !detectedLanguages.includes(userLanguage.toLowerCase())
+    ) {
+      detectedLanguages.push(userLanguage.toLowerCase());
     }
 
     return {
@@ -786,7 +804,7 @@ ${rawText}
       const messages = [
         {
           role: "user",
-          content: prompts.PLAIN_TEXT_OCR_PROMPT,
+          content: PLAIN_TEXT_OCR_PROMPT,
           images: [base64Image],
         },
       ];
@@ -805,7 +823,7 @@ ${rawText}
       throw new Error("OCR produced no usable text");
     }
 
-    const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
+    const structurePrompt = STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
       "[OcrService] Redesigned Pipeline Step 2: Querying qwen2.5:14b for STRUCTURED EXTRACTION...",
@@ -1097,6 +1115,23 @@ ${rawText}
   async processAndStoreSynchronously({ file, userId }) {
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
+    // Fetch preferred language from onboarding state
+    let preferredLanguage = "gujarati";
+    if (userId) {
+      try {
+        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+          preferredLanguage = onboardingRecord.data.preferredLanguage;
+        }
+      } catch (err) {
+        console.warn(
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          err.message,
+        );
+      }
+    }
+
     // 0. Classify document before upload
     const tClassifyStart = Date.now();
     const {
@@ -1107,7 +1142,9 @@ ${rawText}
       `[OcrService] [CLASSIFY] Duration: ${Date.now() - tClassifyStart}ms. Result:`,
       classification,
     );
-
+    if (classification.documentType === "GRAPHICAL_REPORT") {
+      return this.analyzeGraphicalDocument(file, userId);
+    }
     if (!classification.isMedicalDocument) {
       throw new NonMedicalDocumentException(
         classification.reason || "The uploaded file is not a medical document.",
@@ -1124,7 +1161,7 @@ ${rawText}
 
     // 2. Perform OCR
     const tOcrStart = Date.now();
-    const ocrResult = await this.extractText(file);
+    const ocrResult = await this.extractText(file, preferredLanguage);
     console.log(
       `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
     );
@@ -1137,7 +1174,7 @@ ${rawText}
     );
 
     // 3.5 Fetch user preferred language
-    let preferredLanguage = "Gujarati";
+    // let preferredLanguage = "Gujarati";
     if (userId) {
       try {
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
@@ -1247,6 +1284,48 @@ ${rawText}
       ocrResult,
       structuredData,
     };
+  }
+  //New Method: analyzeGraphicalDocument(file) which uses the vision model (ollamaClient.chat) to visually interpret the file and return structured JSON.
+
+  async analyzeGraphicalDocument(file, userId) {
+    // 1. Upload image to S3 (temporary for vision analysis)
+    const uploadResult = await uploadFileService.uploadFile(file, "TEMP_GRAPHICAL_DOC", userId);
+
+    const tAnalyzeStart = Date.now();
+    try {
+      // 2. Analyze using vision model
+      const visionResult = await this.extractTextFromImageUsingVision(
+        uploadResult.data.filePath,
+        "en",
+      );
+      console.log(`[OcrService] [VISION] Analyzed in ${Date.now() - tAnalyzeStart}ms`);
+
+      // 3. Clean and parse JSON
+      const structuredData = this.cleanAndParseJSON(visionResult);
+
+      // 4. Store in database (separate table? or use existing structure?)
+      // Option A: Store in new medicalGraph table
+      const [graph] = await db
+        .insert(medicalGraph)
+        .values({
+          documentId: null, // Optional link
+          userId: userId || null,
+          graphType: "medical_chart", // Or based on type detected
+          analysisData: structuredData,
+          analysisStatus: "COMPLETED",
+        })
+        .returning();
+
+      return { graph, analysisResult: structuredData };
+    } finally {
+      // 5. Delete temporary upload
+      try {
+        await uploadFileService.deleteFile(uploadResult.data.fileKey);
+        console.log(`[OcrService] Deleted temporary upload: ${uploadResult.data.fileKey}`);
+      } catch (deleteErr) {
+        console.warn("[OcrService] Failed to delete temporary upload", deleteErr);
+      }
+    }
   }
 }
 
