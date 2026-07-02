@@ -1,8 +1,14 @@
 /* eslint-disable no-console */
 const { ollamaClient } = require("../clients/ollamaClient");
-const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
+const { ONBOARDING_SYSTEM_PROMPT, TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const medicationService = require("../../medicationService");
+const medicationReminderService = require("../../medicationReminderService");
+const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
+const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
+const { medicationTypeValues } = require("../../../enums/medicationType");
+const { frequencyTypeValues } = require("../../../enums/frequencyType");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -72,119 +78,10 @@ function normalizeDOB(dobStr) {
   return "";
 }
 
-function normalizeGender(genderStr) {
-  if (!genderStr) return "";
-  const cleaned = genderStr.trim().toLowerCase();
-
-  if (cleaned.includes("female") || cleaned === "સ્ત્રી" || cleaned === "stri") {
-    return "female";
-  }
-  if (cleaned.includes("male") || cleaned === "પુરુષ" || cleaned === "purush") {
-    return "male";
-  }
-  return "";
-}
-
-function normalizeBloodGroup(bgStr) {
-  if (!bgStr) return "";
-  const cleaned = bgStr.trim().toUpperCase();
-  const valid = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
-  if (valid.includes(cleaned)) {
-    return cleaned;
-  }
-  return "";
-}
-
-function localParseInput(fieldType, text) {
-  const cleaned = String(text).trim();
-  const lower = cleaned.toLowerCase();
-
-  if (fieldType === "preferredLanguage") {
-    if (["en", "english", "eng"].includes(lower)) return "english";
-    if (["gu", "gujarati", "guj", "ગુજરાતી"].includes(lower) || cleaned === "ગુજરાતી")
-      return "gujarati";
-    if (
-      ["hi", "hindi", "hin", "हिन्दी", "हिंदी"].includes(lower) ||
-      cleaned === "हिन्दी" ||
-      cleaned === "हिंदी"
-    )
-      return "hindi";
-    if (["mr", "marathi", "mar", "मराठी"].includes(lower) || cleaned === "मराठी") return "marathi";
-    if (["ta", "tamil", "tam", "தமிழ்"].includes(lower) || cleaned === "தமிழ்") return "tamil";
-  }
-
-  if (fieldType === "flowMode") {
-    if (
-      ["upload", "upload medical report", "upload_document", "upload document"].includes(lower) ||
-      lower.includes("upload") ||
-      cleaned.includes("અપલોડ")
-    ) {
-      return "UPLOAD";
-    }
-    if (
-      [
-        "manual",
-        "skip",
-        "enter manually",
-        "skip and enter manually",
-        "જાતે માહિતી ભરો",
-        "manual_entry",
-        "manual entry",
-      ].includes(lower) ||
-      lower.includes("manual") ||
-      lower.includes("skip") ||
-      cleaned === "જાતે માહિતી ભરો"
-    ) {
-      return "MANUAL";
-    }
-  }
-
-  if (fieldType === "documentConfirmed") {
-    if (
-      ["yes", "y", "yeah", "confirm", "હા", "yes (હા)", "yes(હા)", "yes_confirm"].includes(lower) ||
-      lower.includes("yes") ||
-      lower.includes("confirm") ||
-      cleaned.includes("હા")
-    ) {
-      return "YES";
-    }
-    if (
-      ["no", "n", "nope", "reject", "ના", "no (ના)", "no(ના)", "no_reject"].includes(lower) ||
-      lower.includes("no") ||
-      lower.includes("reject") ||
-      cleaned.includes("ના")
-    ) {
-      return "NO";
-    }
-  }
-
-  if (fieldType === "gender") {
-    if (["male", "m", "પુરુષ", "purush", "males"].includes(lower) || cleaned === "પુરુષ")
-      return "male";
-    if (["female", "f", "સ્ત્રી", "stri", "females"].includes(lower) || cleaned === "સ્ત્રી")
-      return "female";
-  }
-
-  if (fieldType === "bloodGroup") {
-    const bg = normalizeBloodGroup(cleaned);
-    if (bg) return bg;
-  }
-
-  return null;
-}
-
 async function extractFieldFromMessage(fieldType, text, _lang) {
   // Direct check for language independent skip patterns
   const lower = text.trim().toLowerCase();
-  const skipPatterns = [
-    "skip",
-    "સ્કિપ",
-    "skip question",
-    "skip_question",
-    "સ્કિપ કરો",
-    "question skip",
-    "skipquestion",
-  ];
+  const skipPatterns = ["skip", "skip question", "skip_question", "question skip", "skipquestion"];
   if (skipPatterns.includes(lower)) {
     return null;
   }
@@ -217,6 +114,32 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
   } else if (fieldType === "allergies") {
     contextPrompt =
       'Extract a list of allergies from the text. Return a JSON array of strings in the \'value\' field, e.g. ["dust", "peanuts"]. If none, return [].';
+  } else if (fieldType === "yesNo") {
+    contextPrompt = "Determine if user chose YES or NO. Return strictly either 'YES' or 'NO'.";
+  } else if (fieldType === "medicationName") {
+    contextPrompt = "Extract the name of the medicine from the user input.";
+  } else if (fieldType === "medicationType") {
+    contextPrompt =
+      "Extract the type of medicine. Return strictly one of: 'TABLET', 'CAPSULE', 'SYRUP', 'INJECTION', 'DROPS', 'CREAM', 'OINTMENT', 'LOTION', 'INHALER', 'SUPPOSITORY', 'PATCH', 'OTHER'.";
+  } else if (fieldType === "dosePerIntake") {
+    contextPrompt = "Extract the numeric dose per intake. Return a number, e.g., 1, 1.5, 2.";
+  } else if (fieldType === "frequency") {
+    contextPrompt =
+      "Extract the frequency of taking the medicine. Return strictly one of: 'ONCE_DAILY', 'TWICE_DAILY', 'THRICE_DAILY', 'FOUR_TIMES_DAILY', 'AS_NEEDED', 'EVERY_OTHER_DAY', 'ONCE_A_WEEK'.";
+  } else if (fieldType === "medicationSchedule") {
+    contextPrompt =
+      "Extract the schedule times as a JSON object with keys like 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT' and values as time strings like '09:00:00'. If missing, return null.";
+  } else if (fieldType === "time24Hour") {
+    contextPrompt =
+      "Extract a time of day from the text and format it as HH:MM:SS in 24-hour format (e.g. '09:00:00' or '22:00:00').";
+  } else if (fieldType === "foodFrequency") {
+    contextPrompt =
+      "Extract the food frequency instruction. Return strictly 'BEFORE_FOOD' or 'AFTER_FOOD'.";
+  } else if (fieldType === "totalQuantity") {
+    contextPrompt = "Extract the total quantity of the medicine as a number, e.g. 10 or 30.";
+  } else if (fieldType === "startDate") {
+    contextPrompt =
+      "Extract the date when the medicine should be started. Return strictly in YYYY-MM-DD format (e.g. 2024-01-01). Support formats like DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY.";
   }
 
   const messages = [
@@ -259,6 +182,12 @@ const OnboardingStep = {
   ASK_GENDER: "ASK_GENDER",
   ASK_BLOOD_GROUP: "ASK_BLOOD_GROUP",
   ASK_ALLERGIES: "ASK_ALLERGIES",
+  ASK_FOUND_MEDICINES: "ASK_FOUND_MEDICINES",
+  ASK_ON_MEDICINES: "ASK_ON_MEDIClINES",
+  REVIEW_MEDICINES_LIST: "REVIEW_MEDICINES_LIST",
+  ASK_MEDICINE_DETAILS: "ASK_MEDICINE_DETAILS",
+  CONFIRM_MEDICINE: "CONFIRM_MEDICINE",
+  EDIT_MEDICINE: "EDIT_MEDICINE",
   REGISTER_USER: "REGISTER_USER",
   POST_ONBOARDING: "POST_ONBOARDING",
   COMPLETE: "COMPLETE",
@@ -281,6 +210,47 @@ function getNextRequiredOrOptionalStep(state) {
   const hasAllergies = Array.isArray(data.allergies) && data.allergies.length > 0;
   if (!hasAllergies && !state.allergiesSkipped) {
     return "ASK_ALLERGIES";
+  }
+
+  // Medication Flow
+  if (!state.medicinesSkipped) {
+    if (!state.medicinesFlowStarted) {
+      if (state.flowMode === "UPLOAD" && state.foundMedicines && state.foundMedicines.length > 0) {
+        return "ASK_FOUND_MEDICINES";
+      } else {
+        return "ASK_ON_MEDICINES";
+      }
+    }
+
+    if (state.medicinesToAdd && state.medicinesToAdd.length > 0) {
+      if (!state.medicinesConfirmed) {
+        return "REVIEW_MEDICINES_LIST";
+      }
+
+      for (let i = 0; i < state.medicinesToAdd.length; i++) {
+        const med = state.medicinesToAdd[i];
+        const isComplete =
+          med.medicationName &&
+          med.medicationType &&
+          med.dosePerIntake !== undefined &&
+          med.frequency &&
+          med.medicationSchedule &&
+          Object.keys(med.medicationSchedule).length > 0 &&
+          med.foodFrequency &&
+          med.startDate &&
+          med.totalQuantity !== undefined &&
+          med.ongoing !== undefined;
+
+        if (!isComplete) {
+          state.currentMedicineIndex = i;
+          return "ASK_MEDICINE_DETAILS";
+        }
+        if (!med.isConfirmed) {
+          state.currentMedicineIndex = i;
+          return "CONFIRM_MEDICINE";
+        }
+      }
+    }
   }
 
   return "REGISTER_USER";
@@ -310,10 +280,8 @@ async function updateStateFromMessage(state, message) {
   const lower = msg.toLowerCase();
   const isSkip = [
     "skip",
-    "સ્કિપ",
     "skip question",
     "skip_question",
-    "સ્કિપ કરો",
     "question skip",
     "skipquestion",
   ].includes(lower);
@@ -322,25 +290,13 @@ async function updateStateFromMessage(state, message) {
 
   switch (state.currentStep) {
     case "ASK_LANGUAGE": {
-      const langVal = localParseInput("preferredLanguage", msg);
-      if (
-        langVal === "english" ||
-        langVal === "gujarati" ||
-        langVal === "hindi" ||
-        langVal === "marathi" ||
-        langVal === "tamil"
-      ) {
+      const langVal = msg;
+      if (languageTypeValues.includes(langVal)) {
         state.preferredLanguage = langVal;
         state.currentStep = "ASK_UPLOAD_OR_SKIP";
       } else {
         const extractedLang = await extractFieldFromMessage("preferredLanguage", msg, "english");
-        if (
-          extractedLang === "gujarati" ||
-          extractedLang === "english" ||
-          extractedLang === "hindi" ||
-          extractedLang === "marathi" ||
-          extractedLang === "tamil"
-        ) {
+        if (languageTypeValues.includes(extractedLang)) {
           state.preferredLanguage = extractedLang;
           state.currentStep = "ASK_UPLOAD_OR_SKIP";
         }
@@ -349,7 +305,7 @@ async function updateStateFromMessage(state, message) {
     }
 
     case "ASK_UPLOAD_OR_SKIP": {
-      const fmVal = localParseInput("flowMode", msg);
+      const fmVal = msg;
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
         if (fmVal === "MANUAL" && state.hasSocialData) {
@@ -390,22 +346,11 @@ async function updateStateFromMessage(state, message) {
       }
       break;
     }
+
     case "ASK_USE_SOCIAL_LOGIN_INFO": {
       const msgUpper = msg.toUpperCase();
-      const isSocial =
-        msgUpper.includes("SOCIAL") ||
-        msgUpper.includes("YES") ||
-        msgUpper.includes("હા") ||
-        msgUpper.includes("हाँ") ||
-        msgUpper.includes("हो") ||
-        msgUpper.includes("ஆம்");
-      const isDocument =
-        msgUpper.includes("DOCUMENT") ||
-        msgUpper.includes("NO") ||
-        msgUpper.includes("ના") ||
-        msgUpper.includes("नहीं") ||
-        msgUpper.includes("नाही") ||
-        msgUpper.includes("இல்லை");
+      const isSocial = msgUpper === "SOCIAL" || msgUpper === "YES";
+      const isDocument = msgUpper === "DOCUMENT" || msgUpper === "NO";
 
       if (isSocial) {
         state.socialDataConfirmed = true;
@@ -421,7 +366,7 @@ async function updateStateFromMessage(state, message) {
         }
         state.currentStep = computeCurrentStep(state);
       } else if (isDocument) {
-        state.socialDataConfirmed = true; // Conflict is resolved, keep document data
+        state.socialDataConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -435,22 +380,12 @@ async function updateStateFromMessage(state, message) {
       break;
     }
 
-    case "ASK_DOCUMENT_CONFIRMATION": {
-      const confVal = localParseInput("documentConfirmed", msg);
-      if (
-        confVal === "YES" ||
-        msg.toUpperCase() === "YES" ||
-        msg.toUpperCase() === "YES (હા)" ||
-        msg.toUpperCase() === "YES(હા)"
-      ) {
+    case "CONFIRM_DOCUMENT_DETAILS": {
+      const msgUpper = msg.toUpperCase();
+      if (msgUpper === "YES") {
         state.documentConfirmed = true;
         state.currentStep = getNextRequiredOrOptionalStep(state);
-      } else if (
-        confVal === "NO" ||
-        msg.toUpperCase() === "NO" ||
-        msg.toUpperCase() === "NO (ના)" ||
-        msg.toUpperCase() === "NO(ના)"
-      ) {
+      } else if (msgUpper === "NO") {
         state.documentConfirmed = false;
         state.flowMode = "MANUAL";
         state.documentUploaded = false;
@@ -521,9 +456,7 @@ async function updateStateFromMessage(state, message) {
     }
 
     case "ASK_DOB": {
-      const dobVal =
-        localParseInput("dateOfBirth", msg) ||
-        (await extractFieldFromMessage("dateOfBirth", msg, state.preferredLanguage));
+      const dobVal = await extractFieldFromMessage("dateOfBirth", msg, state.preferredLanguage);
       const dob = normalizeDOB(dobVal);
       if (dob) {
         state.existingUserData.dateOfBirth = dob;
@@ -533,9 +466,7 @@ async function updateStateFromMessage(state, message) {
     }
 
     case "ASK_GENDER": {
-      const genVal =
-        localParseInput("gender", msg) ||
-        (await extractFieldFromMessage("gender", msg, state.preferredLanguage));
+      const genVal = await extractFieldFromMessage("gender", msg, state.preferredLanguage);
       if (genVal === "male" || genVal === "female") {
         state.existingUserData.gender = genVal;
       }
@@ -548,10 +479,8 @@ async function updateStateFromMessage(state, message) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const bgVal =
-          localParseInput("bloodGroup", msg) ||
-          (await extractFieldFromMessage("bloodGroup", msg, state.preferredLanguage));
-        if (bgVal) {
+        const bgVal = await extractFieldFromMessage("bloodGroup", msg, state.preferredLanguage);
+        if (bloodGroupTypeValues.includes(bgVal)) {
           state.existingUserData.bloodGroup = bgVal;
         }
       }
@@ -577,6 +506,181 @@ async function updateStateFromMessage(state, message) {
       break;
     }
 
+    case "ASK_FOUND_MEDICINES":
+    case "ASK_ON_MEDICINES": {
+      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+      if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
+        state.medicinesFlowStarted = true;
+        if (state.currentStep === "ASK_FOUND_MEDICINES") {
+          state.medicinesToAdd = (state.foundMedicines || []).map((m) => {
+            let parsedDose = undefined;
+            if (m.dosage && typeof m.dosage === "string") {
+              const parts = m.dosage
+                .split("-")
+                .map((p) => parseInt(p, 10))
+                .filter((n) => !isNaN(n));
+              if (parts.length > 0) {
+                parsedDose = Math.max(...parts);
+              }
+            }
+            return {
+              medicationName: m.name || m.medicationName,
+              medicationType: undefined,
+              dosePerIntake: parsedDose,
+              frequency: undefined,
+              medicationSchedule: undefined,
+              foodFrequency: undefined,
+              startDate: undefined,
+              totalQuantity: undefined,
+              ongoing: undefined,
+              isConfirmed: false,
+            };
+          });
+          // Intentionally NOT setting medicinesConfirmed to true here,
+          // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
+        } else {
+          state.medicinesToAdd = [{ isConfirmed: false }];
+          state.medicinesConfirmed = true; // Skip review step since there's no list to review yet
+        }
+      } else {
+        state.medicinesSkipped = true;
+        state.medicinesFlowStarted = true;
+      }
+      state.currentStep = getNextRequiredOrOptionalStep(state);
+      break;
+    }
+
+    case "REVIEW_MEDICINES_LIST": {
+      const txt = msg.toUpperCase();
+      if (txt.includes("EDIT") || txt === "NO") {
+        // UI handle
+      } else {
+        state.medicinesConfirmed = true;
+      }
+      state.currentStep = getNextRequiredOrOptionalStep(state);
+      break;
+    }
+
+    case "ASK_MEDICINE_DETAILS": {
+      const idx = state.currentMedicineIndex;
+      const med = state.medicinesToAdd[idx];
+
+      if (!med.medicationName) {
+        med.medicationName = await extractFieldFromMessage(
+          "medicationName",
+          msg,
+          state.preferredLanguage,
+        );
+      } else if (!med.medicationType) {
+        if (medicationTypeValues.includes(msg.toUpperCase())) {
+          med.medicationType = msg.toUpperCase();
+        } else {
+          med.medicationType = await extractFieldFromMessage(
+            "medicationType",
+            msg,
+            state.preferredLanguage,
+          );
+        }
+      } else if (med.dosePerIntake === undefined) {
+        med.dosePerIntake = await extractFieldFromMessage(
+          "dosePerIntake",
+          msg,
+          state.preferredLanguage,
+        );
+      } else if (!med.frequency) {
+        if (frequencyTypeValues.includes(msg.toUpperCase())) {
+          med.frequency = msg.toUpperCase();
+        } else {
+          med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
+        }
+      } else if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
+        if (!med.tempTimes) med.tempTimes = [];
+
+        let expectedDoses = 1;
+        if (med.frequency === "TWICE_DAILY") expectedDoses = 2;
+        if (med.frequency === "THREE_TIMES_DAILY") expectedDoses = 3;
+        if (med.frequency === "FOUR_TIMES_DAILY") expectedDoses = 4;
+
+        const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
+        if (timeVal) {
+          med.tempTimes.push(timeVal);
+        }
+
+        if (med.tempTimes.length >= expectedDoses || med.frequency === "AS_NEEDED") {
+          let schedule = {};
+          let customTimes = [];
+
+          for (const timeStr of med.tempTimes) {
+            const hour = parseInt(timeStr.split(":")[0], 10);
+            let key = "CUSTOM";
+            if (hour >= 5 && hour < 12) key = "MORNING";
+            else if (hour >= 12 && hour < 17) key = "NOON";
+            else if (hour >= 17 || hour < 5) key = "NIGHT";
+
+            if (key !== "CUSTOM" && !schedule[key]) {
+              schedule[key] = timeStr;
+            } else {
+              customTimes.push(timeStr);
+            }
+          }
+
+          if (customTimes.length > 0) {
+            schedule.CUSTOM = customTimes;
+          }
+
+          med.medicationSchedule = schedule;
+          delete med.tempTimes;
+        }
+      } else if (!med.foodFrequency) {
+        if (msg.toUpperCase() === "BEFORE_FOOD" || msg.toUpperCase() === "AFTER_FOOD") {
+          med.foodFrequency = msg.toUpperCase();
+        } else {
+          med.foodFrequency = await extractFieldFromMessage(
+            "foodFrequency",
+            msg,
+            state.preferredLanguage,
+          );
+        }
+      } else if (!med.startDate) {
+        const d = await extractFieldFromMessage("startDate", msg, state.preferredLanguage);
+        if (d) med.startDate = d;
+      } else if (med.totalQuantity === undefined) {
+        med.totalQuantity = await extractFieldFromMessage(
+          "totalQuantity",
+          msg,
+          state.preferredLanguage,
+        );
+      } else if (med.ongoing === undefined) {
+        const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+        med.ongoing = yesNoVal === "YES" || msg.toUpperCase() === "YES";
+      }
+
+      state.currentStep = getNextRequiredOrOptionalStep(state);
+      break;
+    }
+
+    case "CONFIRM_MEDICINE": {
+      const txt = msg.toUpperCase();
+      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+      if (txt.includes("EDIT") || txt === "NO" || yesNoVal === "NO") {
+        // Keep the values but mark as unconfirmed so UI can open edit form
+        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = false;
+        state.currentStep = "EDIT_MEDICINE";
+      } else {
+        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
+        state.currentStep = getNextRequiredOrOptionalStep(state);
+      }
+      break;
+    }
+
+    case "EDIT_MEDICINE": {
+      // The UI has sent the updated medicine details in the state.
+      // We mark it as confirmed and proceed.
+      state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
+      state.currentStep = getNextRequiredOrOptionalStep(state);
+      break;
+    }
+
     case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {
@@ -586,467 +690,238 @@ async function updateStateFromMessage(state, message) {
   }
 }
 
-function getNextStep(state) {
-  const step = state.currentStep || computeCurrentStep(state);
+async function translateMessage(text, language) {
+  if (!text || language === "english") return text;
 
+  const messages = [
+    {
+      role: "system",
+      content: TRANSLATION_SYSTEM_PROMPT(language),
+    },
+    {
+      role: "user",
+      content: text,
+    },
+  ];
+
+  try {
+    const response = await ollamaClient.chat(messages, "qwen3:32b", {
+      temperature: 0.1,
+      maxTokens: 256,
+      think: false,
+    });
+    return response.trim();
+  } catch (err) {
+    console.error(`[OnboardingService] Failed to translate text to ${language}:`, err);
+    return text; // Fallback to English
+  }
+}
+
+function getNextStep(state) {
+  return state.currentStep || computeCurrentStep(state);
+}
+
+function createResponse(step, state) {
+  return getLocalizedResponse(step, state);
+}
+
+function getLocalizedResponse(step, state) {
   switch (step) {
     case "ASK_LANGUAGE":
       return {
         action: "ASK_LANGUAGE",
-        message_en: "Which language do you prefer?",
-        options: [
-          { label: "English", value: "english" },
-          { label: "ગુજરાતી", value: "gujarati" },
-          { label: "हिन्दी", value: "hindi" },
-          { label: "मराठी", value: "marathi" },
-          { label: "தமிழ்", value: "tamil" },
-        ],
+        message: "Welcome! please select your preferred language..?",
+        options: languageTypeValues.map((lang) => ({
+          label: languageNativeLabels[lang] || lang,
+          value: lang,
+        })),
       };
 
     case "ASK_UPLOAD_OR_SKIP":
       return {
         action: "ASK_UPLOAD_OR_SKIP",
-        message_en:
-          "I will now chat with you in English. Would you like to upload your medical report or enter details manually?",
-        message_gu:
-          "હું હવે તમારી સાથે ગુજરાતીમાં ચેટ કરીશ. શું તમે મેડિકલ રિપોર્ટ અપલોડ કરવા માંગો છો કે માહિતી જાતે ભરવા માંગો છો?",
-        message_hi:
-          "अब मैं आपसे हिंदी में बात करूंगा। क्या आप अपनी मेडिकल रिपोर्ट अपलोड करना चाहेंगे या मैन्युअल रूप से विवरण दर्ज करना चाहेंगे?",
-        message_mr:
-          "मी आता तुमच्याशी मराठीत संवाद साधेन. तुम्ही तुमचा वैद्यकीय अहवाल अपलोड करू इच्छिता की व्यक्तिशः माहिती प्रविष्ट करू इच्छिता?",
-        message_ta:
-          "நான் இப்போது உங்களுடன் தமிழில் உரையாடுவேன். உங்கள் மருத்துவ அறிக்கையை பதிவேற்ற விரும்புகிறீர்களா அல்லது விவரங்களை கைமுறையாக உள்ளிட விரும்புகிறீர்களா?",
+        message: "How would you like to provide your details?",
         options: [
-          {
-            label_en: "Upload Medical Report",
-            label_gu: "મેડિકલ રિપોર્ટ અપલોડ કરો",
-            label_hi: "मेडिकल रिपोर्ट अपलोड करें",
-            label_mr: "वैद्यकीय अहवाल अपलोड करा",
-            label_ta: "மருத்துவ அறிக்கையை பதிவேற்றவும்",
-            value: "UPLOAD",
-          },
-          {
-            label_en: "Skip and Enter Manually",
-            label_gu: "જાતે માહિતી ભરો",
-            label_hi: "मैन्युअल रूप से दर्ज करें",
-            label_mr: "व्यक्तिशः माहिती प्रविष्ट करा",
-            label_ta: "கைமுறையாக உள்ளிடவும்",
-            value: "MANUAL",
-          },
+          { label: "Upload Medical Document", value: "UPLOAD" },
+          { label: "Enter Details Manually", value: "MANUAL" },
         ],
       };
-
-    case "ASK_USE_SOCIAL_LOGIN_INFO": {
-      const formatProfile = (data) => {
-        if (!data) return "N/A";
-        const parts = [];
-        if (data.firstName || data.lastName)
-          parts.push(`Name: ${data.firstName || ""} ${data.lastName || ""}`.trim());
-        if (data.dateOfBirth) parts.push(`DOB: ${data.dateOfBirth}`);
-        if (data.gender) parts.push(`Gender: ${data.gender}`);
-        if (data.email) parts.push(`Email: ${data.email}`);
-        if (data.phoneNumber) parts.push(`Phone: ${data.phoneNumber}`);
-        return parts.join(", ");
-      };
-
-      const socialProfile = formatProfile(state.socialData);
-      const docProfile = formatProfile(state.existingUserData);
-
-      return {
-        action: "ASK_USE_SOCIAL_LOGIN_INFO",
-        message_en: `We found a difference in your profiles. Social Login: [${socialProfile}] vs Document: [${docProfile}]. Which profile details do you prefer to keep?`,
-        message_gu: `અમને તમારી પ્રોફાઇલમાં તફાવત મળ્યો છે. સોશિયલ લોગિન: [${socialProfile}] વિરુદ્ધ દસ્તાવેજ: [${docProfile}]. તમે કઈ પ્રોફાઇલ વિગતો રાખવાનું પસંદ કરશો?`,
-        message_hi: `हमें आपकी प्रोफ़ाइल में अंतर मिला है। सोशल लॉगिन: [${socialProfile}] बनाम दस्तावेज़: [${docProfile}]। आप कौन सा प्रोफ़ाइल विवरण रखना पसंद करेंगे?`,
-        message_mr: `आम्हाला तुमच्या प्रोफाइलमध्ये फरक आढळला आहे. सोशल लॉगिन: [${socialProfile}] विरुद्ध दस्तऐवज: [${docProfile}]. तुम्हाला कोणते प्रोफाइल तपशील ठेवायला आवडेल?`,
-        message_ta: `உங்கள் சுயவிவரங்களில் ஒரு வித்தியாசத்தை நாங்கள் கண்டறிந்துள்ளோம். சமூக உள்நுழைவு: [${socialProfile}] எதிர் ஆவணம்: [${docProfile}]. எந்த சுயவிவர விவரங்களை வைத்திருக்க விரும்புகிறீர்கள்?`,
-        options: [
-          {
-            label_en: "Use Social Login",
-            label_gu: "સોશિયલ લોગિન વાપરો",
-            label_hi: "सोशल लॉगिन का उपयोग करें",
-            label_mr: "सोशल लॉगिन वापरा",
-            label_ta: "சமூக உள்நுழைவைப் பயன்படுத்துக",
-            value: "SOCIAL",
-          },
-          {
-            label_en: "Use Document",
-            label_gu: "દસ્તાવેજ વાપરો",
-            label_hi: "दस्तावेज़ का उपयोग करें",
-            label_mr: "दस्तऐवज वापरा",
-            label_ta: "ஆவணத்தைப் பயன்படுத்துக",
-            value: "DOCUMENT",
-          },
-        ],
-      };
-    }
 
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
-        message_en: "Please upload your medical document.",
-        message_gu: "કૃપા કરીને તમારો મેડિકલ રિપોર્ટ અપલોડ કરો.",
-        message_hi: "कृपया अपना मेडिकल दस्तावेज़ अपलोड करें।",
-        message_mr: "कृपया तुमचा वैद्यकीय दस्तऐवज अपलोड करा.",
-        message_ta: "தயவுசெய்து உங்கள் மருத்துவ ஆவணத்தை பதிவேற்றவும்.",
+        message: "Please upload your medical document (Prescription, Lab Report, etc.).",
       };
 
-    case "ASK_DOCUMENT_CONFIRMATION":
+    case "PROCESSING_DOCUMENT":
       return {
-        action: "ASK_DOCUMENT_CONFIRMATION",
-        message_en: "Is this your document?",
-        message_gu: "શું આ તમારો રિપોર્ટ છે?",
-        message_hi: "क्या यह आपका दस्तावेज़ है?",
-        message_mr: "हा तुमचा दस्तऐवज आहे का?",
-        message_ta: "இது உங்கள் ஆவணமா?",
+        action: "PROCESSING_DOCUMENT",
+        message: "I am analyzing your document...",
+      };
+
+    case "CONFIRM_DOCUMENT_DETAILS":
+      return {
+        action: "CONFIRM_DOCUMENT_DETAILS",
+        message: "I have extracted the details. Please confirm if they are correct.",
         options: [
-          {
-            label_en: "Yes",
-            label_gu: "હા",
-            label_hi: "हाँ",
-            label_mr: "होय",
-            label_ta: "ஆம்",
-            value: "YES",
-          },
-          {
-            label_en: "No",
-            label_gu: "ના",
-            label_hi: "नहीं",
-            label_mr: "नाही",
-            label_ta: "இல்லை",
-            value: "NO",
-          },
+          { label: "Yes, they are correct", value: "YES" },
+          { label: "No, let me enter manually", value: "NO" },
         ],
       };
 
     case "ASK_FIRST_NAME":
-      return {
-        action: "ASK_FIRST_NAME",
-        message_en: "What is your first name?",
-        message_gu: "તમારું પ્રથમ નામ શું છે?",
-        message_hi: "आपका प्रथम नाम क्या है?",
-        message_mr: "तुमचे पहिले नाव काय आहे?",
-        message_ta: "உங்கள் முதல் பெயர் என்ன?",
-      };
+      return { action: "ASK_FIRST_NAME", message: "What is your first name?" };
 
     case "ASK_LAST_NAME":
-      return {
-        action: "ASK_LAST_NAME",
-        message_en: "What is your last name?",
-        message_gu: "તમારું છેલ્લું નામ શું છે?",
-        message_hi: "आपका अंतिम नाम क्या है?",
-        message_mr: "तुमचे आडनाव काय आहे?",
-        message_ta: "உங்கள் கடைசி பெயர் என்ன?",
-      };
+      return { action: "ASK_LAST_NAME", message: "What is your last name?" };
 
     case "ASK_DOB":
-      return {
-        action: "ASK_DOB",
-        message_en: "What is your date of birth? (Example: 1989-01-01)",
-        message_gu: "તમારી જન્મ તારીખ શું છે? (ઉદાહરણ: 1989-01-01)",
-        message_hi: "आपकी जन्म तिथि क्या है? (उदाहरण: 1989-01-01)",
-        message_mr: "तुमची जन्मतारीख काय आहे? (उदा: 1989-01-01)",
-        message_ta: "உங்கள் பிறந்த தேதி என்ன? (உதாரணம்: 1989-01-01)",
-      };
+      return { action: "ASK_DOB", message: "What is your date of birth? (Example: 1989-01-01)" };
 
     case "ASK_GENDER":
       return {
         action: "ASK_GENDER",
-        message_en: "What is your gender?",
-        message_gu: "તમારું લિંગ શું છે?",
-        message_hi: "आपका लिंग क्या है?",
-        message_mr: "तुमचे लिंग काय आहे?",
-        message_ta: "உங்கள் பாலினம் என்ன?",
+        message: "What is your gender?",
         options: [
-          {
-            label_en: "Male",
-            label_gu: "પુરુષ",
-            label_hi: "पुरुष",
-            label_mr: "पुरुष",
-            label_ta: "ஆண்",
-            value: "male",
-          },
-          {
-            label_en: "Female",
-            label_gu: "સ્ત્રી",
-            label_hi: "महिला",
-            label_mr: "स्त्री",
-            label_ta: "பெண்",
-            value: "female",
-          },
+          { label: "Male", value: "male" },
+          { label: "Female", value: "female" },
         ],
       };
 
     case "ASK_BLOOD_GROUP":
       return {
         action: "ASK_BLOOD_GROUP",
-        message_en: "What is your blood group? You can skip this question.",
-        message_gu: "તમારું બ્લડ ગ્રુપ શું છે? તમે આ પ્રશ્ન સ્કિપ પણ કરી શકો છો.",
-        message_hi: "आपका रक्त समूह क्या है? आप इस प्रश्न को छोड़ सकते हैं।",
-        message_mr: "तुमचा रक्तगट कोणता आहे? तुम्ही हा प्रश्न वगळू शकता.",
-        message_ta: "உங்கள் இரத்த வகை என்ன? நீங்கள் இந்த கேள்வியை தவிர்க்கலாம்.",
+        message: "What is your blood group? You can skip this question.",
         options: [
-          {
-            label_en: "Skip",
-            label_gu: "સ્કિપ",
-            label_hi: "स्किप करें",
-            label_mr: "वगळा",
-            label_ta: "தவிர்",
-            value: "SKIP",
-          },
+          { label: "Skip", value: "SKIP" },
+          ...bloodGroupTypeValues.map((bg) => ({ label: bg, value: bg })),
         ],
       };
 
     case "ASK_ALLERGIES":
       return {
         action: "ASK_ALLERGIES",
-        message_en: "Do you have any allergies? You can skip this question.",
-        message_gu: "શું તમને કોઈ એલર્જી છે? તમે આ પ્રશ્ન સ્કિપ પણ કરી શકો છો.",
-        message_hi: "क्या आपको कोई एलर्जी है? आप इस प्रश्न को छोड़ सकते हैं।",
-        message_mr: "तुम्हाला कोणतीही ऍलर्जी आहे का? तुम्ही हा प्रश्न वगळू शकता.",
-        message_ta: "உங்களுக்கு ஏதேனும் ஒவ்வாமை உள்ளதா? நீங்கள் இந்த கேள்வியை தவிர்க்கலாம்.",
+        message: "Do you have any allergies? You can skip this question.",
+        options: [{ label: "Skip", value: "SKIP" }],
+      };
+
+    case "ASK_FOUND_MEDICINES": {
+      const medNames = (state.foundMedicines || [])
+        .map((m) => m.name || m.medicationName)
+        .filter(Boolean)
+        .join(", ");
+      return {
+        action: "ASK_FOUND_MEDICINES",
+        message: `We found the following medicines in your document: ${medNames}. Do you want to add these to your profile?`,
         options: [
-          {
-            label_en: "Skip",
-            label_gu: "સ્કિપ",
-            label_hi: "स्किप करें",
-            label_mr: "वगळा",
-            label_ta: "தவிர்",
-            value: "SKIP",
-          },
+          { label: "Yes ", value: "YES" },
+          { label: "No ", value: "NO" },
+        ],
+      };
+    }
+
+    case "ASK_ON_MEDICINES":
+      return {
+        action: "ASK_ON_MEDICINES",
+        message: "Would you like to manually add any medicines?",
+        options: [
+          { label: "Yes", value: "YES" },
+          { label: "No", value: "NO" },
         ],
       };
 
-    case "ASK_EMAIL":
+    case "REVIEW_MEDICINES_LIST":
       return {
-        action: "ASK_EMAIL",
-        message_en: "Please provide your Email (Optional).",
-        message_gu: "કૃપા કરીને તમારું ઇમેઇલ આપો (વૈકલ્પિક).",
-        message_hi: "कृपया अपना ईमेल प्रदान करें (वैकल्पिक)।",
-        message_mr: "कृपया तुमचा ईमेल द्या (पर्यायी).",
-        message_ta: "உங்கள் மின்னஞ்சலை வழங்கவும் (விருப்பம்).",
-      };
-
-    case "ASK_MEDICAL_CONDITIONS":
-      return {
-        action: "ASK_MEDICAL_CONDITIONS",
-        message_en: "Do you have any other medical conditions? (Optional)",
-        message_gu: "શું તમને અન્ય કોઈ તબીબી પરિસ્થિતિઓ છે? (વૈકલ્પિક)",
-        message_hi: "क्या आपको कोई अन्य चिकित्सीय स्थिति है? (वैकल्पिक)",
-        message_mr: "तुम्हाला इतर काही वैद्यकीय समस्या आहेत का? (पर्यायी)",
-        message_ta: "உங்களுக்கு வேறு ஏதேனும் மருத்துவ நிலைமைகள் உள்ளதா? (விருப்பம்)",
-      };
-
-    case "ASK_OPTIONAL_DETAILS_PROMPT":
-      return {
-        action: "ASK_OPTIONAL_DETAILS_PROMPT",
-        message_en:
-          "Would you like to add more details? (Email, Blood Group, Allergies, Other Medical Conditions)",
-        message_gu:
-          "શું તમે વધુ વિગતો ઉમેરવા માંગો છો? (ઇમેઇલ, બ્લડ ગ્રુપ, એલર્જી, અન્ય તબીબી પરિસ્થિતિઓ)",
-        message_hi:
-          "क्या आप और विवरण जोड़ना चाहेंगे? (ईमेल, रक्त समूह, एलर्जी, अन्य चिकित्सीय स्थितियां)",
-        message_mr:
-          "तुम्हाला अधिक तपशील जोडायचे आहेत का? (ईमेल, रक्तगट, ऍलर्जी, इतर वैद्यकीय समस्या)",
-        message_ta:
-          "மேலும் விவரங்களைச் சேர்க்க விரும்புகிறீர்களா? (மின்னஞ்சல், இரத்த வகை, ஒவ்வாமை, பிற மருத்துவ நிலைமைகள்)",
+        action: "REVIEW_MEDICINES_LIST",
+        message: "Please review your medicine list.",
         options: [
-          {
-            label_en: "Add Details",
-            label_gu: "વિગતો ઉમેરો",
-            label_hi: "विवरण जोड़ें",
-            label_mr: "तपशील जोडा",
-            label_ta: "விவரங்களைச் சேர்க்கவும்",
-            value: "YES",
-          },
-          {
-            label_en: "Skip",
-            label_gu: "સ્કિપ કરો",
-            label_hi: "छोड़ें",
-            label_mr: "वगळा",
-            label_ta: "தவிர்",
-            value: "SKIP",
-          },
+          { label: "Confirm", value: "CONFIRM" },
+          { label: "Edit", value: "EDIT" },
         ],
       };
 
-    case "ASK_ADD_FOUND_MEDICINES":
-      return {
-        action: "ASK_ADD_FOUND_MEDICINES",
-        message_en:
-          "We found medicines in your medical document. Do you want to add these medicines?",
-        message_gu: "અમને તમારા મેડિકલ ડોક્યુમેન્ટમાં દવાઓ મળી છે. શું તમે આ દવાઓ ઉમેરવા માંગો છો?",
-        message_hi:
-          "हमें आपके मेडिकल दस्तावेज़ में दवाएं मिली हैं। क्या आप इन दवाओं को जोड़ना चाहते हैं?",
-        message_mr:
-          "आम्हाला तुमच्या वैद्यकीय दस्तऐवजात औषधे आढळली आहेत. तुम्हाला ही औषधे जोडायची आहेत का?",
-        message_ta:
-          "உங்கள் மருத்துவ ஆவணத்தில் மருந்துகளைக் கண்டறிந்துள்ளோம். இந்த மருந்துகளைச் சேர்க்க விரும்புகிறீர்களா?",
-        options: [
-          {
-            label_en: "Yes, Add",
-            label_gu: "હા, ઉમેરો",
-            label_hi: "हाँ, जोड़ें",
-            label_mr: "होय, जोडा",
-            label_ta: "ஆம், சேர்க்கவும்",
-            value: "YES",
-          },
-          {
-            label_en: "No, Skip",
-            label_gu: "ના, સ્કિપ કરો",
-            label_hi: "नहीं, छोड़ें",
-            label_mr: "नाही, वगळा",
-            label_ta: "இல்லை, தவிர்",
-            value: "NO",
-          },
-        ],
-      };
+    case "ASK_MEDICINE_DETAILS": {
+      const idx = state?.currentMedicineIndex || 0;
+      const med = state?.medicinesToAdd?.[idx] || {};
+      let msg = "Please provide the medicine details.";
+      let options = undefined;
 
-    case "ASK_NO_MEDICINES_ACTION":
-      return {
-        action: "ASK_NO_MEDICINES_ACTION",
-        message_en: "No medicines found in your document. What would you like to do?",
-        message_gu: "તમારા ડોક્યુમેન્ટમાં કોઈ દવાઓ મળી નથી. તમે શું કરવા માંગો છો?",
-        message_hi: "आपके दस्तावेज़ में कोई दवाएं नहीं मिलीं। आप क्या करना चाहेंगे?",
-        message_mr: "तुमच्या दस्तऐवजात कोणतीही औषधे आढळली नाहीत. तुम्हाला काय करायचे आहे?",
-        message_ta:
-          "உங்கள் ஆவணத்தில் எந்த மருந்துகளும் காணப்படவில்லை. நீங்கள் என்ன செய்ய விரும்புகிறீர்கள்?",
-        options: [
-          {
-            label_en: "Go to Dashboard",
-            label_gu: "ડેશબોર્ડ પર જાઓ",
-            label_hi: "डैशबोर्ड पर जाएं",
-            label_mr: "डॅशबोर्डवर जा",
-            label_ta: "கட்டுப்பாட்டகத்திற்குச் செல்க",
-            value: "DASHBOARD",
-          },
-          {
-            label_en: "Add medicine manually",
-            label_gu: "દવા મેન્યુઅલી ઉમેરો",
-            label_hi: "मैन्युअल रूप से दवा जोड़ें",
-            label_mr: "औषध मॅन्युअली जोडा",
-            label_ta: "மருந்தை கைமுறையாகச் சேர்க்கவும்",
-            value: "MANUAL",
-          },
-        ],
-      };
+      if (!med.medicationName) msg = "What is the name of the medicine?";
+      else if (!med.medicationType) {
+        msg = "What type of medicine is it?";
+        options = medicationTypeValues.map((mt) => ({ label: mt, value: mt }));
+      } else if (med.dosePerIntake === undefined)
+        msg = "What is the dose per intake (e.g. 1, 10, 500)?";
+      else if (!med.frequency) {
+        msg = "How often do you take it?";
+        options = frequencyTypeValues.map((ft) => ({ label: ft, value: ft }));
+      } else if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
+        let doseNum = (med.tempTimes?.length || 0) + 1;
+        msg = `Please provide the exact time for dose ${doseNum} (e.g. '09:00:00' or '22:00:00').`;
+      } else if (!med.foodFrequency) {
+        msg = "When do you take it in relation to food?";
+        options = [
+          { label: "Before Food", value: "BEFORE_FOOD" },
+          { label: "After Food", value: "AFTER_FOOD" },
+        ];
+      } else if (!med.startDate) msg = "When did you start taking this medicine (YYYY-MM-DD)?";
+      else if (med.totalQuantity === undefined) msg = "What is the total quantity prescribed?";
+      else if (med.ongoing === undefined) {
+        msg = "Are you currently taking this medication (Ongoing)?";
+        options = [
+          { label: "Yes", value: "YES" },
+          { label: "No", value: "NO" },
+        ];
+      }
 
-    case "ASK_CONFIRM_MEDICINE_LIST":
-      return {
-        action: "ASK_CONFIRM_MEDICINE_LIST",
-        message_en: "Please confirm the medicines you want to add.",
-        message_gu: "કૃપા કરીને તમે જે દવાઓ ઉમેરવા માંગો છો તેની પુષ્ટિ કરો.",
-        message_hi: "कृपया उन दवाओं की पुष्टि करें जिन्हें आप जोड़ना चाहते हैं।",
-        message_mr: "कृपया तुम्हाला जी औषधे जोडायची आहेत त्यांची पुष्टी करा.",
-        message_ta: "நீங்கள் சேர்க்க விரும்பும் மருந்துகளை உறுதிப்படுத்தவும்.",
-        options: [
-          {
-            label_en: "Confirm All",
-            label_gu: "બધાની પુષ્ટિ કરો",
-            label_hi: "सभी की पुष्टि करें",
-            label_mr: "सर्वांची पुष्टी करा",
-            label_ta: "அனைத்தையும் உறுதிப்படுத்துக",
-            value: "CONFIRM",
-          },
-          {
-            label_en: "Edit List",
-            label_gu: "યાદીમાં ફેરફાર કરો",
-            label_hi: "सूची संपादित करें",
-            label_mr: "यादी संपादित करा",
-            label_ta: "பட்டியலைத் திருத்துக",
-            value: "EDIT",
-          },
-        ],
-      };
-
-    case "ASK_MEDICINE_DETAILS":
       return {
         action: "ASK_MEDICINE_DETAILS",
-        message_en: "Please provide details for the medicine.",
-        message_gu: "કૃપા કરીને દવાની વિગતો આપો.",
-        message_hi: "कृपया दवा का विवरण प्रदान करें।",
-        message_mr: "कृपया औषधाचे तपशील द्या.",
-        message_ta: "தயவுசெய்து மருந்தின் விவரங்களை வழங்கவும்.",
+        message: msg,
+        ...(options ? { options } : {}),
+      };
+    }
+
+    case "CONFIRM_MEDICINE":
+      return {
+        action: "CONFIRM_MEDICINE",
+        message: "Are these details correct?",
+        options: [
+          { label: "Yes", value: "YES" },
+          { label: "Edit", value: "EDIT" },
+        ],
       };
 
-    case "ASK_ADD_MEDICINE_MANUALLY":
+    case "EDIT_MEDICINE":
       return {
-        action: "ASK_ADD_MEDICINE_MANUALLY",
-        message_en: "Please enter medicine details.",
-        message_gu: "કૃપા કરીને દવાની વિગતો દાખલ કરો.",
-        message_hi: "कृपया दवा का विवरण दर्ज करें।",
-        message_mr: "कृपया औषधाचे तपशील प्रविष्ट करा.",
-        message_ta: "தயவுசெய்து மருந்து விவரங்களை உள்ளிடவும்.",
-      };
-
-    case "REGISTER_USER":
-      return {
-        action: "REGISTER_USER",
-        message_en: "Your registration is completed successfully.",
-        message_gu: "તમારી નોંધણી સફળતાપૂર્વક પૂર્ણ થઈ ગઈ છે.",
-        message_hi: "आपका पंजीकरण सफलतापूर्वक पूरा हो गया है।",
-        message_mr: "तुमची नोंदणी यशस्वीरित्या पूर्ण झाली आहे.",
-        message_ta: "உங்கள் பதிவு வெற்றிகரமாக முடிந்தது.",
+        action: "EDIT_MEDICINE",
+        message: "Please edit the medication details and submit.",
       };
 
     case "COMPLETE":
-      return {
-        action: "GO_TO_DASHBOARD",
-        message_en: "Your onboarding is complete. Redirecting to dashboard...",
-        message_gu: "તમારું ઓનબોર્ડિંગ પૂર્ણ થયું છે. ડેશબોર્ડ પર રીડાયરેક્ટ કરી રહ્યા છીએ...",
-        message_hi: "आपकी ऑनबोर्डिंग पूरी हो गई है। डैशबोर्ड पर रीडायरेक्ट कर रहे हैं...",
-        message_mr: "तुमची ऑनबोर्डिंग पूर्ण झाली आहे. डॅशबोर्डवर पुनर्निर्देशित करत आहे...",
-        message_ta: "உங்கள் பதிவு நிறைவடைந்தது. டாஷ்போர்டுக்கு செல்கிறது...",
-      };
+    case "POST_ONBOARDING": {
+      const finalOptions = [
+        { label: "Go to Dashboard", value: "GO_TO_DASHBOARD" },
+        { label: "Add More Medicines", value: "ADD_MORE_MEDICINES" },
+      ];
+      // Only show the report option if they uploaded a document (POST_ONBOARDING step)
+      if (step === "POST_ONBOARDING") {
+        finalOptions.push({ label: "Ask About My Report", value: "ASK_ABOUT_REPORT" });
+      }
+      finalOptions.push({ label: "View My Medicines", value: "VIEW_MEDICINES" });
 
-    case "POST_ONBOARDING":
+      return {
+        action: step,
+        message: "Thank you! Onboarding is complete. What would you like to do next?",
+        options: finalOptions,
+      };
+    }
+
     default:
       return {
-        action: "POST_ONBOARDING",
-        message_en: "Would you like to view your report summary or ask health related questions?",
-        message_gu:
-          "શું તમે રિપોર્ટનો સારાંશ જોવા માંગો છો કે રિપોર્ટ સંબંધિત પ્રશ્ન પૂછવા માંગો છો?",
-        message_hi:
-          "क्या आप अपनी रिपोर्ट का सारांश देखना चाहेंगे या स्वास्थ्य संबंधी प्रश्न पूछना चाहेंगे?",
-        message_mr:
-          "तुम्ही तुमच्या अहवालाचा सारांश पाहू इच्छिता की आरोग्याशी संबंधित प्रश्न विचारू इच्छिता?",
-        message_ta:
-          "உங்கள் அறிக்கை சுருக்கத்தைக் காண விரும்புகிறீர்களா அல்லது உடல்நலம் தொடர்பான கேள்வியைக் கேட்க விரும்புகிறீர்களா?",
-        options: [
-          {
-            label_en: "Go To Dashboard",
-            label_gu: "Dashboard પર જાઓ",
-            label_hi: "डैशबोर्ड पर जाएं",
-            label_mr: "डॅशबोर्डवर जा",
-            label_ta: "டாஷ்போர்டுக்குச் செல்லவும்",
-            value: "DASHBOARD",
-          },
-          {
-            label_en: "Report Summary",
-            label_gu: "રિપોર્ટ સારાંશ",
-            label_hi: "रिपोर्ट सारांश",
-            label_mr: "अहवाल सारांश",
-            label_ta: "அறிக்கை சுருக்கம்",
-            value: "REPORT_SUMMARY",
-          },
-          {
-            label_en: "Ask Health Questions",
-            label_gu: "આરોગ્ય પ્રશ્ન પૂછો",
-            label_hi: "स्वास्थ्य प्रश्न पूछें",
-            label_mr: "आरोग्य प्रश्न विचारा",
-            label_ta: "உடல்நலக் கேள்விகளைக் கேளுங்கள்",
-            value: "HEALTH_CHAT",
-          },
-        ],
+        action: step,
+        message: "Processing...",
       };
   }
-}
-
-function createResponse(stepResponse, state) {
-  return {
-    ...stepResponse,
-    state,
-    data: state.existingUserData,
-  };
 }
 
 class OnboardingService {
@@ -1165,7 +1040,7 @@ class OnboardingService {
         }
 
         if (extracted.gender) {
-          state.existingUserData.gender = normalizeGender(extracted.gender);
+          state.existingUserData.gender = extracted.gender;
         }
 
         if (extracted.email) {
@@ -1173,7 +1048,7 @@ class OnboardingService {
         }
 
         if (extracted.bloodGroup) {
-          state.existingUserData.bloodGroup = normalizeBloodGroup(extracted.bloodGroup);
+          state.existingUserData.bloodGroup = extracted.bloodGroup;
         }
 
         if (Array.isArray(extracted.allergies)) {
@@ -1192,6 +1067,12 @@ class OnboardingService {
 
         if (extracted.address) {
           state.existingUserData.address = extracted.address.trim();
+        }
+
+        if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
+          state.foundMedicines = extracted.medications;
+        } else {
+          state.foundMedicines = [];
         }
 
         state.documentExtracted = true;
@@ -1241,7 +1122,7 @@ class OnboardingService {
             }
 
             if (extracted.gender) {
-              state.existingUserData.gender = normalizeGender(extracted.gender);
+              state.existingUserData.gender = extracted.gender;
             }
 
             if (extracted.email) {
@@ -1249,7 +1130,7 @@ class OnboardingService {
             }
 
             if (extracted.bloodGroup) {
-              state.existingUserData.bloodGroup = normalizeBloodGroup(extracted.bloodGroup);
+              state.existingUserData.bloodGroup = extracted.bloodGroup;
             }
 
             if (Array.isArray(extracted.allergies)) {
@@ -1310,6 +1191,41 @@ class OnboardingService {
         updateData.status = "ACTIVE";
         updateData.isVerified = true;
         updateData.onboardingCompleted = true;
+
+        if (
+          state.medicinesConfirmed &&
+          Array.isArray(state.medicinesToAdd) &&
+          !state.medicinesSavedToDb
+        ) {
+          for (const med of state.medicinesToAdd) {
+            try {
+              // Only send if it has medicationName
+              if (med.medicationName) {
+                // Ensure ongoing is boolean and reminderBeforeMinutes is integer if present
+                const payload = {
+                  ...med,
+                  ongoing: med.ongoing === true || med.ongoing === "true",
+                  reminderBeforeMinutes: med.reminderBeforeMinutes
+                    ? parseInt(med.reminderBeforeMinutes, 10)
+                    : undefined,
+                };
+                delete payload.isConfirmed;
+                delete payload.tempTimes;
+                const medication = await medicationService.createMedication(userId, payload);
+                await medicationReminderService.createReminder(userId, {
+                  medicationId: medication.id,
+                });
+              }
+            } catch (err) {
+              console.error(
+                `[OnboardingService] Error creating medication ${med.medicationName}:`,
+                err,
+              );
+            }
+          }
+          // Mark as saved to prevent duplicate creation on subsequent steps, without clearing the array
+          state.medicinesSavedToDb = true;
+        }
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -1332,6 +1248,13 @@ class OnboardingService {
         bloodGroupSkipped: state.bloodGroupSkipped,
         allergiesSkipped: state.allergiesSkipped,
         uploadedMedicalDocument: state.uploadedMedicalDocument,
+        medicinesToAdd: state.medicinesToAdd,
+        foundMedicines: state.foundMedicines,
+        medicinesFlowStarted: state.medicinesFlowStarted,
+        medicinesConfirmed: state.medicinesConfirmed,
+        currentMedicineIndex: state.currentMedicineIndex,
+        medicinesSkipped: state.medicinesSkipped,
+        medicinesSavedToDb: state.medicinesSavedToDb,
       };
 
       if (existingRecord) {
@@ -1350,7 +1273,26 @@ class OnboardingService {
     }
 
     const nextStep = getNextStep(state);
-    return createResponse(nextStep, state);
+    const response = createResponse(nextStep, state);
+
+    if (state.preferredLanguage && state.preferredLanguage !== "english") {
+      if (response.message) {
+        response.message = await translateMessage(response.message, state.preferredLanguage);
+      }
+      if (response.options && Array.isArray(response.options)) {
+        response.options = await Promise.all(
+          response.options.map(async (opt) => ({
+            ...opt,
+            label: await translateMessage(opt.label, state.preferredLanguage),
+          })),
+        );
+      }
+    }
+
+    return {
+      ...response,
+      state: state,
+    };
   }
 }
 

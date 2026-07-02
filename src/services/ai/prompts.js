@@ -336,6 +336,9 @@ If it is NOT a medical document:
   "reason": "Explain briefly why it is rejected (e.g. 'This is an ID card')"
 }`;
 
+const TRANSLATION_SYSTEM_PROMPT = (language) =>
+  `You are a professional medical translator. Translate the following English text into ${language}. Return ONLY the translated text without any quotes, conversational filler, or explanations. Do not provide transliterations unless requested. Preserve any numbers or times as appropriate.`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -347,4 +350,5 @@ module.exports = {
   STRUCTURED_EXTRACTION_PROMPT,
   ONBOARDING_SYSTEM_PROMPT,
   CLASSIFICATION_PROMPT,
+  TRANSLATION_SYSTEM_PROMPT,
 };
