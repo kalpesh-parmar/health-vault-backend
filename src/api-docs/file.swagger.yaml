@@ -31,7 +31,13 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: File to upload
+                  description: Legacy single file to upload
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Array of files to upload (max 5 files allowed)
                 uploadType:
                   type: string
                   enum:
@@ -40,15 +46,23 @@ paths:
                   description: Only PATIENT_PROFILE is accepted on this endpoint.
       responses:
         "200":
-          description: File uploaded successfully
+          description: File(s) uploaded successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  fileKey:
-                    type: string
-                    example: profile_image/17000012345-image.png
+                oneOf:
+                  - type: object
+                    properties:
+                      fileKey:
+                        type: string
+                        example: profile_image/17000012345-image.png
+                  - type: array
+                    items:
+                      type: object
+                      properties:
+                        fileKey:
+                          type: string
+                          example: profile_image/17000012345-image.png
         "400":
           description: |
             Returned when `uploadType` is missing, invalid, or set to

@@ -134,13 +134,16 @@ function normalizePhone(phoneStr) {
 }
 
 function splitName(fullName) {
-  if (!fullName) return { firstName: null, lastName: null };
+  if (!fullName) return { firstName: null, middleName: null, lastName: null };
   const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return { firstName: null, lastName: null };
-  if (parts.length === 1) return { firstName: parts[0], lastName: null };
+  if (parts.length === 0) return { firstName: null, middleName: null, lastName: null };
+  if (parts.length === 1) return { firstName: parts[0], middleName: null, lastName: null };
+  if (parts.length === 2) return { firstName: parts[0], middleName: null, lastName: parts[1] };
+
   const firstName = parts[0];
-  const lastName = parts.slice(1).join(" ");
-  return { firstName, lastName };
+  const lastName = parts[parts.length - 1];
+  const middleName = parts.slice(1, -1).join(" ");
+  return { firstName, middleName, lastName };
 }
 
 // Helper functions for normalization (formerly in medicalExtractionService from aiService)
@@ -508,7 +511,11 @@ class OcrService {
             }
           }
           const closing = stack.reverse().join("");
-          const repaired = body + closing;
+          let repaired = body;
+          if (inStr) {
+            repaired += '"';
+          }
+          repaired += closing;
           const cleaned = repaired.replace(/,\s*([}\]])/g, "$1");
           return JSON.parse(cleaned);
         },
@@ -545,65 +552,17 @@ class OcrService {
   }
 
   async validateDocument(file) {
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
-    let responseText;
+    const {
+      medicalDocumentClassifierService,
+    } = require("../classifier/medicalDocumentClassifier.service");
 
-    if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.VALIDATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+    console.log("[OcrService] Delegating validation to MedicalDocumentClassifierService...");
+    const classification = await medicalDocumentClassifierService.classify(file);
 
-      console.log("[OcrService] Validating PDF document...");
-      responseText = await ollamaClient.generate(prompt, "qwen2.5:14b", { temperature: 0 });
-    } else {
-      const processedBuffer = await preprocessImage(file.buffer);
-      const base64Image = processedBuffer.toString("base64");
-      const messages = [
-        {
-          role: "user",
-          content: prompts.VALIDATION_PROMPT,
-          images: [base64Image],
-        },
-      ];
-
-      console.log("[OcrService] Validating image document using qwen3-vl:latest...");
-      responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
-    }
-
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
-
-    const validation = this.cleanAndParseJSON(responseText, { traceId, jobId });
-    const shouldRunFallback =
-      validation.status === "FAILED" ||
-      validation.isMedicalDocument !== true ||
-      !validation.documentType;
-
-    if (shouldRunFallback) {
-      try {
-        const {
-          medicalDocumentClassifierService,
-        } = require("../classifier/medicalDocumentClassifier.service");
-        const fallback = await medicalDocumentClassifierService.classify(file);
-        if (fallback && fallback.isMedicalDocument) {
-          return {
-            status: "SUCCESS",
-            ...fallback,
-          };
-        }
-        if (validation.status === "SUCCESS" && validation.isMedicalDocument === false) {
-          return validation;
-        }
-      } catch (fallbackError) {
-        console.warn(
-          `[OcrService] Validation fallback classifier failed: ${fallbackError.message}`,
-        );
-      }
-    }
-
-    return validation;
+    return {
+      status: classification.confidence > 0 ? "SUCCESS" : "FAILED",
+      ...classification,
+    };
   }
 
   async extractText(file, userLanguage = "english") {
@@ -930,11 +889,18 @@ ${rawText}
         extracted.dateOfBirth = null;
       }
 
-      // If patientName is populated but firstName/lastName are empty, split the name
-      if (extracted.patientName && (!extracted.firstName || !extracted.lastName)) {
-        const { firstName, lastName } = splitName(extracted.patientName);
-        if (!extracted.firstName) extracted.firstName = firstName;
-        if (!extracted.lastName) extracted.lastName = lastName;
+      const combinedName =
+        extracted.patientName ||
+        (extracted.firstName || extracted.lastName
+          ? `${extracted.firstName || ""} ${extracted.lastName || ""}`.trim()
+          : null);
+
+      if (combinedName) {
+        const { firstName, middleName, lastName } = splitName(combinedName);
+        extracted.firstName = firstName;
+        extracted.middleName = middleName;
+        extracted.lastName = lastName;
+        extracted.patientName = combinedName;
       }
 
       return extracted;
@@ -1012,10 +978,17 @@ ${rawText}
     let name = parsedOCR.patient?.name || null;
     let firstName = parsedOCR.patient?.firstName || null;
     let lastName = parsedOCR.patient?.lastName || null;
-    if (name && (!firstName || !lastName)) {
-      const split = splitName(name);
-      if (!firstName) firstName = split.firstName;
-      if (!lastName) lastName = split.lastName;
+    let middleName = null;
+
+    const combinedName =
+      name || (firstName || lastName ? `${firstName || ""} ${lastName || ""}`.trim() : null);
+
+    if (combinedName) {
+      const split = splitName(combinedName);
+      firstName = split.firstName;
+      middleName = split.middleName;
+      lastName = split.lastName;
+      name = combinedName;
     }
 
     const mapped = {
@@ -1029,6 +1002,7 @@ ${rawText}
         patientInfo: {
           name,
           firstName,
+          middleName,
           lastName,
           age: parsedOCR.patient?.age || null,
           gender: normalizeGender(parsedOCR.patient?.gender),

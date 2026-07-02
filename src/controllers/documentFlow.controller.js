@@ -16,11 +16,13 @@ const { attachSseStream } = require("../services/sse/sseTransport");
 const { NotFoundException } = require("../exceptions/appError");
 const documentOcrJobService = require("../services/documentOcrJobService");
 const documentPersistenceService = require("../services/documentPersistenceService");
+const uploadFileService = require("../services/uploadFileService");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
 const { validateSchema } = require("../validations");
 const {
   addDocumentSchema,
   fileKeySchema,
+  batchFileKeySchema,
   runOcrSchema,
 } = require("../validations/documentFlowValidation");
 
@@ -38,23 +40,72 @@ async function ocrProgressStream(req, res) {
  */
 async function runOcr(req, res) {
   const data = await validateSchema(runOcrSchema, req.body);
-  const job = await documentOcrJobService.enqueue({
-    fileKey: data.fileKey,
-    mimeType: data.mimeType,
-    userId: req.auth.userId,
-  });
+  const userId = req.auth.userId;
+  const jobs = [];
 
-  return successResponse(
-    res,
-    {
-      fileKey: job.fileKey,
-      jobId: job.id,
-      stage: job.stage,
-      status: "OCR_STARTED",
-    },
-    "OCR job accepted",
-    StatusCodes.ACCEPTED,
-  );
+  // 1. Handle legacy single fileKey
+  if (data.fileKey) {
+    const job = await documentOcrJobService.enqueue({
+      fileKey: data.fileKey,
+      mimeType: data.mimeType,
+      userId,
+    });
+    jobs.push(job);
+  }
+
+  // 2. Handle array of fileKeys
+  if (data.fileKeys && data.fileKeys.length > 0) {
+    for (const fKey of data.fileKeys) {
+      // avoid duplicate if fileKey was also provided
+      if (fKey === data.fileKey) continue;
+      const job = await documentOcrJobService.enqueue({
+        fileKey: fKey,
+        userId,
+      });
+      jobs.push(job);
+    }
+  }
+
+  // 3. Handle multiple uploaded files
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+      const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
+      const job = await documentOcrJobService.enqueue({
+        fileKey: uploadResult.data.fileKey,
+        mimeType: uploadResult.data.mimeType,
+        userId,
+      });
+      jobs.push(job);
+    }
+  }
+
+  if (jobs.length === 0) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ error: "No files or fileKeys provided." });
+  }
+
+  // If only one job and no array format was used, return legacy single-object format
+  if (jobs.length === 1 && !data.fileKeys && (!req.files || req.files.length === 0)) {
+    return successResponse(
+      res,
+      {
+        fileKey: jobs[0].fileKey,
+        jobId: jobs[0].id,
+        stage: jobs[0].stage,
+        status: "OCR_STARTED",
+      },
+      "OCR job accepted",
+      StatusCodes.ACCEPTED,
+    );
+  }
+
+  const responseData = jobs.map((job) => ({
+    fileKey: job.fileKey,
+    jobId: job.id,
+    stage: job.stage,
+    status: "OCR_STARTED",
+  }));
+
+  return successResponse(res, responseData, "OCR jobs accepted", StatusCodes.ACCEPTED);
 }
 
 /**
@@ -75,6 +126,35 @@ async function runOcrStatus(req, res) {
   }
   return successResponse(res, job, "OCR job status fetched");
 }
+
+/**
+ * Fetch status for multiple files simultaneously
+ */
+async function runOcrStatusBatch(req, res) {
+  const { fileKeys } = await validateSchema(batchFileKeySchema, req.body);
+  const userId = req.auth.userId;
+
+  const jobs = await Promise.all(
+    fileKeys.map(async (fileKey) => {
+      try {
+        const job = await documentOcrJobService.getStatus({ fileKey, userId });
+        if (!job) return { fileKey, status: "NOT_FOUND" };
+        if (job.status === "FAILED") {
+          return {
+            fileKey,
+            status: "FAILED",
+            error: job.error || "AI response format is invalid.",
+          };
+        }
+        return job;
+      } catch (err) {
+        return { fileKey, status: "ERROR", error: err.message };
+      }
+    }),
+  );
+
+  return successResponse(res, jobs, "OCR batch statuses fetched");
+}
 async function addDocument(req, res) {
   const payload = await validateSchema(addDocumentSchema, req.body);
   const result = await documentPersistenceService.addDocument({
@@ -84,4 +164,10 @@ async function addDocument(req, res) {
   return successResponse(res, result, messageConstants.DOCUMENT_CREATED, StatusCodes.CREATED);
 }
 
-module.exports = { addDocument, ocrProgressStream, runOcr, runOcrStatus };
+module.exports = {
+  addDocument,
+  ocrProgressStream,
+  runOcr,
+  runOcrStatus,
+  runOcrStatusBatch,
+};

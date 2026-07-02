@@ -21,19 +21,60 @@ async function uploadFile(req, res) {
     }
   }
 
+  let files = [];
+  if (req.files) {
+    if (Array.isArray(req.files)) {
+      files = req.files;
+    } else {
+      files = [...(req.files.file || []), ...(req.files.files || [])];
+    }
+  } else if (req.file) {
+    files = [req.file];
+  }
+
+  if (files.length === 0) {
+    return res.status(StatusCodes.BAD_REQUEST).json({ error: "File is required" });
+  }
+
+  const uploadType = req.body.uploadType;
+
+  if (uploadType === "PATIENT_PROFILE") {
+    if (files.length > 1) {
+      return res
+        .status(StatusCodes.BAD_REQUEST)
+        .json({ error: "PATIENT_PROFILE allows only one picture." });
+    }
+    if (!files[0].mimetype.startsWith("image/")) {
+      return res
+        .status(StatusCodes.BAD_REQUEST)
+        .json({ error: "PATIENT_PROFILE allows only picture formats." });
+    }
+  }
+
   const { NonMedicalDocumentException } = require("../exceptions/appError");
   try {
-    const result = await uploadFileService.uploadFile(req.file, req.body.uploadType, patientId);
-
-    if (req.body.uploadType === "PATIENT_DOCUMENT" && result.isMedicalDocument !== undefined) {
-      return res.status(StatusCodes.OK).json({
-        isMedicalDocument: true,
-        documentType: result.documentType,
-        data: result.data,
-      });
+    const results = [];
+    for (const file of files) {
+      const result = await uploadFileService.uploadFile(file, req.body.uploadType, patientId);
+      results.push(result);
     }
 
-    return successResponse(res, result, messageConstants.FILE_UPLOADED);
+    if (req.body.uploadType === "PATIENT_DOCUMENT") {
+      const allMedical = results.every((r) => r.isMedicalDocument);
+      if (allMedical) {
+        return res.status(StatusCodes.OK).json({
+          isMedicalDocument: true,
+          documentType: results.length === 1 ? results[0].documentType : "multiple",
+          data: results.length === 1 ? results[0].data : results.map((r) => r.data),
+        });
+      }
+    }
+
+    if (results.length === 1) {
+      return successResponse(res, results[0], messageConstants.FILE_UPLOADED);
+    }
+
+    return successResponse(res, results, messageConstants.FILE_UPLOADED);
   } catch (error) {
     if (error instanceof NonMedicalDocumentException) {
       return res.status(StatusCodes.BAD_REQUEST).json({

@@ -50,8 +50,66 @@ async function verifyFirebaseToken(firebaseToken) {
   return admin.auth(app).verifyIdToken(firebaseToken);
 }
 
+async function findOrCreateFirebaseUser(email, name, providerUid) {
+  const app = initializeFirebase();
+  if (!app) {
+    throw new Error("Firebase Admin SDK is not initialized. Check credentials in env.");
+  }
+
+  const auth = admin.auth(app);
+  let userRecord = null;
+
+  // 1. Try to find by custom uid (preferred to ensure consistency)
+  const customUid = `microsoft_${providerUid}`;
+  try {
+    userRecord = await auth.getUser(customUid);
+  } catch (error) {
+    if (error.code !== "auth/user-not-found") {
+      console.error("[FirebaseConfig] getUser failed:", error);
+    }
+  }
+
+  // 2. Try to find by email if present and not found by UID
+  if (!userRecord && email) {
+    try {
+      userRecord = await auth.getUserByEmail(email);
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") {
+        console.error("[FirebaseConfig] getUserByEmail failed:", error);
+      }
+    }
+  }
+
+  // 3. Create Firebase user if still not found
+  if (!userRecord) {
+    try {
+      userRecord = await auth.createUser({
+        uid: customUid,
+        email: email || undefined,
+        displayName: name || undefined,
+        emailVerified: true,
+      });
+    } catch (error) {
+      console.error("[FirebaseConfig] createUser failed:", error);
+      throw error;
+    }
+  }
+
+  return userRecord;
+}
+
+async function createCustomFirebaseToken(uid) {
+  const app = initializeFirebase();
+  if (!app) {
+    throw new Error("Firebase Admin SDK is not initialized. Check credentials in env.");
+  }
+  return admin.auth(app).createCustomToken(uid);
+}
+
 module.exports = {
   getFirebaseMessaging,
   verifyFirebaseToken,
   initializeFirebase,
+  findOrCreateFirebaseUser,
+  createCustomFirebaseToken,
 };

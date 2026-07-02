@@ -8,9 +8,16 @@ const fileKeySchema = z
   })
   .strict();
 
+const batchFileKeySchema = z
+  .object({
+    fileKeys: z.array(z.string().trim().min(3).max(500)).min(1).max(50),
+  })
+  .strict();
+
 const runOcrSchema = z
   .object({
-    fileKey: z.string().trim().min(3).max(500),
+    fileKey: z.string().trim().min(3).max(500).optional(),
+    fileKeys: z.array(z.string().trim().min(3).max(500)).optional(),
     documentType: z.enum(documentTypeValue).optional(),
     mimeType: z.string().trim().max(128).optional(),
   })
@@ -60,6 +67,7 @@ const sessionListQuerySchema = z
 
 module.exports = {
   addDocumentSchema,
+  batchFileKeySchema,
   createChatSessionSchema,
   fileKeySchema,
   runOcrSchema,

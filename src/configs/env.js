@@ -137,6 +137,7 @@ const env = Object.freeze({
   chatModel: process.env.CHAT_MODEL,
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL,
+  popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
   embeddingModel: process.env.AI_EMBEDDING_MODEL || "all-MiniLM-L6-v2",
