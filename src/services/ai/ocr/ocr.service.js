@@ -676,6 +676,19 @@ class OcrService {
       documentType: "MEDICAL_CHART",
       chartType: pageResults.find((item) => item.chartType)?.chartType || null,
       patientName: pageResults.find((item) => item.patientName)?.patientName || null,
+      firstName: pageResults.find((item) => item.firstName)?.firstName || null,
+      lastName: pageResults.find((item) => item.lastName)?.lastName || null,
+      dateOfBirth: pageResults.find((item) => item.dateOfBirth)?.dateOfBirth || null,
+      gender: pageResults.find((item) => item.gender)?.gender || null,
+      bloodGroup: pageResults.find((item) => item.bloodGroup)?.bloodGroup || null,
+      email: pageResults.find((item) => item.email)?.email || null,
+      phoneNumber: pageResults.find((item) => item.phoneNumber)?.phoneNumber || null,
+      address: pageResults.find((item) => item.address)?.address || null,
+      allergies: uniqueStrings(pageResults.flatMap((item) => asArray(item.allergies))),
+      medicalConditions: uniqueStrings(
+        pageResults.flatMap((item) => asArray(item.medicalConditions)),
+      ),
+      medications: pageResults.flatMap((item) => asArray(item.medications)),
       reportDate: pageResults.find((item) => item.reportDate)?.reportDate || null,
       doctorName: pageResults.find((item) => item.doctorName)?.doctorName || null,
       hospitalName: pageResults.find((item) => item.hospitalName)?.hospitalName || null,
@@ -1284,6 +1297,8 @@ ${rawText}
       `[OcrService] [UPLOAD] Duration: ${Date.now() - tUploadStart}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
     );
 
+    const fileKey = uploadResult.data.fileKey;
+
     // 2. Perform OCR
     const tOcrStart = Date.now();
     const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
@@ -1315,11 +1330,10 @@ ${rawText}
 
     // 4. Generate summaries in English and preferred language
     const tSummaryStart = Date.now();
-    const summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
-    const summaryPreferredLanguage = await this.generateSummary(
-      ocrResult.rawText,
-      preferredLanguage,
-    );
+    const [summaryEnglish, summaryPreferredLanguage] = await Promise.all([
+      this.generateSummary(ocrResult.rawText, "english"),
+      this.generateSummary(ocrResult.rawText, preferredLanguage),
+    ]);
     console.log(
       `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
     );
@@ -1330,7 +1344,6 @@ ${rawText}
 
     // 5. Store in database
     const tDbStart = Date.now();
-    const fileKey = uploadResult.data.fileKey;
     const bucketName =
       uploadResult.data.s3Bucket ||
       (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
@@ -1367,6 +1380,7 @@ ${rawText}
 
     // 6. Index Document in RAG
     const { embeddingService } = require("../chat/embedding.service");
+    //remove await so that time reduce and embedding performs in bachground
     await embeddingService.embedAndPersist({
       documentId: documentRow.id,
       userId,

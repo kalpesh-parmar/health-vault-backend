@@ -375,7 +375,7 @@ class PatientService {
         decodedToken = {
           uid: `microsoft_${providerToken.replace("dummy-", "")}`,
           email: "microsoft-mockuser@example.com",
-          name: "Mock MicrosoftUser",
+          name: null,
         };
       } else {
         if (!providerToken) {
@@ -411,8 +411,8 @@ class PatientService {
       if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
         decodedToken = {
           uid: `mock-uid-${provider}-${firebaseIdToken}`,
-          email: `${provider}-mockuser@example.com`,
-          name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+          email: null,
+          name: null,
           phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
         };
       } else {

@@ -66,10 +66,7 @@ const medicationScheduleSchema = z
   })
   .refine(
     (data) =>
-      //   Object.values(data).some(Boolean), {
-      //   message: errorConstants.ONE_REQUIRED,
-      // });
-      !!data.MORNING || !!data.NOON || !!data.NIGHT || (data.CUSTOM && data.CUSTOM.length > 0),
+      !!data.Morning || !!data.Noon || !!data.Night || (data.Custom && data.Custom.length > 0),
     {
       message: errorConstants.ONE_REQUIRED,
     },

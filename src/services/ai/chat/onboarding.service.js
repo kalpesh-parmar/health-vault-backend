@@ -287,7 +287,9 @@ function computeCurrentStep(state) {
   if (state.flowMode === "UPLOAD") {
     const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
     if (!isUploaded) return "ASK_UPLOAD_DOCUMENT";
-
+    if (state.documentExtracted && !state.documentConfirmed) {
+      return "CONFIRM_DOCUMENT_DETAILS";
+    }
     if (state.documentExtracted && state.hasSocialData && !state.socialDataConfirmed) {
       return "ASK_USE_SOCIAL_LOGIN_INFO";
     }
@@ -405,7 +407,7 @@ async function updateStateFromMessage(state, message) {
       const msgUpper = msg.toUpperCase();
       if (msgUpper === "YES") {
         state.documentConfirmed = true;
-        state.currentStep = getNextRequiredOrOptionalStep(state);
+        state.currentStep = computeCurrentStep(state);
       } else if (msgUpper === "NO") {
         state.documentConfirmed = false;
         state.flowMode = "MANUAL";
@@ -431,7 +433,7 @@ async function updateStateFromMessage(state, message) {
         );
         if (extractedConf === "YES") {
           state.documentConfirmed = true;
-          state.currentStep = getNextRequiredOrOptionalStep(state);
+          state.currentStep = computeCurrentStep(state);
         } else if (extractedConf === "NO") {
           state.documentConfirmed = false;
           state.flowMode = "MANUAL";
@@ -651,12 +653,12 @@ async function updateStateFromMessage(state, message) {
 
         for (const timeStr of med.tempTimes) {
           const hour = parseInt(timeStr.split(":")[0], 10);
-          let key = "CUSTOM";
-          if (hour >= 5 && hour < 12) key = "MORNING";
-          else if (hour >= 12 && hour < 17) key = "NOON";
-          else if (hour >= 17 || hour < 5) key = "NIGHT";
+          let key = "Custom";
+          if (hour >= 5 && hour < 12) key = "Morning";
+          else if (hour >= 12 && hour < 17) key = "Noon";
+          else if (hour >= 17 || hour < 5) key = "Night";
 
-          if (key !== "CUSTOM" && !schedule[key]) {
+          if (key !== "Custom" && !schedule[key]) {
             schedule[key] = timeStr;
           } else {
             customTimes.push(timeStr);
@@ -699,11 +701,8 @@ async function updateStateFromMessage(state, message) {
     case "ASK_MEDICINE_QUANTITY": {
       const idx = state.currentMedicineIndex;
       const med = state.medicinesToAdd[idx];
-      med.totalQuantity = await extractFieldFromMessage(
-        "totalQuantity",
-        msg,
-        state.preferredLanguage,
-      );
+      const quantity = await extractFieldFromMessage("totalQuantity", msg, state.preferredLanguage);
+      med.totalQuantity = parseInt(quantity, 10);
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
@@ -826,6 +825,15 @@ function getLocalizedResponse(step, state) {
         message: "I am analyzing your document...",
       };
 
+    // case "CONFIRM_DOCUMENT_DETAILS":
+    //   return {
+    //     action: "CONFIRM_DOCUMENT_DETAILS",
+    //     message: "I have extracted the details. Please confirm if they are correct.",
+    //     options: [
+    //       { label: "Yes, they are correct", value: "YES" },
+    //       { label: "No, let me enter manually", value: "NO" },
+    //     ],
+    //   };
     case "CONFIRM_DOCUMENT_DETAILS":
       return {
         action: "CONFIRM_DOCUMENT_DETAILS",
@@ -845,10 +853,7 @@ function getLocalizedResponse(step, state) {
     case "ASK_DOB":
       return {
         action: "ASK_DOB",
-        message:
-          state.flowMode === "MANUAL"
-            ? "What is your date of birth?"
-            : "What is your date of birth? (Example: 1989-01-01)",
+        message: "What is your date of birth?",
       };
 
     case "ASK_GENDER":
@@ -927,7 +932,7 @@ function getLocalizedResponse(step, state) {
     case "ASK_DOSE_PER_INTAKE":
       return {
         action: "ASK_DOSE_PER_INTAKE",
-        message: "What is the dose per intake (e.g. 1, 10, 500)?",
+        message: "What is the dose per intake?",
       };
     case "ASK_MEDICINE_FREQUENCY":
       return {
@@ -987,19 +992,24 @@ function getLocalizedResponse(step, state) {
       return {
         action: "EDIT_MEDICINE",
         message: "Please edit the medication details and submit.",
+        options: [{ label: "Confirm", value: "CONFIRM" }],
       };
 
     case "COMPLETE":
     case "POST_ONBOARDING": {
-      const finalOptions = [
-        { label: "Go to Dashboard", value: "GO_TO_DASHBOARD" },
-        { label: "Add More Medicines", value: "ADD_MORE_MEDICINES" },
-      ];
+      const hasMedicines =
+        state.medicinesToAdd && state.medicinesToAdd.length > 0 && !state.medicinesSkipped;
+      const finalOptions = [];
+      finalOptions.push({ label: "Go to Dashboard", value: "GO_TO_DASHBOARD" });
+
       // Only show the report option if they uploaded a document (POST_ONBOARDING step)
       if (step === "POST_ONBOARDING") {
         finalOptions.push({ label: "Ask About My Report", value: "ASK_ABOUT_REPORT" });
       }
-      finalOptions.push({ label: "View My Medicines", value: "VIEW_MEDICINES" });
+      if (hasMedicines) {
+        finalOptions.push({ label: "Add More Medicines", value: "ADD_MORE_MEDICINES" });
+        finalOptions.push({ label: "View My Medicines", value: "VIEW_MEDICINES" });
+      }
 
       return {
         action: step,
@@ -1169,7 +1179,7 @@ class OnboardingService {
 
         state.documentExtracted = true;
         state.documentUploaded = true;
-        state.documentConfirmed = true; // Auto-confirm document
+        // state.documentConfirmed = true; // Auto-confirm document
         state.currentStep = computeCurrentStep(state);
       } else if (state.documentText) {
         console.log("[OnboardingService] Processing medical document for extraction...");
@@ -1249,7 +1259,7 @@ class OnboardingService {
         state.documentExtracted = true;
 
         state.documentUploaded = true;
-        state.documentConfirmed = true;
+        // state.documentConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       }
     }
