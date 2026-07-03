@@ -229,42 +229,21 @@ function getNextRequiredOrOptionalStep(state) {
 
       for (let i = 0; i < state.medicinesToAdd.length; i++) {
         const med = state.medicinesToAdd[i];
+        const isComplete =
+          med.medicationName &&
+          med.medicationType &&
+          med.dosePerIntake !== undefined &&
+          med.frequency &&
+          med.medicationSchedule &&
+          Object.keys(med.medicationSchedule).length > 0 &&
+          med.foodFrequency &&
+          med.startDate &&
+          med.totalQuantity !== undefined &&
+          med.ongoing !== undefined;
 
-        if (!med.medicationName) {
+        if (!isComplete) {
           state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_NAME";
-        }
-        if (!med.medicationType) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_TYPE";
-        }
-        if (med.dosePerIntake === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_DOSE_PER_INTAKE";
-        }
-        if (!med.frequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FREQUENCY";
-        }
-        if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_SCHEDULE";
-        }
-        if (!med.foodFrequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FOOD_FREQUENCY";
-        }
-        if (!med.startDate) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_START_DATE";
-        }
-        if (med.totalQuantity === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_QUANTITY";
-        }
-        if (med.ongoing === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_ONGOING";
+          return "ASK_MEDICINE_DETAILS";
         }
         if (!med.isConfirmed) {
           state.currentMedicineIndex = i;
@@ -529,7 +508,7 @@ async function updateStateFromMessage(state, message) {
 
     case "ASK_FOUND_MEDICINES":
     case "ASK_ON_MEDICINES": {
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+      const yesNoVal = await extractFieldFromMessage("yes", msg, state.preferredLanguage);
       if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
@@ -582,143 +561,107 @@ async function updateStateFromMessage(state, message) {
       break;
     }
 
-    case "ASK_MEDICINE_NAME": {
+    case "ASK_MEDICINE_DETAILS": {
       const idx = state.currentMedicineIndex;
       const med = state.medicinesToAdd[idx];
-      med.medicationName = await extractFieldFromMessage(
-        "medicationName",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_TYPE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (medicationTypeValues.includes(msg.toUpperCase())) {
-        med.medicationType = msg.toUpperCase();
-      } else {
-        med.medicationType = await extractFieldFromMessage(
-          "medicationType",
+
+      if (!med.medicationName) {
+        med.medicationName = await extractFieldFromMessage(
+          "medicationName",
           msg,
           state.preferredLanguage,
         );
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_DOSE_PER_INTAKE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.dosePerIntake = await extractFieldFromMessage(
-        "dosePerIntake",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (frequencyTypeValues.includes(msg.toUpperCase())) {
-        med.frequency = msg.toUpperCase();
-      } else {
-        med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_SCHEDULE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (!med.tempTimes) med.tempTimes = [];
+      } else if (!med.medicationType) {
+        if (medicationTypeValues.includes(msg.toUpperCase())) {
+          med.medicationType = msg.toUpperCase();
+        } else {
+          med.medicationType = await extractFieldFromMessage(
+            "medicationType",
+            msg,
+            state.preferredLanguage,
+          );
+        }
+      } else if (med.dosePerIntake === undefined) {
+        med.dosePerIntake = await extractFieldFromMessage(
+          "dosePerIntake",
+          msg,
+          state.preferredLanguage,
+        );
+      } else if (!med.frequency) {
+        if (frequencyTypeValues.includes(msg.toUpperCase())) {
+          med.frequency = msg.toUpperCase();
+        } else {
+          med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
+        }
+      } else if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
+        if (!med.tempTimes) med.tempTimes = [];
 
-      let expectedDoses = 1;
-      if (med.frequency === "TWICE_DAILY") expectedDoses = 2;
-      if (med.frequency === "THREE_TIMES_DAILY") expectedDoses = 3;
-      if (med.frequency === "FOUR_TIMES_DAILY") expectedDoses = 4;
+        let expectedDoses = 1;
+        if (med.frequency === "TWICE_DAILY") expectedDoses = 2;
+        if (med.frequency === "THREE_TIMES_DAILY") expectedDoses = 3;
+        if (med.frequency === "FOUR_TIMES_DAILY") expectedDoses = 4;
 
-      const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
-      if (timeVal) {
-        med.tempTimes.push(timeVal);
-      }
+        const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
+        if (timeVal) {
+          med.tempTimes.push(timeVal);
+        }
 
-      if (med.tempTimes.length >= expectedDoses || med.frequency === "AS_NEEDED") {
-        let schedule = {};
-        let customTimes = [];
+        if (med.tempTimes.length >= expectedDoses || med.frequency === "AS_NEEDED") {
+          let schedule = {};
+          let customTimes = [];
 
-        for (const timeStr of med.tempTimes) {
-          const hour = parseInt(timeStr.split(":")[0], 10);
-          let key = "CUSTOM";
-          if (hour >= 5 && hour < 12) key = "MORNING";
-          else if (hour >= 12 && hour < 17) key = "NOON";
-          else if (hour >= 17 || hour < 5) key = "NIGHT";
+          for (const timeStr of med.tempTimes) {
+            const hour = parseInt(timeStr.split(":")[0], 10);
+            let key = "CUSTOM";
+            if (hour >= 5 && hour < 12) key = "MORNING";
+            else if (hour >= 12 && hour < 17) key = "NOON";
+            else if (hour >= 17 || hour < 5) key = "NIGHT";
 
-          if (key !== "CUSTOM" && !schedule[key]) {
-            schedule[key] = timeStr;
-          } else {
-            customTimes.push(timeStr);
+            if (key !== "CUSTOM" && !schedule[key]) {
+              schedule[key] = timeStr;
+            } else {
+              customTimes.push(timeStr);
+            }
           }
-        }
 
-        if (customTimes.length > 0) {
-          schedule.CUSTOM = customTimes;
-        }
+          if (customTimes.length > 0) {
+            schedule.CUSTOM = customTimes;
+          }
 
-        med.medicationSchedule = schedule;
-        delete med.tempTimes;
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FOOD_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (msg.toUpperCase() === "BEFORE_FOOD" || msg.toUpperCase() === "AFTER_FOOD") {
-        med.foodFrequency = msg.toUpperCase();
-      } else {
-        med.foodFrequency = await extractFieldFromMessage(
-          "foodFrequency",
+          med.medicationSchedule = schedule;
+          delete med.tempTimes;
+        }
+      } else if (!med.foodFrequency) {
+        if (msg.toUpperCase() === "BEFORE_FOOD" || msg.toUpperCase() === "AFTER_FOOD") {
+          med.foodFrequency = msg.toUpperCase();
+        } else {
+          med.foodFrequency = await extractFieldFromMessage(
+            "foodFrequency",
+            msg,
+            state.preferredLanguage,
+          );
+        }
+      } else if (!med.startDate) {
+        const d = await extractFieldFromMessage("startDate", msg, state.preferredLanguage);
+        if (d) med.startDate = d;
+      } else if (med.totalQuantity === undefined) {
+        med.totalQuantity = await extractFieldFromMessage(
+          "totalQuantity",
           msg,
           state.preferredLanguage,
         );
+      } else if (med.ongoing === undefined) {
+        const yesNoVal = await extractFieldFromMessage("yes", msg, state.preferredLanguage);
+        med.ongoing = yesNoVal === "YES" || msg.toUpperCase() === "YES";
       }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_START_DATE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const d = await extractFieldFromMessage("startDate", msg, state.preferredLanguage);
-      if (d) med.startDate = d;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_QUANTITY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.totalQuantity = await extractFieldFromMessage(
-        "totalQuantity",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_ONGOING": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      med.ongoing = yesNoVal === "YES" || msg.toUpperCase() === "YES";
+
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
     case "CONFIRM_MEDICINE": {
       const txt = msg.toUpperCase();
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+      const yesNoVal = await extractFieldFromMessage("yes", msg, state.preferredLanguage);
       if (txt.includes("EDIT") || txt === "NO" || yesNoVal === "NO") {
         // Keep the values but mark as unconfirmed so UI can open edit form
         state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = false;
@@ -804,16 +747,6 @@ function getLocalizedResponse(step, state) {
         ],
       };
 
-    case "ASK_USE_SOCIAL_LOGIN_INFO":
-      return {
-        action: "ASK_USE_SOCIAL_LOGIN_INFO",
-        message:
-          "We found existing details from your social login. Should we use those, or the details from the uploaded document?",
-        options: [
-          { label: "Use Login Details", value: "SOCIAL" },
-          { label: "Use Document Details", value: "DOCUMENT" },
-        ],
-      };
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
@@ -843,13 +776,7 @@ function getLocalizedResponse(step, state) {
       return { action: "ASK_LAST_NAME", message: "What is your last name?" };
 
     case "ASK_DOB":
-      return {
-        action: "ASK_DOB",
-        message:
-          state.flowMode === "MANUAL"
-            ? "What is your date of birth?"
-            : "What is your date of birth? (Example: 1989-01-01)",
-      };
+      return { action: "ASK_DOB", message: "What is your date of birth? (Example: 1989-01-01)" };
 
     case "ASK_GENDER":
       return {
@@ -887,8 +814,8 @@ function getLocalizedResponse(step, state) {
         action: "ASK_FOUND_MEDICINES",
         message: `We found the following medicines in your document: ${medNames}. Do you want to add these to your profile?`,
         options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
+          { label: "Yes ", value: "YES" },
+          { label: "No ", value: "NO" },
         ],
       };
     }
@@ -913,65 +840,46 @@ function getLocalizedResponse(step, state) {
         ],
       };
 
-    case "ASK_MEDICINE_NAME":
-      return {
-        action: "ASK_MEDICINE_NAME",
-        message: "What is the name of the medicine?",
-      };
-    case "ASK_MEDICINE_TYPE":
-      return {
-        action: "ASK_MEDICINE_TYPE",
-        message: "What type of medicine is it?",
-        options: medicationTypeValues.map((mt) => ({ label: mt, value: mt })),
-      };
-    case "ASK_DOSE_PER_INTAKE":
-      return {
-        action: "ASK_DOSE_PER_INTAKE",
-        message: "What is the dose per intake (e.g. 1, 10, 500)?",
-      };
-    case "ASK_MEDICINE_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FREQUENCY",
-        message: "How often do you take it?",
-        options: frequencyTypeValues.map((ft) => ({ label: ft, value: ft })),
-      };
-    case "ASK_MEDICINE_SCHEDULE": {
+    case "ASK_MEDICINE_DETAILS": {
       const idx = state?.currentMedicineIndex || 0;
       const med = state?.medicinesToAdd?.[idx] || {};
-      let doseNum = (med.tempTimes?.length || 0) + 1;
-      return {
-        action: "ASK_MEDICINE_SCHEDULE",
-        message: `Please provide the exact time for dose ${doseNum} (e.g. '09:00:00' or '22:00:00').`,
-      };
-    }
-    case "ASK_MEDICINE_FOOD_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FOOD_FREQUENCY",
-        message: "When do you take it in relation to food?",
-        options: [
+      let msg = "Please provide the medicine details.";
+      let options = undefined;
+
+      if (!med.medicationName) msg = "What is the name of the medicine?";
+      else if (!med.medicationType) {
+        msg = "What type of medicine is it?";
+        options = medicationTypeValues.map((mt) => ({ label: mt, value: mt }));
+      } else if (med.dosePerIntake === undefined)
+        msg = "What is the dose per intake (e.g. 1, 10, 500)?";
+      else if (!med.frequency) {
+        msg = "How often do you take it?";
+        options = frequencyTypeValues.map((ft) => ({ label: ft, value: ft }));
+      } else if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
+        let doseNum = (med.tempTimes?.length || 0) + 1;
+        msg = `Please provide the exact time for dose ${doseNum} (e.g. '09:00:00' or '22:00:00').`;
+      } else if (!med.foodFrequency) {
+        msg = "When do you take it in relation to food?";
+        options = [
           { label: "Before Food", value: "BEFORE_FOOD" },
           { label: "After Food", value: "AFTER_FOOD" },
-        ],
-      };
-    case "ASK_MEDICINE_START_DATE":
-      return {
-        action: "ASK_MEDICINE_START_DATE",
-        message: "When did you start taking this medicine (YYYY-MM-DD)?",
-      };
-    case "ASK_MEDICINE_QUANTITY":
-      return {
-        action: "ASK_MEDICINE_QUANTITY",
-        message: "What is the total quantity prescribed?",
-      };
-    case "ASK_MEDICINE_ONGOING":
-      return {
-        action: "ASK_MEDICINE_ONGOING",
-        message: "Are you currently taking this medication (Ongoing)?",
-        options: [
+        ];
+      } else if (!med.startDate) msg = "When did you start taking this medicine (YYYY-MM-DD)?";
+      else if (med.totalQuantity === undefined) msg = "What is the total quantity prescribed?";
+      else if (med.ongoing === undefined) {
+        msg = "Are you currently taking this medication (Ongoing)?";
+        options = [
           { label: "Yes", value: "YES" },
           { label: "No", value: "NO" },
-        ],
+        ];
+      }
+
+      return {
+        action: "ASK_MEDICINE_DETAILS",
+        message: msg,
+        ...(options ? { options } : {}),
       };
+    }
 
     case "CONFIRM_MEDICINE":
       return {
@@ -1258,7 +1166,6 @@ class OnboardingService {
     // If the step is REGISTER_USER, mark as completed
     if (state.currentStep === "REGISTER_USER") {
       state.isOnboardingCompleted = true;
-      state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
     if (userId && state.existingUserData) {
