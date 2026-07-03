@@ -924,9 +924,34 @@ ${rawText}
       );
     }
 
-    console.log("[OcrService] Redesigned Pipeline Step 1: Extracting raw text...");
-    const extracted = await this.extractText(file);
-    let rawText = extracted.rawText;
+    const isPdf =
+      file.mimeType === "application/pdf" ||
+      file.filename?.toLowerCase().endsWith(".pdf") ||
+      file.originalname?.toLowerCase().endsWith(".pdf");
+    let rawText;
+
+    if (isPdf) {
+      rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
+    } else {
+      const processedBuffer = await preprocessImage(file.buffer);
+      const base64Image = processedBuffer.toString("base64");
+      const messages = [
+        {
+          role: "user",
+          content: prompts.PLAIN_TEXT_OCR_PROMPT,
+          images: [base64Image],
+        },
+      ];
+
+      console.log(
+        "[OcrService] Redesigned Pipeline Step 1: Querying qwen3-vl:latest for PLAIN TEXT OCR...",
+      );
+      rawText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+        temperature: 0,
+        maxTokens: 8192,
+        rawOptions: { num_ctx: 8192 },
+      });
+    }
 
     if (!rawText || !rawText.trim()) {
       throw new Error("OCR produced no usable text");

@@ -1,8 +1,8 @@
 const bestTakenType = Object.freeze({
-  MORNING: "MORNING",
-  NOON: "NOON",
-  NIGHT: "NIGHT",
-  CUSTOM: "CUSTOM",
+  MORNING: "Morning",
+  NOON: "Noon",
+  NIGHT: "Night",
+  CUSTOM: "Custom",
 });
 
 const bestTakenValues = Object.values(bestTakenType);

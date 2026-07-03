@@ -427,7 +427,7 @@ JSON format:
 
 If the visible image contains both text and waveform data, capture both in the response. Format dates as YYYY-MM-DD when possible.`;
 const TRANSLATION_SYSTEM_PROMPT = (language) =>
-  `You are a professional medical translator. Translate the following English text into ${language}. Return ONLY the translated text without any quotes, conversational filler, or explanations. Do not provide transliterations unless requested. Preserve any numbers or times as appropriate.`;
+  `You are a professional medical translator. Translate the following English text into ${language}. Return ONLY the translated text without any quotes, conversational filler, or explanations. Do not provide transliterations unless requested. Preserve any numbers or times as appropriate. If the text is a short option like "Yes" or "No", translate exactly that single word. Do not combine words like "Yes/No" or "हां / नहीं".`;
 
 module.exports = {
   EMERGENCY_WARNING,
