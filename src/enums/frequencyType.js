@@ -1,5 +1,5 @@
 const frequencyType = Object.freeze({
-  ONCE_DAILY: { name: "ONCE_DAILY", value: "Once Daily" },
+  ONCE_DAILY: "Once Daily",
   TWICE_DAILY: "Twice Daily",
   THREE_TIMES_DAILY: "Three Times Daily",
   AS_NEEDED: "As Needed",

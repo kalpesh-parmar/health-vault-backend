@@ -1,7 +1,7 @@
 const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { foodTypeValues } = require("../enums/foodType");
-const { frequencyTypeValues } = require("../enums/frequencyType");
+const { frequencyTypeValues, frequencyType } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
 const { bestTakenType } = require("../enums/bestTakenType");
 // const { mediactionUnitValues } = require("../enums/medicationUnit");
@@ -58,12 +58,25 @@ const validateStartDate = (startDate, ctx) => {
 };
 
 const medicationScheduleSchema = z
-  .object({
-    [bestTakenType.MORNING]: time24HourSchema.optional(),
-    [bestTakenType.NOON]: time24HourSchema.optional(),
-    [bestTakenType.NIGHT]: time24HourSchema.optional(),
-    [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
-  })
+  .preprocess(
+    (val) => {
+      if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+        const newVal = {};
+        for (const key of Object.keys(val)) {
+          const normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
+          newVal[normalizedKey] = val[key];
+        }
+        return newVal;
+      }
+      return val;
+    },
+    z.object({
+      [bestTakenType.MORNING]: time24HourSchema.optional(),
+      [bestTakenType.NOON]: time24HourSchema.optional(),
+      [bestTakenType.NIGHT]: time24HourSchema.optional(),
+      [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
+    }),
+  )
   .refine(
     (data) =>
       !!data.Morning || !!data.Noon || !!data.Night || (data.Custom && data.Custom.length > 0),
@@ -77,9 +90,9 @@ const validateMedicationSelections = (data, ctx) => {
   }
 
   const frequencyLimitMap = {
-    ONCE_DAILY: 1,
-    TWICE_DAILY: 2,
-    THREE_TIMES_DAILY: 3,
+    [frequencyType.ONCE_DAILY]: 1,
+    [frequencyType.TWICE_DAILY]: 2,
+    [frequencyType.THREE_TIMES_DAILY]: 3,
   };
 
   const selectedCount = Object.values(data.medicationSchedule).filter(

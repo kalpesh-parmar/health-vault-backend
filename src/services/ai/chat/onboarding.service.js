@@ -8,7 +8,7 @@ const medicationReminderService = require("../../medicationReminderService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
-const { frequencyTypeValues } = require("../../../enums/frequencyType");
+const { frequencyTypeValues, frequencyType } = require("../../../enums/frequencyType");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -115,17 +115,16 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     contextPrompt =
       'Extract a list of allergies from the text. Return a JSON array of strings in the \'value\' field, e.g. ["dust", "peanuts"]. If none, return [].';
   } else if (fieldType === "yesNo") {
-    contextPrompt = "Determine if user chose YES or NO. Return strictly either 'YES' or 'NO'.";
+    contextPrompt =
+      "Determine if user chose YES or NO. Return strictly either 'YES' or 'NO'. NEVER return 'YES/NO' combined.";
   } else if (fieldType === "medicationName") {
     contextPrompt = "Extract the name of the medicine from the user input.";
   } else if (fieldType === "medicationType") {
-    contextPrompt =
-      "Extract the type of medicine. Return strictly one of: 'TABLET', 'CAPSULE', 'SYRUP', 'INJECTION', 'DROPS', 'CREAM', 'OINTMENT', 'LOTION', 'INHALER', 'SUPPOSITORY', 'PATCH', 'OTHER'.";
+    contextPrompt = `Extract the type of medicine. Return strictly one of: ${medicationTypeValues.map((v) => `'${v}'`).join(", ")}.`;
   } else if (fieldType === "dosePerIntake") {
     contextPrompt = "Extract the numeric dose per intake. Return a number, e.g., 1, 1.5, 2.";
   } else if (fieldType === "frequency") {
-    contextPrompt =
-      "Extract the frequency of taking the medicine. Return strictly one of: 'ONCE_DAILY', 'TWICE_DAILY', 'THRICE_DAILY', 'FOUR_TIMES_DAILY', 'AS_NEEDED', 'EVERY_OTHER_DAY', 'ONCE_A_WEEK'.";
+    contextPrompt = `Extract the frequency of taking the medicine. Return strictly one of: ${frequencyTypeValues.map((v) => `'${v}'`).join(", ")}.`;
   } else if (fieldType === "medicationSchedule") {
     contextPrompt =
       "Extract the schedule times as a JSON object with keys like 'MORNING', 'AFTERNOON', 'EVENING', 'NIGHT' and values as time strings like '09:00:00'. If missing, return null.";
@@ -559,7 +558,6 @@ async function updateStateFromMessage(state, message) {
               isConfirmed: false,
             };
           });
-          // Intentionally NOT setting medicinesConfirmed to true here,
           // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
         } else {
           state.medicinesToAdd = [{ isConfirmed: false }];
@@ -598,8 +596,9 @@ async function updateStateFromMessage(state, message) {
     case "ASK_MEDICINE_TYPE": {
       const idx = state.currentMedicineIndex;
       const med = state.medicinesToAdd[idx];
-      if (medicationTypeValues.includes(msg.toUpperCase())) {
-        med.medicationType = msg.toUpperCase();
+      const matchedType = medicationTypeValues.find((v) => v.toUpperCase() === msg.toUpperCase());
+      if (matchedType) {
+        med.medicationType = matchedType;
       } else {
         med.medicationType = await extractFieldFromMessage(
           "medicationType",
@@ -624,8 +623,9 @@ async function updateStateFromMessage(state, message) {
     case "ASK_MEDICINE_FREQUENCY": {
       const idx = state.currentMedicineIndex;
       const med = state.medicinesToAdd[idx];
-      if (frequencyTypeValues.includes(msg.toUpperCase())) {
-        med.frequency = msg.toUpperCase();
+      const matchedFreq = frequencyTypeValues.find((v) => v.toUpperCase() === msg.toUpperCase());
+      if (matchedFreq) {
+        med.frequency = matchedFreq;
       } else {
         med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
       }
@@ -638,9 +638,8 @@ async function updateStateFromMessage(state, message) {
       if (!med.tempTimes) med.tempTimes = [];
 
       let expectedDoses = 1;
-      if (med.frequency === "TWICE_DAILY") expectedDoses = 2;
-      if (med.frequency === "THREE_TIMES_DAILY") expectedDoses = 3;
-      if (med.frequency === "FOUR_TIMES_DAILY") expectedDoses = 4;
+      if (med.frequency === frequencyType.TWICE_DAILY) expectedDoses = 2;
+      if (med.frequency === frequencyType.THREE_TIMES_DAILY) expectedDoses = 3;
 
       const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
       if (timeVal) {
@@ -746,8 +745,30 @@ async function updateStateFromMessage(state, message) {
   }
 }
 
+const staticTranslations = {
+  Yes: { gujarati: "હા", hindi: "हाँ", marathi: "हो", tamil: "ஆம்" },
+  No: { gujarati: "ના", hindi: "नहीं", marathi: "नाही", tamil: "இல்லை" },
+  Skip: { gujarati: "છોડી દો", hindi: "छोड़ें", marathi: "वगळा", tamil: "தவிர்க்கவும்" },
+  Confirm: {
+    gujarati: "પુષ્ટિ કરો",
+    hindi: "पुष्टि करें",
+    marathi: "पुष्टी करा",
+    tamil: "உறுதிப்படுத்துக",
+  },
+  Edit: {
+    gujarati: "ફેરફાર કરો",
+    hindi: "संपादित करें",
+    marathi: "संपादित करा",
+    tamil: "திருத்து",
+  },
+};
+
 async function translateMessage(text, language) {
   if (!text || language === "english") return text;
+
+  if (staticTranslations[text] && staticTranslations[text][language]) {
+    return staticTranslations[text][language];
+  }
 
   const messages = [
     {

@@ -330,9 +330,18 @@ Accept ONLY these medical document types:
 - Vaccination record
 - Insurance medical report
 - Body Scan report
+<<<<<<< HEAD
 - GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
 - MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
 - MEDICAL_REPORT (Any valid medical report not listed above)
+=======
+<<<<<<< HEAD
+=======
+- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
+- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
+- MEDICAL_REPORT (Any valid medical report not listed above)
+>>>>>>> 7309b1052a998e381b4fe4cb00244d370ac0e251
+>>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 - Any other medical related reports
 
 Reject immediately:
@@ -582,6 +591,21 @@ Tamil:
 
 ----------------------------------
 English:
+<<<<<<< HEAD
+=======
+No
+Hindi:
+नहीं
+Gujarati:
+ના
+Marathi:
+नाही
+Tamil:
+இல்லை
+
+----------------------------------
+English:
+>>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 Skip
 Hindi:
 छोड़ें
@@ -597,6 +621,10 @@ FINAL REQUIREMENTS
 ✔ Never mix English with ${language}.
 ✔ Never transliterate English.
 ✔ Sound exactly like a native speaker wrote it.
+<<<<<<< HEAD
+=======
+✔ NEVER output paired words (e.g. "Yes/No", "હા/ના") unless they exist in the English text. Translate strictly what is provided.
+>>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 ✔ Return ONLY the translated text.
 Do not include quotation marks.
 Do not include markdown.
