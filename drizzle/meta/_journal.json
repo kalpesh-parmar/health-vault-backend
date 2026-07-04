@@ -85,6 +85,27 @@
       "when": 1782478829772,
       "tag": "0011_heavy_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782889031934,
+      "tag": "0012_wealthy_captain_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782927677546,
+      "tag": "0013_silky_mystique",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783076694433,
+      "tag": "0014_ordinary_invaders",
+      "breakpoints": true
     }
   ]
 }

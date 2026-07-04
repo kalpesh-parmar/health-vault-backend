@@ -2,10 +2,10 @@ const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 const patientService = require("../services/patientService");
 
-async function firebaseLogin(req, res) {
-  const result = await patientService.firebaseLogin(req.body);
-  return successResponse(res, result, messageConstants.PATIENT_LOGIN_SUCCESS);
-}
+// async function firebaseLogin(req, res) {
+//   const result = await patientService.firebaseLogin(req.body);
+//   return successResponse(res, result, messageConstants.PATIENT_LOGIN_SUCCESS);
+// }
 
 async function refreshToken(req, res) {
   const result = await patientService.refreshToken(req.body);
@@ -59,7 +59,6 @@ async function reportAuthFailure(req, res) {
 
 module.exports = {
   deletePatient,
-  firebaseLogin,
   getPatientProfile,
   getPatientById,
   getPatientList,

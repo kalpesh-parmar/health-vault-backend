@@ -1,8 +1,8 @@
 const frequencyType = Object.freeze({
-  ONCE_DAILY: "ONCE_DAILY",
-  TWICE_DAILY: "TWICE_DAILY",
-  THREE_TIMES_DAILY: "THREE_TIMES_DAILY",
-  AS_NEEDED: "AS_NEEDED",
+  ONCE_DAILY: "Once Daily",
+  TWICE_DAILY: "Twice Daily",
+  THREE_TIMES_DAILY: "Three Times Daily",
+  AS_NEEDED: "As Needed",
 });
 
 const frequencyTypeValues = Object.values(frequencyType);

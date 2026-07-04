@@ -179,12 +179,34 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/RunOcrRequest" }
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Array of files to upload and process (max 5)
+                fileKey:
+                  type: string
+                  description: Legacy single fileKey
+                fileKeys:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of previously uploaded fileKeys
       responses:
         "202":
-          description: OCR job accepted
+          description: OCR job(s) accepted
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/RunOcrAcceptedResponse" }
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/RunOcrAcceptedResponse" }
+                  - type: array
+                    items: { $ref: "#/components/schemas/RunOcrAcceptedResponse" }
 
   /documents/run-ocr-status/{fileKey}:
     get:
@@ -207,6 +229,35 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RunOcrStatusResponse" }
+
+  /documents/run-ocr-status/batch:
+    post:
+      tags: [Documents]
+      summary: Poll OCR job status for multiple files
+      description: |
+        Returns the latest job state for multiple fileKeys.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileKeys]
+              properties:
+                fileKeys:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+      responses:
+        "200":
+          description: Array of Job statuses
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RunOcrStatusResponse" }
 
   /documents/add:
     post:

@@ -41,92 +41,129 @@ class OllamaClient {
 
   async chat(messages, model, options = {}) {
     const url = `${this.baseUrl}/api/chat`;
-    const payload = {
-      model,
-      messages,
-      stream: false,
-      think: options.think ?? false,
-      options: {
-        temperature: options.temperature ?? 0.2,
-        num_predict: options.maxTokens ?? 1024,
-        ...options.rawOptions,
-      },
-    };
+    let numPredict = options.maxTokens ?? 1024;
+    let attempt = 1;
+    let response;
+    let raw;
+    let message;
 
-    const config = {
-      method: "post",
-      url,
-      data: payload,
-      timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
-      headers: { "Content-Type": "application/json" },
-    };
+    while (attempt <= 2) {
+      const payload = {
+        model,
+        messages,
+        stream: false,
+        think: options.think ?? false,
+        options: {
+          temperature: options.temperature ?? 0.2,
+          num_predict: numPredict,
+          ...options.rawOptions,
+        },
+      };
 
-    try {
-      const response = await this.requestWithRetry(config);
-      const message = response.data?.message;
-      if (!message) {
-        throw new Error("Invalid response structure from Ollama chat");
+      if (options.format) {
+        payload.format = options.format;
       }
 
-      const raw = response.data || {};
-      const doneReason = raw.done_reason || "N/A";
-      const promptEvalCount = raw.prompt_eval_count || 0;
-      const evalCount = raw.eval_count || 0;
-      const contentLen = message.content?.length || 0;
-      const thinkingLen = message.thinking?.length || 0;
-      const totalDurationMs = raw.total_duration ? (raw.total_duration / 1e6).toFixed(2) : "N/A";
+      const config = {
+        method: "post",
+        url,
+        data: payload,
+        timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+        headers: { "Content-Type": "application/json" },
+      };
 
-      console.log(`[OllamaClient] Chat Done Reason: ${doneReason}`);
-      console.log(`[OllamaClient] Prompt eval (input) tokens: ${promptEvalCount}`);
-      console.log(`[OllamaClient] Eval (output) tokens: ${evalCount}`);
-      console.log(`[OllamaClient] Content length: ${contentLen}`);
-      console.log(`[OllamaClient] Thinking length: ${thinkingLen}`);
-      console.log(`[OllamaClient] Total Ollama duration: ${totalDurationMs}ms`);
+      try {
+        response = await this.requestWithRetry(config);
+        message = response.data?.message;
+        if (!message) {
+          throw new Error("Invalid response structure from Ollama chat");
+        }
 
-      if (raw.load_duration)
-        console.log(
-          `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
-        );
-      if (raw.prompt_eval_duration)
-        console.log(
-          `[OllamaClient] Prompt eval duration: ${(raw.prompt_eval_duration / 1e6).toFixed(2)}ms`,
-        );
-      if (raw.eval_duration)
-        console.log(
-          `[OllamaClient] Output generation duration: ${(raw.eval_duration / 1e6).toFixed(2)}ms`,
-        );
-      console.log(`[OllamaClient] Raw Response: ${JSON.stringify(raw)}`);
+        raw = response.data || {};
+        const doneReason = raw.done_reason || "N/A";
+        const promptEvalCount = raw.prompt_eval_count || 0;
+        const evalCount = raw.eval_count || 0;
+        const contentLen = message.content?.length || 0;
+        const thinkingLen = message.thinking?.length || 0;
+        const totalDurationMs = raw.total_duration ? (raw.total_duration / 1e6).toFixed(2) : "N/A";
 
-      let text = message.content;
-      const thinking = message.thinking;
-      if (
-        (typeof text !== "string" || !text.trim()) &&
-        typeof thinking === "string" &&
-        thinking.trim()
-      ) {
-        text = thinking;
+        console.log(`[OllamaClient] Chat Model: ${model}`);
+        console.log(`[OllamaClient] Chat Done Reason: ${doneReason}`);
+        console.log(`[OllamaClient] Prompt eval (input) tokens: ${promptEvalCount}`);
+        console.log(`[OllamaClient] Eval (output) tokens: ${evalCount}`);
+        console.log(`[OllamaClient] Content length: ${contentLen}`);
+        console.log(`[OllamaClient] Thinking length: ${thinkingLen}`);
+        console.log(`[OllamaClient] Total Ollama duration: ${totalDurationMs}ms`);
+        console.log(`[OllamaClient] Attempt: ${attempt}`);
+
+        if (raw.load_duration)
+          console.log(
+            `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
+          );
+        if (raw.prompt_eval_duration)
+          console.log(
+            `[OllamaClient] Prompt eval duration: ${(raw.prompt_eval_duration / 1e6).toFixed(2)}ms`,
+          );
+        if (raw.eval_duration)
+          console.log(
+            `[OllamaClient] Output generation duration: ${(raw.eval_duration / 1e6).toFixed(2)}ms`,
+          );
+        console.log(`[OllamaClient] Raw Response: ${JSON.stringify(raw)}`);
+
+        // Check retry conditions:
+        // - done_reason === "length"
+        // - message.content is empty
+        // - first attempt failed
+        const contentIsEmpty = !message.content || !message.content.trim();
+        if (doneReason === "length" && contentIsEmpty && attempt === 1) {
+          console.warn(
+            `[OllamaClient] Response truncated (done_reason=length with empty content). Retrying with larger output budget (attempt 2)...`,
+          );
+          // Increase token budget (e.g., double the num_predict or set to 4096)
+          numPredict = Math.min((options.maxTokens || 1024) * 2, 8192);
+          if (numPredict < 4096) numPredict = 4096; // ensure we have enough room
+          attempt++;
+          continue;
+        }
+
+        break;
+      } catch (error) {
+        console.error(`[OllamaClient] Chat attempt ${attempt} failed:`, error.message);
+        throw error;
       }
-      if (typeof text !== "string") {
-        throw new Error("Invalid response format from Ollama chat");
-      }
-
-      if (options.returnFullResponse) {
-        return {
-          text,
-          done_reason: raw.done_reason,
-          prompt_eval_count: promptEvalCount,
-          eval_count: evalCount,
-          content_len: contentLen,
-          thinking_len: thinkingLen,
-          total_duration: raw.total_duration,
-        };
-      }
-
-      return text;
-    } catch (error) {
-      console.error("[OllamaClient] Chat failed:", error.message);
-      throw error;
     }
+
+    let text = message.content;
+    const thinking = message.thinking;
+    const fallbackToThinking = options.fallbackToThinking ?? true;
+    if (
+      fallbackToThinking &&
+      (typeof text !== "string" || !text.trim()) &&
+      typeof thinking === "string" &&
+      thinking.trim()
+    ) {
+      text = thinking;
+    }
+    if (typeof text !== "string") {
+      throw new Error("Invalid response format from Ollama chat");
+    }
+
+    if (options.returnFullResponse) {
+      return {
+        text,
+        content: message.content,
+        thinking: message.thinking,
+        done_reason: raw.done_reason,
+        prompt_eval_count: raw.prompt_eval_count || 0,
+        eval_count: raw.eval_count || 0,
+        content_len: message.content?.length || 0,
+        thinking_len: message.thinking?.length || 0,
+        total_duration: raw.total_duration,
+        retry_attempts: attempt - 1,
+      };
+    }
+
+    return text;
   }
 
   async chatStream(messages, model, onChunk, options = {}) {
@@ -192,6 +229,10 @@ class OllamaClient {
       },
     };
 
+    if (options.format) {
+      payload.format = options.format;
+    }
+
     const config = {
       method: "post",
       url,
@@ -206,6 +247,20 @@ class OllamaClient {
       if (typeof text !== "string") {
         throw new Error("Invalid response format from Ollama generate");
       }
+
+      const raw = response.data || {};
+      if (options.returnFullResponse) {
+        return {
+          text,
+          content: text,
+          done_reason: raw.done_reason,
+          prompt_eval_count: raw.prompt_eval_count || 0,
+          eval_count: raw.eval_count || 0,
+          content_len: text.length,
+          total_duration: raw.total_duration,
+        };
+      }
+
       return text;
     } catch (error) {
       console.error("[OllamaClient] Generate failed:", error.message);

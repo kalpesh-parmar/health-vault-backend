@@ -50,7 +50,9 @@ async function ocrExtract(req, res, next) {
           hospitalName: documentRow.hospitalName,
           doctorName: documentRow.doctorName,
           remarks: documentRow.remarks,
-          summaryGujarati: documentRow.summaryGujarati,
+          summaryEnglish: structuredData.summaryEnglish,
+          summaryInPreferredLanguage: documentRow.summaryInPreferredLanguage,
+          summaryLanguage: structuredData.summaryLanguage,
           ocrStatus: documentRow.ocrStatus,
           ocrExtractedText: documentRow.ocrExtractedText,
         },
@@ -97,9 +99,20 @@ async function onboardingChat(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    const { message, history = [], state } = req.body;
-    if (message === undefined || !state) {
-      return res.status(StatusCodes.BAD_REQUEST).json({ error: "message and state are required" });
+    let { message, history = [], state } = req.body;
+    if (message === undefined) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ error: "message is required" });
+    }
+
+    // If frontend doesn't send state, fetch it from the database
+    if (!state) {
+      const existingRecord = await userOnboardingRepository.findByUserId(userId);
+      if (existingRecord && existingRecord.data) {
+        state = existingRecord.data;
+        console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
+      } else {
+        state = {}; // First time user
+      }
     }
 
     console.log(

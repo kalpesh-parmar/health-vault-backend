@@ -11,32 +11,6 @@ components:
       bearerFormat: JWT
 
   schemas:
-    FirebaseLoginRequest:
-      type: object
-      required:
-        - firebaseIdToken
-      properties:
-        firebaseIdToken:
-          type: string
-        deviceToken:
-          type: string
-          nullable: true
-        loginType:
-          type: string
-          enum:
-            - mobile
-            - social
-        provider:
-          type: string
-          enum:
-            - google
-            - facebook
-            - apple
-            - microsoft
-            - mobile
-        providerToken:
-          type: string
-
     SocialLoginRequest:
       type: object
       required:
@@ -172,52 +146,12 @@ components:
               type: string
 
 paths:
-  /auth/firebase-login:
-    post:
-      tags: [Auth]
-      summary: Firebase Login with Onboarding Support
-      description: |
-        Login using Firebase authentication. Returns access token and session information.
-        If onboarding is not completed, returns the current onboarding step and saved state
-        for resumption. If user closes and reopens the app, they can resume from the same step.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/FirebaseLoginRequest"
-            examples:
-              mobileLogin:
-                value:
-                  firebaseIdToken: "firebase-token"
-                  deviceToken: "DEVICE_TOKEN"
-                  provider: "mobile"
-                  loginType: "mobile"
-                  providerToken: "provider-id-token"
-      responses:
-        "200":
-          description: Login successful with onboarding status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: SUCCESS
-                  data:
-                    $ref: "#/components/schemas/AuthResponse"
-
   /auth/social-login:
     post:
       tags: [Auth]
-      summary: Social Login (Google, Facebook, Microsoft) with Onboarding Support
+      summary: Social Login (Google, Facebook, Microsoft) & mobile Login (Mobile Number + OTP)
       description: |
-        Login using social providers. Supports account linking:
-        - If user logs in with a new provider but same email/phone, account is linked
-        - If onboarding is not completed, returns current onboarding step and saved state
-        - When user reopens app, they continue from where they left off in onboarding
+        Login using social providers or mobileNumber + OTP:
       security: []
       requestBody:
         required: true
@@ -245,6 +179,12 @@ paths:
                   loginType: social
                   provider: microsoft
                   providerToken: "microsoft-id-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  firebaseIdToken: "firebase-token"
+              mobile:
+                value:
+                  loginType: mobile
+                  provider: mobile
                   deviceToken: "DEVICE_TOKEN"
                   firebaseIdToken: "firebase-token"
       responses:
@@ -283,22 +223,6 @@ paths:
                         mobile: ""
                         email: "user@example.com"
                         role: "patient"
-  # /auth/login:
-  #   post:
-  #     tags: [Auth]
-  #     summary: Login
-  #     security: []
-  #     requestBody:
-  #       required: true
-  #       content:
-  #         application/json:
-  #           schema:
-  #             $ref: "#/components/schemas/LoginRequest"
-  #     responses:
-  #       "200": { description: Success }
-  #   description: Login Success
-  # "401":
-  #   description: Login blocked
 
   /auth/auth-failure:
     post:
@@ -315,12 +239,12 @@ paths:
             examples:
               mobileFailure:
                 value:
-                  identifier: "9876543210"
+                  identifier: "mock-firebase-uid-mobile"
                   provider: "mobile"
                   loginType: "mobile"
               googleFailure:
                 value:
-                  identifier: "user@gmail.com"
+                  identifier: "mock-firebase-uid-google"
                   provider: "google"
                   loginType: "social"
       responses:

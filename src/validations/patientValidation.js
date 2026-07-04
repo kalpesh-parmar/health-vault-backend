@@ -118,28 +118,34 @@ const updatePatientSchema = z
     return updatedData;
   });
 
-const firebaseLoginSchema = z
+const socialLogin = z
   .object({
     deviceToken: z.string().max(500).optional().nullable(),
-    firebaseIdToken: z.string().min(1).optional(),
-    loginType: z.enum(loginTypeValues).optional(),
-    provider: z.enum(providerValues).optional(),
+    loginType: z.enum(loginTypeValues),
+    provider: z.enum(providerValues),
+    providerType: z.string().optional(),
     providerToken: z.string().optional(),
+    firebaseIdToken: z.string().min(1).optional(),
   })
-  .strict()
-  .refine((data) => data.firebaseIdToken, {
-    message: "Firebase ID token is required",
-    path: ["firebaseIdToken"],
+  .superRefine((data, ctx) => {
+    if (data.loginType === "mobile" && data.provider !== "mobile") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provider must be mobile when login type is mobile",
+        path: ["provider"],
+      });
+    }
+    if (
+      data.loginType === "social" &&
+      !["google", "facebook", "microsoft"].includes(data.provider)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provider must be google, facebook, or microsoft when login type is social",
+        path: ["provider"],
+      });
+    }
   });
-
-const socialLogin = z.object({
-  deviceToken: z.string().max(500).optional().nullable(),
-  loginType: z.enum(loginTypeValues),
-  provider: z.enum(providerValues),
-  providerType: z.string().optional(),
-  providerToken: z.string().optional(),
-  firebaseIdToken: z.string().min(1).optional(),
-});
 
 const authFailureSchema = z.object({
   identifier: z.string().min(1).optional(),
@@ -170,7 +176,6 @@ const listPatientsQuerySchema = z
 
 module.exports = {
   createPatientSchema,
-  firebaseLoginSchema,
   listPatientsQuerySchema,
   refreshTokenSchema,
   updatePatientSchema,
