@@ -739,6 +739,16 @@ async function updateStateFromMessage(state, message) {
     case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {
+      if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
+        state.isOnboardingCompleted = false;
+        state.medicinesConfirmed = true; // Skip review step since we are starting a fresh medicine
+        state.medicinesSavedToDb = false;
+        state.medicinesToAdd = [{}];
+        state.currentMedicineIndex = 0;
+        state.currentStep = "ASK_MEDICINE_NAME";
+        break;
+      }
+
       state.currentStep = computeCurrentStep(state);
       break;
     }
@@ -1118,9 +1128,13 @@ class OnboardingService {
     }
     // 1. If onboarding is completed, return completed status immediately
     if (state.isOnboardingCompleted) {
-      state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
-      const step = getNextStep(state);
-      return createResponse(step, state);
+      if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
+        // Let it pass through to updateStateFromMessage
+      } else {
+        state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
+        const step = getNextStep(state);
+        return createResponse(step, state);
+      }
     }
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
 
