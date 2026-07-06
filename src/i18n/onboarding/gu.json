@@ -1,0 +1,33 @@
+{
+  "ASK_LANGUAGE": {
+    "message": "સ્વાગત છે! કૃપા કરીને તમારી પસંદગીની ભાષા પસંદ કરો.",
+    "options": [
+      { "label": "અંગ્રેજી (English)", "value": "english" },
+      { "label": "ગુજરાતી (Gujarati)", "value": "gujarati" },
+      { "label": "હિન્દી (Hindi)", "value": "hindi" },
+      { "label": "મરાઠી (Marathi)", "value": "marathi" },
+      { "label": "તમિલ (Tamil)", "value": "tamil" }
+    ]
+  },
+  "onboarding.upload.success": "✅ તમારો દસ્તાવેજ સફળતાપૂર્વક અપલોડ થઈ ગયો છે.",
+  "onboarding.upload.failed": "❌ દસ્તાવેજ પ્રક્રિયા નિષ્ફળ રહી. કૃપા કરીને ફરી પ્રયાસ કરો અથવા વિગતો જાતે દાખલ કરો.",
+  "onboarding.retryUpload": "ફરી પ્રયાસ કરો",
+  "onboarding.manual": "જાતે વિગતો દાખલ કરો",
+  "onboarding.document.ownership": "શું આ દસ્તાવેજ તમારો છે?",
+  "onboarding.yes": "હા",
+  "onboarding.no": "ના",
+  "onboarding.source.conflict.message": "મને તમારી વિગતો માટે બે અલગ અલગ સ્ત્રોત મળ્યા છે. કૃપા કરીને સમીક્ષા કરો અને પસંદ કરો કે કયું સાચું છે.",
+  "onboarding.source.conflict.title": "અમને બે અલગ અલગ પ્રોફાઇલ મળ્યા છે",
+  "onboarding.source.conflict.subtitle": "કૃપા કરીને સમીક્ષા કરો અને તમારી પસંદગી પસંદ કરો",
+  "onboarding.source.conflict.explainer": "દસ્તાવેજો અને સામાજिक પ્રોફાઇલમાં નામની વિગતો ક્યારેક અલગ રીતે લખાયેલી હોઈ શકે છે.",
+  "onboarding.source.useSocialLogin": "સામાજિક લોગિન વિગતો વાપરો",
+  "onboarding.source.useDocument": "દસ્તાવેજ વિગતો વાપરો",
+  "onboarding.source.editManually": "તેના બદલે વિગતો જાતે સુધારો",
+  "onboarding.source.whyTitle": "હું આ શા માટે જોઈ રહ્યો છું?",
+  "onboarding.field.firstName": "પ્રથમ નામ",
+  "onboarding.field.lastName": "અટક",
+  "onboarding.field.mobile": "ફોન નંબર",
+  "onboarding.field.dob": "જન્મ તારીખ",
+  "onboarding.field.gender": "જાતિ",
+  "onboarding.field.bloodGroup": "બ્લડ ગ્રુપ"
+}

@@ -8,6 +8,17 @@ jest.mock("../../../src/services/ai/clients/ollamaClient", () => ({
   },
 }));
 
+jest.mock("../../../src/repositories/patientRepository", () => ({
+  updateById: jest.fn().mockResolvedValue({}),
+  findById: jest.fn().mockResolvedValue({}),
+}));
+
+jest.mock("../../../src/repositories/userOnboardingRepository", () => ({
+  findByUserId: jest.fn().mockResolvedValue(null),
+  updateByUserId: jest.fn().mockResolvedValue({}),
+  create: jest.fn().mockResolvedValue({}),
+}));
+
 describe("OnboardingService Structured Flow", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -235,5 +246,181 @@ describe("OnboardingService Structured Flow", () => {
     expect(result.action).not.toBe("ASK_UPLOAD_DOCUMENT");
     expect(result.action).not.toBe("ASK_UPLOAD_OR_SKIP");
     expect(result.state.currentStep).toBe("ASK_GENDER");
+  });
+
+  describe("New Refined Onboarding Flow Steps", () => {
+    beforeEach(() => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      patientRepository.updateById.mockClear();
+    });
+
+    it("Should map old step names (CONFIRM_DOCUMENT_DETAILS) to CONFIRM_DOCUMENT_OWNERSHIP via alias mapping", async () => {
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_DETAILS",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState);
+      expect(result.state.currentStep).not.toBe("CONFIRM_DOCUMENT_DETAILS");
+    });
+
+    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'NO' by discarding extracted details and reverting to MANUAL flow", async () => {
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentText: "Extracted Patient Profile text",
+        hasSocialData: true,
+        socialData: {
+          firstName: "GoogleFirst",
+          lastName: "GoogleLast",
+          email: "google@gmail.com",
+          phoneNumber: "+1234567890",
+        },
+        documentData: {
+          firstName: "DocFirst",
+          lastName: "DocLast",
+        },
+        existingUserData: {
+          firstName: "DocFirst",
+          lastName: "DocLast",
+          phoneNumber: "",
+        },
+      };
+
+      const result = await onboardingService.chat("NO", [], mockState, "test-user-id");
+
+      expect(result.state.flowMode).toBe("MANUAL");
+      expect(result.state.documentUploaded).toBe(false);
+      expect(result.state.documentExtracted).toBe(false);
+      expect(result.state.existingUserData.firstName).toBe("GoogleFirst");
+      expect(result.state.existingUserData.lastName).toBe("GoogleLast");
+
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      expect(patientRepository.updateById).toHaveBeenCalled();
+    });
+
+    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and transition to RESOLVE_PROFILE_SOURCE if there are differences", async () => {
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        hasSocialData: true,
+        socialData: {
+          firstName: "GoogleFirst",
+          lastName: "GoogleLast",
+        },
+        documentData: {
+          firstName: "DocFirst",
+          lastName: "DocLast",
+        },
+        existingUserData: {
+          firstName: "DocFirst",
+          lastName: "DocLast",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    });
+
+    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and highlight conflicting last names", async () => {
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        hasSocialData: true,
+        socialData: {
+          firstName: "John",
+          lastName: "Doe",
+        },
+        documentData: {
+          firstName: "John",
+          lastName: "Smith",
+        },
+        existingUserData: {
+          firstName: "John",
+          lastName: "Smith",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      const lastNameField = result.fields.find((f) => f.key === "lastName");
+      expect(lastNameField).toBeDefined();
+      expect(lastNameField.isMismatch).toBe(true);
+      expect(lastNameField.loginValue).toBe("Doe");
+      expect(lastNameField.documentValue).toBe("Smith");
+    });
+
+    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and silently merge if no mismatch is present", async () => {
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        hasSocialData: true,
+        socialData: {
+          firstName: "Sarah",
+          lastName: "Anderson",
+        },
+        documentData: {
+          firstName: "Sarah",
+          lastName: "Anderson",
+        },
+        existingUserData: {
+          firstName: "Sarah",
+          lastName: "Anderson",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState);
+      expect(result.state.currentStep).toBe("ASK_DOB");
+    });
+
+    it("Should resolve profile conflict card with Use Social Login", async () => {
+      const mockState = {
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        hasSocialData: true,
+        socialData: {
+          firstName: "SocialSarah",
+          lastName: "SocialAnderson",
+        },
+        documentData: {
+          firstName: "DocSarah",
+          lastName: "DocAnderson",
+        },
+        existingUserData: {
+          firstName: "DocSarah",
+          lastName: "DocAnderson",
+        },
+      };
+
+      const result = await onboardingService.chat(
+        JSON.stringify({ source: "LOGIN" }),
+        [],
+        mockState,
+      );
+      expect(result.state.socialDataConfirmed).toBe(true);
+      expect(result.state.existingUserData.firstName).toBe("SocialSarah");
+      expect(result.state.existingUserData.lastName).toBe("SocialAnderson");
+    });
   });
 });

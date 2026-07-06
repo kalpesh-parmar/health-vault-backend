@@ -1,0 +1,12 @@
+{
+  "ASK_LANGUAGE": {
+    "message": "வரவேற்கிறோம்! உங்கள் விருப்பமான மொழியைத் தேர்ந்தெடுக்கவும்.",
+    "options": [
+      { "label": "ஆங்கிலம் (English)", "value": "english" },
+      { "label": "குஜராத்தி (Gujarati)", "value": "gujarati" },
+      { "label": "ஹிந்தி (Hindi)", "value": "hindi" },
+      { "label": "மராத்தி (Marathi)", "value": "marathi" },
+      { "label": "தமிழ் (Tamil)", "value": "tamil" }
+    ]
+  }
+}

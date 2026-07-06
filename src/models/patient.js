@@ -53,9 +53,9 @@ const patient = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("patients_email_unique_idx").on(table.email),
-    uniqueIndex("patients_code_unique_idx").on(table.patientCode),
-    uniqueIndex("patients_mobile_unique_idx").on(table.mobile),
+    // uniqueIndex("patients_email_unique_idx").on(table.email),
+    // uniqueIndex("patients_code_unique_idx").on(table.patientCode),
+    // uniqueIndex("patients_mobile_unique_idx").on(table.mobile),
     uniqueIndex("patients_firebase_uid_unique_idx").on(table.firebaseUid),
     index("patients_status_idx").on(table.status),
     index("patients_soft_delete_idx").on(table.softDelete),

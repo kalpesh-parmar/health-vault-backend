@@ -1,0 +1,33 @@
+{
+  "ASK_LANGUAGE": {
+    "message": "स्वागत आहे! कृपया आपली पसंतीची भाषा निवडा.",
+    "options": [
+      { "label": "इंग्रजी (English)", "value": "english" },
+      { "label": "गुजराती (Gujarati)", "value": "gujarati" },
+      { "label": "हिंदी (Hindi)", "value": "hindi" },
+      { "label": "मराठी (Marathi)", "value": "marathi" },
+      { "label": "तमिळ (Tamil)", "value": "tamil" }
+    ]
+  },
+  "onboarding.upload.success": "✅ तुमचे दस्तऐवज यशस्वीरित्या अपलोड केले गेले.",
+  "onboarding.upload.failed": "❌ दस्तऐवज प्रक्रिया अयशस्वी. कृपया पुन्हा प्रयत्न करा किंवा मॅन्युअली माहिती भरा.",
+  "onboarding.retryUpload": "पुन्हा प्रयत्न करा",
+  "onboarding.manual": "मॅन्युअली माहिती भरा",
+  "onboarding.document.ownership": "हा दस्तऐवज तुमचा आहे का?",
+  "onboarding.yes": "होय",
+  "onboarding.no": "नाही",
+  "onboarding.source.conflict.message": "मला तुमच्या तपशीलांसाठी दोन भिन्न स्त्रोत सापडले आहेत. कृपया पुनरावलोकन करा आणि कोणते बरोबर आहे ते निवडा.",
+  "onboarding.source.conflict.title": "आम्हाला दोन भिन्न प्रोफाइल सापडले",
+  "onboarding.source.conflict.subtitle": "कृपया पुनरावलोकन करा आणि आपण प्राधान्य दिलेला एक निवडा",
+  "onboarding.source.conflict.explainer": "दस्तऐवज आणि सोशल प्रोफाइलमध्ये नावाची तपशील कधीकधी भिन्न असू शकतात.",
+  "onboarding.source.useSocialLogin": "सोशल लॉगिन वापरा",
+  "onboarding.source.useDocument": "दस्तऐवज वापरा",
+  "onboarding.source.editManually": "त्याऐवजी मॅन्युअली संपादन करा",
+  "onboarding.source.whyTitle": "मला हे का दिसत आहे?",
+  "onboarding.field.firstName": "पहिले नाव",
+  "onboarding.field.lastName": "आडनाव",
+  "onboarding.field.mobile": "फोन नंबर",
+  "onboarding.field.dob": "जन्म तारीख",
+  "onboarding.field.gender": "लिंग",
+  "onboarding.field.bloodGroup": "रक्त गट"
+}
