@@ -19,6 +19,10 @@ jest.mock("../../../src/repositories/userOnboardingRepository", () => ({
   create: jest.fn().mockResolvedValue({}),
 }));
 
+jest.mock("../../../src/repositories/authProviderRepository", () => ({
+  findByUserId: jest.fn().mockResolvedValue([]),
+}));
+
 describe("OnboardingService Structured Flow", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -418,9 +422,428 @@ describe("OnboardingService Structured Flow", () => {
         [],
         mockState,
       );
-      expect(result.state.socialDataConfirmed).toBe(true);
+      expect(result.state.profileConfirmed).toBe(true);
       expect(result.state.existingUserData.firstName).toBe("SocialSarah");
       expect(result.state.existingUserData.lastName).toBe("SocialAnderson");
+    });
+
+    it("Should auto-fill unverified email from document for phone-OTP user with no conflict", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "otp-user-id",
+        firstName: "OtpUser",
+        lastName: "OtpLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: null,
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentData: {
+          firstName: "OtpUser",
+          lastName: "OtpLast",
+          phoneNumber: "+919000000002",
+          email: "document@email.com",
+        },
+        existingUserData: {
+          firstName: "OtpUser",
+          lastName: "OtpLast",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "otp-user-id");
+
+      expect(result.state.currentStep).toBe("ASK_DOB");
+      expect(result.state.existingUserData.email).toBe("document@email.com");
+      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
+    });
+
+    it("Should lock verified fields (phone + Google) when both exist", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "multi-user-id",
+        firstName: "MultiUser",
+        lastName: "MultiLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: "verified@gmail.com",
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([
+        { provider: "mobile" },
+        { provider: "google" },
+      ]);
+
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentData: {
+          firstName: "MultiUser",
+          lastName: "MultiLast",
+          phoneNumber: "+919000000002",
+          email: "different@gmail.com",
+        },
+        existingUserData: {
+          firstName: "MultiUser",
+          lastName: "MultiLast",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "multi-user-id");
+
+      expect(result.state.currentStep).toBe("ASK_DOB");
+      expect(result.state.existingUserData.email).toBe("verified@gmail.com");
+      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
+    });
+
+    it("Should lock verified fields from manual edits and exclude them from { edited }", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "lock-user-id",
+        firstName: "LockUser",
+        lastName: "LockLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: "verified@gmail.com",
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([
+        { provider: "mobile" },
+        { provider: "google" },
+      ]);
+
+      const mockState = {
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        hasLoginData: true,
+        loginData: {
+          firstName: { value: "LockUser", verified: false },
+          lastName: { value: "LockLast", verified: false },
+          phoneNumber: { value: "+919000000001", verified: true },
+          email: { value: "verified@gmail.com", verified: true },
+        },
+        documentData: {
+          firstName: "DocUser",
+          lastName: "DocLast",
+          phoneNumber: "+919000000002",
+          email: "different@gmail.com",
+        },
+        existingUserData: {
+          firstName: "DocUser",
+          lastName: "DocLast",
+        },
+      };
+
+      const result = await onboardingService.chat(
+        JSON.stringify({
+          edited: {
+            firstName: "NewFirstName",
+            lastName: "NewLastName",
+            phoneNumber: "+919999999999",
+            email: "hacked@gmail.com",
+          },
+        }),
+        [],
+        mockState,
+        "lock-user-id",
+      );
+
+      expect(result.state.profileConfirmed).toBe(true);
+      expect(result.state.existingUserData.firstName).toBe("NewFirstName");
+      expect(result.state.existingUserData.lastName).toBe("NewLastName");
+      expect(result.state.existingUserData.email).toBe("verified@gmail.com");
+      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
+    });
+
+    it("Should route to CONFIRM mode and return all six fields in the payload when there are no mismatches", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "confirm-user-id",
+        firstName: "ConfirmUser",
+        lastName: "ConfirmLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: "confirm@gmail.com",
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentData: {
+          firstName: "ConfirmUser",
+          lastName: "ConfirmLast",
+          phoneNumber: "+919000000001",
+          email: "confirm@gmail.com",
+        },
+        existingUserData: {
+          firstName: "ConfirmUser",
+          lastName: "ConfirmLast",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "confirm-user-id");
+
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.mode).toBe("CONFIRM");
+      expect(result.fields).toHaveLength(6);
+      expect(result.fields[0].key).toBe("firstName");
+      expect(result.fields[5].key).toBe("email");
+    });
+
+    it("Should preserve non-conflicting/document-only fields when source choice is applied", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "source-user-id",
+        firstName: "SourceUser",
+        lastName: "SourceLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: "source@gmail.com",
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        hasLoginData: true,
+        loginData: {
+          firstName: { value: "SourceUser", verified: false },
+          lastName: { value: "SourceLast", verified: false },
+          phoneNumber: { value: "+919000000001", verified: true },
+          email: { value: "source@gmail.com", verified: true },
+        },
+        documentData: {
+          firstName: "DocUser",
+          lastName: "SourceLast",
+          phoneNumber: "+919000000001",
+          email: "source@gmail.com",
+          gender: "female",
+          dateOfBirth: "1995-05-15",
+        },
+        existingUserData: {
+          firstName: "SourceUser",
+          lastName: "SourceLast",
+        },
+      };
+
+      // User picks source: "LOGIN" (which chooses "SourceUser" over "DocUser" for firstName conflict)
+      const result = await onboardingService.chat(
+        JSON.stringify({ source: "LOGIN" }),
+        [],
+        mockState,
+        "source-user-id",
+      );
+
+      expect(result.state.profileConfirmed).toBe(true);
+      expect(result.state.existingUserData.firstName).toBe("SourceUser");
+      // Mismatched fields not selected are kept if empty on other side, but document-only fields are NOT wiped!
+      expect(result.state.existingUserData.gender).toBe("female");
+      expect(result.state.existingUserData.dateOfBirth).toBe("1995-05-15");
+    });
+
+    it("Should skip required fields that are pre-filled in existingUserData", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "skip-user-id",
+        firstName: "SkipUser",
+        lastName: "SkipLast",
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: "skip@gmail.com",
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        hasLoginData: true,
+        loginData: {
+          firstName: { value: "SkipUser", verified: false },
+          lastName: { value: "SkipLast", verified: false },
+          phoneNumber: { value: "+919000000001", verified: true },
+          email: { value: "skip@gmail.com", verified: true },
+        },
+        documentData: {
+          firstName: "SkipUser",
+          lastName: "SkipLast",
+          phoneNumber: "+919000000001",
+          email: "skip@gmail.com",
+        },
+        existingUserData: {
+          firstName: "SkipUser",
+          lastName: "SkipLast",
+          // Let's pre-fill dateOfBirth and gender
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const result = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        mockState,
+        "skip-user-id",
+      );
+
+      expect(result.state.profileConfirmed).toBe(true);
+      // Since firstName, lastName, phone, email, dob, gender are all present, next step should bypass them
+      // Next step should proceed to blood group/allergies/medicines add step
+      expect(result.state.currentStep).not.toBe("ASK_DOB");
+      expect(result.state.currentStep).not.toBe("ASK_GENDER");
+    });
+
+    it("Should immediately advance flow on idempotency guard when profileConfirmed is already true", async () => {
+      const mockState = {
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        profileConfirmed: true,
+        existingUserData: {
+          firstName: "IdempotentUser",
+          lastName: "IdempotentLast",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "idem-user-id");
+      expect(result.state.currentStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+    });
+
+    it("Should show CONFIRM mode when unverified fields are empty on login side but present on document side (auto-fill case)", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "otp-confirm-user-id",
+        firstName: null,
+        lastName: null,
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: null,
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentData: {
+          firstName: "URMILA",
+          lastName: "HIPARPA",
+          phoneNumber: "+919000000001",
+          dateOfBirth: "1992-08-20",
+          gender: "female",
+        },
+        existingUserData: {
+          firstName: null,
+          lastName: null,
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "otp-confirm-user-id");
+
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.mode).toBe("CONFIRM");
+      expect(result.fields).toHaveLength(6);
+
+      // Verified phone is locked (verified: true, not editable)
+      const phoneField = result.fields.find((f) => f.key === "phoneNumber");
+      expect(phoneField.verified).toBe(true);
+      expect(phoneField.editable).toBe(false);
+      expect(phoneField.isMismatch).toBe(false);
+
+      // Unverified email is empty on both sides -> no conflict, editable: true
+      const emailField = result.fields.find((f) => f.key === "email");
+      expect(emailField.verified).toBe(false);
+      expect(emailField.editable).toBe(true);
+      expect(emailField.isMismatch).toBe(false);
+
+      // First name is populated from document and has value, no mismatch
+      const firstNameField = result.fields.find((f) => f.key === "firstName");
+      expect(firstNameField.value).toBe("URMILA");
+      expect(firstNameField.isMismatch).toBe(false);
+    });
+
+    it("Should show CONFLICT mode when unverified fields differ on both sides", async () => {
+      const patientRepository = require("../../../src/repositories/patientRepository");
+      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+
+      patientRepository.findById.mockResolvedValue({
+        id: "conflict-otp-user-id",
+        firstName: "OldName",
+        lastName: null,
+        mobile: "9000000001",
+        countryCode: "+91",
+        email: null,
+      });
+
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+
+      const mockState = {
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentData: {
+          firstName: "URMILA",
+          lastName: "HIPARPA",
+          phoneNumber: "+919000000001",
+          dateOfBirth: "1992-08-20",
+          gender: "female",
+        },
+        existingUserData: {
+          firstName: "OldName",
+          lastName: null,
+        },
+      };
+
+      const result = await onboardingService.chat("YES", [], mockState, "conflict-otp-user-id");
+
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.mode).toBe("CONFLICT");
+
+      const firstNameField = result.fields.find((f) => f.key === "firstName");
+      expect(firstNameField.isMismatch).toBe(true);
     });
   });
 });

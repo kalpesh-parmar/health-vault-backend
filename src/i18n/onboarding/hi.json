@@ -9,7 +9,6 @@
       { "label": "तमिल (Tamil)", "value": "tamil" }
     ]
   },
-  "onboarding.upload.success": "✅ आपका दस्तावेज़ सफलतापूर्वक अपलोड हो गया था।",
   "onboarding.upload.failed": "❌ दस्तावेज़ प्रसंस्करण विफल रहा। कृपया पुनः प्रयास करें या विवरण मैन्युअल रूप से दर्ज करें।",
   "onboarding.retryUpload": "पुनः प्रयास करें",
   "onboarding.manual": "मैन्युअल रूप से दर्ज करें",

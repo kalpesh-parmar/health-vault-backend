@@ -5,6 +5,7 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { ONBOARDING_SYSTEM_PROMPT, TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const authProviderRepository = require("../../../repositories/authProviderRepository");
 const medicationService = require("../../medicationService");
 const medicationReminderService = require("../../medicationReminderService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
@@ -75,6 +76,27 @@ function normalizePhone(phoneStr) {
     .trim()
     .replace(/[^\d+]/g, "");
   return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
+}
+
+function isSamePhone(p1, p2) {
+  if (!p1 || !p2) return false;
+  const digits1 = String(p1).replace(/\D/g, "");
+  const digits2 = String(p2).replace(/\D/g, "");
+
+  if (digits1.length === 0 || digits2.length === 0) return false;
+
+  const last10_1 = digits1.slice(-10);
+  const last10_2 = digits2.slice(-10);
+
+  if (last10_1 !== last10_2) return false;
+
+  if (digits1.length > 10 && digits2.length > 10) {
+    const cc1 = digits1.slice(0, digits1.length - 10);
+    const cc2 = digits2.slice(0, digits2.length - 10);
+    return cc1 === cc2;
+  }
+
+  return true;
 }
 
 function getLocalizedTranslation(key, language) {
@@ -327,25 +349,30 @@ function getNextRequiredOrOptionalStep(state) {
 
 function normalizeFieldVal(val, type) {
   if (val === undefined || val === null) return "";
+  const str = String(val).trim();
+  const lower = str.toLowerCase();
+  if (lower === "" || lower === "null" || lower === "undefined" || lower === "nan") {
+    return "";
+  }
   if (type === "name") {
-    return String(val).trim().toLowerCase().replace(/\s+/g, " ");
+    return lower.replace(/\s+/g, " ");
   }
   if (type === "gender") {
-    return String(val).trim().toLowerCase();
+    return lower;
   }
-  return String(val).trim();
+  return str;
 }
 
 function getProfileMismatches(state) {
-  console.log("[RAW SOCIAL DATA] socialData:", JSON.stringify(state.socialData, null, 2));
+  console.log("[RAW LOGIN DATA] loginData:", JSON.stringify(state.loginData, null, 2));
   console.log("[RAW DOCUMENT DATA] documentData:", JSON.stringify(state.documentData, null, 2));
 
-  if (!state.socialData || !state.documentData) {
+  if (!state.loginData) {
     return { hasMismatch: false, fields: [] };
   }
 
+  const docData = state.documentData || {};
   const fields = [];
-  let hasMismatch = false;
 
   const compareKeys = [
     { key: "firstName", label: "First Name", type: "name" },
@@ -353,33 +380,36 @@ function getProfileMismatches(state) {
     { key: "phoneNumber", label: "Phone Number", type: "phone" },
     { key: "dateOfBirth", label: "Date of Birth", type: "dob" },
     { key: "gender", label: "Gender", type: "gender" },
-    { key: "bloodGroup", label: "Blood Group", type: "bloodGroup" },
+    { key: "email", label: "Email", type: "email" },
   ];
 
   for (const item of compareKeys) {
-    const rawLogin = state.socialData[item.key];
-    const rawDoc = state.documentData[item.key];
+    const loginField = state.loginData[item.key] || { value: null, verified: false };
+    const rawLogin = loginField.value;
 
-    // Check if at least one side is populated
-    if (
-      (rawLogin === undefined || rawLogin === null || rawLogin === "") &&
-      (rawDoc === undefined || rawDoc === null || rawDoc === "")
-    ) {
-      continue;
+    let rawDoc = docData[item.key];
+    if (item.key === "phoneNumber" && rawDoc === undefined) {
+      rawDoc = docData.mobile || docData.phoneNumber;
     }
 
     const normalizedLogin = normalizeFieldVal(rawLogin, item.type);
     const normalizedDoc = normalizeFieldVal(rawDoc, item.type);
 
     let isMismatch = false;
-    if (normalizedLogin && normalizedDoc) {
-      if (normalizedLogin !== normalizedDoc) {
-        isMismatch = true;
-        hasMismatch = true;
+    if (loginField.verified) {
+      // Verified fields are never marked as mismatch
+      isMismatch = false;
+    } else if (normalizedLogin && normalizedDoc) {
+      if (item.type === "phone") {
+        isMismatch = !isSamePhone(normalizedLogin, normalizedDoc);
+      } else {
+        isMismatch = normalizedLogin !== normalizedDoc;
       }
     }
 
-    console.log(`[INSTRUMENTATION] [getProfileMismatches] Field: ${item.key}`, {
+    console.log("[INSTRUMENTATION] getProfileMismatches field evaluation:", {
+      key: item.key,
+      verified: loginField.verified,
       rawLogin,
       rawDoc,
       normalizedLogin,
@@ -391,12 +421,100 @@ function getProfileMismatches(state) {
       key: item.key,
       label: item.label,
       loginValue: rawLogin || null,
-      documentValue: rawDoc || null,
+      documentValue: loginField.verified ? rawLogin : rawDoc || null,
       isMismatch,
+      verified: loginField.verified,
     });
   }
 
+  const hasMismatch = fields.some((f) => f.isMismatch === true);
+  console.log("[INSTRUMENTATION] getProfileMismatches final decision:", {
+    hasMismatch,
+    computedMode: hasMismatch ? "CONFLICT" : "CONFIRM",
+  });
+
   return { hasMismatch, fields };
+}
+
+function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
+  const compareKeys = ["firstName", "lastName", "phoneNumber", "dateOfBirth", "gender", "email"];
+
+  const docData = state.documentData || {};
+
+  for (const key of compareKeys) {
+    const loginField = state.loginData?.[key] || { value: null, verified: false };
+    const rawLogin = loginField.value;
+
+    let rawDoc = docData[key];
+    if (key === "phoneNumber" && rawDoc === undefined) {
+      rawDoc = docData.mobile || docData.phoneNumber;
+    }
+
+    const normalizedLogin = normalizeFieldVal(rawLogin, key === "phoneNumber" ? "phone" : key);
+    const normalizedDoc = normalizeFieldVal(rawDoc, key === "phoneNumber" ? "phone" : key);
+
+    const isMismatch =
+      !loginField.verified &&
+      normalizedLogin &&
+      normalizedDoc &&
+      (key === "phoneNumber"
+        ? !isSamePhone(normalizedLogin, normalizedDoc)
+        : normalizedLogin !== normalizedDoc);
+
+    const shownValue = loginField.verified ? rawLogin : rawLogin || rawDoc || null;
+
+    if (loginField.verified) {
+      state.existingUserData[key] = rawLogin;
+    } else if (editedData) {
+      // Exclude verified fields from editedData application (ignored on backend for verified fields)
+      if (editedData[key] !== undefined) {
+        state.existingUserData[key] = editedData[key];
+      } else {
+        state.existingUserData[key] = shownValue;
+      }
+    } else if (isMismatch && sourceChoice) {
+      state.existingUserData[key] = sourceChoice === "DOCUMENT" ? rawDoc : rawLogin;
+    } else {
+      // Non-conflicting/document-only fields are kept and not wiped by source choice
+      state.existingUserData[key] = rawLogin || rawDoc || null;
+    }
+  }
+
+  // Normalize and validate names & phone number & email & dob & gender
+  if (state.existingUserData.firstName) {
+    state.existingUserData.firstName = normalizeName(state.existingUserData.firstName);
+  }
+  if (state.existingUserData.lastName) {
+    state.existingUserData.lastName = normalizeName(state.existingUserData.lastName);
+  }
+  if (state.existingUserData.phoneNumber) {
+    const normPhone = normalizePhone(state.existingUserData.phoneNumber);
+    if (normPhone) {
+      state.existingUserData.phoneNumber = normPhone;
+    }
+  }
+  if (state.existingUserData.dateOfBirth) {
+    const normDob = normalizeDOB(String(state.existingUserData.dateOfBirth));
+    if (normDob) {
+      state.existingUserData.dateOfBirth = normDob;
+    }
+  }
+  if (state.existingUserData.gender) {
+    const lowerGender = String(state.existingUserData.gender).trim().toLowerCase();
+    if (lowerGender === "male" || lowerGender === "female") {
+      state.existingUserData.gender = lowerGender;
+    } else {
+      state.existingUserData.gender = null;
+    }
+  }
+  if (state.existingUserData.email) {
+    const trimmedEmail = String(state.existingUserData.email).trim().toLowerCase();
+    if (/^\S+@\S+\.\S+$/.test(trimmedEmail)) {
+      state.existingUserData.email = trimmedEmail;
+    } else {
+      state.existingUserData.email = null;
+    }
+  }
 }
 
 function computeCurrentStep(state) {
@@ -419,37 +537,14 @@ function computeCurrentStep(state) {
     if (
       state.documentExtracted &&
       state.documentConfirmed &&
-      state.hasSocialData &&
-      !state.socialDataConfirmed
+      state.hasLoginData &&
+      !state.profileConfirmed
     ) {
-      const { hasMismatch } = getProfileMismatches(state);
-      if (!hasMismatch) {
-        // Auto-resolve: merge values silently and confirm
-        const compareKeys = [
-          "firstName",
-          "lastName",
-          "phoneNumber",
-          "dateOfBirth",
-          "gender",
-          "email",
-        ];
-        for (const key of compareKeys) {
-          const loginVal = state.socialData?.[key];
-          const docVal = state.documentData?.[key];
-          if (loginVal && docVal) {
-            if (loginVal.trim().toLowerCase() === docVal.trim().toLowerCase()) {
-              state.existingUserData[key] = loginVal;
-            }
-          } else if (loginVal) {
-            state.existingUserData[key] = loginVal;
-          } else if (docVal) {
-            state.existingUserData[key] = docVal;
-          }
-        }
-        state.socialDataConfirmed = true;
-      } else {
-        return "RESOLVE_PROFILE_SOURCE";
-      }
+      return "RESOLVE_PROFILE_SOURCE";
+    }
+  } else if (state.flowMode === "MANUAL" || state.flowMode === "SKIP") {
+    if (state.hasLoginData && !state.profileConfirmed) {
+      return "RESOLVE_PROFILE_SOURCE";
     }
   }
 
@@ -489,39 +584,11 @@ async function updateStateFromMessage(state, message, userId = null) {
       const fmVal = msg;
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
-        if (fmVal === "MANUAL" && state.hasSocialData) {
-          state.socialDataConfirmed = true;
-          if (state.socialData) {
-            state.existingUserData.firstName =
-              state.socialData.firstName || state.existingUserData.firstName;
-            state.existingUserData.lastName =
-              state.socialData.lastName || state.existingUserData.lastName;
-            state.existingUserData.email = state.socialData.email || state.existingUserData.email;
-            state.existingUserData.gender =
-              state.socialData.gender || state.existingUserData.gender;
-            state.existingUserData.dateOfBirth =
-              state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
-          }
-        }
         state.currentStep = computeCurrentStep(state);
       } else {
         const extractedFM = await extractFieldFromMessage("flowMode", msg, state.preferredLanguage);
         if (extractedFM === "UPLOAD" || extractedFM === "MANUAL") {
           state.flowMode = extractedFM;
-          if (extractedFM === "MANUAL" && state.hasSocialData) {
-            state.socialDataConfirmed = true;
-            if (state.socialData) {
-              state.existingUserData.firstName =
-                state.socialData.firstName || state.existingUserData.firstName;
-              state.existingUserData.lastName =
-                state.socialData.lastName || state.existingUserData.lastName;
-              state.existingUserData.email = state.socialData.email || state.existingUserData.email;
-              state.existingUserData.gender =
-                state.socialData.gender || state.existingUserData.gender;
-              state.existingUserData.dateOfBirth =
-                state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
-            }
-          }
           state.currentStep = computeCurrentStep(state);
         }
       }
@@ -529,7 +596,8 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "RESOLVE_PROFILE_SOURCE": {
-      if (state.socialDataConfirmed) {
+      if (state.profileConfirmed) {
+        state.currentStep = computeCurrentStep(state);
         break;
       }
       let payload;
@@ -544,50 +612,17 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
-      if (payload && payload.source) {
-        state.socialDataConfirmed = true;
-        const sourceData = payload.source === "LOGIN" ? state.socialData : state.documentData;
-        const compareKeys = [
-          "firstName",
-          "lastName",
-          "phoneNumber",
-          "dateOfBirth",
-          "gender",
-          "email",
-        ];
-        for (const key of compareKeys) {
-          if (sourceData[key] !== undefined && sourceData[key] !== null) {
-            state.existingUserData[key] = sourceData[key];
-          }
-        }
-        state.existingUserData.firstName = normalizeName(state.existingUserData.firstName);
-        state.existingUserData.lastName = normalizeName(state.existingUserData.lastName);
-        state.existingUserData.phoneNumber = normalizePhone(state.existingUserData.phoneNumber);
-        if (state.existingUserData.email) {
-          state.existingUserData.email = state.existingUserData.email.trim().toLowerCase();
-        }
+      if (payload && payload.confirmed) {
+        mergeAndApplyProfile(state);
+        state.profileConfirmed = true;
+        state.currentStep = computeCurrentStep(state);
+      } else if (payload && payload.source) {
+        mergeAndApplyProfile(state, payload.source);
+        state.profileConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       } else if (payload && payload.edited) {
-        state.socialDataConfirmed = true;
-        const compareKeys = [
-          "firstName",
-          "lastName",
-          "phoneNumber",
-          "dateOfBirth",
-          "gender",
-          "email",
-        ];
-        for (const key of compareKeys) {
-          if (payload.edited[key] !== undefined) {
-            state.existingUserData[key] = payload.edited[key];
-          }
-        }
-        state.existingUserData.firstName = normalizeName(state.existingUserData.firstName);
-        state.existingUserData.lastName = normalizeName(state.existingUserData.lastName);
-        state.existingUserData.phoneNumber = normalizePhone(state.existingUserData.phoneNumber);
-        if (state.existingUserData.email) {
-          state.existingUserData.email = state.existingUserData.email.trim().toLowerCase();
-        }
+        mergeAndApplyProfile(state, null, payload.edited);
+        state.profileConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -661,28 +696,24 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.documentExtracted = false;
 
         const rollbackData = {
-          firstName: (state.hasSocialData && state.socialData?.firstName) || null,
-          lastName: (state.hasSocialData && state.socialData?.lastName) || null,
-          dateOfBirth:
-            state.hasSocialData && state.socialData?.dateOfBirth
-              ? new Date(state.socialData.dateOfBirth)
-              : null,
-          gender: (state.hasSocialData && state.socialData?.gender) || null,
-          mobile: (state.hasSocialData && state.socialData?.phoneNumber) || null,
+          firstName: state.loginData?.firstName?.value || null,
+          lastName: state.loginData?.lastName?.value || null,
+          dateOfBirth: state.loginData?.dateOfBirth?.value
+            ? new Date(state.loginData.dateOfBirth.value)
+            : null,
+          gender: state.loginData?.gender?.value || null,
+          mobile: state.loginData?.phoneNumber?.value || null,
         };
-        if (state.hasSocialData && state.socialData?.email) {
-          rollbackData.email = state.socialData.email;
+        if (state.loginData?.email?.value) {
+          rollbackData.email = state.loginData.email.value;
         }
 
         state.existingUserData = {
           firstName: rollbackData.firstName,
           lastName: rollbackData.lastName,
-          dateOfBirth: (state.hasSocialData && state.socialData?.dateOfBirth) || null,
+          dateOfBirth: state.loginData?.dateOfBirth?.value || null,
           gender: rollbackData.gender,
-          email:
-            state.existingUserData?.email ||
-            (state.hasSocialData && state.socialData?.email) ||
-            null,
+          email: rollbackData.email,
           bloodGroup: null,
           allergies: [],
           phoneNumber: rollbackData.mobile,
@@ -1045,7 +1076,8 @@ async function getLocalizedResponse(step, state) {
       };
 
     case "RESOLVE_PROFILE_SOURCE": {
-      const { fields } = getProfileMismatches(state);
+      const { hasMismatch, fields } = getProfileMismatches(state);
+      const mode = hasMismatch ? "CONFLICT" : "CONFIRM";
 
       const loginFirstName = state.socialData?.firstName || "";
       const loginLastName = state.socialData?.lastName || "";
@@ -1055,26 +1087,47 @@ async function getLocalizedResponse(step, state) {
       const loginName = [loginFirstName, loginLastName].filter(Boolean).join(" ");
       const docName = [docFirstName, docLastName].filter(Boolean).join(" ");
 
-      const conflictMsg = await getLocalizedText(
-        "onboarding.source.conflict.message",
-        "I found two different sources for your details. Please review and choose which one is correct.",
-        state.preferredLanguage,
-      );
-      const title = await getLocalizedText(
-        "onboarding.source.conflict.title",
-        "We found two different profiles",
-        state.preferredLanguage,
-      );
-      const subtitle = await getLocalizedText(
-        "onboarding.source.conflict.subtitle",
-        "Please review and choose the one you prefer",
-        state.preferredLanguage,
-      );
-      const explainer = await getLocalizedText(
-        "onboarding.source.conflict.explainer",
-        "Name details can sometimes be written differently in documents vs social profiles.",
-        state.preferredLanguage,
-      );
+      let message, title, subtitle, explainer;
+      if (mode === "CONFLICT") {
+        message = await getLocalizedText(
+          "onboarding.source.conflict.message",
+          "I found two different sources for your details. Please review and choose which one is correct.",
+          state.preferredLanguage,
+        );
+        title = await getLocalizedText(
+          "onboarding.source.conflict.title",
+          "We found two different profiles",
+          state.preferredLanguage,
+        );
+        subtitle = await getLocalizedText(
+          "onboarding.source.conflict.subtitle",
+          "Please review and choose the one you prefer",
+          state.preferredLanguage,
+        );
+        explainer = await getLocalizedText(
+          "onboarding.source.conflict.explainer",
+          "Name details can sometimes be written differently in documents vs social profiles.",
+          state.preferredLanguage,
+        );
+      } else {
+        message = await getLocalizedText(
+          "onboarding.source.confirm.message",
+          "Here are your details. Please confirm they're correct — you can edit anything if needed.",
+          state.preferredLanguage,
+        );
+        title = await getLocalizedText(
+          "onboarding.source.confirm.title",
+          "Confirm your profile details",
+          state.preferredLanguage,
+        );
+        subtitle = await getLocalizedText(
+          "onboarding.source.confirm.subtitle",
+          "Please check and confirm all details below",
+          state.preferredLanguage,
+        );
+        explainer = null;
+      }
+
       const useSocialText = await getLocalizedText(
         "onboarding.source.useSocialLogin",
         "Use Social Login",
@@ -1095,6 +1148,8 @@ async function getLocalizedResponse(step, state) {
         fields.map(async (f) => {
           let loginVal = f.loginValue;
           let docVal = f.documentValue;
+          let singleVal = f.verified ? loginVal : loginVal || docVal || null;
+
           if (f.key === "gender") {
             if (loginVal)
               loginVal = await getLocalizedText(
@@ -1106,6 +1161,12 @@ async function getLocalizedResponse(step, state) {
               docVal = await getLocalizedText(
                 `onboarding.fieldValue.${docVal}`,
                 docVal,
+                state.preferredLanguage,
+              );
+            if (singleVal)
+              singleVal = await getLocalizedText(
+                `onboarding.fieldValue.${singleVal}`,
+                singleVal,
                 state.preferredLanguage,
               );
           }
@@ -1123,20 +1184,28 @@ async function getLocalizedResponse(step, state) {
             label: localizedLabel,
             loginValue: loginVal,
             documentValue: docVal,
+            value: singleVal,
+            isMismatch: mode === "CONFIRM" ? false : f.isMismatch,
+            editable: !f.verified,
           };
         }),
       );
 
       const payload = {
         action: "RESOLVE_PROFILE_SOURCE",
-        message: conflictMsg,
+        mode,
+        message,
         title,
         subtitle,
-        explainer,
         fields: localizedFields,
         loginSummary,
         documentSummary,
       };
+
+      if (mode === "CONFLICT") {
+        payload.explainer = explainer;
+      }
+
       console.log(
         "[INSTRUMENTATION] [RESOLVE_PROFILE_SOURCE] final payload fields:",
         JSON.stringify(payload.fields, null, 2),
@@ -1185,11 +1254,6 @@ async function getLocalizedResponse(step, state) {
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
       const yesLabel = await getLocalizedText("onboarding.yes", "Yes", state.preferredLanguage);
       const noLabel = await getLocalizedText("onboarding.no", "No", state.preferredLanguage);
-      const successMsg = await getLocalizedText(
-        "onboarding.upload.success",
-        "✅ Your document was uploaded successfully.",
-        state.preferredLanguage,
-      );
       const ownershipMsg = await getLocalizedText(
         "onboarding.document.ownership",
         "Is this document yours?",
@@ -1198,7 +1262,7 @@ async function getLocalizedResponse(step, state) {
 
       return {
         action: "CONFIRM_DOCUMENT_OWNERSHIP",
-        message: successMsg ? `${successMsg}\n\n${ownershipMsg}` : ownershipMsg,
+        message: ownershipMsg,
         options: [
           { label: yesLabel, value: "YES" },
           { label: noLabel, value: "NO" },
@@ -1425,32 +1489,87 @@ class OnboardingService {
 
     // Check for social login data
     if (
-      state.hasSocialData === undefined ||
-      state.hasSocialData === null ||
-      state.socialData === undefined
+      state.hasLoginData === undefined ||
+      state.hasLoginData === null ||
+      state.loginData === undefined
     ) {
       if (userId) {
         const patient = await patientRepository.findById(userId);
-        if (patient && patient.firstName && patient.firstName !== "User") {
-          state.hasSocialData = true;
+        if (patient) {
+          const providers = await authProviderRepository.findByUserId(userId);
+          const providerNames = providers.map((p) => p.provider);
+
+          let isPhoneVerified = false;
+          let isEmailVerified = false;
+
+          if (providerNames.includes("mobile")) {
+            isPhoneVerified = true;
+          }
+          if (providerNames.some((p) => ["google", "facebook", "microsoft", "apple"].includes(p))) {
+            if (patient.email) {
+              isEmailVerified = true;
+            }
+          }
+          if (patient.email && (providers.length === 0 || providerNames.includes("password"))) {
+            isEmailVerified = true;
+          }
+
+          let fullMobile = null;
+          if (patient.mobile) {
+            fullMobile = (patient.countryCode || "") + patient.mobile;
+          }
+
+          state.loginData = {
+            firstName: { value: patient.firstName || null, verified: false, provenance: "profile" },
+            lastName: {
+              value:
+                patient.lastName !== "+91" && !patient.lastName?.startsWith("+")
+                  ? patient.lastName
+                  : null,
+              verified: false,
+              provenance: "profile",
+            },
+            email: {
+              value: patient.email || null,
+              verified: isEmailVerified,
+              provenance: isEmailVerified ? "auth" : "profile",
+            },
+            gender: { value: patient.gender || null, verified: false, provenance: "profile" },
+            dateOfBirth: {
+              value: patient.dateOfBirth ? patient.dateOfBirth.toISOString().split("T")[0] : null,
+              verified: false,
+              provenance: "profile",
+            },
+            phoneNumber: {
+              value: fullMobile,
+              verified: isPhoneVerified,
+              provenance: isPhoneVerified ? "auth" : "profile",
+            },
+          };
+
+          state.hasLoginData = Object.values(state.loginData).some(
+            (field) => field.value !== null && field.value !== "",
+          );
+
+          // Backward compatibility aliases
+          state.hasSocialData = state.hasLoginData;
           state.socialData = {
-            firstName: patient.firstName,
-            lastName:
-              patient.lastName !== "+91" && !patient.lastName?.startsWith("+")
-                ? patient.lastName
-                : null,
-            email: patient.email,
-            gender: patient.gender,
-            dateOfBirth: patient.dateOfBirth
-              ? patient.dateOfBirth.toISOString().split("T")[0]
-              : null,
-            phoneNumber: patient.mobile || null,
+            firstName: state.loginData.firstName.value,
+            lastName: state.loginData.lastName.value,
+            email: state.loginData.email.value,
+            gender: state.loginData.gender.value,
+            dateOfBirth: state.loginData.dateOfBirth.value,
+            phoneNumber: state.loginData.phoneNumber.value,
           };
         } else {
+          state.hasLoginData = false;
+          state.loginData = null;
           state.hasSocialData = false;
           state.socialData = null;
         }
       } else {
+        state.hasLoginData = false;
+        state.loginData = null;
         state.hasSocialData = false;
         state.socialData = null;
       }
@@ -1670,7 +1789,7 @@ class OnboardingService {
         state.flowMode === "SKIP" ||
         (state.flowMode === "UPLOAD" &&
           state.documentOwnershipConfirmed === true &&
-          (state.socialDataConfirmed === true || !state.hasSocialData));
+          (state.profileConfirmed === true || !state.hasLoginData));
 
       const updateData = {};
       if (shouldWritePatientProfile) {
@@ -1771,7 +1890,9 @@ class OnboardingService {
         medicinesSavedToDb: state.medicinesSavedToDb,
         hasSocialData: state.hasSocialData,
         socialData: state.socialData,
-        socialDataConfirmed: state.socialDataConfirmed,
+        hasLoginData: state.hasLoginData,
+        loginData: state.loginData,
+        profileConfirmed: state.profileConfirmed,
         documentText: state.documentText,
         documentData: state.documentData,
       };
@@ -1807,6 +1928,15 @@ class OnboardingService {
         );
       }
     }
+
+    console.log("[INSTRUMENTATION] FINAL outgoing onboarding assistant payload:", {
+      action: response.action,
+      mode: response.mode,
+      title: response.title,
+      subtitle: response.subtitle,
+      hasFields: !!response.fields,
+      fieldsLength: response.fields?.length,
+    });
 
     return {
       ...response,

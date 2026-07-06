@@ -9,7 +9,6 @@
       { "label": "தமிழ் (Tamil)", "value": "tamil" }
     ]
   },
-  "onboarding.upload.success": "✅ உங்கள் ஆவணம் வெற்றிகரமாக பதிவேற்றப்பட்டது.",
   "onboarding.upload.failed": "❌ ஆவண செயலாக்கம் தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும் அல்லது விவரங்களை கைமுறையாக உள்ளிடவும்.",
   "onboarding.retryUpload": "மீண்டும் முயற்சி செய்",
   "onboarding.manual": "கைமுறையாக உள்ளிடுக",

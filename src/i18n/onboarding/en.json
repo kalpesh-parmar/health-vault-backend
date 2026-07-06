@@ -24,7 +24,6 @@
       }
     ]
   },
-  "onboarding.upload.success": "✅ Your document was uploaded successfully.",
   "onboarding.upload.failed": "❌ Document processing failed. Please try again or enter details manually.",
   "onboarding.retryUpload": "Retry Upload",
   "onboarding.manual": "Enter Details Manually",

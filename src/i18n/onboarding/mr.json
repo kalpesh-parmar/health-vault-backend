@@ -9,7 +9,6 @@
       { "label": "तमिळ (Tamil)", "value": "tamil" }
     ]
   },
-  "onboarding.upload.success": "✅ तुमचे दस्तऐवज यशस्वीरित्या अपलोड केले गेले.",
   "onboarding.upload.failed": "❌ दस्तऐवज प्रक्रिया अयशस्वी. कृपया पुन्हा प्रयत्न करा किंवा मॅन्युअली माहिती भरा.",
   "onboarding.retryUpload": "पुन्हा प्रयत्न करा",
   "onboarding.manual": "मॅन्युअली माहिती भरा",
