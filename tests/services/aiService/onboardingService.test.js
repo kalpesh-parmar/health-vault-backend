@@ -1,4 +1,3 @@
-/* global jest, describe, beforeEach, it, expect */
 const { onboardingService } = require("../../../src/services/ai/chat/onboarding.service");
 const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient");
 
@@ -783,6 +782,7 @@ describe("OnboardingService Structured Flow", () => {
       expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
       expect(result.mode).toBe("CONFIRM");
       expect(result.fields).toHaveLength(6);
+      expect(result.loginProvider).toBe("mobile");
 
       // Verified phone is locked (verified: true, not editable)
       const phoneField = result.fields.find((f) => f.key === "phoneNumber");
@@ -815,7 +815,7 @@ describe("OnboardingService Structured Flow", () => {
         email: null,
       });
 
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
 
       const mockState = {
         currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
@@ -841,9 +841,135 @@ describe("OnboardingService Structured Flow", () => {
       expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
       expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
       expect(result.mode).toBe("CONFLICT");
+      expect(result.loginProvider).toBe("google");
 
       const firstNameField = result.fields.find((f) => f.key === "firstName");
       expect(firstNameField.isMismatch).toBe(true);
+    });
+  });
+
+  describe("Medications Flow Integration", () => {
+    let medicationRepository;
+    let patientRepository;
+    beforeEach(() => {
+      medicationRepository = require("../../../src/repositories/medicationRepository");
+      patientRepository = require("../../../src/repositories/patientRepository");
+      jest
+        .spyOn(patientRepository, "findById")
+        .mockResolvedValue({ id: "test-user-id", patientCode: "P-111" });
+      jest
+        .spyOn(medicationRepository, "insert")
+        .mockResolvedValue({ id: "med-123", clientMedId: "doc_med_1" });
+      jest
+        .spyOn(medicationRepository, "bulkInsert")
+        .mockResolvedValue([{ id: "med-123", clientMedId: "doc_med_0" }]);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it("Case 5: document-found -> list -> add -> confirm -> store -> options", async () => {
+      const mockState = {
+        medicationFlowDone: false,
+        medicationFlowStarted: false,
+        currentStep: null,
+        documentData: {
+          doctorName: "Dr. Smith",
+          medications: [
+            { name: "Aspirin 150mg", dosage: "1 tablet", frequency: "once daily", type: "tablet" },
+            { name: "Paracetamol", dosage: "", frequency: "twice daily", type: "tablet" },
+          ],
+        },
+        existingUserData: {
+          firstName: "Sarah",
+          lastName: "Anderson",
+          dateOfBirth: "1989-01-01",
+          gender: "female",
+        },
+      };
+
+      // Step 1: Start medication flow
+      let result = await onboardingService.chat("hello", [], mockState, "test-user-id");
+      expect(result.state.currentStep).toBe("REVIEW_MEDICINES_LIST");
+      expect(result.action).toBe("REVIEW_MEDICINES_LIST");
+      expect(result.medicines).toHaveLength(2);
+
+      // Step 2: Submit selected medicines from list
+      const selectedIds = [result.medicines[0].id, result.medicines[1].id];
+      result = await onboardingService.chat(
+        JSON.stringify({ selected: selectedIds }),
+        [],
+        result.state,
+        "test-user-id",
+      );
+
+      expect(result.state.currentStep).toBe("ADD_MEDICINE");
+      expect(result.action).toBe("ADD_MEDICINE");
+      expect(result.medicine.name).toBe("Paracetamol");
+
+      // Step 3: Complete Paracetamol details
+      const addPayload = {
+        clientMedId: result.medicine.client_med_id,
+        medicine: {
+          name: "Paracetamol",
+          type: "TABLET",
+          dose: { count: 1 },
+          frequency: "TWICE",
+        },
+      };
+      result = await onboardingService.chat(
+        JSON.stringify(addPayload),
+        [],
+        result.state,
+        "test-user-id",
+      );
+      expect(result.state.currentStep).toBe("CONFIRM_MEDICINE");
+      expect(result.action).toBe("CONFIRM_MEDICINE");
+      expect(result.summary.title).toBe("Paracetamol");
+
+      // Step 4: Confirm Paracetamol (writes to DB)
+      result = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        result.state,
+        "test-user-id",
+      );
+      expect(medicationRepository.insert).toHaveBeenCalled();
+
+      expect(result.state.currentStep).toBe("CONFIRM_MEDICINE");
+      expect(result.action).toBe("CONFIRM_MEDICINE");
+      expect(result.summary.title).toBe("Confirm all medications");
+
+      // Step 5: Confirm bulk list
+      result = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        result.state,
+        "test-user-id",
+      );
+      expect(medicationRepository.bulkInsert).toHaveBeenCalled();
+      expect(result.state.currentStep).toBe("MEDICINE_OPTIONS");
+      expect(result.action).toBe("MEDICINE_OPTIONS");
+    });
+
+    it("Case 6: document-not-found -> options", async () => {
+      const mockState = {
+        medicationFlowDone: false,
+        medicationFlowStarted: false,
+        currentStep: null,
+        documentData: null,
+        existingUserData: {
+          firstName: "Sarah",
+          lastName: "Anderson",
+          dateOfBirth: "1989-01-01",
+          gender: "female",
+        },
+      };
+
+      const result = await onboardingService.chat("hello", [], mockState, "test-user-id");
+      expect(result.state.currentStep).toBe("MEDICINE_OPTIONS");
+      expect(result.action).toBe("MEDICINE_OPTIONS");
     });
   });
 });

@@ -7,11 +7,8 @@ const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
 const medicationService = require("../../medicationService");
-const medicationReminderService = require("../../medicationReminderService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
-const { medicationTypeValues } = require("../../../enums/medicationType");
-const { frequencyTypeValues } = require("../../../enums/frequencyType");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -283,65 +280,20 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   // Medication Flow
-  if (!state.medicinesSkipped) {
-    if (!state.medicinesFlowStarted) {
+  if (!state.medicationFlowDone) {
+    if (!state.medicationFlowStarted) {
+      state.medicationFlowStarted = true;
       if (state.flowMode === "UPLOAD" && state.foundMedicines && state.foundMedicines.length > 0) {
-        return "ASK_FOUND_MEDICINES";
-      } else {
-        return "ASK_ON_MEDICINES";
-      }
-    }
-
-    if (state.medicinesToAdd && state.medicinesToAdd.length > 0) {
-      if (!state.medicinesConfirmed) {
+        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
         return "REVIEW_MEDICINES_LIST";
-      }
-
-      for (let i = 0; i < state.medicinesToAdd.length; i++) {
-        const med = state.medicinesToAdd[i];
-
-        if (!med.medicationName) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_NAME";
-        }
-        if (!med.medicationType) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_TYPE";
-        }
-        if (med.dosePerIntake === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_DOSE_PER_INTAKE";
-        }
-        if (!med.frequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FREQUENCY";
-        }
-        if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_SCHEDULE";
-        }
-        if (!med.foodFrequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FOOD_FREQUENCY";
-        }
-        if (!med.startDate) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_START_DATE";
-        }
-        if (med.totalQuantity === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_QUANTITY";
-        }
-        if (med.ongoing === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_ONGOING";
-        }
-        if (!med.isConfirmed) {
-          state.currentMedicineIndex = i;
-          return "CONFIRM_MEDICINE";
-        }
+      } else {
+        return "MEDICINE_OPTIONS";
       }
     }
+    if (state.currentStep) {
+      return state.currentStep;
+    }
+    return "MEDICINE_OPTIONS";
   }
 
   return "REGISTER_USER";
@@ -846,166 +798,183 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "REVIEW_MEDICINES_LIST": {
-      const txt = msg.toUpperCase();
-      if (txt.includes("EDIT") || txt === "NO") {
-        // UI handle
-      } else {
-        state.medicinesConfirmed = true;
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-
-    case "ASK_MEDICINE_NAME": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.medicationName = await extractFieldFromMessage(
-        "medicationName",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_TYPE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (medicationTypeValues.includes(msg.toUpperCase())) {
-        med.medicationType = msg.toUpperCase();
-      } else {
-        med.medicationType = await extractFieldFromMessage(
-          "medicationType",
-          msg,
-          state.preferredLanguage,
-        );
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_DOSE_PER_INTAKE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.dosePerIntake = await extractFieldFromMessage(
-        "dosePerIntake",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (frequencyTypeValues.includes(msg.toUpperCase())) {
-        med.frequency = msg.toUpperCase();
-      } else {
-        med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_SCHEDULE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (!med.tempTimes) med.tempTimes = [];
-
-      let expectedDoses = 1;
-      if (med.frequency === "TWICE_DAILY") expectedDoses = 2;
-      if (med.frequency === "THREE_TIMES_DAILY") expectedDoses = 3;
-      if (med.frequency === "FOUR_TIMES_DAILY") expectedDoses = 4;
-
-      const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
-      if (timeVal) {
-        med.tempTimes.push(timeVal);
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
       }
 
-      if (med.tempTimes.length >= expectedDoses || med.frequency === "AS_NEEDED") {
-        let schedule = {};
-        let customTimes = [];
+      if (payload.selected) {
+        const selectedIds = payload.selected;
+        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
+          ...m,
+          selected: selectedIds.includes(m.id),
+        }));
 
-        for (const timeStr of med.tempTimes) {
-          const hour = parseInt(timeStr.split(":")[0], 10);
-          let key = "Custom";
-          if (hour >= 5 && hour < 12) key = "Morning";
-          else if (hour >= 12 && hour < 17) key = "Noon";
-          else if (hour >= 17 || hour < 5) key = "Night";
-
-          if (key !== "Custom" && !schedule[key]) {
-            schedule[key] = timeStr;
-          } else {
-            customTimes.push(timeStr);
+        let nextIncompleteIndex = -1;
+        for (let i = 0; i < state.medicinesToAdd.length; i++) {
+          const m = state.medicinesToAdd[i];
+          if (m.selected) {
+            try {
+              await medicationService.validate(m);
+            } catch {
+              nextIncompleteIndex = i;
+              break;
+            }
           }
         }
 
-        if (customTimes.length > 0) {
-          schedule.CUSTOM = customTimes;
+        if (nextIncompleteIndex >= 0) {
+          state.currentMedicineIndex = nextIncompleteIndex;
+          state.currentStep = "ADD_MEDICINE";
+        } else {
+          state.validMedsToBulkCreate = state.medicinesToAdd.filter((m) => m.selected);
+          state.confirmMode = "BULK";
+          state.currentStep = "CONFIRM_MEDICINE";
+        }
+      } else if (payload.addNew) {
+        state.currentStep = "ADD_MEDICINE";
+        state.currentMedicineIndex = undefined;
+      } else if (payload.skipAll) {
+        state.medicationFlowDone = true;
+        state.currentStep = "MEDICINE_OPTIONS";
+      }
+      break;
+    }
+
+    case "ADD_MEDICINE": {
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
+      }
+
+      if (payload.medicine) {
+        try {
+          await medicationService.validate(payload.medicine);
+        } catch {
+          break;
         }
 
-        med.medicationSchedule = schedule;
-        delete med.tempTimes;
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FOOD_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (msg.toUpperCase() === "BEFORE_FOOD" || msg.toUpperCase() === "AFTER_FOOD") {
-        med.foodFrequency = msg.toUpperCase();
-      } else {
-        med.foodFrequency = await extractFieldFromMessage(
-          "foodFrequency",
-          msg,
-          state.preferredLanguage,
+        const newMed = {
+          ...payload.medicine,
+          client_med_id: payload.clientMedId || payload.medicine.client_med_id,
+          id: payload.clientMedId || payload.medicine.client_med_id,
+        };
+
+        if (!state.medicinesToAdd) state.medicinesToAdd = [];
+
+        const existingIdx = state.medicinesToAdd.findIndex(
+          (m) => m.client_med_id === newMed.client_med_id,
         );
+        if (existingIdx >= 0) {
+          state.medicinesToAdd[existingIdx] = {
+            ...state.medicinesToAdd[existingIdx],
+            ...newMed,
+            selected: true,
+          };
+        } else {
+          state.medicinesToAdd.push({ ...newMed, selected: true });
+        }
+
+        state.activeMedicine = newMed;
+        state.confirmMode = "SINGLE";
+        state.currentStep = "CONFIRM_MEDICINE";
       }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_START_DATE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const d = await extractFieldFromMessage("startDate", msg, state.preferredLanguage);
-      if (d) med.startDate = d;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_QUANTITY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const quantity = await extractFieldFromMessage("totalQuantity", msg, state.preferredLanguage);
-      med.totalQuantity = parseInt(quantity, 10);
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_ONGOING": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      med.ongoing = yesNoVal === "YES" || msg.toUpperCase() === "YES";
-      state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
     case "CONFIRM_MEDICINE": {
-      const txt = msg.toUpperCase();
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      if (txt.includes("EDIT") || txt === "NO" || yesNoVal === "NO") {
-        // Keep the values but mark as unconfirmed so UI can open edit form
-        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = false;
-        state.currentStep = "EDIT_MEDICINE";
-      } else {
-        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
-        state.currentStep = getNextRequiredOrOptionalStep(state);
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
+      }
+
+      if (payload.confirmed) {
+        if (state.confirmMode === "SINGLE") {
+          if (!state.activeMedicine?.client_med_id) {
+            throw new Error("client_med_id is missing");
+          }
+
+          await medicationService.create(userId, state.activeMedicine);
+
+          let nextIncompleteIndex = -1;
+          for (let i = 0; i < state.medicinesToAdd.length; i++) {
+            const m = state.medicinesToAdd[i];
+            if (m.selected && m.client_med_id !== state.activeMedicine.client_med_id) {
+              try {
+                await medicationService.validate(m);
+              } catch {
+                nextIncompleteIndex = i;
+                break;
+              }
+            }
+          }
+
+          if (nextIncompleteIndex >= 0) {
+            state.currentMedicineIndex = nextIncompleteIndex;
+            state.currentStep = "ADD_MEDICINE";
+          } else {
+            const savedClientMedIds = [state.activeMedicine.client_med_id];
+            const otherValidMeds = (state.medicinesToAdd || []).filter(
+              (m) => m.selected && !savedClientMedIds.includes(m.client_med_id),
+            );
+
+            if (otherValidMeds.length > 0) {
+              state.validMedsToBulkCreate = otherValidMeds;
+              state.confirmMode = "BULK";
+              state.currentStep = "CONFIRM_MEDICINE";
+            } else {
+              state.currentStep = "MEDICINE_OPTIONS";
+            }
+          }
+        } else if (state.confirmMode === "BULK") {
+          if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
+            await medicationService.bulkCreate(userId, state.validMedsToBulkCreate);
+          }
+          state.currentStep = "MEDICINE_OPTIONS";
+        }
+      } else if (payload.edit) {
+        state.currentStep = "ADD_MEDICINE";
+        if (state.confirmMode === "SINGLE") {
+          const idx = state.medicinesToAdd.findIndex(
+            (m) => m.client_med_id === state.activeMedicine.client_med_id,
+          );
+          if (idx >= 0) state.currentMedicineIndex = idx;
+        }
       }
       break;
     }
 
-    case "EDIT_MEDICINE": {
-      // The UI has sent the updated medicine details in the state.
-      // We mark it as confirmed and proceed.
-      state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
+    case "MEDICINE_OPTIONS": {
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        if (msg === "ADD" || msg === "DASHBOARD" || msg === "ASK_REPORT") {
+          payload = { key: msg };
+        } else {
+          payload = {};
+        }
+      }
+
+      const key = payload.key || msg;
+      if (key === "ADD") {
+        state.currentStep = "ADD_MEDICINE";
+        state.currentMedicineIndex = undefined;
+      } else if (key === "DASHBOARD") {
+        state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
+        state.currentStep = "COMPLETE";
+      } else if (key === "ASK_REPORT") {
+        state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
+        state.currentStep = "POST_ONBOARDING";
+      }
       break;
     }
 
@@ -1200,6 +1169,7 @@ async function getLocalizedResponse(step, state) {
         fields: localizedFields,
         loginSummary,
         documentSummary,
+        loginProvider: state.loginProvider || "email",
       };
 
       if (mode === "CONFLICT") {
@@ -1309,116 +1279,83 @@ async function getLocalizedResponse(step, state) {
         options: [{ label: "Skip", value: "SKIP" }],
       };
 
-    case "ASK_FOUND_MEDICINES": {
-      const medNames = (state.foundMedicines || [])
-        .map((m) => m.name || m.medicationName)
-        .filter(Boolean)
-        .join(", ");
-      return {
-        action: "ASK_FOUND_MEDICINES",
-        message: `We found the following medicines in your document: ${medNames}. Do you want to add these to your profile?`,
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
-    }
-
-    case "ASK_ON_MEDICINES":
-      return {
-        action: "ASK_ON_MEDICINES",
-        message: "Would you like to manually add any medicines?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
-
     case "REVIEW_MEDICINES_LIST":
       return {
         action: "REVIEW_MEDICINES_LIST",
-        message: "Please review your medicine list.",
+        message: "Please review the list of medications extracted from your document:",
         options: [
-          { label: "Confirm", value: "CONFIRM" },
-          { label: "Edit", value: "EDIT" },
+          { label: "Confirm Selected", value: "CONFIRM" },
+          { label: "Add New", value: "ADD" },
+          { label: "Skip All", value: "SKIP" },
         ],
+        medicines: state.medicinesToAdd || [],
       };
 
-    case "ASK_MEDICINE_NAME":
+    case "ADD_MEDICINE": {
+      const idx = state.currentMedicineIndex;
+      const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
       return {
-        action: "ASK_MEDICINE_NAME",
-        message: "What is the name of the medicine?",
-      };
-    case "ASK_MEDICINE_TYPE":
-      return {
-        action: "ASK_MEDICINE_TYPE",
-        message: "What type of medicine is it?",
-        options: medicationTypeValues.map((mt) => ({ label: mt, value: mt })),
-      };
-    case "ASK_DOSE_PER_INTAKE":
-      return {
-        action: "ASK_DOSE_PER_INTAKE",
-        message: "What is the dose per intake?",
-      };
-    case "ASK_MEDICINE_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FREQUENCY",
-        message: "How often do you take it?",
-        options: frequencyTypeValues.map((ft) => ({ label: ft, value: ft })),
-      };
-    case "ASK_MEDICINE_SCHEDULE": {
-      const idx = state?.currentMedicineIndex || 0;
-      const med = state?.medicinesToAdd?.[idx] || {};
-      let doseNum = (med.tempTimes?.length || 0) + 1;
-      return {
-        action: "ASK_MEDICINE_SCHEDULE",
-        message: `Please provide the exact time for dose ${doseNum} (e.g. '09:00:00' or '22:00:00').`,
+        action: "ADD_MEDICINE",
+        message: med
+          ? `Please edit details for ${med.name}:`
+          : "Please enter the new medication details:",
+        medicine: med,
       };
     }
-    case "ASK_MEDICINE_FOOD_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FOOD_FREQUENCY",
-        message: "When do you take it in relation to food?",
-        options: [
-          { label: "Before Food", value: "BEFORE_FOOD" },
-          { label: "After Food", value: "AFTER_FOOD" },
-        ],
-      };
-    case "ASK_MEDICINE_START_DATE":
-      return {
-        action: "ASK_MEDICINE_START_DATE",
-        message: "When did you start taking this medicine (YYYY-MM-DD)?",
-      };
-    case "ASK_MEDICINE_QUANTITY":
-      return {
-        action: "ASK_MEDICINE_QUANTITY",
-        message: "What is the total quantity prescribed?",
-      };
-    case "ASK_MEDICINE_ONGOING":
-      return {
-        action: "ASK_MEDICINE_ONGOING",
-        message: "Are you currently taking this medication (Ongoing)?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
 
-    case "CONFIRM_MEDICINE":
+    case "CONFIRM_MEDICINE": {
+      let title = "";
+      let lines = [];
+
+      if (state.confirmMode === "SINGLE" && state.activeMedicine) {
+        const med = state.activeMedicine;
+        title = med.name || "Medicine Summary";
+        const doseStr =
+          med.type === "TABLET" || med.type === "CAPSULE"
+            ? `${med.dose.count} ${med.type.toLowerCase()}(s)`
+            : `${med.dose.value} ${med.dose.unit}`;
+        const timesVal =
+          med.medicationSchedule?.times || med.medicationSchedule?.reminderTimes || [];
+        const timesStr =
+          Array.isArray(timesVal) && timesVal.length > 0 ? timesVal.join(", ") : "None";
+        lines = [
+          `Type: ${med.type}`,
+          `Dose: ${doseStr}`,
+          `Frequency: ${med.frequency}`,
+          `Times: ${timesStr}`,
+          `Prescribed By: ${med.prescribed_by || "None"}`,
+          `Notes: ${med.notes || "None"}`,
+        ];
+      } else if (state.confirmMode === "BULK" && state.validMedsToBulkCreate) {
+        title = "Confirm all medications";
+        lines = state.validMedsToBulkCreate.map((m) => {
+          const doseStr =
+            m.type === "TABLET" || m.type === "CAPSULE"
+              ? `${m.dose.count} ${m.type.toLowerCase()}(s)`
+              : `${m.dose.value} ${m.dose.unit}`;
+          const timesVal = m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
+          const timesStr =
+            Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
+          return `${m.name} (${doseStr}, ${m.frequency}${timesStr})`;
+        });
+      }
+
       return {
         action: "CONFIRM_MEDICINE",
-        message: "Are these details correct?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "Edit", value: "EDIT" },
-        ],
+        message: "Please verify if these details are correct before saving:",
+        summary: { title, lines },
       };
+    }
 
-    case "EDIT_MEDICINE":
+    case "MEDICINE_OPTIONS":
       return {
-        action: "EDIT_MEDICINE",
-        message: "Please edit the medication details and submit.",
-        options: [{ label: "Confirm", value: "CONFIRM" }],
+        action: "MEDICINE_OPTIONS",
+        message: "What would you like to do next?",
+        options: [
+          { key: "ADD", label: "Add Another Medicine", primary: true },
+          { key: "DASHBOARD", label: "Go to Dashboard", primary: false },
+          { key: "ASK_REPORT", label: "Ask About My Report", primary: false },
+        ],
       };
 
     case "COMPLETE":
@@ -1454,6 +1391,31 @@ async function getLocalizedResponse(step, state) {
 
 class OnboardingService {
   async chat(message, history = [], state = {}, userId = null) {
+    if (!state) {
+      state = {};
+    }
+
+    // Ensure all medication-related state properties are initialized
+    if (state.medicinesToAdd === undefined || state.medicinesToAdd === null)
+      state.medicinesToAdd = [];
+    if (state.foundMedicines === undefined || state.foundMedicines === null)
+      state.foundMedicines = [];
+    if (state.medicinesFlowStarted === undefined || state.medicinesFlowStarted === null)
+      state.medicinesFlowStarted = false;
+    if (state.medicinesConfirmed === undefined || state.medicinesConfirmed === null)
+      state.medicinesConfirmed = false;
+    if (state.currentMedicineIndex === undefined || state.currentMedicineIndex === null)
+      state.currentMedicineIndex = 0;
+    if (state.medicinesSavedToDb === undefined || state.medicinesSavedToDb === null)
+      state.medicinesSavedToDb = false;
+    if (state.activeMedicine === undefined) state.activeMedicine = null;
+    if (state.confirmMode === undefined) state.confirmMode = null;
+    if (state.pendingQueue === undefined || state.pendingQueue === null) state.pendingQueue = [];
+    if (state.validMedsToBulkCreate === undefined || state.validMedsToBulkCreate === null)
+      state.validMedsToBulkCreate = [];
+    if (state.medicationFlowDone === undefined || state.medicationFlowDone === null)
+      state.medicationFlowDone = false;
+
     let msg = "";
     if (typeof message === "object" && message !== null) {
       msg = JSON.stringify(message);
@@ -1498,6 +1460,22 @@ class OnboardingService {
         if (patient) {
           const providers = await authProviderRepository.findByUserId(userId);
           const providerNames = providers.map((p) => p.provider);
+
+          let primaryProvider = "email";
+          if (providerNames.includes("google")) {
+            primaryProvider = "google";
+          } else if (providerNames.includes("facebook")) {
+            primaryProvider = "facebook";
+          } else if (providerNames.includes("microsoft")) {
+            primaryProvider = "microsoft";
+          } else if (providerNames.includes("apple")) {
+            primaryProvider = "apple";
+          } else if (providerNames.includes("mobile")) {
+            primaryProvider = "mobile";
+          } else if (providerNames.includes("password")) {
+            primaryProvider = "email";
+          }
+          state.loginProvider = primaryProvider;
 
           let isPhoneVerified = false;
           let isEmailVerified = false;
@@ -1823,41 +1801,6 @@ class OnboardingService {
         updateData.status = "ACTIVE";
         updateData.isVerified = true;
         updateData.onboardingCompleted = true;
-
-        if (
-          state.medicinesConfirmed &&
-          Array.isArray(state.medicinesToAdd) &&
-          !state.medicinesSavedToDb
-        ) {
-          for (const med of state.medicinesToAdd) {
-            try {
-              // Only send if it has medicationName
-              if (med.medicationName) {
-                // Ensure ongoing is boolean and reminderBeforeMinutes is integer if present
-                const payload = {
-                  ...med,
-                  ongoing: med.ongoing === true || med.ongoing === "true",
-                  reminderBeforeMinutes: med.reminderBeforeMinutes
-                    ? parseInt(med.reminderBeforeMinutes, 10)
-                    : undefined,
-                };
-                delete payload.isConfirmed;
-                delete payload.tempTimes;
-                const medication = await medicationService.createMedication(userId, payload);
-                await medicationReminderService.createReminder(userId, {
-                  medicationId: medication.id,
-                });
-              }
-            } catch (err) {
-              console.error(
-                `[OnboardingService] Error creating medication ${med.medicationName}:`,
-                err,
-              );
-            }
-          }
-          // Mark as saved to prevent duplicate creation on subsequent steps, without clearing the array
-          state.medicinesSavedToDb = true;
-        }
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -1895,6 +1838,7 @@ class OnboardingService {
         profileConfirmed: state.profileConfirmed,
         documentText: state.documentText,
         documentData: state.documentData,
+        loginProvider: state.loginProvider,
       };
 
       if (existingRecord) {

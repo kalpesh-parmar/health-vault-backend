@@ -2,6 +2,23 @@ const js = require("@eslint/js");
 const prettierConfig = require("eslint-config-prettier");
 const unusedImports = require("eslint-plugin-unused-imports");
 
+let jestGlobals = {};
+try {
+  const globals = require("globals");
+  jestGlobals = globals.jest;
+} catch {
+  jestGlobals = {
+    jest: "readonly",
+    describe: "readonly",
+    it: "readonly",
+    expect: "readonly",
+    beforeEach: "readonly",
+    afterEach: "readonly",
+    beforeAll: "readonly",
+    afterAll: "readonly",
+  };
+}
+
 module.exports = [
   {
     ignores: [
@@ -47,6 +64,12 @@ module.exports = [
         },
       ],
       "unused-imports/no-unused-imports": "error",
+    },
+  },
+  {
+    files: ["**/*.test.js", "tests/**/*.js"],
+    languageOptions: {
+      globals: jestGlobals,
     },
   },
   prettierConfig,

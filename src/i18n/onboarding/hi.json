@@ -2,11 +2,26 @@
   "ASK_LANGUAGE": {
     "message": "स्वागत है! कृपया अपनी पसंदीदा भाषा चुनें।",
     "options": [
-      { "label": "अंग्रेज़ी (English)", "value": "english" },
-      { "label": "गुजराती (Gujarati)", "value": "gujarati" },
-      { "label": "हिंदी (Hindi)", "value": "hindi" },
-      { "label": "मराठी (Marathi)", "value": "marathi" },
-      { "label": "तमिल (Tamil)", "value": "tamil" }
+      {
+        "label": "अंग्रेज़ी (English)",
+        "value": "english"
+      },
+      {
+        "label": "गुजराती (Gujarati)",
+        "value": "gujarati"
+      },
+      {
+        "label": "हिंदी (Hindi)",
+        "value": "hindi"
+      },
+      {
+        "label": "मराठी (Marathi)",
+        "value": "marathi"
+      },
+      {
+        "label": "तमिल (Tamil)",
+        "value": "tamil"
+      }
     ]
   },
   "onboarding.upload.failed": "❌ दस्तावेज़ प्रसंस्करण विफल रहा। कृपया पुनः प्रयास करें या विवरण मैन्युअल रूप से दर्ज करें।",
@@ -28,5 +43,12 @@
   "onboarding.field.mobile": "फ़ोन नंबर",
   "onboarding.field.dob": "जन्म तिथि",
   "onboarding.field.gender": "लिंग",
-  "onboarding.field.bloodGroup": "रक्त समूह"
+  "onboarding.field.bloodGroup": "रक्त समूह",
+  "onboarding.medicine.morning": "सुबह (08:00)",
+  "onboarding.medicine.noon": "दोपहर (13:00)",
+  "onboarding.medicine.night": "रात (20:00)",
+  "onboarding.medicine.custom": "कस्टम",
+  "onboarding.medicine.counter": "चुनें {required} समय · {selected} में से {required} चयनित",
+  "onboarding.medicine.duplicate": "यह समय पहले से ही जोड़ा गया है",
+  "onboarding.medicine.saveGateError": "कृपया ठीक {required} समय स्लॉट चुनें"
 }

@@ -43,5 +43,12 @@
   "onboarding.field.mobile": "Phone Number",
   "onboarding.field.dob": "Date of Birth",
   "onboarding.field.gender": "Gender",
-  "onboarding.field.bloodGroup": "Blood Group"
+  "onboarding.field.bloodGroup": "Blood Group",
+  "onboarding.medicine.morning": "Morning (08:00)",
+  "onboarding.medicine.noon": "Noon (13:00)",
+  "onboarding.medicine.night": "Night (20:00)",
+  "onboarding.medicine.custom": "Custom",
+  "onboarding.medicine.counter": "Choose {required} times · {selected} of {required} selected",
+  "onboarding.medicine.duplicate": "This time is already added",
+  "onboarding.medicine.saveGateError": "Please select exactly {required} time slots"
 }

@@ -2,11 +2,26 @@
   "ASK_LANGUAGE": {
     "message": "સ્વાગત છે! કૃપા કરીને તમારી પસંદગીની ભાષા પસંદ કરો.",
     "options": [
-      { "label": "અંગ્રેજી (English)", "value": "english" },
-      { "label": "ગુજરાતી (Gujarati)", "value": "gujarati" },
-      { "label": "હિન્દી (Hindi)", "value": "hindi" },
-      { "label": "મરાઠી (Marathi)", "value": "marathi" },
-      { "label": "તમિલ (Tamil)", "value": "tamil" }
+      {
+        "label": "અંગ્રેજી (English)",
+        "value": "english"
+      },
+      {
+        "label": "ગુજરાતી (Gujarati)",
+        "value": "gujarati"
+      },
+      {
+        "label": "હિન્દી (Hindi)",
+        "value": "hindi"
+      },
+      {
+        "label": "મરાઠી (Marathi)",
+        "value": "marathi"
+      },
+      {
+        "label": "તમિલ (Tamil)",
+        "value": "tamil"
+      }
     ]
   },
   "onboarding.upload.failed": "❌ દસ્તાવેજ પ્રક્રિયા નિષ્ફળ રહી. કૃપા કરીને ફરી પ્રયાસ કરો અથવા વિગતો જાતે દાખલ કરો.",
@@ -28,5 +43,12 @@
   "onboarding.field.mobile": "ફોન નંબર",
   "onboarding.field.dob": "જન્મ તારીખ",
   "onboarding.field.gender": "જાતિ",
-  "onboarding.field.bloodGroup": "બ્લડ ગ્રુપ"
+  "onboarding.field.bloodGroup": "બ્લડ ગ્રુપ",
+  "onboarding.medicine.morning": "સવાર (08:00)",
+  "onboarding.medicine.noon": "બપોર (13:00)",
+  "onboarding.medicine.night": "રાત (20:00)",
+  "onboarding.medicine.custom": "કસ્ટમ",
+  "onboarding.medicine.counter": "પસંદ કરો {required} સમય · {selected} માંથી {required} પસંદ કરેલ",
+  "onboarding.medicine.duplicate": "આ સમય પહેલાથી જ ઉમેરેલ છે",
+  "onboarding.medicine.saveGateError": "કૃપા કરીને બરાબર {required} સમય પસંદ કરો"
 }

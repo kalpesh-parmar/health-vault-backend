@@ -52,6 +52,70 @@ class MedicationRepository {
     return result[0] || null;
   }
 
+  async insert(data) {
+    const result = await db
+      .insert(medication)
+      .values(data)
+      .onConflictDoUpdate({
+        target: [medication.userId, medication.clientMedId],
+        set: {
+          patientCode: data.patientCode,
+          medicationName: data.medicationName,
+          medicationType: data.medicationType,
+          prescribedBy: data.prescribedBy,
+          dosePerIntake: data.dosePerIntake,
+          frequency: data.frequency,
+          medicationSchedule: data.medicationSchedule,
+          foodFrequency: data.foodFrequency,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          ongoing: data.ongoing,
+          totalQuantity: data.totalQuantity,
+          unit: data.unit,
+          dailyConsumption: data.dailyConsumption,
+          reminderBeforeMinutes: data.reminderBeforeMinutes,
+          notes: data.notes,
+        },
+      })
+      .returning();
+    return result[0] || null;
+  }
+
+  async bulkInsert(dataList) {
+    return await db.transaction(async (tx) => {
+      const results = [];
+      for (const data of dataList) {
+        const res = await tx
+          .insert(medication)
+          .values(data)
+          .onConflictDoUpdate({
+            target: [medication.userId, medication.clientMedId],
+            set: {
+              patientCode: data.patientCode,
+              medicationName: data.medicationName,
+              medicationType: data.medicationType,
+              prescribedBy: data.prescribedBy,
+              dosePerIntake: data.dosePerIntake,
+              frequency: data.frequency,
+              medicationSchedule: data.medicationSchedule,
+              foodFrequency: data.foodFrequency,
+              startDate: data.startDate,
+              endDate: data.endDate,
+              ongoing: data.ongoing,
+              totalQuantity: data.totalQuantity,
+              unit: data.unit,
+              dailyConsumption: data.dailyConsumption,
+              reminderBeforeMinutes: data.reminderBeforeMinutes,
+              notes: data.notes,
+            },
+          })
+          .returning();
+        results.push(res[0] || null);
+      }
+      return results;
+    });
+  }
+
   async findById(id) {
     const result = await db
       .select()

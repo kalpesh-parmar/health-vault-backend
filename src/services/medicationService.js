@@ -275,6 +275,243 @@ class MedicationService {
 
     return updatedMedication;
   }
+
+  // Onboarding Helper: build normalized structure from raw OCR data
+  buildFromDocument(docMeds = []) {
+    return (docMeds || []).map((med, index) => {
+      let count = undefined;
+      let value = undefined;
+      let unit = undefined;
+
+      const rawDosage = String(med.dosage || "")
+        .toLowerCase()
+        .trim();
+      const rawType = String(med.type || "tablet")
+        .toUpperCase()
+        .trim();
+
+      if (rawType === "TABLET" || rawType === "CAPSULE") {
+        const match = rawDosage.match(/([0-9.]+)/);
+        if (match) {
+          count = parseFloat(match[1]);
+        } else {
+          count = 1;
+        }
+      } else {
+        const matchNum = rawDosage.match(/([0-9.]+)/);
+        value = matchNum ? parseFloat(matchNum[1]) : 1;
+        const matchUnit = rawDosage.match(/(ml|tsp|tbsp|drops|puff|iu)/i);
+        unit = matchUnit
+          ? matchUnit[1].toLowerCase()
+          : rawType === "SYRUP"
+            ? "ml"
+            : rawType === "DROPS"
+              ? "drops"
+              : "puff";
+      }
+
+      let freq = "ONCE";
+      const rawFreq = String(med.frequency || "")
+        .toLowerCase()
+        .trim();
+      if (rawFreq.includes("twice") || rawFreq.includes("2")) freq = "TWICE";
+      else if (rawFreq.includes("thrice") || rawFreq.includes("three") || rawFreq.includes("3"))
+        freq = "THRICE";
+
+      return {
+        id: `doc_med_${index}`,
+        name: med.name || "Unknown",
+        type: rawType,
+        dose: { count, value, unit },
+        frequency: freq,
+        notes: "",
+        prescribed_by: med.prescribedBy || med.prescribed_by || "",
+        refill_alert: false,
+        total_quantity: null,
+        client_med_id: `doc_med_${index}`,
+        selected: true,
+        source: "OCR",
+      };
+    });
+  }
+
+  // Onboarding Helper: get times and food frequency defaults
+  applyDefaults(frequency) {
+    const timesMap = {
+      ONCE: ["08:00"],
+      TWICE: ["08:00", "20:00"],
+      THRICE: ["08:00", "14:00", "20:00"],
+      "Once Daily": ["08:00"],
+      "Twice Daily": ["08:00", "20:00"],
+      "Three Times Daily": ["08:00", "14:00", "20:00"],
+    };
+    const times = timesMap[frequency] || ["08:00"];
+    return {
+      best_times: times,
+      reminder_times: times,
+      food_context: "AFTER_FOOD",
+    };
+  }
+
+  // Onboarding Helper: validate payload
+  async validate(payload) {
+    const { medicationOnboardingSchema } = require("../validations");
+    return await validateSchema(medicationOnboardingSchema, payload);
+  }
+
+  _mapFrequencyToDb(frequency) {
+    const map = {
+      ONCE: "Once Daily",
+      TWICE: "Twice Daily",
+      THRICE: "Three Times Daily",
+      "Once Daily": "Once Daily",
+      "Twice Daily": "Twice Daily",
+      "Three Times Daily": "Three Times Daily",
+    };
+    return map[frequency] || "Once Daily";
+  }
+
+  _getFrequencyCount(frequency) {
+    const map = {
+      ONCE: 1,
+      TWICE: 2,
+      THRICE: 3,
+      "Once Daily": 1,
+      "Twice Daily": 2,
+      "Three Times Daily": 3,
+    };
+    return map[frequency] || 1;
+  }
+
+  // Onboarding Helper: map fields and save single medication
+  async create(userId, payload) {
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const frequencyDb = this._mapFrequencyToDb(payload.frequency);
+    const defaults = this.applyDefaults(payload.frequency);
+
+    let value = undefined;
+    let unit = undefined;
+
+    if (payload.type === "TABLET" || payload.type === "CAPSULE") {
+      value = payload.dose.count;
+      unit = payload.type.toLowerCase();
+    } else {
+      value = payload.dose.value;
+      unit = payload.dose.unit;
+    }
+
+    const dosePerIntake = Number.isInteger(value) ? value : null;
+    const unitDb = unit.toUpperCase();
+
+    const foodContext = payload.foodContext || defaults.food_context;
+    const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
+
+    const frequencyCount = this._getFrequencyCount(payload.frequency);
+    const dailyConsumption = Math.ceil(value) * frequencyCount;
+
+    const medicationSchedule = {
+      times: payload.medicationSchedule?.times || defaults.best_times,
+      reminderTimes: payload.medicationSchedule?.reminderTimes || defaults.reminder_times,
+      dose: { value, unit },
+      source: payload.source || "MANUAL",
+      refillAlert: !!payload.refill_alert,
+      foodContext: foodFrequency,
+    };
+
+    const mappedData = {
+      userId,
+      patientCode: patient.patientCode,
+      medicationName: payload.name,
+      medicationType: payload.type,
+      prescribedBy: payload.prescribed_by || null,
+      dosePerIntake,
+      frequency: frequencyDb,
+      medicationSchedule,
+      foodFrequency,
+      startDate: new Date(),
+      endDate: null,
+      ongoing: true,
+      totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
+      unit: unitDb,
+      dailyConsumption,
+      reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
+      notes: payload.notes || null,
+      clientMedId: payload.client_med_id,
+      softDelete: false,
+    };
+
+    return await medicationRepository.insert(mappedData);
+  }
+
+  // Onboarding Helper: map, validate, and bulk save multiple medications in a transaction
+  async bulkCreate(userId, payloadList = []) {
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const mappedList = payloadList.map((payload) => {
+      const frequencyDb = this._mapFrequencyToDb(payload.frequency);
+      const defaults = this.applyDefaults(payload.frequency);
+
+      let value = undefined;
+      let unit = undefined;
+
+      if (payload.type === "TABLET" || payload.type === "CAPSULE") {
+        value = payload.dose.count;
+        unit = payload.type.toLowerCase();
+      } else {
+        value = payload.dose.value;
+        unit = payload.dose.unit;
+      }
+
+      const dosePerIntake = Number.isInteger(value) ? value : null;
+      const unitDb = unit.toUpperCase();
+
+      const foodContext = payload.foodContext || defaults.food_context;
+      const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
+
+      const frequencyCount = this._getFrequencyCount(payload.frequency);
+      const dailyConsumption = Math.ceil(value) * frequencyCount;
+
+      const medicationSchedule = {
+        times: payload.medicationSchedule?.times || defaults.best_times,
+        reminderTimes: payload.medicationSchedule?.reminderTimes || defaults.reminder_times,
+        dose: { value, unit },
+        source: payload.source || "MANUAL",
+        refillAlert: !!payload.refill_alert,
+        foodContext: foodFrequency,
+      };
+
+      return {
+        userId,
+        patientCode: patient.patientCode,
+        medicationName: payload.name,
+        medicationType: payload.type,
+        prescribedBy: payload.prescribed_by || null,
+        dosePerIntake,
+        frequency: frequencyDb,
+        medicationSchedule,
+        foodFrequency,
+        startDate: new Date(),
+        endDate: null,
+        ongoing: true,
+        totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
+        unit: unitDb,
+        dailyConsumption,
+        reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
+        notes: payload.notes || null,
+        clientMedId: payload.client_med_id,
+        softDelete: false,
+      };
+    });
+
+    return await medicationRepository.bulkInsert(mappedList);
+  }
 }
 
 module.exports = new MedicationService();
