@@ -1,3 +1,20 @@
+jest.mock("../../../src/configs/db", () => {
+  const queryMock = {
+    select: jest.fn(),
+    from: jest.fn(),
+    where: jest.fn(),
+    orderBy: jest.fn(),
+    limit: jest.fn(),
+  };
+  queryMock.select.mockReturnValue(queryMock);
+  queryMock.from.mockReturnValue(queryMock);
+  queryMock.where.mockReturnValue(queryMock);
+  queryMock.orderBy.mockReturnValue(queryMock);
+  queryMock.limit.mockReturnValue(queryMock);
+  queryMock.then = (onFulfilled) => Promise.resolve([]).then(onFulfilled);
+  return { db: queryMock };
+});
+
 const { onboardingService } = require("../../../src/services/ai/chat/onboarding.service");
 const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient");
 
@@ -970,6 +987,79 @@ describe("OnboardingService Structured Flow", () => {
       const result = await onboardingService.chat("hello", [], mockState, "test-user-id");
       expect(result.state.currentStep).toBe("MEDICINE_OPTIONS");
       expect(result.action).toBe("MEDICINE_OPTIONS");
+    });
+
+    it("Case 7: Uma Clinic prescription (Uma Clinic, Urmila)", async () => {
+      const { db } = require("../../../src/configs/db");
+      db.then = (onFulfilled) =>
+        Promise.resolve([
+          {
+            id: "doc-urmila",
+            ocrStatus: "completed",
+            structuredExtractedData: {
+              medications: [
+                {
+                  name: "TAB. MBSON SL",
+                  dosage: "",
+                  frequency: "1-0-0",
+                  type: "",
+                  duration: "30 Days",
+                  quantity: 30,
+                },
+                {
+                  name: "Caldison D3",
+                  dosage: "",
+                  frequency: "1-0-0",
+                  type: "",
+                  duration: "4 Days",
+                  quantity: 4,
+                },
+              ],
+            },
+          },
+        ]).then(onFulfilled);
+
+      const mockState = {
+        medicationFlowDone: false,
+        medicationFlowStarted: false,
+        currentStep: null,
+        documentId: "doc-urmila",
+        flowMode: "UPLOAD",
+        existingUserData: {
+          firstName: "Urmila",
+          lastName: "Shah",
+          dateOfBirth: "1992-08-20",
+          gender: "female",
+        },
+      };
+
+      // Step 1: Start medication flow
+      let result = await onboardingService.chat("hello", [], mockState, "test-user-id");
+      expect(result.state.currentStep).toBe("REVIEW_MEDICINES_LIST");
+      expect(result.action).toBe("REVIEW_MEDICINES_LIST");
+      expect(result.medicines).toHaveLength(2);
+
+      // Verify "MBSON SL" normalization
+      const mbson = result.medicines[0];
+      expect(mbson.name).toBe("MBSON SL");
+      expect(mbson.type).toBe("TABLET");
+      expect(mbson.dose.count).toBe(1);
+      expect(mbson.frequency).toBe("ONCE");
+      expect(mbson.duration).toBe("30 Days");
+      expect(mbson.total_quantity).toBe(30);
+      expect(mbson.medicationSchedule.times).toEqual(["08:00"]);
+      expect(mbson.medicationSchedule.reminderTimes).toEqual(["08:00"]);
+
+      // Verify "Caldison D3" normalization
+      const caldison = result.medicines[1];
+      expect(caldison.name).toBe("Caldison D3");
+      expect(caldison.type).toBe("TABLET");
+      expect(caldison.dose.count).toBe(1);
+      expect(caldison.frequency).toBe("ONCE");
+      expect(caldison.duration).toBe("4 Days");
+      expect(caldison.total_quantity).toBe(4);
+      expect(caldison.medicationSchedule.times).toEqual(["08:00"]);
+      expect(caldison.medicationSchedule.reminderTimes).toEqual(["08:00"]);
     });
   });
 });

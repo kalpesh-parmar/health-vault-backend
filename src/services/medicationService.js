@@ -15,6 +15,7 @@ const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
+const { normalizeMedicine } = require("./ai/helpers/medicineNormalize");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -279,59 +280,8 @@ class MedicationService {
   // Onboarding Helper: build normalized structure from raw OCR data
   buildFromDocument(docMeds = []) {
     return (docMeds || []).map((med, index) => {
-      let count = undefined;
-      let value = undefined;
-      let unit = undefined;
-
-      const rawDosage = String(med.dosage || "")
-        .toLowerCase()
-        .trim();
-      const rawType = String(med.type || "tablet")
-        .toUpperCase()
-        .trim();
-
-      if (rawType === "TABLET" || rawType === "CAPSULE") {
-        const match = rawDosage.match(/([0-9.]+)/);
-        if (match) {
-          count = parseFloat(match[1]);
-        } else {
-          count = 1;
-        }
-      } else {
-        const matchNum = rawDosage.match(/([0-9.]+)/);
-        value = matchNum ? parseFloat(matchNum[1]) : 1;
-        const matchUnit = rawDosage.match(/(ml|tsp|tbsp|drops|puff|iu)/i);
-        unit = matchUnit
-          ? matchUnit[1].toLowerCase()
-          : rawType === "SYRUP"
-            ? "ml"
-            : rawType === "DROPS"
-              ? "drops"
-              : "puff";
-      }
-
-      let freq = "ONCE";
-      const rawFreq = String(med.frequency || "")
-        .toLowerCase()
-        .trim();
-      if (rawFreq.includes("twice") || rawFreq.includes("2")) freq = "TWICE";
-      else if (rawFreq.includes("thrice") || rawFreq.includes("three") || rawFreq.includes("3"))
-        freq = "THRICE";
-
-      return {
-        id: `doc_med_${index}`,
-        name: med.name || "Unknown",
-        type: rawType,
-        dose: { count, value, unit },
-        frequency: freq,
-        notes: "",
-        prescribed_by: med.prescribedBy || med.prescribed_by || "",
-        refill_alert: false,
-        total_quantity: null,
-        client_med_id: `doc_med_${index}`,
-        selected: true,
-        source: "OCR",
-      };
+      const { onboardingMed } = normalizeMedicine(med, index);
+      return onboardingMed;
     });
   }
 

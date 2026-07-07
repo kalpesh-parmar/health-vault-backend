@@ -759,29 +759,10 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
-          state.medicinesToAdd = (state.foundMedicines || []).map((m) => {
-            let parsedDose = undefined;
-            if (m.dosage && typeof m.dosage === "string") {
-              const parts = m.dosage
-                .split("-")
-                .map((p) => parseInt(p, 10))
-                .filter((n) => !isNaN(n));
-              if (parts.length > 0) {
-                parsedDose = Math.max(...parts);
-              }
-            }
-            return {
-              medicationName: m.name || m.medicationName,
-              medicationType: undefined,
-              dosePerIntake: parsedDose,
-              frequency: undefined,
-              medicationSchedule: undefined,
-              foodFrequency: undefined,
-              startDate: undefined,
-              totalQuantity: undefined,
-              ongoing: undefined,
-              isConfirmed: false,
-            };
+          const { normalizeMedicine } = require("../helpers/medicineNormalize");
+          state.medicinesToAdd = (state.foundMedicines || []).map((m, index) => {
+            const { onboardingMed } = normalizeMedicine(m, index);
+            return onboardingMed;
           });
           // Intentionally NOT setting medicinesConfirmed to true here,
           // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
@@ -1449,6 +1430,61 @@ class OnboardingService {
     if (state.allergiesSkipped === undefined) state.allergiesSkipped = false;
     if (state.documentExtracted === undefined) state.documentExtracted = false;
 
+    // Synchronize medications from DB for UPLOAD flow if they are not loaded yet or if document changed
+    if (
+      state.flowMode === "UPLOAD" &&
+      (state.documentId !== state.loadedDocumentId ||
+        !state.foundMedicines ||
+        state.foundMedicines.length === 0)
+    ) {
+      try {
+        const { db } = require("../../../configs/db");
+        const { document } = require("../../../models/document");
+        const { eq, desc } = require("drizzle-orm");
+
+        let docRow = null;
+        if (state.documentId) {
+          const rows = await db.select().from(document).where(eq(document.id, state.documentId));
+          docRow = rows[0] || null;
+        } else if (userId) {
+          const rows = await db
+            .select()
+            .from(document)
+            .where(eq(document.userId, userId))
+            .orderBy(desc(document.createdAt))
+            .limit(1);
+          docRow = rows[0] || null;
+        }
+
+        if (docRow) {
+          // Handle async race: if extraction is in progress, poll up to 5 times (1s interval)
+          let attempts = 0;
+          while (docRow && docRow.ocrStatus === "in_progress" && attempts < 5) {
+            console.log(
+              `[OnboardingService] Document ${docRow.id} extraction in progress. Polling attempt ${attempts + 1}...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            const rows = await db.select().from(document).where(eq(document.id, docRow.id));
+            docRow = rows[0] || null;
+            attempts++;
+          }
+
+          if (docRow && docRow.ocrStatus === "completed" && docRow.structuredExtractedData) {
+            const structured = docRow.structuredExtractedData;
+            if (Array.isArray(structured.medications) && structured.medications.length > 0) {
+              state.foundMedicines = structured.medications;
+              state.loadedDocumentId = docRow.id;
+              console.log(
+                `[OnboardingService] Loaded ${state.foundMedicines.length} medications from DB document ${docRow.id}`,
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[OnboardingService] Failed to load medicines from DB:", err.message);
+      }
+    }
+
     // Check for social login data
     if (
       state.hasLoginData === undefined ||
@@ -1663,7 +1699,7 @@ class OnboardingService {
 
         if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
           state.foundMedicines = extracted.medications;
-        } else {
+        } else if (!state.foundMedicines || state.foundMedicines.length === 0) {
           state.foundMedicines = [];
         }
 
@@ -1839,6 +1875,8 @@ class OnboardingService {
         documentText: state.documentText,
         documentData: state.documentData,
         loginProvider: state.loginProvider,
+        documentId: state.documentId || null,
+        loadedDocumentId: state.loadedDocumentId || null,
       };
 
       if (existingRecord) {
