@@ -468,13 +468,13 @@ CRITICAL RULES
    These MUST be translated completely into ${language}.
 
 2. NEVER leave English words in the output.
-   ❌ Medical Document અપલોડ કરો
-   ❌ Blood Group दर्ज करें
-   ❌ Continue करें
-   ✅ Translate the ENTIRE phrase into ${language}.
+    Medical Document અપલોડ કરો
+    Blood Group दर्ज करें
+    Continue करें
+    Translate the ENTIRE phrase into ${language}.
 3. NEVER transliterate English into another script.
-   ❌ મેડીકલ ડોક્યુમેન્ટ
-   ❌ मेडिकल डॉक्यूमेंट
+    મેડીકલ ડોક્યુમેન્ટ
+    मेडिकल डॉक्यूमेंट
    Instead use the natural equivalent used by native speakers.
 4. NEVER mix languages.
    The final output must contain ONLY ${language} except for:

@@ -1,9 +1,9 @@
 const { StatusCodes } = require("http-status-codes");
-const { ocrService, onboardingService } = require("../services/ai");
-const { NonMedicalDocumentException } = require("../exceptions/appError");
+const { onboardingService } = require("../services/ai");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
 
+/*
 async function ocrExtract(req, res, next) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).substring(7);
@@ -86,6 +86,7 @@ async function ocrExtract(req, res, next) {
     return next(error);
   }
 }
+*/
 
 async function onboardingChat(req, res, next) {
   const requestReceivedTime = Date.now();
@@ -104,15 +105,19 @@ async function onboardingChat(req, res, next) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "message is required" });
     }
 
-    // If frontend doesn't send state, fetch it from the database
+    // Fetch existing state from the database
+    const existingRecord = await userOnboardingRepository.findByUserId(userId);
+    let dbState = {};
+    if (existingRecord && existingRecord.data) {
+      dbState = existingRecord.data;
+    }
+
+    // If frontend doesn't send state, use dbState. Otherwise, merge them.
     if (!state) {
-      const existingRecord = await userOnboardingRepository.findByUserId(userId);
-      if (existingRecord && existingRecord.data) {
-        state = existingRecord.data;
-        console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
-      } else {
-        state = {}; // First time user
-      }
+      state = dbState;
+      console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
+    } else {
+      state = { ...dbState, ...state };
     }
 
     console.log(
@@ -201,7 +206,7 @@ async function getOnboardingStatus(req, res, next) {
 }
 
 module.exports = {
-  ocrExtract,
+  // ocrExtract,
   onboardingChat,
   getOnboardingStatus,
 };

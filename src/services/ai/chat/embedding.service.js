@@ -194,12 +194,10 @@ class EmbeddingService {
     };
   }
 }
-
-const embeddingService = new EmbeddingService();
+module.exports = new EmbeddingService();
 
 module.exports = {
   EmbeddingService,
-  embeddingService,
   buildChunks,
   splitText,
 };
