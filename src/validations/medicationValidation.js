@@ -261,9 +261,102 @@ const refillMedicationSchema = z.object({
     .positive(),
 });
 
+const medicationOnboardingSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    type: z.enum(["TABLET", "CAPSULE", "SYRUP", "INJECTION", "DROPS", "SPRAY", "INHALER"]),
+    frequency: z.enum(["ONCE", "TWICE", "THRICE"]),
+    dose: z.object({
+      count: z.number().optional(),
+      value: z.number().optional(),
+      unit: z.string().optional(),
+    }),
+    notes: z.string().trim().optional().nullable(),
+    prescribed_by: z.string().trim().optional().nullable(),
+    refill_alert: z.boolean().optional(),
+    total_quantity: z.number().int().min(0).optional().nullable(),
+    client_med_id: z.string().min(1),
+    source: z.enum(["OCR", "MANUAL"]).optional().default("MANUAL"),
+  })
+  .superRefine((data, ctx) => {
+    const { type, dose } = data;
+
+    if (type === "TABLET") {
+      if (dose.count === undefined || dose.count <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "count"],
+          message: "Count must be a positive number for tablets",
+        });
+      } else {
+        const remainder = dose.count % 0.25;
+        if (Math.abs(remainder) > 0.0001 && Math.abs(remainder - 0.25) > 0.0001) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["dose", "count"],
+            message: "Tablet count must be in increments of 0.25",
+          });
+        }
+      }
+    } else if (type === "CAPSULE") {
+      if (dose.count === undefined || dose.count <= 0 || !Number.isInteger(dose.count)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "count"],
+          message: "Capsule count must be a positive whole number (integer)",
+        });
+      }
+    } else {
+      if (dose.value === undefined || dose.value <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "value"],
+          message: "Dose value must be a positive number",
+        });
+      }
+
+      if (
+        (type === "SPRAY" || type === "INHALER") &&
+        dose.value !== undefined &&
+        !Number.isInteger(dose.value)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "value"],
+          message: `${type.toLowerCase()} dose must be a whole number (puffs)`,
+        });
+      }
+
+      if (!dose.unit) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "unit"],
+          message: "Unit is required for this medication type",
+        });
+      } else {
+        const allowedUnits = {
+          SYRUP: ["ml", "tsp", "tbsp"],
+          INJECTION: ["ml", "IU"],
+          DROPS: ["drops", "ml"],
+          SPRAY: ["puff"],
+          INHALER: ["puff"],
+        };
+        const list = allowedUnits[type] || [];
+        if (!list.includes(dose.unit)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["dose", "unit"],
+            message: `Unit must be one of: ${list.join(", ")}`,
+          });
+        }
+      }
+    }
+  });
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
   refillMedicationSchema,
+  medicationOnboardingSchema,
 };

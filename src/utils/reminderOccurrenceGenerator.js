@@ -4,7 +4,50 @@ const { env } = require("../configs/env");
 
 function generateReminderOccurrences(reminder, medication, startFromDate = null, options = {}) {
   const occurrences = [];
-  const medicationTimes = Object.entries(medication.medicationSchedule || {});
+
+  // Extract times safely supporting both formats
+  let timesList = [];
+  const schedule = medication.medicationSchedule || {};
+  if (schedule.Morning) timesList.push(schedule.Morning);
+  if (schedule.Noon) timesList.push(schedule.Noon);
+  if (schedule.Night) timesList.push(schedule.Night);
+  if (Array.isArray(schedule.Custom)) {
+    timesList.push(...schedule.Custom);
+  }
+  if (timesList.length === 0) {
+    if (Array.isArray(schedule.times)) {
+      timesList = schedule.times;
+    } else if (Array.isArray(schedule.reminderTimes)) {
+      timesList = schedule.reminderTimes;
+    } else {
+      timesList = Object.keys(schedule).filter(
+        (key) => typeof key === "string" && key.includes(":"),
+      );
+    }
+  }
+  // if (Array.isArray(schedule.times)) {
+  //   timesList = schedule.times;
+  // } else if (Array.isArray(schedule.reminderTimes)) {
+  //   timesList = schedule.reminderTimes;
+  // } else {
+  //   // Legacy mapping (flat object with time keys/values)
+  //   timesList = Object.keys(schedule).filter((key) => typeof key === "string" && key.includes(":"));
+  // }
+
+  // Defensively filter and parse each time
+  const parseTime = (t) => {
+    if (typeof t !== "string" || !t.includes(":")) {
+      return { hours: 8, minutes: 0, seconds: 0 };
+    }
+    const [h, m, s = "0"] = t.split(":");
+    return {
+      hours: Number(h) || 0,
+      minutes: Number(m) || 0,
+      seconds: Number(s) || 0,
+    };
+  };
+
+  const times = (timesList || []).filter(Boolean);
   const userTimezone = medication.timezone || "Asia/Kolkata";
   const { skipPastOccurrences = true } = options;
   const now = new Date();
@@ -13,13 +56,13 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   let consumedQuantity = 0;
 
   while (availableQuantity === 0 || consumedQuantity < availableQuantity) {
-    for (const [, timeValue] of medicationTimes) {
+    for (const timeValue of times) {
       const dosePerIntake = Number(medication.dosePerIntake || 1);
 
       if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
         break;
       }
-      const [hours, minutes, seconds = 0] = timeValue.split(":").map(Number);
+      const { hours, minutes, seconds } = parseTime(timeValue);
 
       const localDateTime = moment.tz(
         {
@@ -48,7 +91,6 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       });
       consumedQuantity += dosePerIntake;
     }
-
     if (availableQuantity > 0 && consumedQuantity >= availableQuantity) {
       break;
     }

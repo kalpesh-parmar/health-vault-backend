@@ -23,6 +23,13 @@ class AuthProviderRepository {
 
     return result[0] || null;
   }
+
+  async findByUserId(userId) {
+    return await db
+      .select()
+      .from(authProvider)
+      .where(and(eq(authProvider.userId, userId), eq(authProvider.softDelete, false)));
+  }
 }
 
 module.exports = new AuthProviderRepository();

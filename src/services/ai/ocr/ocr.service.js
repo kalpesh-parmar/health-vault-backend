@@ -34,7 +34,39 @@ async function preprocessImage(imageBuffer) {
   }
 }
 
+function cleanOcrText(text) {
+  if (!text || typeof text !== "string") return "";
+
+  let cleaned = text;
+  // Strip <think>...</think> blocks
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+  // Split into lines to clean line-by-line reasoning
+  const lines = cleaned.split("\n");
+  const filteredLines = lines.filter((line) => {
+    const trimmed = line.trim().toLowerCase();
+    if (
+      trimmed.startsWith("wait,") ||
+      trimmed.startsWith("let me check") ||
+      trimmed.startsWith("let me think") ||
+      trimmed.startsWith("let's see") ||
+      trimmed.startsWith("first, let's") ||
+      trimmed.startsWith("first, let me")
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  return filteredLines.join("\n").trim();
+}
+
 // DB dependencies for processAndStoreSynchronously
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { ocrStatus } = require("../../../enums/ocrStatus");
+const { fileTypeValue } = require("../../../enums/fileType");
+const uploadFileService = require("../../uploadFileService");
 
 const TestResultSchema = z.object({
   testName: z.string().nullable().default(null),
@@ -296,11 +328,11 @@ function joinForText(value) {
   return value || null;
 }
 
-// function inferFileType(mimeType) {
-//   if (!mimeType) return fileTypeValue[0];
-//   if (fileTypeValue.includes(mimeType)) return mimeType;
-//   return fileTypeValue[0];
-// }
+function inferFileType(mimeType) {
+  if (!mimeType) return fileTypeValue[0];
+  if (fileTypeValue.includes(mimeType)) return mimeType;
+  return fileTypeValue[0];
+}
 
 class OcrService {
   async convertPdfToImages(pdfBuffer) {
@@ -316,7 +348,7 @@ class OcrService {
     fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     try {
-      const popplerPath = env.popplerPath || "D:/Release-26.02.0-0/poppler-26.02.0/Library/bin";
+      const popplerPath = env.popplerPath || "C:/poppler-26.02.0/Library/bin";
       const pdftoppmExe = path.join(popplerPath, "pdftoppm.exe");
       const cmd = `"${pdftoppmExe}" -png -r 150 "${tempPdfPath}" "${outputPrefix}"`;
 
@@ -588,15 +620,12 @@ class OcrService {
           images: [base64Images[i]],
         },
       ];
-      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
-        temperature: 0,
-        maxTokens: 8192,
-        rawOptions: { num_ctx: 8192 },
-      });
+      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
       pageTexts.push(pageText);
     }
 
-    const rawText = pageTexts.map((text, idx) => `--- Page ${idx + 1} ---\n${text}`).join("\n\n");
+    let rawText = pageTexts.map((text, idx) => `--- Page ${idx + 1} ---\n${text}`).join("\n\n");
+    rawText = cleanOcrText(rawText);
 
     const hasGujarati = /[\u0A80-\u0AFF]/.test(rawText);
     const detectedLanguages = ["english"];
@@ -746,7 +775,7 @@ class OcrService {
     }
 
     return {
-      rawText: combined.rawText || combined.summary || "",
+      rawText: cleanOcrText(combined.rawText || combined.summary || ""),
       detectedLanguages,
       pageCount: base64Images.length,
       structuredData: {
@@ -923,11 +952,9 @@ ${rawText}
   }
 
   async extractMedicalData(file) {
-    const extractResult = await this.extractText(file);
-    let rawText = extractResult.rawText;
-
-    file.rawText = rawText; // Attach so the classifier can use it!
     const validation = await this.validateDocument(file);
+    const traceId = file.traceId || "N/A";
+    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
 
     if (validation.status === "FAILED") {
       throw new Error("AI response format is invalid.");
@@ -938,13 +965,40 @@ ${rawText}
       );
     }
 
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
+    const isPdf =
+      file.mimeType === "application/pdf" ||
+      file.filename?.toLowerCase().endsWith(".pdf") ||
+      file.originalname?.toLowerCase().endsWith(".pdf");
+    let rawText;
+
+    if (isPdf) {
+      rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
+    } else {
+      const processedBuffer = await preprocessImage(file.buffer);
+      const base64Image = processedBuffer.toString("base64");
+      const messages = [
+        {
+          role: "user",
+          content: prompts.PLAIN_TEXT_OCR_PROMPT,
+          images: [base64Image],
+        },
+      ];
+
+      console.log(
+        "[OcrService] Redesigned Pipeline Step 1: Querying qwen3-vl:latest for PLAIN TEXT OCR...",
+      );
+      rawText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+        temperature: 0,
+        maxTokens: 8192,
+        rawOptions: { num_ctx: 8192 },
+      });
+    }
 
     if (!rawText || !rawText.trim()) {
       throw new Error("OCR produced no usable text");
     }
 
+    rawText = cleanOcrText(rawText);
     const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
@@ -1243,7 +1297,6 @@ ${rawText}
     return { normalized, rawOcrData, structured, summary };
   }
 
-  /*
   async processAndStoreSynchronously({ file, userId }) {
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
@@ -1304,12 +1357,22 @@ ${rawText}
       );
     }
 
-    // 4. Generate summaries in English and preferred language
+    // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
     const tSummaryStart = Date.now();
-    const [summaryEnglish, summaryPreferredLanguage] = await Promise.all([
-      this.generateSummary(ocrResult.rawText, "english"),
-      this.generateSummary(ocrResult.rawText, preferredLanguage),
-    ]);
+    let summaryEnglish = "";
+    let summaryPreferredLanguage = "";
+
+    if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+      summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+      summaryPreferredLanguage = summaryEnglish;
+    } else {
+      const [sumEng, sumPref] = await Promise.all([
+        this.generateSummary(ocrResult.rawText, "english"),
+        this.generateSummary(ocrResult.rawText, preferredLanguage),
+      ]);
+      summaryEnglish = sumEng;
+      summaryPreferredLanguage = sumPref;
+    }
     console.log(
       `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
     );
@@ -1384,7 +1447,145 @@ ${rawText}
       structuredData,
     };
   }
-*/
+
+  async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+    console.log(
+      `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
+    );
+    const { eq } = require("drizzle-orm");
+
+    // Fetch preferred language from onboarding state
+    let preferredLanguage = "gujarati";
+    if (userId) {
+      try {
+        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+          preferredLanguage = onboardingRecord.data.preferredLanguage;
+        }
+      } catch (err) {
+        console.warn(
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          err.message,
+        );
+      }
+    }
+
+    try {
+      // 2. Perform OCR
+      const tOcrStart = Date.now();
+      const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
+      let ocrResult;
+      let structuredData;
+
+      if (isGraphicalDocument) {
+        ocrResult = await this.extractGraphicalMedicalData(file, preferredLanguage);
+        structuredData = ocrResult.structuredData;
+        console.log(
+          `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Graphical report. Page count = ${ocrResult.pageCount}.`,
+        );
+      } else {
+        ocrResult = await this.extractText(file, preferredLanguage);
+        console.log(
+          `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}.`,
+        );
+
+        // 3. Extract structured medical data
+        const tExtractStart = Date.now();
+        structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+        console.log(
+          `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete.`,
+        );
+      }
+
+      // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+      const tSummaryStart = Date.now();
+      let summaryEnglish = "";
+      let summaryPreferredLanguage = "";
+
+      if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+        summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+        summaryPreferredLanguage = summaryEnglish;
+      } else {
+        const [sumEng, sumPref] = await Promise.all([
+          this.generateSummary(ocrResult.rawText, "english"),
+          this.generateSummary(ocrResult.rawText, preferredLanguage),
+        ]);
+        summaryEnglish = sumEng;
+        summaryPreferredLanguage = sumPref;
+      }
+      console.log(
+        `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated.`,
+      );
+
+      // Ensure data contains both summaries
+      structuredData.summaryEnglish = summaryEnglish;
+      structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+
+      // 5. Update database
+      const tDbStart = Date.now();
+      await db
+        .update(document)
+        .set({
+          ocrStatus: ocrStatus.COMPLETED,
+          ocrExtractedText: ocrResult.rawText,
+          structuredExtractedData: structuredData,
+          reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
+          hospitalName: structuredData.hospitalName || null,
+          doctorName: structuredData.doctorName || null,
+          remarks: structuredData.remarks || null,
+          summaryEnglish,
+          summaryInPreferredLanguage: summaryPreferredLanguage,
+          updatedAt: new Date(),
+        })
+        .where(eq(document.id, documentId));
+      console.log(
+        `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. Document ${documentId} updated. Indexing in RAG...`,
+      );
+
+      // 6. Index Document in RAG
+      const { embeddingService } = require("../chat/embedding.service");
+      await embeddingService.embedAndPersist({
+        documentId,
+        userId,
+        rawOcr: {
+          fullText: ocrResult.rawText,
+          language: ocrResult.detectedLanguages?.join(",") || "en",
+        },
+        structured: {
+          summary: summaryPreferredLanguage,
+          observations: Array.isArray(structuredData.diagnosis)
+            ? structuredData.diagnosis
+            : structuredData.diagnosis
+              ? [structuredData.diagnosis]
+              : [],
+          recommendations: structuredData.remarks ? [structuredData.remarks] : [],
+          medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
+        },
+      });
+
+      console.log(
+        `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
+      );
+    } catch (err) {
+      console.error(
+        `[OcrService] [ERROR] processAndStoreAsynchronously failed for document ${documentId}:`,
+        err,
+      );
+      try {
+        await db
+          .update(document)
+          .set({
+            ocrStatus: ocrStatus.FAILED,
+            remarks: `Processing failed: ${err.message}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(document.id, documentId));
+      } catch (dbErr) {
+        console.error(`[OcrService] Failed to set document status to FAILED in DB:`, dbErr);
+      }
+    }
+  }
 }
 
 const ocrService = new OcrService();
