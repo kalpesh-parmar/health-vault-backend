@@ -254,11 +254,14 @@ class OcrOrchestrator {
       });
     }
 
+    const durationMs = Date.now() - t0;
     ocrLogger.info(trace, "ocr_completed", {
       engine: result.engine,
-      ms: Date.now() - t0,
+      ms: durationMs,
       source: "configured-model",
     });
+    result.metrics = result.metrics || {};
+    result.metrics.processing_seconds = Number((durationMs / 1000).toFixed(2));
     return this._tag(result, { trace });
   }
 

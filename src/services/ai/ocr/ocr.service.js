@@ -955,6 +955,7 @@ ${rawText}
       maxTokens: 8192,
       rawOptions: { num_ctx: 8192 },
     });
+    console.log("jsonResponseText", jsonResponseText);
 
     const parsedOCR = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
     if (parsedOCR.status === "FAILED") {

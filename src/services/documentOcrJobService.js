@@ -150,30 +150,38 @@ class DocumentOcrJobService {
     RUNNING_LOCKS.add(fileKey);
 
     try {
+      //print timing in teminal or console for each steps
+      const startTime = Date.now();
+
+      console.log(`[ocr-job] OCR job started at ${new Date(startTime).toISOString()}`);
       await documentProcessingJobRepository.markRunning(jobId);
       await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
-
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 1. Uploading File / Download check stage
       await emitAndPersist(jobId, fileKey, STAGES.UPLOADING_FILE);
       await ensureFileExists(fileKey);
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 2. Medical Document Validation stage
       await emitAndPersist(jobId, fileKey, STAGES.VALIDATING);
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 3. Extracting Text stage
       await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrResponse = await ocrOrchestrator.runFromStorage({
         bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
         fileKey,
         mimeType: inferMimeType(fileKey, mimeType),
         traceId: `ocr_job_${jobId}`,
       });
-
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrPayload = ocrResponse?.structuredDocument || ocrResponse?.ocr || ocrResponse || {};
       const pageCount =
         ocrPayload?.pageCount ||
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 4. Analyzing Report stage
       await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
@@ -188,9 +196,11 @@ class DocumentOcrJobService {
           fallbackUsed: false,
         },
       });
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 5. Generating Summary stage
       await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
+      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const { rawOcrData, structured, normalized, summary } = await ocrService.normalizeExtraction({
         patientContext,
         rawOcr: ocrResponse,
