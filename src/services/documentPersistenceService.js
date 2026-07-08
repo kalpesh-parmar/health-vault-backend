@@ -8,7 +8,8 @@ const { InvalidRequestException, NotFoundException } = require("../exceptions/ap
 const DocumentArtifactsRepository = require("../repositories/documentArtifactsRepository");
 const documentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const patientRepository = require("../repositories/patientRepository");
-const { embeddingService, medicationMapper } = require("./ai");
+const EmbeddingService = require("./ai/chat/embedding.service");
+const medicationMapper = require("./ai/helpers/medicationMapper");
 const objectStorageService = require("./objectStorageService");
 const { document } = require("../models/document");
 
@@ -65,9 +66,6 @@ class DocumentPersistenceService {
         messageConstants.FILE_KEY_REQUIRED || "fileKey is required",
       );
     }
-    if (!rawOcrData || !extractedStructuredData) {
-      throw new InvalidRequestException("rawOcrData and extractedStructuredData are required");
-    }
 
     try {
       await objectStorageService.getSignedFileUrl(s3Key);
@@ -79,14 +77,28 @@ class DocumentPersistenceService {
     if (!patient) throw new NotFoundException("Patient profile not found");
 
     const fileName = payload.fileName || s3Key.split("/").pop();
-    const mimeType = rawOcrData?.mimeType || rawOcrData?.metrics?.mime_type || "application/pdf";
+    const ext = fileName.includes(".") ? fileName.split(".").pop().toLowerCase() : "";
+    const inferredMime =
+      ext === "pdf"
+        ? "application/pdf"
+        : ext === "png"
+          ? "image/png"
+          : ext === "jpg" || ext === "jpeg"
+            ? "image/jpeg"
+            : "application/pdf";
+    const mimeType =
+      payload.mimeType ||
+      payload.fileType ||
+      rawOcrData?.mimeType ||
+      rawOcrData?.metrics?.mime_type ||
+      inferredMime;
 
     const result = await db.transaction(async (tx) => {
       const artifacts = new DocumentArtifactsRepository(tx);
       const intelligence = new documentIntelligenceRepository(tx);
 
       const bucketName =
-        payload.bucket ||
+        payload.s3bucket ||
         (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
       const filePath =
         env.storageProvider === "gcp"
@@ -122,7 +134,7 @@ class DocumentPersistenceService {
         confidence: rawOcrData?.confidence != null ? Number(rawOcrData.confidence) : null,
         documentId,
         engine: rawOcrData?.engine || "pymupdf",
-        s3Key,
+        fileKey: s3Key,
         fullText: rawOcrData?.fullText || null,
         language: rawOcrData?.language || null,
         metrics: rawOcrData?.metrics || {},
@@ -189,7 +201,6 @@ class DocumentPersistenceService {
           yAxis: graph.yAxis || [],
         })),
       );
-
       const { rows: medicationRows, skipped: medicationSkipped } = medicationMapper.buildRows({
         defaults: {
           prescribedBy: extractedStructuredData?.doctorName || null,
@@ -209,7 +220,7 @@ class DocumentPersistenceService {
 
       let embeddingResult = { chunkCount: 0, chunkIds: [], embeddings: 0 };
       if (!embeddingsGenerated) {
-        embeddingResult = await embeddingService.embedAndPersist({
+        embeddingResult = await EmbeddingService.embedAndPersist({
           documentId,
           rawOcr: rawOcrData,
           structured: extractedStructuredData,

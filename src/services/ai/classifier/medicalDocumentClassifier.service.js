@@ -3,17 +3,15 @@ const { ollamaClient } = require("../clients/ollamaClient");
 
 class MedicalDocumentClassifierService {
   async classify(file) {
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
+    // const isPdf =
+    //   file.mimeType === "application/pdf" ||
+    //   file.filename?.toLowerCase().endsWith(".pdf") ||
+    //   file.originalname?.toLowerCase().endsWith(".pdf");
     let responseObj;
 
-    if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.CLASSIFICATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
-
-      console.log("[MedicalDocumentClassifierService] Validating PDF document...");
+    if (file.rawText) {
+      const prompt = `${prompts.CLASSIFICATION_PROMPT}\n\nHere is the raw text extracted from the document:\n${file.rawText.slice(0, 4000)}`;
+      console.log("[MedicalDocumentClassifierService] Validating text document...");
       responseObj = await ollamaClient.generate(prompt, "qwen2.5:14b", {
         temperature: 0,
         format: "json",

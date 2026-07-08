@@ -1,9 +1,9 @@
 const { StatusCodes } = require("http-status-codes");
-const { ocrService, onboardingService } = require("../services/ai");
-const { NonMedicalDocumentException } = require("../exceptions/appError");
+const { onboardingService } = require("../services/ai");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
 
+/*
 async function ocrExtract(req, res, next) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).substring(7);
@@ -86,6 +86,7 @@ async function ocrExtract(req, res, next) {
     return next(error);
   }
 }
+*/
 
 async function onboardingChat(req, res, next) {
   const requestReceivedTime = Date.now();
@@ -104,15 +105,31 @@ async function onboardingChat(req, res, next) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "message is required" });
     }
 
-    // If frontend doesn't send state, fetch it from the database
+    // Always fetch existing state from the database to merge with incoming state
+    const existingRecord = await userOnboardingRepository.findByUserId(userId);
+    let dbState = {};
+    if (existingRecord && existingRecord.data) {
+      dbState = existingRecord.data;
+    }
+
     if (!state) {
-      const existingRecord = await userOnboardingRepository.findByUserId(userId);
-      if (existingRecord && existingRecord.data) {
-        state = existingRecord.data;
+      state = dbState;
+      if (Object.keys(state).length > 0) {
         console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
       } else {
-        state = {}; // First time user
+        console.log(
+          `[OnboardingController] [userId=${userId}] No existing state found (first time user).`,
+        );
       }
+    } else {
+      // Deep merge incoming state into dbState so we don't lose preferredLanguage etc.
+      state = { ...dbState, ...state };
+      if (state.existingUserData && dbState.existingUserData) {
+        state.existingUserData = { ...dbState.existingUserData, ...state.existingUserData };
+      }
+      console.log(
+        `[OnboardingController] [userId=${userId}] Merged incoming state with database state.`,
+      );
     }
 
     console.log(
@@ -201,7 +218,7 @@ async function getOnboardingStatus(req, res, next) {
 }
 
 module.exports = {
-  ocrExtract,
+  // ocrExtract,
   onboardingChat,
   getOnboardingStatus,
 };

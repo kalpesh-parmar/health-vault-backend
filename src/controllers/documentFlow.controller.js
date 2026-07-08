@@ -16,7 +16,6 @@ const { attachSseStream } = require("../services/sse/sseTransport");
 const { NotFoundException } = require("../exceptions/appError");
 const documentOcrJobService = require("../services/documentOcrJobService");
 const documentPersistenceService = require("../services/documentPersistenceService");
-const uploadFileService = require("../services/uploadFileService");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
 const { validateSchema } = require("../validations");
 const {
@@ -66,25 +65,12 @@ async function runOcr(req, res) {
     }
   }
 
-  // 3. Handle multiple uploaded files
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files) {
-      const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
-      const job = await documentOcrJobService.enqueue({
-        fileKey: uploadResult.data.fileKey,
-        mimeType: uploadResult.data.mimeType,
-        userId,
-      });
-      jobs.push(job);
-    }
-  }
-
   if (jobs.length === 0) {
-    return res.status(StatusCodes.BAD_REQUEST).json({ error: "No files or fileKeys provided." });
+    return res.status(StatusCodes.BAD_REQUEST).json({ error: "No fileKeys provided." });
   }
 
   // If only one job and no array format was used, return legacy single-object format
-  if (jobs.length === 1 && !data.fileKeys && (!req.files || req.files.length === 0)) {
+  if (jobs.length === 1 && !data.fileKeys) {
     return successResponse(
       res,
       {

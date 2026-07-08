@@ -51,12 +51,17 @@ async function deleteFile(req, res) {
   const result = await documentService.deleteFile(req.auth.userId, fileKey);
   return successResponse(res, result, messageConstants.DOCUMENT_DELETED);
 }
+async function getDocumentSummaryList(req, res) {
+  const result = await documentService.getDocumentSummaryList(req.auth.userId, req.query);
+  return successResponse(res, result, "Document summaries fetched successfully");
+}
 
 module.exports = {
   deleteDocument,
   deleteFile,
   getDocumentById,
   getDocumentList,
+  getDocumentSummaryList,
   getDownloadFile,
   listDocuments,
   listDocumentsPaginated,

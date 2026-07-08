@@ -35,11 +35,6 @@ async function preprocessImage(imageBuffer) {
 }
 
 // DB dependencies for processAndStoreSynchronously
-const { db } = require("../../../configs/db");
-const { document } = require("../../../models/document");
-const { ocrStatus } = require("../../../enums/ocrStatus");
-const { fileTypeValue } = require("../../../enums/fileType");
-const uploadFileService = require("../../uploadFileService");
 
 const TestResultSchema = z.object({
   testName: z.string().nullable().default(null),
@@ -301,11 +296,11 @@ function joinForText(value) {
   return value || null;
 }
 
-function inferFileType(mimeType) {
-  if (!mimeType) return fileTypeValue[0];
-  if (fileTypeValue.includes(mimeType)) return mimeType;
-  return fileTypeValue[0];
-}
+// function inferFileType(mimeType) {
+//   if (!mimeType) return fileTypeValue[0];
+//   if (fileTypeValue.includes(mimeType)) return mimeType;
+//   return fileTypeValue[0];
+// }
 
 class OcrService {
   async convertPdfToImages(pdfBuffer) {
@@ -321,7 +316,7 @@ class OcrService {
     fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     try {
-      const popplerPath = env.popplerPath || "C:/poppler-26.02.0/Library/bin";
+      const popplerPath = env.popplerPath || "D:/Release-26.02.0-0/poppler-26.02.0/Library/bin";
       const pdftoppmExe = path.join(popplerPath, "pdftoppm.exe");
       const cmd = `"${pdftoppmExe}" -png -r 150 "${tempPdfPath}" "${outputPrefix}"`;
 
@@ -593,7 +588,11 @@ class OcrService {
           images: [base64Images[i]],
         },
       ];
-      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
+      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+        temperature: 0,
+        maxTokens: 8192,
+        rawOptions: { num_ctx: 8192 },
+      });
       pageTexts.push(pageText);
     }
 
@@ -924,9 +923,11 @@ ${rawText}
   }
 
   async extractMedicalData(file) {
+    const extractResult = await this.extractText(file);
+    let rawText = extractResult.rawText;
+
+    file.rawText = rawText; // Attach so the classifier can use it!
     const validation = await this.validateDocument(file);
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
 
     if (validation.status === "FAILED") {
       throw new Error("AI response format is invalid.");
@@ -937,34 +938,8 @@ ${rawText}
       );
     }
 
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
-    let rawText;
-
-    if (isPdf) {
-      rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-    } else {
-      const processedBuffer = await preprocessImage(file.buffer);
-      const base64Image = processedBuffer.toString("base64");
-      const messages = [
-        {
-          role: "user",
-          content: prompts.PLAIN_TEXT_OCR_PROMPT,
-          images: [base64Image],
-        },
-      ];
-
-      console.log(
-        "[OcrService] Redesigned Pipeline Step 1: Querying qwen3-vl:latest for PLAIN TEXT OCR...",
-      );
-      rawText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
-        temperature: 0,
-        maxTokens: 8192,
-        rawOptions: { num_ctx: 8192 },
-      });
-    }
+    const traceId = file.traceId || "N/A";
+    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
 
     if (!rawText || !rawText.trim()) {
       throw new Error("OCR produced no usable text");
@@ -1268,6 +1243,7 @@ ${rawText}
     return { normalized, rawOcrData, structured, summary };
   }
 
+  /*
   async processAndStoreSynchronously({ file, userId }) {
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
@@ -1408,6 +1384,7 @@ ${rawText}
       structuredData,
     };
   }
+*/
 }
 
 const ocrService = new OcrService();

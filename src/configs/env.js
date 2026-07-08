@@ -123,7 +123,7 @@ const env = Object.freeze({
   aiMaxRetries: numberFromEnv("AI_MAX_RETRIES", 2),
   aiPageConcurrency: numberFromEnv("AI_PAGE_CONCURRENCY", 4),
   aiMaxOutputTokens: numberFromEnv("AI_MAX_OUTPUT_TOKENS", 8192),
-  aiMaxInlineBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 18 * 1024 * 1024),
+  aiMaxInlineBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 100 * 1024 * 1024),
   aiMinTextChars: numberFromEnv("AI_MIN_TEXT_CHARS", 8),
   aiMinConfidence: Number.isFinite(Number(process.env.AI_MIN_CONFIDENCE))
     ? Number(process.env.AI_MIN_CONFIDENCE)

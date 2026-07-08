@@ -1,6 +1,5 @@
 /* eslint-disable no-console */
 const { ollamaClient } = require("../clients/ollamaClient");
-const { ONBOARDING_SYSTEM_PROMPT, TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const medicationService = require("../../medicationService");
@@ -9,6 +8,7 @@ const { languageTypeValues, languageNativeLabels } = require("../../../enums/lan
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues, frequencyType } = require("../../../enums/frequencyType");
+const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -276,6 +276,40 @@ function getNextRequiredOrOptionalStep(state) {
   return "REGISTER_USER";
 }
 
+function resolveSocialVsDocumentConflict(state) {
+  if (!state.socialData || !state.existingUserData) return false;
+
+  const fields = ["firstName", "lastName", "dateOfBirth", "gender", "email"];
+  const conflicts = [];
+
+  for (const field of fields) {
+    const socialVal = state.socialData[field];
+    const docVal = state.existingUserData[field];
+
+    if (
+      socialVal &&
+      docVal &&
+      String(socialVal).toLowerCase().trim() !== String(docVal).toLowerCase().trim()
+    ) {
+      conflicts.push({ field, social: socialVal, document: docVal });
+    }
+  }
+
+  if (conflicts.length > 0) {
+    state.conflictingFields = conflicts;
+    return true; // Conflict exists
+  }
+
+  // No conflict, safe to auto-merge social data into existingUserData
+  for (const field of fields) {
+    if (state.socialData[field] && !state.existingUserData[field]) {
+      state.existingUserData[field] = state.socialData[field];
+    }
+  }
+  state.socialDataConfirmed = true;
+  return false;
+}
+
 function computeCurrentStep(state) {
   if (state.isOnboardingCompleted) {
     return state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
@@ -290,7 +324,11 @@ function computeCurrentStep(state) {
       return "CONFIRM_DOCUMENT_DETAILS";
     }
     if (state.documentExtracted && state.hasSocialData && !state.socialDataConfirmed) {
-      return "ASK_USE_SOCIAL_LOGIN_INFO";
+      const hasConflict = resolveSocialVsDocumentConflict(state);
+      if (hasConflict) {
+        return "ASK_USE_SOCIAL_LOGIN_INFO";
+      }
+      // If no conflict, it merged and set socialDataConfirmed = true. Fall through.
     }
   }
 
@@ -834,16 +872,27 @@ function getLocalizedResponse(step, state) {
         ],
       };
 
-    case "ASK_USE_SOCIAL_LOGIN_INFO":
+    case "ASK_USE_SOCIAL_LOGIN_INFO": {
+      let conflictMsg =
+        "We found conflicting details between your social login and the uploaded document.\n\n";
+      if (state.conflictingFields && state.conflictingFields.length > 0) {
+        state.conflictingFields.forEach((c) => {
+          const fieldName =
+            c.field.charAt(0).toUpperCase() + c.field.slice(1).replace(/([A-Z])/g, " $1");
+          conflictMsg += `- ${fieldName.trim()}: Social Login shows '${c.social}', Document shows '${c.document}'\n`;
+        });
+      }
+      conflictMsg += "\nWhich details should we use?";
+
       return {
         action: "ASK_USE_SOCIAL_LOGIN_INFO",
-        message:
-          "We found existing details from your social login. Should we use those, or the details from the uploaded document?",
+        message: conflictMsg,
         options: [
           { label: "Use Login Details", value: "SOCIAL" },
           { label: "Use Document Details", value: "DOCUMENT" },
         ],
       };
+    }
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
@@ -1146,7 +1195,7 @@ class OnboardingService {
       }
     }
 
-    // 3. If Medical Document uploaded in UPLOAD flow, perform extraction using Qwen3 or use pre-extracted data
+    /*// 3. If Medical Document uploaded in UPLOAD flow, perform extraction using Qwen3 or use pre-extracted data
     if (
       state.flowMode === "UPLOAD" &&
       (state.uploadedMedicalDocument || state.documentUploaded) &&
@@ -1289,6 +1338,84 @@ class OnboardingService {
         state.currentStep = computeCurrentStep(state);
       }
     }
+    */
+
+    // 3. If Medical Document uploaded in UPLOAD flow, fetch extracted data from DB
+    if (state.flowMode === "UPLOAD" && state.documentId && !state.documentExtracted) {
+      console.log(
+        `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
+      );
+      try {
+        const { db } = require("../../../configs/db");
+        const { document } = require("../../../models/document");
+        const { eq } = require("drizzle-orm");
+
+        const [doc] = await db.select().from(document).where(eq(document.id, state.documentId));
+
+        if (doc && doc.structuredExtractedData) {
+          const extracted = doc.structuredExtractedData;
+          const patientInfo = extracted.patientInfo || {};
+
+          if (patientInfo.firstName || patientInfo.lastName) {
+            state.existingUserData.firstName =
+              patientInfo.firstName || state.existingUserData.firstName;
+            state.existingUserData.lastName =
+              patientInfo.lastName || state.existingUserData.lastName;
+          }
+
+          if (patientInfo.dateOfBirth) {
+            state.existingUserData.dateOfBirth = normalizeDOB(patientInfo.dateOfBirth);
+          }
+
+          if (patientInfo.gender) {
+            state.existingUserData.gender = patientInfo.gender;
+          }
+
+          if (patientInfo.email) {
+            state.existingUserData.email = patientInfo.email.trim();
+          }
+
+          if (extracted.bloodGroup || patientInfo.bloodGroup) {
+            state.existingUserData.bloodGroup = extracted.bloodGroup || patientInfo.bloodGroup;
+          }
+
+          if (Array.isArray(extracted.allergies)) {
+            state.existingUserData.allergies = extracted.allergies.map((a) => String(a).trim());
+          } else if (Array.isArray(patientInfo.allergies)) {
+            state.existingUserData.allergies = patientInfo.allergies.map((a) => String(a).trim());
+          }
+
+          if (patientInfo.phoneNumber) {
+            state.existingUserData.phoneNumber = patientInfo.phoneNumber.trim();
+          }
+
+          if (Array.isArray(patientInfo.medicalConditions)) {
+            state.existingUserData.medicalConditions = patientInfo.medicalConditions.map((c) =>
+              String(c).trim(),
+            );
+          }
+
+          if (patientInfo.address) {
+            state.existingUserData.address = patientInfo.address.trim();
+          }
+
+          if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
+            state.foundMedicines = extracted.medications;
+          } else {
+            state.foundMedicines = [];
+          }
+
+          state.documentExtracted = true;
+          state.documentUploaded = true;
+          state.currentStep = computeCurrentStep(state);
+          console.log("[OnboardingService] Successfully loaded and merged document data.");
+        } else {
+          console.warn("[OnboardingService] Document or structuredExtractedData not found in DB.");
+        }
+      } catch (err) {
+        console.error("[OnboardingService] Failed to load document data from DB:", err);
+      }
+    }
 
     // 4. Resolve next step after updates
     // If the step is REGISTER_USER, mark as completed
@@ -1389,6 +1516,7 @@ class OnboardingService {
         socialDataConfirmed: state.socialDataConfirmed,
         documentText: state.documentText,
         documentData: state.documentData,
+        documentId: state.documentId,
       };
 
       if (existingRecord) {

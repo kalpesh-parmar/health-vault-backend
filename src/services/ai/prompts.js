@@ -330,12 +330,15 @@ Accept ONLY these medical document types:
 - Vaccination record
 - Insurance medical report
 - Body Scan report
-<<<<<<< HEAD
-=======
 - GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
 - MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
 - MEDICAL_REPORT (Any valid medical report not listed above)
->>>>>>> 7309b1052a998e381b4fe4cb00244d370ac0e251
+- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
+- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
+- MEDICAL_REPORT (Any valid medical report not listed above)
+- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
+- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
+- MEDICAL_REPORT (Any valid medical report not listed above)
 - Any other medical related reports
 
 Reject immediately:
@@ -462,13 +465,13 @@ CRITICAL RULES
    These MUST be translated completely into ${language}.
 
 2. NEVER leave English words in the output.
-   ❌ Medical Document અપલોડ કરો
-   ❌ Blood Group दर्ज करें
-   ❌ Continue करें
-   ✅ Translate the ENTIRE phrase into ${language}.
+    Medical Document અપલોડ કરો
+    Blood Group दर्ज करें
+    Continue करें
+    Translate the ENTIRE phrase into ${language}.
 3. NEVER transliterate English into another script.
-   ❌ મેડીકલ ડોક્યુમેન્ટ
-   ❌ मेडिकल डॉक्यूमेंट
+    મેડીકલ ડોક્યુમેન્ટ
+    मेडिकल डॉक्यूमेंट
    Instead use the natural equivalent used by native speakers.
 4. NEVER mix languages.
    The final output must contain ONLY ${language} except for:
@@ -612,6 +615,7 @@ FINAL REQUIREMENTS
 ✔ Never mix English with ${language}.
 ✔ Never transliterate English.
 ✔ Sound exactly like a native speaker wrote it.
+✔ NEVER output paired words (e.g. "Yes/No", "હા/ના") unless they exist in the English text. Translate strictly what is provided.
 ✔ NEVER output paired words (e.g. "Yes/No", "હા/ના") unless they exist in the English text. Translate strictly what is provided.
 ✔ Return ONLY the translated text.
 Do not include quotation marks.
