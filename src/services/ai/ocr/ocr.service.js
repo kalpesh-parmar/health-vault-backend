@@ -609,7 +609,7 @@ class OcrService {
 
     const pageTexts = [];
     console.log(
-      `[OcrService] Processing ${base64Images.length} page(s) sequentially with qwen3-vl:latest...`,
+      `[OcrService] Processing ${base64Images.length} page(s) sequentially with ${env.aiModel}...`,
     );
 
     for (let i = 0; i < base64Images.length; i++) {
@@ -620,7 +620,7 @@ class OcrService {
           images: [base64Images[i]],
         },
       ];
-      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", { temperature: 0 });
+      const pageText = await ollamaClient.chat(messages, env.aiModel, { temperature: 0 });
       pageTexts.push(pageText);
     }
 
@@ -687,7 +687,7 @@ class OcrService {
         },
       ];
 
-      const responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      const responseText = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
       });
 
@@ -849,7 +849,7 @@ ${rawText}
 """`;
 
     try {
-      const response = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      const response = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0.1,
       });
 
@@ -985,9 +985,9 @@ ${rawText}
       ];
 
       console.log(
-        "[OcrService] Redesigned Pipeline Step 1: Querying qwen3-vl:latest for PLAIN TEXT OCR...",
+        `[OcrService] Redesigned Pipeline Step 1: Querying ${env.aiModel} for PLAIN TEXT OCR...`,
       );
-      rawText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      rawText = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
         maxTokens: 8192,
         rawOptions: { num_ctx: 8192 },
@@ -1002,9 +1002,9 @@ ${rawText}
     const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
-      "[OcrService] Redesigned Pipeline Step 2: Querying qwen2.5:14b for STRUCTURED EXTRACTION...",
+      `[OcrService] Redesigned Pipeline Step 2: Querying ${env.chatModel} for STRUCTURED EXTRACTION...`,
     );
-    const jsonResponseText = await ollamaClient.generate(structurePrompt, "qwen2.5:14b", {
+    const jsonResponseText = await ollamaClient.generate(structurePrompt, env.chatModel, {
       temperature: 0,
       maxTokens: 8192,
       rawOptions: { num_ctx: 8192 },
@@ -1111,7 +1111,7 @@ ${rawText}
 """`;
 
     try {
-      const response = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      const response = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0.1,
       });
       return response.trim();

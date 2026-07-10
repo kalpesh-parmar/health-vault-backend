@@ -298,9 +298,41 @@ async function getOnboardingStatus(req, res, next) {
   }
 }
 
+async function cancelOcr(req, res, next) {
+  try {
+    const userId = req.auth?.userId;
+    const { documentId } = req.params;
+    if (!userId || !documentId) {
+      return res.status(StatusCodes.BAD_REQUEST).json({ error: "Missing parameters" });
+    }
+
+    const { db } = require("../configs/db");
+    const { document } = require("../models/document");
+    const { ocrStatus } = require("../enums/ocrStatus");
+    const { eq, and } = require("drizzle-orm");
+
+    await db
+      .update(document)
+      .set({
+        ocrStatus: ocrStatus.CANCELLED,
+        remarks: "ERR_CODE:USER_CANCELLED",
+        updatedAt: new Date(),
+      })
+      .where(and(eq(document.id, documentId), eq(document.userId, userId)));
+
+    return res
+      .status(StatusCodes.OK)
+      .json({ status: "SUCCESS", message: "Job cancelled successfully" });
+  } catch (error) {
+    console.error("[OnboardingController] cancelOcr failed:", error);
+    return next(error);
+  }
+}
+
 module.exports = {
   ocrExtract,
   getOcrStatus,
+  cancelOcr,
   onboardingChat,
   getOnboardingStatus,
 };

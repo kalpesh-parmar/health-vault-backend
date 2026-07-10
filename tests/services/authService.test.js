@@ -1,4 +1,3 @@
-/* global jest, describe, beforeEach, it, expect */
 const patientService = require("../../src/services/patientService");
 const patientRepository = require("../../src/repositories/patientRepository");
 const sessionRepository = require("../../src/repositories/sessionRepository");
@@ -176,5 +175,69 @@ describe("PatientService - Social/Mobile Login", () => {
     expect(result.firebaseCustomToken).toBe("mock-firebase-custom-token");
     expect(result.token).toBeDefined();
     expect(result.refreshToken).toBeDefined();
+  });
+
+  it("should prefer profile name (firstName + lastName) over social fullName in login response", async () => {
+    const mockToken = "mock-firebase-token-pref";
+    const mockDecodedToken = {
+      email: "preferred@example.com",
+      uid: "mock-firebase-uid-pref",
+    };
+
+    verifyFirebaseToken.mockResolvedValue(mockDecodedToken);
+
+    const mockPatient = {
+      id: "mock-uuid-pref",
+      email: "preferred@example.com",
+      firebaseUid: "mock-firebase-uid-pref",
+      firstName: "ProfileFirst",
+      lastName: "ProfileLast",
+      fullName: "SocialFullName",
+      status: "ACTIVE",
+    };
+
+    patientRepository.findByEmail.mockResolvedValue(mockPatient);
+    patientRepository.updateById.mockResolvedValue(mockPatient);
+    sessionRepository.create.mockResolvedValue({});
+
+    const result = await patientService.socialLogin({
+      loginType: "social",
+      provider: "google",
+      firebaseIdToken: mockToken,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.user.name).toBe("ProfileFirst ProfileLast");
+  });
+
+  it("should fall back to social fullName if firstName/lastName are empty", async () => {
+    const mockToken = "mock-firebase-token-fallback";
+    const mockDecodedToken = {
+      email: "fallback@example.com",
+      uid: "mock-firebase-uid-fallback",
+    };
+
+    verifyFirebaseToken.mockResolvedValue(mockDecodedToken);
+
+    const mockPatient = {
+      id: "mock-uuid-fallback",
+      email: "fallback@example.com",
+      firebaseUid: "mock-firebase-uid-fallback",
+      fullName: "SocialFullName",
+      status: "ACTIVE",
+    };
+
+    patientRepository.findByEmail.mockResolvedValue(mockPatient);
+    patientRepository.updateById.mockResolvedValue(mockPatient);
+    sessionRepository.create.mockResolvedValue({});
+
+    const result = await patientService.socialLogin({
+      loginType: "social",
+      provider: "google",
+      firebaseIdToken: mockToken,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.user.name).toBe("SocialFullName");
   });
 });

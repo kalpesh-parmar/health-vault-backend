@@ -2,7 +2,9 @@
 const fs = require("fs");
 const path = require("path");
 const { ollamaClient } = require("../clients/ollamaClient");
-const { ONBOARDING_SYSTEM_PROMPT, TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
+const aiClient = require("../clients/aiClient.service");
+const { env } = require("../../../configs/env");
+const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
@@ -99,16 +101,27 @@ function isSamePhone(p1, p2) {
 function getLocalizedTranslation(key, language) {
   try {
     let langCode = "en";
-    if (language === "hindi") langCode = "hi";
-    else if (language === "marathi") langCode = "mr";
-    else if (language === "gujarati") langCode = "gu";
-    else if (language === "tamil") langCode = "ta";
+    if (language === "hindi" || language === "hi") langCode = "hi";
+    else if (language === "marathi" || language === "mr") langCode = "mr";
+    else if (language === "gujarati" || language === "gu") langCode = "gu";
+    else if (language === "tamil" || language === "ta") langCode = "ta";
 
     const filePath = path.resolve(__dirname, `../../../i18n/onboarding/${langCode}.json`);
     if (fs.existsSync(filePath)) {
       const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
       if (content && content[key]) {
         return content[key];
+      }
+    }
+
+    // Strict fallback: if missing in target, resolve from en.json
+    if (langCode !== "en") {
+      const enFilePath = path.resolve(__dirname, "../../../i18n/onboarding/en.json");
+      if (fs.existsSync(enFilePath)) {
+        const enContent = JSON.parse(fs.readFileSync(enFilePath, "utf8"));
+        if (enContent && enContent[key]) {
+          return enContent[key];
+        }
       }
     }
   } catch (err) {
@@ -120,10 +133,17 @@ function getLocalizedTranslation(key, language) {
   return null;
 }
 
-async function getLocalizedText(key, defaultEnglish, language) {
-  const localVal = getLocalizedTranslation(key, language);
-  if (localVal) return localVal;
-  return await translateMessage(defaultEnglish, language);
+async function getLocalizedText(key, defaultEnglish, language, variables = {}) {
+  let text = getLocalizedTranslation(key, language);
+  if (!text) {
+    text = await translateMessage(defaultEnglish, language);
+  }
+  if (text && typeof text === "string") {
+    for (const [varName, varVal] of Object.entries(variables)) {
+      text = text.replace(new RegExp(`\\{${varName}\\}`, "g"), String(varVal));
+    }
+  }
+  return text;
 }
 
 function normalizeDOB(dobStr) {
@@ -223,7 +243,7 @@ User Input: "${text}"`,
   ];
 
   try {
-    const response = await ollamaClient.chat(messages, "qwen3:32b", {
+    const response = await ollamaClient.chat(messages, env.chatModel, {
       temperature: 0.1,
       maxTokens: 128,
       think: false,
@@ -971,24 +991,8 @@ async function updateStateFromMessage(state, message, userId = null) {
 async function translateMessage(text, language) {
   if (!text || language === "english") return text;
 
-  const messages = [
-    {
-      role: "system",
-      content: TRANSLATION_SYSTEM_PROMPT(language),
-    },
-    {
-      role: "user",
-      content: text,
-    },
-  ];
-
   try {
-    const response = await ollamaClient.chat(messages, "qwen3:32b", {
-      temperature: 0.1,
-      maxTokens: 256,
-      think: false,
-    });
-    return response.trim();
+    return await aiClient.translate(text, "english", language);
   } catch (err) {
     console.error(`[OnboardingService] Failed to translate text to ${language}:`, err);
     return text; // Fallback to English
@@ -1008,7 +1012,11 @@ async function getLocalizedResponse(step, state) {
     case "ASK_LANGUAGE":
       return {
         action: "ASK_LANGUAGE",
-        message: "Welcome! please select your preferred language..?",
+        message: await getLocalizedText(
+          "onboarding.askLanguage.message",
+          "Welcome! Please select your preferred language.",
+          state.preferredLanguage,
+        ),
         options: languageTypeValues.map((lang) => ({
           label: languageNativeLabels[lang] || lang,
           value: lang,
@@ -1018,10 +1026,28 @@ async function getLocalizedResponse(step, state) {
     case "ASK_UPLOAD_OR_SKIP":
       return {
         action: "ASK_UPLOAD_OR_SKIP",
-        message: "How would you like to provide your details?",
+        message: await getLocalizedText(
+          "onboarding.askUploadOrSkip.message",
+          "How would you like to provide your details?",
+          state.preferredLanguage,
+        ),
         options: [
-          { label: "Upload Medical Document", value: "UPLOAD" },
-          { label: "Enter Details Manually", value: "MANUAL" },
+          {
+            label: await getLocalizedText(
+              "onboarding.askUploadOrSkip.upload",
+              "Upload Medical Document",
+              state.preferredLanguage,
+            ),
+            value: "UPLOAD",
+          },
+          {
+            label: await getLocalizedText(
+              "onboarding.askUploadOrSkip.manual",
+              "Enter Details Manually",
+              state.preferredLanguage,
+            ),
+            value: "MANUAL",
+          },
         ],
       };
 
@@ -1089,10 +1115,38 @@ async function getLocalizedResponse(step, state) {
         state.preferredLanguage,
       );
 
-      const loginSummary = loginName
-        ? `${loginName} (${useSocialText})`
-        : `${useSocialText} Details`;
-      const documentSummary = docName ? `${docName} (Medical Document)` : `${useDocText} Details`;
+      let loginSummary, documentSummary;
+      if (loginName) {
+        loginSummary = await getLocalizedText(
+          "onboarding.source.loginSummary",
+          "{name} ({provider})",
+          state.preferredLanguage,
+          { name: loginName, provider: useSocialText },
+        );
+      } else {
+        loginSummary = await getLocalizedText(
+          "onboarding.source.loginSummaryEmpty",
+          "{provider} Details",
+          state.preferredLanguage,
+          { provider: useSocialText },
+        );
+      }
+
+      if (docName) {
+        documentSummary = await getLocalizedText(
+          "onboarding.source.documentSummary",
+          "{name} (Medical Document)",
+          state.preferredLanguage,
+          { name: docName },
+        );
+      } else {
+        documentSummary = await getLocalizedText(
+          "onboarding.source.documentSummaryEmpty",
+          "{provider} Details",
+          state.preferredLanguage,
+          { provider: useDocText },
+        );
+      }
 
       const localizedFields = await Promise.all(
         fields.map(async (f) => {
@@ -1166,7 +1220,11 @@ async function getLocalizedResponse(step, state) {
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
-        message: "Please upload your medical document (Prescription, Lab Report, etc.).",
+        message: await getLocalizedText(
+          "onboarding.askUploadDocument.message",
+          "Please upload your medical document (Prescription, Lab Report, etc.).",
+          state.preferredLanguage,
+        ),
       };
 
     case "ASK_UPLOAD_DOCUMENT_FAILED": {
@@ -1199,7 +1257,11 @@ async function getLocalizedResponse(step, state) {
     case "PROCESSING_DOCUMENT":
       return {
         action: "PROCESSING_DOCUMENT",
-        message: "I am analyzing your document...",
+        message: await getLocalizedText(
+          "onboarding.processingDocument.message",
+          "I am analyzing your document...",
+          state.preferredLanguage,
+        ),
       };
 
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
@@ -1222,33 +1284,76 @@ async function getLocalizedResponse(step, state) {
     }
 
     case "ASK_FIRST_NAME":
-      return { action: "ASK_FIRST_NAME", message: "What is your first name?" };
+      return {
+        action: "ASK_FIRST_NAME",
+        message: await getLocalizedText(
+          "onboarding.askFirstName.message",
+          "What is your first name?",
+          state.preferredLanguage,
+        ),
+      };
 
     case "ASK_LAST_NAME":
-      return { action: "ASK_LAST_NAME", message: "What is your last name?" };
+      return {
+        action: "ASK_LAST_NAME",
+        message: await getLocalizedText(
+          "onboarding.askLastName.message",
+          "What is your last name?",
+          state.preferredLanguage,
+        ),
+      };
 
     case "ASK_DOB":
       return {
         action: "ASK_DOB",
-        message: "What is your date of birth?",
+        message: await getLocalizedText(
+          "onboarding.askDob.message",
+          "What is your date of birth?",
+          state.preferredLanguage,
+        ),
       };
 
     case "ASK_GENDER":
       return {
         action: "ASK_GENDER",
-        message: "What is your gender?",
+        message: await getLocalizedText(
+          "onboarding.askGender.message",
+          "What is your gender?",
+          state.preferredLanguage,
+        ),
         options: [
-          { label: "Male", value: "male" },
-          { label: "Female", value: "female" },
+          {
+            label: await getLocalizedText(
+              "onboarding.fieldValue.male",
+              "Male",
+              state.preferredLanguage,
+            ),
+            value: "male",
+          },
+          {
+            label: await getLocalizedText(
+              "onboarding.fieldValue.female",
+              "Female",
+              state.preferredLanguage,
+            ),
+            value: "female",
+          },
         ],
       };
 
     case "ASK_BLOOD_GROUP":
       return {
         action: "ASK_BLOOD_GROUP",
-        message: "What is your blood group? You can skip this question.",
+        message: await getLocalizedText(
+          "onboarding.askBloodGroup.message",
+          "What is your blood group? You can skip this question.",
+          state.preferredLanguage,
+        ),
         options: [
-          { label: "Skip", value: "SKIP" },
+          {
+            label: await getLocalizedText("onboarding.skip", "Skip", state.preferredLanguage),
+            value: "SKIP",
+          },
           ...bloodGroupTypeValues.map((bg) => ({ label: bg, value: bg })),
         ],
       };
@@ -1256,18 +1361,52 @@ async function getLocalizedResponse(step, state) {
     case "ASK_ALLERGIES":
       return {
         action: "ASK_ALLERGIES",
-        message: "Do you have any allergies? You can skip this question.",
-        options: [{ label: "Skip", value: "SKIP" }],
+        message: await getLocalizedText(
+          "onboarding.askAllergies.message",
+          "Do you have any allergies? You can skip this question.",
+          state.preferredLanguage,
+        ),
+        options: [
+          {
+            label: await getLocalizedText("onboarding.skip", "Skip", state.preferredLanguage),
+            value: "SKIP",
+          },
+        ],
       };
 
     case "REVIEW_MEDICINES_LIST":
       return {
         action: "REVIEW_MEDICINES_LIST",
-        message: "Please review the list of medications extracted from your document:",
+        message: await getLocalizedText(
+          "onboarding.reviewMedicinesList.message",
+          "Please review the list of medications extracted from your document:",
+          state.preferredLanguage,
+        ),
         options: [
-          { label: "Confirm Selected", value: "CONFIRM" },
-          { label: "Add New", value: "ADD" },
-          { label: "Skip All", value: "SKIP" },
+          {
+            label: await getLocalizedText(
+              "onboarding.reviewMedicinesList.confirm",
+              "Confirm Selected",
+              state.preferredLanguage,
+            ),
+            value: "CONFIRM",
+          },
+          {
+            label: await getLocalizedText(
+              "onboarding.reviewMedicinesList.addNew",
+              "Add New",
+              state.preferredLanguage,
+            ),
+            value: "ADD",
+          },
+          {
+            label: await getLocalizedText(
+              "onboarding.reviewMedicinesList.skipAll",
+              "Skip All",
+              state.preferredLanguage,
+            ),
+            value: "SKIP",
+          },
         ],
         medicines: state.medicinesToAdd || [],
       };
@@ -1275,11 +1414,21 @@ async function getLocalizedResponse(step, state) {
     case "ADD_MEDICINE": {
       const idx = state.currentMedicineIndex;
       const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
+      const message = med
+        ? await getLocalizedText(
+            "onboarding.addMedicine.messageEdit",
+            "Please edit details for {name}:",
+            state.preferredLanguage,
+            { name: med.name },
+          )
+        : await getLocalizedText(
+            "onboarding.addMedicine.messageNew",
+            "Please enter the new medication details:",
+            state.preferredLanguage,
+          );
       return {
         action: "ADD_MEDICINE",
-        message: med
-          ? `Please edit details for ${med.name}:`
-          : "Please enter the new medication details:",
+        message,
         medicine: med,
       };
     }
@@ -1287,43 +1436,106 @@ async function getLocalizedResponse(step, state) {
     case "CONFIRM_MEDICINE": {
       let title = "";
       let lines = [];
+      const lang = state.preferredLanguage;
 
       if (state.confirmMode === "SINGLE" && state.activeMedicine) {
         const med = state.activeMedicine;
-        title = med.name || "Medicine Summary";
+        title =
+          med.name ||
+          (await getLocalizedText("onboarding.confirmMedicine.title", "Medicine Summary", lang));
+
+        // Localize type:
+        const typeLabel = await getLocalizedText(
+          `onboarding.medicationType.${med.type}`,
+          med.type,
+          lang,
+        );
+
+        // Localize dose:
+        const typeLower = med.type.toLowerCase();
+        const doseTypeKey =
+          med.type === "TABLET"
+            ? "onboarding.dose.tablets"
+            : med.type === "CAPSULE"
+              ? "onboarding.dose.capsules"
+              : "";
+        const doseUnitText = doseTypeKey
+          ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
+          : med.dose.unit;
         const doseStr =
           med.type === "TABLET" || med.type === "CAPSULE"
-            ? `${med.dose.count} ${med.type.toLowerCase()}(s)`
-            : `${med.dose.value} ${med.dose.unit}`;
+            ? `${med.dose.count} ${doseUnitText}`
+            : `${med.dose.value} ${doseUnitText}`;
+
+        // Localize frequency:
+        const freqText = await getLocalizedText(
+          `onboarding.medicationFrequency.${med.frequency}`,
+          med.frequency,
+          lang,
+        );
+
+        // Localize times:
         const timesVal =
           med.medicationSchedule?.times || med.medicationSchedule?.reminderTimes || [];
+        const noneText = await getLocalizedText("common.none", "None", lang);
         const timesStr =
-          Array.isArray(timesVal) && timesVal.length > 0 ? timesVal.join(", ") : "None";
+          Array.isArray(timesVal) && timesVal.length > 0 ? timesVal.join(", ") : noneText;
+
+        // Localize prescribed by and notes:
+        const prescribedByStr = med.prescribed_by || noneText;
+        const notesStr = med.notes || noneText;
+
         lines = [
-          `Type: ${med.type}`,
+          `Type: ${typeLabel}`,
           `Dose: ${doseStr}`,
-          `Frequency: ${med.frequency}`,
+          `Frequency: ${freqText}`,
           `Times: ${timesStr}`,
-          `Prescribed By: ${med.prescribed_by || "None"}`,
-          `Notes: ${med.notes || "None"}`,
+          `Prescribed By: ${prescribedByStr}`,
+          `Notes: ${notesStr}`,
         ];
       } else if (state.confirmMode === "BULK" && state.validMedsToBulkCreate) {
-        title = "Confirm all medications";
-        lines = state.validMedsToBulkCreate.map((m) => {
-          const doseStr =
-            m.type === "TABLET" || m.type === "CAPSULE"
-              ? `${m.dose.count} ${m.type.toLowerCase()}(s)`
-              : `${m.dose.value} ${m.dose.unit}`;
-          const timesVal = m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
-          const timesStr =
-            Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
-          return `${m.name} (${doseStr}, ${m.frequency}${timesStr})`;
-        });
+        title = await getLocalizedText(
+          "onboarding.confirmMedicine.titleBulk",
+          "Confirm all medications",
+          lang,
+        );
+        lines = await Promise.all(
+          state.validMedsToBulkCreate.map(async (m) => {
+            const typeLower = m.type.toLowerCase();
+            const doseTypeKey =
+              m.type === "TABLET"
+                ? "onboarding.dose.tablets"
+                : m.type === "CAPSULE"
+                  ? "onboarding.dose.capsules"
+                  : "";
+            const doseUnitText = doseTypeKey
+              ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
+              : m.dose.unit;
+            const doseStr =
+              m.type === "TABLET" || m.type === "CAPSULE"
+                ? `${m.dose.count} ${doseUnitText}`
+                : `${m.dose.value} ${doseUnitText}`;
+            const freqText = await getLocalizedText(
+              `onboarding.medicationFrequency.${m.frequency}`,
+              m.frequency,
+              lang,
+            );
+            const timesVal =
+              m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
+            const timesStr =
+              Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
+            return `${m.name} (${doseStr}, ${freqText}${timesStr})`;
+          }),
+        );
       }
 
       return {
         action: "CONFIRM_MEDICINE",
-        message: "Please verify if these details are correct before saving:",
+        message: await getLocalizedText(
+          "onboarding.confirmMedicine.message",
+          "Please verify if these details are correct before saving:",
+          lang,
+        ),
         summary: { title, lines },
       };
     }
@@ -1331,11 +1543,39 @@ async function getLocalizedResponse(step, state) {
     case "MEDICINE_OPTIONS":
       return {
         action: "MEDICINE_OPTIONS",
-        message: "What would you like to do next?",
+        message: await getLocalizedText(
+          "onboarding.medicineOptions.message",
+          "What would you like to do next?",
+          state.preferredLanguage,
+        ),
         options: [
-          { key: "ADD", label: "Add Another Medicine", primary: true },
-          { key: "DASHBOARD", label: "Go to Dashboard", primary: false },
-          { key: "ASK_REPORT", label: "Ask About My Report", primary: false },
+          {
+            key: "ADD",
+            label: await getLocalizedText(
+              "onboarding.medicineOptions.addAnother",
+              "Add Another Medicine",
+              state.preferredLanguage,
+            ),
+            primary: true,
+          },
+          {
+            key: "DASHBOARD",
+            label: await getLocalizedText(
+              "onboarding.medicineOptions.goToDashboard",
+              "Go to Dashboard",
+              state.preferredLanguage,
+            ),
+            primary: false,
+          },
+          {
+            key: "ASK_REPORT",
+            label: await getLocalizedText(
+              "onboarding.medicineOptions.askAboutReport",
+              "Ask About My Report",
+              state.preferredLanguage,
+            ),
+            primary: false,
+          },
         ],
       };
 
@@ -1344,20 +1584,44 @@ async function getLocalizedResponse(step, state) {
       const hasMedicines =
         state.medicinesToAdd && state.medicinesToAdd.length > 0 && !state.medicinesSkipped;
       const finalOptions = [];
-      finalOptions.push({ label: "Go to Dashboard", value: "GO_TO_DASHBOARD" });
 
-      // Only show the report option if they uploaded a document (POST_ONBOARDING step)
+      const dashboardLabel = await getLocalizedText(
+        "onboarding.complete.goToDashboard",
+        "Go to Dashboard",
+        state.preferredLanguage,
+      );
+      finalOptions.push({ label: dashboardLabel, value: "GO_TO_DASHBOARD" });
+
       if (step === "POST_ONBOARDING") {
-        finalOptions.push({ label: "Ask About My Report", value: "ASK_ABOUT_REPORT" });
+        const askReportLabel = await getLocalizedText(
+          "onboarding.complete.askAboutReport",
+          "Ask About My Report",
+          state.preferredLanguage,
+        );
+        finalOptions.push({ label: askReportLabel, value: "ASK_ABOUT_REPORT" });
       }
       if (hasMedicines) {
-        finalOptions.push({ label: "Add More Medicines", value: "ADD_MORE_MEDICINES" });
-        finalOptions.push({ label: "View My Medicines", value: "VIEW_MEDICINES" });
+        const addMoreLabel = await getLocalizedText(
+          "onboarding.complete.addMoreMedicines",
+          "Add More Medicines",
+          state.preferredLanguage,
+        );
+        const viewMedsLabel = await getLocalizedText(
+          "onboarding.complete.viewMyMedicines",
+          "View My Medicines",
+          state.preferredLanguage,
+        );
+        finalOptions.push({ label: addMoreLabel, value: "ADD_MORE_MEDICINES" });
+        finalOptions.push({ label: viewMedsLabel, value: "VIEW_MEDICINES" });
       }
 
       return {
         action: step,
-        message: "Thank you! Onboarding is complete. What would you like to do next?",
+        message: await getLocalizedText(
+          "onboarding.complete.message",
+          "Thank you! Onboarding is complete. What would you like to do next?",
+          state.preferredLanguage,
+        ),
         options: finalOptions,
       };
     }
@@ -1646,7 +1910,7 @@ class OnboardingService {
       }
     }
 
-    // 3. If Medical Document uploaded in UPLOAD flow, perform extraction using Qwen3 or use pre-extracted data
+    // 3. If Medical Document uploaded in UPLOAD flow, perform extraction using chat model or use pre-extracted data
     if (
       state.flowMode === "UPLOAD" &&
       (state.uploadedMedicalDocument || state.documentUploaded) &&
@@ -1715,7 +1979,7 @@ class OnboardingService {
             { role: "user", content: `Document OCR Text:\n${state.documentText}` },
           ];
 
-          let chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
+          let chatResponse = await ollamaClient.chat(extractionMessages, env.chatModel, {
             temperature: 0.2,
             maxTokens: 1024,
             think: false,
@@ -1726,7 +1990,7 @@ class OnboardingService {
             console.warn(
               "[OnboardingService] Document extraction truncated. Retrying with maxTokens 2048...",
             );
-            chatResponse = await ollamaClient.chat(extractionMessages, "qwen3:32b", {
+            chatResponse = await ollamaClient.chat(extractionMessages, env.chatModel, {
               temperature: 0.2,
               maxTokens: 2048,
               think: false,
@@ -1827,6 +2091,17 @@ class OnboardingService {
           state.existingUserData.phoneNumber !== null
         )
           updateData.mobile = state.existingUserData.phoneNumber;
+
+        if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
+          const existingPatient = await patientRepository.findById(userId);
+          if (existingPatient) {
+            const mergedFirstName =
+              updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
+            const mergedLastName =
+              updateData.lastName !== undefined ? updateData.lastName : existingPatient.lastName;
+            updateData.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
+          }
+        }
       }
       if (state.existingUserData.bloodGroup)
         updateData.bloodGroup = state.existingUserData.bloodGroup;
@@ -1897,19 +2172,8 @@ class OnboardingService {
     const nextStep = getNextStep(state);
     const response = await createResponse(nextStep, state);
 
-    if (state.preferredLanguage && state.preferredLanguage !== "english") {
-      if (response.message) {
-        response.message = await translateMessage(response.message, state.preferredLanguage);
-      }
-      if (response.options && Array.isArray(response.options)) {
-        response.options = await Promise.all(
-          response.options.map(async (opt) => ({
-            ...opt,
-            label: await translateMessage(opt.label, state.preferredLanguage),
-          })),
-        );
-      }
-    }
+    // Response is already localized via getLocalizedResponse static key lookup.
+    // Double translation block removed to prevent corruption of translated templates.
 
     console.log("[INSTRUMENTATION] FINAL outgoing onboarding assistant payload:", {
       action: response.action,

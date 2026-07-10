@@ -1,4 +1,3 @@
-/* global describe, it, expect, jest */
 const fileController = require("../../src/controllers/file.controller");
 const uploadFileService = require("../../src/services/uploadFileService");
 const { InvalidRequestException } = require("../../src/exceptions/appError");

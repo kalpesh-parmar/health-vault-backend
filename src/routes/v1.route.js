@@ -7,6 +7,7 @@ const router = express.Router();
 
 router.post("/ocr/extract", verifyToken, upload.single("file"), v1Controller.ocrExtract);
 router.get("/ocr/status/:documentId", verifyToken, v1Controller.getOcrStatus);
+router.post("/ocr/cancel/:documentId", verifyToken, v1Controller.cancelOcr);
 router.post("/onboarding/chat", verifyToken, v1Controller.onboardingChat);
 router.get("/onboarding/status", verifyToken, v1Controller.getOnboardingStatus);
 

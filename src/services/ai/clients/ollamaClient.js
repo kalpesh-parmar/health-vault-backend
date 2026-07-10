@@ -52,6 +52,7 @@ class OllamaClient {
         model,
         messages,
         stream: false,
+        keep_alive: "30m",
         think: options.think ?? false,
         options: {
           temperature: options.temperature ?? 0.2,
@@ -172,6 +173,7 @@ class OllamaClient {
       model,
       messages,
       stream: true,
+      keep_alive: "30m",
       options: {
         temperature: options.temperature ?? 0.2,
         num_predict: options.maxTokens ?? 2048,
@@ -222,6 +224,7 @@ class OllamaClient {
       model,
       prompt,
       stream: false,
+      keep_alive: "30m",
       options: {
         temperature: options.temperature ?? 0,
         num_predict: options.maxTokens ?? 8192,
@@ -273,6 +276,7 @@ class OllamaClient {
     const payload = {
       model,
       prompt,
+      keep_alive: "30m",
     };
 
     const config = {

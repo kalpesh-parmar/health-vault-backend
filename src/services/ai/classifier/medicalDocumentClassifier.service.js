@@ -1,5 +1,6 @@
 const prompts = require("../prompts");
 const { ollamaClient } = require("../clients/ollamaClient");
+const { env } = require("../../../configs/env");
 
 class MedicalDocumentClassifierService {
   async classify(file) {
@@ -13,8 +14,10 @@ class MedicalDocumentClassifierService {
       const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
       const prompt = `${prompts.CLASSIFICATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
 
-      console.log("[MedicalDocumentClassifierService] Validating PDF document...");
-      responseObj = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      console.log(
+        `[MedicalDocumentClassifierService] Validating PDF document using ${env.chatModel}...`,
+      );
+      responseObj = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0,
         format: "json",
         returnFullResponse: true,
@@ -30,9 +33,9 @@ class MedicalDocumentClassifierService {
       ];
 
       console.log(
-        "[MedicalDocumentClassifierService] Validating image document using qwen3-vl:latest...",
+        `[MedicalDocumentClassifierService] Validating image document using ${env.aiModel}...`,
       );
-      responseObj = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      responseObj = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
         maxTokens: 2048,
         format: "json",

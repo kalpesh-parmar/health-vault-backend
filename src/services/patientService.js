@@ -291,6 +291,13 @@ class PatientService {
       data.password = await bcrypt.hash(data.password, 10);
     }
 
+    if (data.firstName !== undefined || data.lastName !== undefined) {
+      const mergedFirstName =
+        data.firstName !== undefined ? data.firstName : existingPatient.firstName;
+      const mergedLastName = data.lastName !== undefined ? data.lastName : existingPatient.lastName;
+      data.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
+    }
+
     const updatedPatient = await patientRepository.updateById(params.id, data);
 
     if (!updatedPatient) {
@@ -604,7 +611,10 @@ class PatientService {
       onboardingData: onboardingState?.data || null,
       user: {
         id: patientUser.id,
-        name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
+        name:
+          patientUser.firstName || patientUser.lastName
+            ? `${patientUser.firstName || ""} ${patientUser.lastName || ""}`.trim()
+            : patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
         mobile: patientUser.mobile || "",
         email: patientUser.email || "",
         role: "patient",
