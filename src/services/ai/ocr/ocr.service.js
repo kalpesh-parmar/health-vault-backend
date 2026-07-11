@@ -616,7 +616,7 @@ class OcrService {
 
     const pageTexts = [];
     console.log(
-      `[OcrService] Processing ${base64Images.length} page(s) sequentially with ${env.visionModel}...`,
+      `[OcrService] Processing ${base64Images.length} page(s) sequentially with ${env.aiModel}...`,
     );
 
     for (let i = 0; i < base64Images.length; i++) {
@@ -627,11 +627,7 @@ class OcrService {
           images: [base64Images[i]],
         },
       ];
-      const pageText = await ollamaClient.chat(messages, env.visionModel, {
-        temperature: 0,
-        maxTokens: 8192,
-        rawOptions: { num_ctx: 8192 },
-      });
+      const pageText = await ollamaClient.chat(messages, env.aiModel, { temperature: 0 });
       pageTexts.push(pageText);
     }
 
@@ -698,7 +694,7 @@ class OcrService {
         },
       ];
 
-      const responseText = await ollamaClient.chat(messages, env.visionModel, {
+      const responseText = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
         // format: "json",
       });
@@ -861,7 +857,7 @@ ${rawText}
 """`;
 
     try {
-      const response = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      const response = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0.1,
       });
 
@@ -981,8 +977,34 @@ ${rawText}
       );
     }
 
-    const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
+    const isPdf =
+      file.mimeType === "application/pdf" ||
+      file.filename?.toLowerCase().endsWith(".pdf") ||
+      file.originalname?.toLowerCase().endsWith(".pdf");
+
+    if (isPdf) {
+      // let rawText;
+      rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
+    } else {
+      const processedBuffer = await preprocessImage(file.buffer);
+      const base64Image = processedBuffer.toString("base64");
+      const messages = [
+        {
+          role: "user",
+          content: prompts.PLAIN_TEXT_OCR_PROMPT,
+          images: [base64Image],
+        },
+      ];
+
+      console.log(
+        `[OcrService] Redesigned Pipeline Step 1: Querying ${env.aiModel} for PLAIN TEXT OCR...`,
+      );
+      rawText = await ollamaClient.chat(messages, env.aiModel, {
+        temperature: 0,
+        maxTokens: 8192,
+        rawOptions: { num_ctx: 8192 },
+      });
+    }
 
     if (!rawText || !rawText.trim()) {
       throw new Error("OCR produced no usable text");
@@ -992,16 +1014,16 @@ ${rawText}
     const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
-      "[OcrService] Redesigned Pipeline Step 2: Querying qwen2.5:14b for STRUCTURED EXTRACTION...",
+      `[OcrService] Redesigned Pipeline Step 2: Querying ${env.chatModel} for STRUCTURED EXTRACTION...`,
     );
-    const jsonResponseText = await ollamaClient.generate(structurePrompt, "qwen2.5:14b", {
+    const jsonResponseText = await ollamaClient.generate(structurePrompt, env.chatModel, {
       temperature: 0,
       maxTokens: 8192,
       rawOptions: { num_ctx: 8192 },
     });
     console.log("jsonResponseText", jsonResponseText);
-
-    const parsedOCR = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
+    //  { traceId, jobId }
+    const parsedOCR = this.cleanAndParseJSON(jsonResponseText);
     if (parsedOCR.status === "FAILED") {
       throw new Error("AI response format is invalid.");
     }
@@ -1106,7 +1128,7 @@ ${rawText}
 """`;
 
     try {
-      const response = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      const response = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0.1,
       });
       return response.trim();
@@ -1291,6 +1313,175 @@ ${rawText}
 
     return { normalized, rawOcrData, structured, summary };
   }
+
+  // async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+  //   console.log(
+  //     `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
+  //   );
+  //   const { eq } = require("drizzle-orm");
+
+  //   // Fetch preferred language from onboarding state
+  //   let preferredLanguage = "gujarati";
+  //   if (userId) {
+  //     try {
+  //       const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+  //       const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+  //       if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
+  //         preferredLanguage = onboardingRecord.data.preferredLanguage;
+  //       }
+  //     } catch (err) {
+  //       console.warn(
+  //         `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+  //         err.message,
+  //       );
+  //     }
+  //   }
+
+  //   try {
+  //     // 2. Perform OCR
+  //     const tOcrStart = Date.now();
+  //     const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
+  //     let ocrResult;
+  //     let structuredData;
+
+  //     if (isGraphicalDocument) {
+  //       ocrResult = await this.extractGraphicalMedicalData(file, preferredLanguage);
+  //       structuredData = ocrResult.structuredData;
+  //       console.log(
+  //         `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Graphical report. Page count = ${ocrResult.pageCount}.`,
+  //       );
+  //     } else {
+  //       ocrResult = await this.extractText(file, preferredLanguage);
+  //       console.log(
+  //         `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}.`,
+  //       );
+
+  //       // 3. Extract structured medical data
+  //       const tExtractStart = Date.now();
+  //       structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+  //       console.log(
+  //         `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete.`,
+  //       );
+  //     }
+
+  //     // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+  //     const tSummaryStart = Date.now();
+  //     let summaryEnglish = "";
+  //     let summaryPreferredLanguage = "";
+
+  //     if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+  //       summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+  //       summaryPreferredLanguage = summaryEnglish;
+  //     } else {
+  //       const [sumEng, sumPref] = await Promise.all([
+  //         this.generateSummary(ocrResult.rawText, "english"),
+  //         this.generateSummary(ocrResult.rawText, preferredLanguage),
+  //       ]);
+  //       summaryEnglish = sumEng;
+  //       summaryPreferredLanguage = sumPref;
+  //     }
+  //     console.log(
+  //       `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated.`,
+  //     );
+
+  //     // Ensure data contains both summaries
+  //     structuredData.summaryEnglish = summaryEnglish;
+  //     structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+
+  //     // 5. Update database
+  //     const tDbStart = Date.now();
+  //     await db
+  //       .update(document)
+  //       .set({
+  //         ocrStatus: ocrStatus.COMPLETED,
+  //         ocrExtractedText: ocrResult.rawText,
+  //         structuredExtractedData: structuredData,
+  //         reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
+  //         hospitalName: structuredData.hospitalName || null,
+  //         doctorName: structuredData.doctorName || null,
+  //         remarks: structuredData.remarks || null,
+  //         summaryEnglish,
+  //         summaryInPreferredLanguage: summaryPreferredLanguage,
+  //         updatedAt: new Date(),
+  //       })
+  //       .where(eq(document.id, documentId));
+  //     console.log(
+  //       `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. Document ${documentId} updated. Indexing in RAG...`,
+  //     );
+
+  //     // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+  //     // const tSummaryStart = Date.now();
+  //     if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+  //       let summaryEnglish = "";
+  //       // let summaryPreferredLanguage = "";
+  //       summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+  //       summaryPreferredLanguage = summaryEnglish;
+  //     } else {
+  //       const [sumEng, sumPref] = await Promise.all([
+  //         this.generateSummary(ocrResult.rawText, "english"),
+  //         this.generateSummary(ocrResult.rawText, preferredLanguage),
+  //       ]);
+  //       summaryEnglish = sumEng;
+  //       summaryPreferredLanguage = sumPref;
+  //     }
+  //     console.log(
+  //       `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
+  //     );
+
+  //     // Ensure controller response contains both summaries
+  //     structuredData.summaryEnglish = summaryEnglish;
+  //     structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+
+  //     // 5. Store in database
+  //     // const tDbStart = Date.now();
+  //     const bucketName =
+  //       uploadResult.data.s3Bucket ||
+  //       (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
+  //     // const filePath =
+  //     //   env.storageProvider === "gcp"
+  //     //     ? `gs://${bucketName}/${fileKey}`
+  //     //     : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+
+  //     const [documentRow] = await db.insert(document).values({
+  //       userId,
+  //       rawOcr: {
+  //         fullText: ocrResult.rawText,
+  //         language: ocrResult.detectedLanguages?.join(",") || "en",
+  //       },
+  //       structured: {
+  //         summary: summaryPreferredLanguage,
+  //         observations: Array.isArray(structuredData.diagnosis)
+  //           ? structuredData.diagnosis
+  //           : structuredData.diagnosis
+  //             ? [structuredData.diagnosis]
+  //             : [],
+  //         recommendations: structuredData.remarks ? [structuredData.remarks] : [],
+  //         medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
+  //       },
+  //     });
+
+  //     console.log(
+  //       `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
+  //     );
+  //   } catch (err) {
+  //     console.error(
+  //       `[OcrService] [ERROR] processAndStoreAsynchronously failed for document ${documentId}:`,
+  //       err,
+  //     );
+  //     try {
+  //       await db
+  //         .update(document)
+  //         .set({
+  //           ocrStatus: ocrStatus.FAILED,
+  //           remarks: `Processing failed: ${err.message}`,
+  //           updatedAt: new Date(),
+  //         })
+  //         .where(eq(document.id, documentId));
+  //     } catch (dbErr) {
+  //       console.error(`[OcrService] Failed to set document status to FAILED in DB:`, dbErr);
+  //     }
+  //   }
+  // }
 
   async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
     console.log(

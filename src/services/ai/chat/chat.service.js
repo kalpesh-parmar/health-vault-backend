@@ -71,8 +71,8 @@ class ChatService {
       const systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText);
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
-      console.log("[ChatService] Running local RAG chat using qwen2.5:14b...");
-      const answer = await ollamaClient.chat(formattedMessages, "qwen2.5:14b", {
+      console.log(`[ChatService] Running local RAG chat using ${env.chatModel}...`);
+      const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
         maxTokens: 2048,
       });
@@ -89,8 +89,8 @@ class ChatService {
       ...messages,
     ];
 
-    console.log("[ChatService] Running local general chat using qwen2.5:14b...");
-    const answer = await ollamaClient.chat(formattedMessages, "qwen2.5:14b", {
+    console.log(`[ChatService] Running local general chat using ${env.chatModel}...`);
+    const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
       temperature: 0.2,
       maxTokens: 2048,
     });

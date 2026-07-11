@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     )
     realtime_voice_enabled: bool = Field(default=True, alias="VOICE_REALTIME_ENABLED")
 
+    translation_model_name: str = Field(
+        default="ai4bharat/indictrans2-en-indic-dist-200M", alias="TRANSLATION_MODEL_NAME"
+    )
+    hf_token: str | None = Field(default=None, alias="HF_TOKEN")
+    translation_num_beams: int = Field(default=1, alias="TRANSLATION_NUM_BEAMS")
+
     worker_poll_interval_seconds: float = 1.0
     job_lock_seconds: int = 900
     max_pdf_pages: int = Field(default=25, alias="MAX_PDF_PAGES")

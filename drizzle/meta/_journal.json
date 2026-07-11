@@ -120,6 +120,13 @@
       "when": 1783683129307,
       "tag": "0016_pretty_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783762006332,
+      "tag": "0017_calm_gauntlet",
+      "breakpoints": true
     }
   ]
 }

@@ -132,18 +132,19 @@ const env = Object.freeze({
   // Local/Legacy AI Settings
   apiKey: stringFromEnv("CHATBOT_API_KEY"),
   chatbotAPIKey: stringFromEnv("CHATBOT_API_KEY"),
-  ollamaUrl: process.env.AI_BASE_URL,
+
+  ollamaUrl: stringFromEnv("AI_BASE_URL"),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: process.env.CHAT_MODEL,
+  chatModel: stringFromEnv("CHAT_MODEL") || "qwen2.5:14b",
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL,
   popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
-  embeddingModel: process.env.AI_EMBEDDING_MODEL || "bge-m3:latest",
+  embeddingModel: stringFromEnv("AI_EMBEDDING_MODEL") || "bge-m3:latest",
+  embeddingDim: numberFromEnv("EMBEDDING_DIM", 1024),
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
-  // refillAlertBeforeDays: numberFromEnv("REFILL_ALERT_BEFORE_DAYS", 2),
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
 
   //client Ids based on Provider
@@ -175,10 +176,20 @@ function validateEnv(config) {
     if (!config.awsRegion) missing.push("AWS_REGION");
   }
 
-  if (missing.length) {
-    throw new Error(`Missing required configuration: ${missing.join(", ")}`);
+  if (!process.env.CHAT_MODEL) {
+    console.warn(
+      "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen2.5:14b'.",
+    );
+  }
+  if (!process.env.AI_EMBEDDING_MODEL) {
+    console.warn(
+      "[EnvValidation] AI_EMBEDDING_MODEL is missing in environment. Using default 'bge-m3:latest'.",
+    );
   }
 
+  if (missing.length) {
+    console.warn(`[EnvValidation] Missing configuration variables: ${missing.join(", ")}`);
+  }
   if (config.aiTimeoutMs <= 0) throw new Error("AI_TIMEOUT_MS must be greater than zero");
   if (config.aiMaxRetries < 0) throw new Error("AI_MAX_RETRIES must be zero or greater");
   if (config.aiMaxOutputTokens <= 0)

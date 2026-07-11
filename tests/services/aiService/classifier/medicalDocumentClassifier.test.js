@@ -1,4 +1,3 @@
-/* global describe, it, expect, jest, beforeEach */
 const {
   medicalDocumentClassifierService,
 } = require("../../../../src/services/ai/classifier/medicalDocumentClassifier.service");

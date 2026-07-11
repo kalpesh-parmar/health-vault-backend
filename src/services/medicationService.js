@@ -16,7 +16,6 @@ const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGene
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 const { normalizeMedicine } = require("./ai/helpers/medicineNormalize");
-const medicationReminderService = require("../services/medicationReminderService");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -395,15 +394,7 @@ class MedicationService {
       softDelete: false,
     };
 
-    const inserted = await medicationRepository.insert(mappedData);
-
-    if (inserted) {
-      await medicationReminderService.createReminder(userId, {
-        medicationId: inserted.id,
-      });
-    }
-
-    return inserted;
+    return await medicationRepository.insert(mappedData);
   }
 
   // Onboarding Helper: map, validate, and bulk save multiple medications in a transaction
@@ -469,17 +460,7 @@ class MedicationService {
       };
     });
 
-    const insertedList = await medicationRepository.bulkInsert(mappedList);
-
-    for (const inserted of insertedList) {
-      if (inserted) {
-        await medicationReminderService.createReminder(userId, {
-          medicationId: inserted.id,
-        });
-      }
-    }
-
-    return insertedList;
+    return await medicationRepository.bulkInsert(mappedList);
   }
 }
 

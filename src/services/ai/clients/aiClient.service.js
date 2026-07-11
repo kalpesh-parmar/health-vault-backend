@@ -29,9 +29,74 @@ async function postWithRetry(url, body, { headers, timeout = DEFAULT_TIMEOUT, re
   throw new InternalServerException(`AI service request failed (${status}): ${detail}`);
 }
 
+class MemoryLRUCache {
+  constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return null;
+    const entry = this.cache.get(key);
+    if (Date.now() - entry.timestamp > this.ttlMs) {
+      this.cache.delete(key);
+      return null;
+    }
+    // Refresh insertion order (LRU)
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+    return entry.value;
+  }
+
+  set(key, value) {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      // Evict oldest (first key in map iterator)
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, { value, timestamp: Date.now() });
+  }
+}
+
 class AiServiceClient {
+  constructor() {
+    this.translationCache = new MemoryLRUCache();
+  }
+
   get baseUrl() {
     return env.aiServiceUrl;
+  }
+
+  async translate(text, srcLang = "en", tgtLang) {
+    if (!text || srcLang === tgtLang) return text;
+    const cacheKey = `${srcLang}:${tgtLang}:${text}`;
+    const cached = this.translationCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const response = await postWithRetry(
+        `${this.baseUrl}/api/v1/translate`,
+        {
+          text,
+          src_lang: srcLang,
+          tgt_lang: tgtLang,
+        },
+        { timeout: 30000, retries: 2 },
+      );
+
+      const translatedText = response?.translated_text || text;
+      this.translationCache.set(cacheKey, translatedText);
+      return translatedText;
+    } catch (err) {
+      console.error(
+        `[AiServiceClient] Translation failed from ${srcLang} to ${tgtLang}:`,
+        err.message,
+      );
+      return text; // Fallback to original text
+    }
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {

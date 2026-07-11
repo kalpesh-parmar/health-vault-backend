@@ -37,6 +37,15 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   //   timesList = Object.keys(schedule).filter((key) => typeof key === "string" && key.includes(":"));
   // }
 
+  if (Array.isArray(schedule.times)) {
+    timesList = schedule.times;
+  } else if (Array.isArray(schedule.reminderTimes)) {
+    timesList = schedule.reminderTimes;
+  } else {
+    // Legacy mapping (flat object with time keys/values)
+    timesList = Object.keys(schedule).filter((key) => typeof key === "string" && key.includes(":"));
+  }
+
   // Defensively filter and parse each time
   const parseTime = (t) => {
     if (typeof t !== "string" || !t.includes(":")) {
