@@ -206,6 +206,39 @@ class DocumentOcrJobService {
         rawOcr: ocrResponse,
       });
 
+      let preferredLanguage = "gujarati";
+      try {
+        if (userId) {
+          const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+          const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+          if (onboardingRecord?.data?.preferredLanguage) {
+            preferredLanguage = onboardingRecord.data.preferredLanguage;
+          }
+        }
+      } catch (err) {
+        console.warn("[ocr-job] failed to fetch preferred language", err);
+      }
+
+      let summaryEnglish = "";
+      let summaryPreferredLanguage = "";
+      const rawTextToSummarize = rawOcrData.fullText || "";
+      if (rawTextToSummarize) {
+        if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+          summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+          summaryPreferredLanguage = summaryEnglish;
+        } else {
+          const [sumEng, sumPref] = await Promise.all([
+            ocrService.generateSummary(rawTextToSummarize, "english"),
+            ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
+          ]);
+          summaryEnglish = sumEng;
+          summaryPreferredLanguage = sumPref;
+        }
+      }
+
+      structured.summaryEnglish = summaryEnglish;
+      structured.summaryInPreferredLanguage = summaryPreferredLanguage;
+
       // Best-effort graph extraction
       let graphs = [];
       try {

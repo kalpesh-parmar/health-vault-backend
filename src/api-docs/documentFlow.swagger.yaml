@@ -78,6 +78,8 @@ components:
             vitals: { type: array, items: {} }
             recommendations: { type: array, items: {} }
             summary: { type: string }
+            summaryEnglish: { type: string }
+            summaryInPreferredLanguage: { type: string }
         graphs: { type: array, items: { type: object } }
         embeddingsGenerated: { type: boolean, example: false }
         documentType: { type: string, example: "lab_report" }

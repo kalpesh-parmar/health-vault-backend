@@ -1,0 +1,1 @@
+ALTER TABLE "patients" DROP CONSTRAINT "patients_email_unique";

@@ -225,6 +225,7 @@ JSON format schema:
   "patient": {
     "name": "Patient Name",
     "firstName": "First Name",
+    "middleName": "middle name",
     "lastName": "Last Name",
     "age": 25,
     "gender": "Gender",
@@ -280,6 +281,7 @@ const ONBOARDING_SYSTEM_PROMPT = `You are HealthVault AI. Extract patient onboar
 
 Extract the following fields:
 - firstName
+-middleName
 - lastName
 - dateOfBirth (normalize strictly to YYYY-MM-DD, e.g. 1989-01-01. Support formats like DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY. Set to empty string "" if not found)
 - gender (normalize strictly to lowercase "male" or "female". If gender is missing or not explicitly present: DO NOT GUESS. Return empty string "")
@@ -294,7 +296,7 @@ NAME SPLITTING RULE:
 If the full name is found (e.g. Sarah Anderson), split into:
 "firstName": "Sarah", "lastName": "Anderson".
 If name is John Michael Smith, split into:
-"firstName": "John", "lastName": "Michael Smith".
+"firstName": "John", "middleName": "Michael" , "lastName": "Smith".
 If name is Madonna, split into:
 "firstName": "Madonna", "lastName": "".
 Never return empty firstName or lastName if a full name is present in the document.
@@ -303,6 +305,7 @@ Return ONLY a valid JSON object matching this schema:
 {
   "firstName": "...",
   "lastName": "...",
+  "middleName":"...",
   "dateOfBirth": "...",
   "gender": "...",
   "email": "...",
@@ -312,7 +315,6 @@ Return ONLY a valid JSON object matching this schema:
   "medicalConditions": [...],
   "address": "..."
 }
-
 Do not explain. Do not output markdown code blocks. Do not output thinking. Response must be parseable by JSON.parse().`;
 
 const CLASSIFICATION_PROMPT = `You are a strict medical document classifier.
@@ -330,18 +332,9 @@ Accept ONLY these medical document types:
 - Vaccination record
 - Insurance medical report
 - Body Scan report
-<<<<<<< HEAD
 - GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
 - MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
 - MEDICAL_REPORT (Any valid medical report not listed above)
-=======
-<<<<<<< HEAD
-=======
-- GRAPHICAL_REPORT (ECG, Cardiogram, Medical Graphs)
-- MEDICAL_CHART (Medical Charts, ECGs, Cardiograms, Waveforms)
-- MEDICAL_REPORT (Any valid medical report not listed above)
->>>>>>> 7309b1052a998e381b4fe4cb00244d370ac0e251
->>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 - Any other medical related reports
 
 Reject immediately:
@@ -404,7 +397,7 @@ Return ONLY a valid JSON object strictly matching this schema:
 const GRAPHICAL_REPORT_EXTRACTION_PROMPT = `You are a precise medical chart interpretation engine.
 Analyze the provided medical chart image. The image may be an ECG, EKG, cardiogram, heart rate waveform, or other graphical medical report.
 Extract any visible text, patient/hospital/doctor metadata, and a clear structured clinical interpretation.
-
+You must output ONLY valid JSON. Do not include any conversational text, explanations, or markdown formatting  The output must start with { and end with }
 Rules:
 1. Use only the image content. Do not hallucinate information.
 2. If a field is missing, set it to null or an empty array as specified.
@@ -417,6 +410,7 @@ JSON format:
   "chartType": "ECG" or "EKG" or "CARDIOGRAM" or null,
   "patientName": "Patient Name or null",
   "firstName": "First Name or null",
+  "middleName":"Middle Name or null",
   "lastName": "Last Name or null",
   "dateOfBirth": "YYYY-MM-DD or null",
   "gender": "Gender or null",
@@ -591,8 +585,6 @@ Tamil:
 
 ----------------------------------
 English:
-<<<<<<< HEAD
-=======
 No
 Hindi:
 नहीं
@@ -605,7 +597,6 @@ Tamil:
 
 ----------------------------------
 English:
->>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 Skip
 Hindi:
 छोड़ें
@@ -621,10 +612,7 @@ FINAL REQUIREMENTS
 ✔ Never mix English with ${language}.
 ✔ Never transliterate English.
 ✔ Sound exactly like a native speaker wrote it.
-<<<<<<< HEAD
-=======
 ✔ NEVER output paired words (e.g. "Yes/No", "હા/ના") unless they exist in the English text. Translate strictly what is provided.
->>>>>>> 2b2db49 (fix: resolve merge conflicts and remove unused vars)
 ✔ Return ONLY the translated text.
 Do not include quotation marks.
 Do not include markdown.

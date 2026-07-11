@@ -140,7 +140,7 @@ const env = Object.freeze({
   popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
-  embeddingModel: process.env.AI_EMBEDDING_MODEL || "all-MiniLM-L6-v2",
+  embeddingModel: process.env.AI_EMBEDDING_MODEL || "bge-m3:latest",
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   // refillAlertBeforeDays: numberFromEnv("REFILL_ALERT_BEFORE_DAYS", 2),

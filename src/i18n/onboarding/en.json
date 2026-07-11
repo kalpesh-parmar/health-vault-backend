@@ -1,0 +1,54 @@
+{
+  "ASK_LANGUAGE": {
+    "message": "Welcome! Please select your preferred language.",
+    "options": [
+      {
+        "label": "English",
+        "value": "english"
+      },
+      {
+        "label": "Gujarati",
+        "value": "gujarati"
+      },
+      {
+        "label": "Hindi",
+        "value": "hindi"
+      },
+      {
+        "label": "Marathi",
+        "value": "marathi"
+      },
+      {
+        "label": "Tamil",
+        "value": "tamil"
+      }
+    ]
+  },
+  "onboarding.upload.failed": "❌ Document processing failed. Please try again or enter details manually.",
+  "onboarding.retryUpload": "Retry Upload",
+  "onboarding.manual": "Enter Details Manually",
+  "onboarding.document.ownership": "Is this document yours?",
+  "onboarding.yes": "Yes",
+  "onboarding.no": "No",
+  "onboarding.source.conflict.message": "I found two different sources for your details. Please review and choose which one is correct.",
+  "onboarding.source.conflict.title": "We found two different profiles",
+  "onboarding.source.conflict.subtitle": "Please review and choose the one you prefer",
+  "onboarding.source.conflict.explainer": "Name details can sometimes be written differently in documents vs social profiles.",
+  "onboarding.source.useSocialLogin": "Use Social Login",
+  "onboarding.source.useDocument": "Use Document",
+  "onboarding.source.editManually": "Edit manually instead",
+  "onboarding.source.whyTitle": "Why am I seeing this?",
+  "onboarding.field.firstName": "First Name",
+  "onboarding.field.lastName": "Last Name",
+  "onboarding.field.mobile": "Phone Number",
+  "onboarding.field.dob": "Date of Birth",
+  "onboarding.field.gender": "Gender",
+  "onboarding.field.bloodGroup": "Blood Group",
+  "onboarding.medicine.morning": "Morning (08:00)",
+  "onboarding.medicine.noon": "Noon (13:00)",
+  "onboarding.medicine.night": "Night (20:00)",
+  "onboarding.medicine.custom": "Custom",
+  "onboarding.medicine.counter": "Choose {required} times · {selected} of {required} selected",
+  "onboarding.medicine.duplicate": "This time is already added",
+  "onboarding.medicine.saveGateError": "Please select exactly {required} time slots"
+}

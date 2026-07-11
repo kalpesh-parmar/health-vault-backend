@@ -110,6 +110,14 @@ async function runOcrStatus(req, res) {
       error: job.error || "AI response format is invalid.",
     });
   }
+
+  if (job.extractedStructuredData) {
+    job.summary =
+      job.extractedStructuredData.summaryInPreferredLanguage ||
+      job.extractedStructuredData.summaryEnglish ||
+      "";
+  }
+
   return successResponse(res, job, "OCR job status fetched");
 }
 

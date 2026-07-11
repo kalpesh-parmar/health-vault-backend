@@ -148,7 +148,7 @@ const socialLogin = z
   });
 
 const authFailureSchema = z.object({
-  identifier: z.string().min(1).optional(),
+  identifier: z.string().optional(),
   provider: z.enum(providerValues),
   loginType: z.enum(loginTypeValues),
 });

@@ -8,6 +8,9 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { NonMedicalDocumentException } = require("../../../exceptions/appError");
 const prompts = require("../prompts");
 const sharp = require("sharp");
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { ocrStatus } = require("../../../enums/ocrStatus");
 
 async function preprocessImage(imageBuffer) {
   try {
@@ -32,6 +35,33 @@ async function preprocessImage(imageBuffer) {
     );
     return imageBuffer;
   }
+}
+
+function cleanOcrText(text) {
+  if (!text || typeof text !== "string") return "";
+
+  let cleaned = text;
+  // Strip <think>...</think> blocks
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+  // Split into lines to clean line-by-line reasoning
+  const lines = cleaned.split("\n");
+  const filteredLines = lines.filter((line) => {
+    const trimmed = line.trim().toLowerCase();
+    if (
+      trimmed.startsWith("wait,") ||
+      trimmed.startsWith("let me check") ||
+      trimmed.startsWith("let me think") ||
+      trimmed.startsWith("let's see") ||
+      trimmed.startsWith("first, let's") ||
+      trimmed.startsWith("first, let me")
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  return filteredLines.join("\n").trim();
 }
 
 // DB dependencies for processAndStoreSynchronously
@@ -379,6 +409,15 @@ class OcrService {
         },
       },
       {
+        name: "regex_extract_json",
+        fn: () => {
+          //find first { or [ and last ] or }
+          const match = raw.match(/\{[\s\S]*\}/);
+          if (!match) throw new Error("No structure found");
+          return JSON.parse(match[0]);
+        },
+      },
+      {
         name: "first_last_brace",
         fn: () => {
           const firstBrace = raw.indexOf("{");
@@ -577,7 +616,7 @@ class OcrService {
 
     const pageTexts = [];
     console.log(
-      `[OcrService] Processing ${base64Images.length} page(s) sequentially with qwen3-vl:latest...`,
+      `[OcrService] Processing ${base64Images.length} page(s) sequentially with ${env.visionModel}...`,
     );
 
     for (let i = 0; i < base64Images.length; i++) {
@@ -588,7 +627,7 @@ class OcrService {
           images: [base64Images[i]],
         },
       ];
-      const pageText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      const pageText = await ollamaClient.chat(messages, env.visionModel, {
         temperature: 0,
         maxTokens: 8192,
         rawOptions: { num_ctx: 8192 },
@@ -596,7 +635,8 @@ class OcrService {
       pageTexts.push(pageText);
     }
 
-    const rawText = pageTexts.map((text, idx) => `--- Page ${idx + 1} ---\n${text}`).join("\n\n");
+    let rawText = pageTexts.map((text, idx) => `--- Page ${idx + 1} ---\n${text}`).join("\n\n");
+    rawText = cleanOcrText(rawText);
 
     const hasGujarati = /[\u0A80-\u0AFF]/.test(rawText);
     const detectedLanguages = ["english"];
@@ -658,8 +698,9 @@ class OcrService {
         },
       ];
 
-      const responseText = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      const responseText = await ollamaClient.chat(messages, env.visionModel, {
         temperature: 0,
+        // format: "json",
       });
 
       const parsed = this.cleanAndParseJSON(responseText);
@@ -746,7 +787,7 @@ class OcrService {
     }
 
     return {
-      rawText: combined.rawText || combined.summary || "",
+      rawText: cleanOcrText(combined.rawText || combined.summary || ""),
       detectedLanguages,
       pageCount: base64Images.length,
       structuredData: {
@@ -903,17 +944,19 @@ ${rawText}
 
       const combinedName =
         extracted.patientName ||
-        (extracted.firstName || extracted.lastName
-          ? `${extracted.firstName || ""} ${extracted.lastName || ""}`.trim()
+        (extracted.firstName || extracted.middleName || extracted.lastName
+          ? `${extracted.firstName || ""} ${extracted.middleName || ""} ${extracted.lastName || ""}`
+              .replace(/\s+/g, " ")
+              .trim()
           : null);
 
-      if (combinedName) {
-        const { firstName, middleName, lastName } = splitName(combinedName);
-        extracted.firstName = firstName;
-        extracted.middleName = middleName;
-        extracted.lastName = lastName;
-        extracted.patientName = combinedName;
+      if (combinedName && (!extracted.firstName || !extracted.lastName)) {
+        const split = splitName(combinedName);
+        extracted.firstName = extracted.firstName || split.firstName;
+        extracted.middleName = extracted.middleName || split.middleName;
+        extracted.lastName = extracted.lastName || split.lastName;
       }
+      extracted.patientName = combinedName;
 
       return extracted;
     } catch (error) {
@@ -945,6 +988,7 @@ ${rawText}
       throw new Error("OCR produced no usable text");
     }
 
+    rawText = cleanOcrText(rawText);
     const structurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
 
     console.log(
@@ -966,19 +1010,23 @@ ${rawText}
 
     let name = parsedOCR.patient?.name || null;
     let firstName = parsedOCR.patient?.firstName || null;
+    let middleName = parsedOCR.patient?.middleName || null;
     let lastName = parsedOCR.patient?.lastName || null;
-    let middleName = null;
 
     const combinedName =
-      name || (firstName || lastName ? `${firstName || ""} ${lastName || ""}`.trim() : null);
+      name ||
+      (firstName || middleName || lastName
+        ? `${firstName || ""} ${middleName || ""} ${lastName || ""}`.replace(/\s+/g, " ").trim()
+        : null);
 
-    if (combinedName) {
+    if (combinedName && (!firstName || !lastName)) {
       const split = splitName(combinedName);
-      firstName = split.firstName;
-      middleName = split.middleName;
-      lastName = split.lastName;
-      name = combinedName;
+      firstName = firstName || split.firstName;
+      middleName = middleName || split.middleName;
+      lastName = lastName || split.lastName;
     }
+
+    name = combinedName;
 
     const mapped = {
       pages: [
@@ -1074,7 +1122,7 @@ ${rawText}
 
     try {
       const tags = await ollamaClient.listTags();
-      const modelName = env.aiModel || "qwen3-vl:latest";
+      const modelName = env.visionModel || "qwen3-vl:latest";
       const isReachable = tags.length > 0;
 
       modelValidation = {
@@ -1095,7 +1143,7 @@ ${rawText}
       timestamp: new Date().toISOString(),
       ai: {
         engine: "ollama",
-        model: env.aiModel || "qwen3-vl:latest",
+        model: env.visionModel || "qwen2.5-vl-7b",
         baseUrl: env.ollamaUrl || "http://localhost:11434",
         configured,
         apiKeyPresent: false,
@@ -1244,9 +1292,11 @@ ${rawText}
     return { normalized, rawOcrData, structured, summary };
   }
 
-  /*
-  async processAndStoreSynchronously({ file, userId }) {
-    console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
+  async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+    console.log(
+      `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
+    );
+    const { eq } = require("drizzle-orm");
 
     // Fetch preferred language from onboarding state
     let preferredLanguage = "gujarati";
@@ -1265,127 +1315,121 @@ ${rawText}
       }
     }
 
-    // 0. Upload file and validate it as a medical document.
-    // `uploadFileService.uploadFile` already runs AI validation for PATIENT_DOCUMENT,
-    // so this avoids duplicate classifier logic and keeps v1/ocr/extract aligned with the document OCR pipeline.
-    const tUploadStart = Date.now();
-    const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
-    console.log(
-      `[OcrService] [UPLOAD] Duration: ${Date.now() - tUploadStart}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
-    );
+    try {
+      // 2. Perform OCR
+      const tOcrStart = Date.now();
+      const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
+      let ocrResult;
+      let structuredData;
 
-    const fileKey = uploadResult.data.fileKey;
+      if (isGraphicalDocument) {
+        ocrResult = await this.extractGraphicalMedicalData(file, preferredLanguage);
+        structuredData = ocrResult.structuredData;
+        console.log(
+          `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Graphical report. Page count = ${ocrResult.pageCount}.`,
+        );
+      } else {
+        ocrResult = await this.extractText(file, preferredLanguage);
+        console.log(
+          `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}.`,
+        );
 
-    // 2. Perform OCR
-    const tOcrStart = Date.now();
-    const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
-    let ocrResult;
-    let structuredData;
+        // 3. Extract structured medical data
+        const tExtractStart = Date.now();
+        structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+        console.log(
+          `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete.`,
+        );
+      }
 
-    if (isGraphicalDocument) {
-      ocrResult = await this.extractGraphicalMedicalData(file, preferredLanguage);
-      structuredData = ocrResult.structuredData;
+      // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+      const tSummaryStart = Date.now();
+      let summaryEnglish = "";
+      let summaryPreferredLanguage = "";
+
+      if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+        summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
+        summaryPreferredLanguage = summaryEnglish;
+      } else {
+        const [sumEng, sumPref] = await Promise.all([
+          this.generateSummary(ocrResult.rawText, "english"),
+          this.generateSummary(ocrResult.rawText, preferredLanguage),
+        ]);
+        summaryEnglish = sumEng;
+        summaryPreferredLanguage = sumPref;
+      }
       console.log(
-        `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Graphical report detected. Page count = ${ocrResult.pageCount}.`,
+        `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated.`,
       );
+
+      // Ensure data contains both summaries
+      structuredData.summaryEnglish = summaryEnglish;
+      structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+
+      // 5. Update database
+      const tDbStart = Date.now();
+      await db
+        .update(document)
+        .set({
+          ocrStatus: ocrStatus.COMPLETED,
+          ocrExtractedText: ocrResult.rawText,
+          structuredExtractedData: structuredData,
+          reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
+          hospitalName: structuredData.hospitalName || null,
+          doctorName: structuredData.doctorName || null,
+          remarks: structuredData.remarks || null,
+          summaryEnglish,
+          summaryInPreferredLanguage: summaryPreferredLanguage,
+          updatedAt: new Date(),
+        })
+        .where(eq(document.id, documentId));
       console.log(
-        `[OcrService] [EXTRACT] Graphical structured extraction complete. Generating Gujarati summary...`,
-      );
-    } else {
-      ocrResult = await this.extractText(file, preferredLanguage);
-      console.log(
-        `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}. Extracting structured data...`,
+        `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. Document ${documentId} updated. Indexing in RAG...`,
       );
 
-      // 3. Extract structured medical data
-      const tExtractStart = Date.now();
-      structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
-      console.log(
-        `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
-      );
-    }
-
-    // 4. Generate summaries in English and preferred language
-    const tSummaryStart = Date.now();
-    const [summaryEnglish, summaryPreferredLanguage] = await Promise.all([
-      this.generateSummary(ocrResult.rawText, "english"),
-      this.generateSummary(ocrResult.rawText, preferredLanguage),
-    ]);
-    console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
-    );
-
-    // Ensure controller response contains both summaries
-    structuredData.summaryEnglish = summaryEnglish;
-    structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
-
-    // 5. Store in database
-    const tDbStart = Date.now();
-    const bucketName =
-      uploadResult.data.s3Bucket ||
-      (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-    const filePath =
-      env.storageProvider === "gcp"
-        ? `gs://${bucketName}/${fileKey}`
-        : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
-
-    const [documentRow] = await db
-      .insert(document)
-      .values({
+      // 6. Index Document in RAG
+      const { embeddingService } = require("../chat/embedding.service");
+      await embeddingService.embedAndPersist({
+        documentId,
         userId,
-        documentType: "medical_document",
-        fileName: uploadResult.data.originalFileName,
-        filePath,
-        s3Bucket: bucketName,
-        s3Key: fileKey,
-        fileType: inferFileType(uploadResult.data.mimeType),
-        fileSize: uploadResult.data.fileSize,
-        ocrStatus: ocrStatus.COMPLETED,
-        ocrExtractedText: ocrResult.rawText,
-        structuredExtractedData: structuredData,
-        reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
-        hospitalName: structuredData.hospitalName || null,
-        doctorName: structuredData.doctorName || null,
-        remarks: structuredData.remarks || null,
-        summaryEnglish,
-        summaryInPreferredLanguage: summaryPreferredLanguage,
-      })
-      .returning();
-    console.log(
-      `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. ID=${documentRow.id}. Indexing in RAG...`,
-    );
+        rawOcr: {
+          fullText: ocrResult.rawText,
+          language: ocrResult.detectedLanguages?.join(",") || "en",
+        },
+        structured: {
+          summary: summaryPreferredLanguage,
+          observations: Array.isArray(structuredData.diagnosis)
+            ? structuredData.diagnosis
+            : structuredData.diagnosis
+              ? [structuredData.diagnosis]
+              : [],
+          recommendations: structuredData.remarks ? [structuredData.remarks] : [],
+          medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
+        },
+      });
 
-    // 6. Index Document in RAG
-    const { embeddingService } = require("../chat/embedding.service");
-    //remove await so that time reduce and embedding performs in bachground
-    await embeddingService.embedAndPersist({
-      documentId: documentRow.id,
-      userId,
-      rawOcr: {
-        fullText: ocrResult.rawText,
-        language: ocrResult.detectedLanguages?.join(",") || "en",
-      },
-      structured: {
-        summary: summaryPreferredLanguage,
-        observations: Array.isArray(structuredData.diagnosis)
-          ? structuredData.diagnosis
-          : structuredData.diagnosis
-            ? [structuredData.diagnosis]
-            : [],
-        recommendations: structuredData.remarks ? [structuredData.remarks] : [],
-        medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
-      },
-    });
-
-    console.log(`[OcrService] RAG indexing completed.`);
-
-    return {
-      document: documentRow,
-      ocrResult,
-      structuredData,
-    };
+      console.log(
+        `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
+      );
+    } catch (err) {
+      console.error(
+        `[OcrService] [ERROR] processAndStoreAsynchronously failed for document ${documentId}:`,
+        err,
+      );
+      try {
+        await db
+          .update(document)
+          .set({
+            ocrStatus: ocrStatus.FAILED,
+            remarks: `Processing failed: ${err.message}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(document.id, documentId));
+      } catch (dbErr) {
+        console.error(`[OcrService] Failed to set document status to FAILED in DB:`, dbErr);
+      }
+    }
   }
-*/
 }
 
 const ocrService = new OcrService();

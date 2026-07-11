@@ -8,10 +8,10 @@ const { InvalidRequestException, NotFoundException } = require("../exceptions/ap
 const DocumentArtifactsRepository = require("../repositories/documentArtifactsRepository");
 const documentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const patientRepository = require("../repositories/patientRepository");
-const EmbeddingService = require("./ai/chat/embedding.service");
 const medicationMapper = require("./ai/helpers/medicationMapper");
 const objectStorageService = require("./objectStorageService");
 const { document } = require("../models/document");
+const { embeddingService } = require("./ai/chat/embedding.service");
 
 function inferDocumentType(rawType) {
   const allowed = new Set(documentTypeValue);
@@ -112,7 +112,7 @@ class DocumentPersistenceService {
           doctorName: extractedStructuredData?.doctorName || null,
           fileName,
           filePath,
-          fileSize: rawOcrData?.fileSize || 0,
+          fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
           fileType: inferFileType(mimeType),
           hospitalName: extractedStructuredData?.hospitalName || null,
           ocrExtractedText: rawOcrData?.fullText || null,
@@ -125,6 +125,8 @@ class DocumentPersistenceService {
           s3Key: s3Key,
           structuredExtractedData: extractedStructuredData,
           userId,
+          summaryEnglish: extractedStructuredData?.summaryEnglish || null,
+          summaryInPreferredLanguage: extractedStructuredData?.summaryInPreferredLanguage || null,
         })
         .returning();
 
@@ -220,7 +222,7 @@ class DocumentPersistenceService {
 
       let embeddingResult = { chunkCount: 0, chunkIds: [], embeddings: 0 };
       if (!embeddingsGenerated) {
-        embeddingResult = await EmbeddingService.embedAndPersist({
+        embeddingResult = await embeddingService.embedAndPersist({
           documentId,
           rawOcr: rawOcrData,
           structured: extractedStructuredData,

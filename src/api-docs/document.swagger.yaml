@@ -54,7 +54,9 @@ components:
         fileName:
           type: string
           example: blood-report.pdf
-
+        fileSize:
+          type: number
+          example: 45678
         fileType:
           type: string
           example: application/pdf

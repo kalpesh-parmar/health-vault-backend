@@ -56,6 +56,7 @@ const addDocumentSchema = z
     s3Key: z.string().trim().min(3).max(500),
     documentType: z.enum(documentTypeValue).optional(),
     fileType: z.string().optional(), // Added so Zod strict() doesn't fail if passed from frontend
+    fileSize: z.number().optional(),
     fileName: z.string().trim().max(255).optional(),
     s3bucket: z.string().trim().max(255).optional(),
     mimeType: z.string().trim().max(128).optional(),

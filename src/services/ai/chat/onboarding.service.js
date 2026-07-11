@@ -1,14 +1,16 @@
 /* eslint-disable no-console */
+const fs = require("fs");
+const path = require("path");
 const { ollamaClient } = require("../clients/ollamaClient");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const authProviderRepository = require("../../../repositories/authProviderRepository");
 const medicationService = require("../../medicationService");
-const medicationReminderService = require("../../medicationReminderService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
-const { medicationTypeValues } = require("../../../enums/medicationType");
-const { frequencyTypeValues, frequencyType } = require("../../../enums/frequencyType");
 const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
+const { medicationTypeValues } = require("../../../enums/medicationType");
+const { frequencyTypeValues } = require("../../../enums/frequencyType");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -58,6 +60,72 @@ function splitName(fullName) {
   const firstName = parts[0];
   const lastName = parts.slice(1).join(" ");
   return { firstName, lastName };
+}
+
+function normalizeName(name) {
+  if (!name) return null;
+  const cleaned = String(name).trim().replace(/\s+/g, " ");
+  if (!cleaned) return null;
+  return cleaned;
+}
+
+function normalizePhone(phoneStr) {
+  if (!phoneStr) return null;
+  const cleaned = String(phoneStr)
+    .trim()
+    .replace(/[^\d+]/g, "");
+  return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
+}
+
+function isSamePhone(p1, p2) {
+  if (!p1 || !p2) return false;
+  const digits1 = String(p1).replace(/\D/g, "");
+  const digits2 = String(p2).replace(/\D/g, "");
+
+  if (digits1.length === 0 || digits2.length === 0) return false;
+
+  const last10_1 = digits1.slice(-10);
+  const last10_2 = digits2.slice(-10);
+
+  if (last10_1 !== last10_2) return false;
+
+  if (digits1.length > 10 && digits2.length > 10) {
+    const cc1 = digits1.slice(0, digits1.length - 10);
+    const cc2 = digits2.slice(0, digits2.length - 10);
+    return cc1 === cc2;
+  }
+
+  return true;
+}
+
+function getLocalizedTranslation(key, language) {
+  try {
+    let langCode = "en";
+    if (language === "hindi") langCode = "hi";
+    else if (language === "marathi") langCode = "mr";
+    else if (language === "gujarati") langCode = "gu";
+    else if (language === "tamil") langCode = "ta";
+
+    const filePath = path.resolve(__dirname, `../../../i18n/onboarding/${langCode}.json`);
+    if (fs.existsSync(filePath)) {
+      const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      if (content && content[key]) {
+        return content[key];
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[OnboardingService] Failed to load local i18n file for ${language}:`,
+      err.message,
+    );
+  }
+  return null;
+}
+
+async function getLocalizedText(key, defaultEnglish, language) {
+  const localVal = getLocalizedTranslation(key, language);
+  if (localVal) return localVal;
+  return await translateMessage(defaultEnglish, language);
 }
 
 function normalizeDOB(dobStr) {
@@ -172,9 +240,10 @@ User Input: "${text}"`,
 const OnboardingStep = {
   ASK_LANGUAGE: "ASK_LANGUAGE",
   ASK_UPLOAD_OR_SKIP: "ASK_UPLOAD_OR_SKIP",
-  ASK_USE_SOCIAL_LOGIN_INFO: "ASK_USE_SOCIAL_LOGIN_INFO",
+  RESOLVE_PROFILE_SOURCE: "RESOLVE_PROFILE_SOURCE",
   ASK_UPLOAD_DOCUMENT: "ASK_UPLOAD_DOCUMENT",
-  ASK_DOCUMENT_CONFIRMATION: "ASK_DOCUMENT_CONFIRMATION",
+  ASK_UPLOAD_DOCUMENT_FAILED: "ASK_UPLOAD_DOCUMENT_FAILED",
+  CONFIRM_DOCUMENT_OWNERSHIP: "CONFIRM_DOCUMENT_OWNERSHIP",
   ASK_FIRST_NAME: "ASK_FIRST_NAME",
   ASK_LAST_NAME: "ASK_LAST_NAME",
   ASK_DOB: "ASK_DOB",
@@ -212,68 +281,193 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   // Medication Flow
-  if (!state.medicinesSkipped) {
-    if (!state.medicinesFlowStarted) {
+  if (!state.medicationFlowDone) {
+    if (!state.medicationFlowStarted) {
+      state.medicationFlowStarted = true;
       if (state.flowMode === "UPLOAD" && state.foundMedicines && state.foundMedicines.length > 0) {
-        return "ASK_FOUND_MEDICINES";
-      } else {
-        return "ASK_ON_MEDICINES";
-      }
-    }
-
-    if (state.medicinesToAdd && state.medicinesToAdd.length > 0) {
-      if (!state.medicinesConfirmed) {
+        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
         return "REVIEW_MEDICINES_LIST";
-      }
-
-      for (let i = 0; i < state.medicinesToAdd.length; i++) {
-        const med = state.medicinesToAdd[i];
-
-        if (!med.medicationName) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_NAME";
-        }
-        if (!med.medicationType) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_TYPE";
-        }
-        if (med.dosePerIntake === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_DOSE_PER_INTAKE";
-        }
-        if (!med.frequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FREQUENCY";
-        }
-        if (!med.medicationSchedule || Object.keys(med.medicationSchedule).length === 0) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_SCHEDULE";
-        }
-        if (!med.foodFrequency) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_FOOD_FREQUENCY";
-        }
-        if (!med.startDate) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_START_DATE";
-        }
-        if (med.totalQuantity === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_QUANTITY";
-        }
-        if (med.ongoing === undefined) {
-          state.currentMedicineIndex = i;
-          return "ASK_MEDICINE_ONGOING";
-        }
-        if (!med.isConfirmed) {
-          state.currentMedicineIndex = i;
-          return "CONFIRM_MEDICINE";
-        }
+      } else {
+        return "MEDICINE_OPTIONS";
       }
     }
+    if (state.currentStep) {
+      return state.currentStep;
+    }
+    return "MEDICINE_OPTIONS";
   }
 
   return "REGISTER_USER";
+}
+
+function normalizeFieldVal(val, type) {
+  if (val === undefined || val === null) return "";
+  const str = String(val).trim();
+  const lower = str.toLowerCase();
+  if (lower === "" || lower === "null" || lower === "undefined" || lower === "nan") {
+    return "";
+  }
+  if (type === "name") {
+    return lower.replace(/\s+/g, " ");
+  }
+  if (type === "gender") {
+    return lower;
+  }
+  return str;
+}
+
+function getProfileMismatches(state) {
+  console.log("[RAW LOGIN DATA] loginData:", JSON.stringify(state.loginData, null, 2));
+  console.log("[RAW DOCUMENT DATA] documentData:", JSON.stringify(state.documentData, null, 2));
+
+  if (!state.loginData) {
+    return { hasMismatch: false, fields: [] };
+  }
+
+  const docData = state.documentData || {};
+  const fields = [];
+
+  const compareKeys = [
+    { key: "firstName", label: "First Name", type: "name" },
+    { key: "lastName", label: "Last Name", type: "name" },
+    { key: "phoneNumber", label: "Phone Number", type: "phone" },
+    { key: "dateOfBirth", label: "Date of Birth", type: "dob" },
+    { key: "gender", label: "Gender", type: "gender" },
+    { key: "email", label: "Email", type: "email" },
+  ];
+
+  for (const item of compareKeys) {
+    const loginField = state.loginData[item.key] || { value: null, verified: false };
+    const rawLogin = loginField.value;
+
+    let rawDoc = docData[item.key];
+    if (item.key === "phoneNumber" && rawDoc === undefined) {
+      rawDoc = docData.mobile || docData.phoneNumber;
+    }
+
+    const normalizedLogin = normalizeFieldVal(rawLogin, item.type);
+    const normalizedDoc = normalizeFieldVal(rawDoc, item.type);
+
+    let isMismatch = false;
+    if (loginField.verified) {
+      // Verified fields are never marked as mismatch
+      isMismatch = false;
+    } else if (normalizedLogin && normalizedDoc) {
+      if (item.type === "phone") {
+        isMismatch = !isSamePhone(normalizedLogin, normalizedDoc);
+      } else {
+        isMismatch = normalizedLogin !== normalizedDoc;
+      }
+    }
+
+    console.log("[INSTRUMENTATION] getProfileMismatches field evaluation:", {
+      key: item.key,
+      verified: loginField.verified,
+      rawLogin,
+      rawDoc,
+      normalizedLogin,
+      normalizedDoc,
+      isMismatch,
+    });
+
+    fields.push({
+      key: item.key,
+      label: item.label,
+      loginValue: rawLogin || null,
+      documentValue: loginField.verified ? rawLogin : rawDoc || null,
+      isMismatch,
+      verified: loginField.verified,
+    });
+  }
+
+  const hasMismatch = fields.some((f) => f.isMismatch === true);
+  console.log("[INSTRUMENTATION] getProfileMismatches final decision:", {
+    hasMismatch,
+    computedMode: hasMismatch ? "CONFLICT" : "CONFIRM",
+  });
+
+  return { hasMismatch, fields };
+}
+
+function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
+  const compareKeys = ["firstName", "lastName", "phoneNumber", "dateOfBirth", "gender", "email"];
+
+  const docData = state.documentData || {};
+
+  for (const key of compareKeys) {
+    const loginField = state.loginData?.[key] || { value: null, verified: false };
+    const rawLogin = loginField.value;
+
+    let rawDoc = docData[key];
+    if (key === "phoneNumber" && rawDoc === undefined) {
+      rawDoc = docData.mobile || docData.phoneNumber;
+    }
+
+    const normalizedLogin = normalizeFieldVal(rawLogin, key === "phoneNumber" ? "phone" : key);
+    const normalizedDoc = normalizeFieldVal(rawDoc, key === "phoneNumber" ? "phone" : key);
+
+    const isMismatch =
+      !loginField.verified &&
+      normalizedLogin &&
+      normalizedDoc &&
+      (key === "phoneNumber"
+        ? !isSamePhone(normalizedLogin, normalizedDoc)
+        : normalizedLogin !== normalizedDoc);
+
+    const shownValue = loginField.verified ? rawLogin : rawLogin || rawDoc || null;
+
+    if (loginField.verified) {
+      state.existingUserData[key] = rawLogin;
+    } else if (editedData) {
+      // Exclude verified fields from editedData application (ignored on backend for verified fields)
+      if (editedData[key] !== undefined) {
+        state.existingUserData[key] = editedData[key];
+      } else {
+        state.existingUserData[key] = shownValue;
+      }
+    } else if (isMismatch && sourceChoice) {
+      state.existingUserData[key] = sourceChoice === "DOCUMENT" ? rawDoc : rawLogin;
+    } else {
+      // Non-conflicting/document-only fields are kept and not wiped by source choice
+      state.existingUserData[key] = rawLogin || rawDoc || null;
+    }
+  }
+
+  // Normalize and validate names & phone number & email & dob & gender
+  if (state.existingUserData.firstName) {
+    state.existingUserData.firstName = normalizeName(state.existingUserData.firstName);
+  }
+  if (state.existingUserData.lastName) {
+    state.existingUserData.lastName = normalizeName(state.existingUserData.lastName);
+  }
+  if (state.existingUserData.phoneNumber) {
+    const normPhone = normalizePhone(state.existingUserData.phoneNumber);
+    if (normPhone) {
+      state.existingUserData.phoneNumber = normPhone;
+    }
+  }
+  if (state.existingUserData.dateOfBirth) {
+    const normDob = normalizeDOB(String(state.existingUserData.dateOfBirth));
+    if (normDob) {
+      state.existingUserData.dateOfBirth = normDob;
+    }
+  }
+  if (state.existingUserData.gender) {
+    const lowerGender = String(state.existingUserData.gender).trim().toLowerCase();
+    if (lowerGender === "male" || lowerGender === "female") {
+      state.existingUserData.gender = lowerGender;
+    } else {
+      state.existingUserData.gender = null;
+    }
+  }
+  if (state.existingUserData.email) {
+    const trimmedEmail = String(state.existingUserData.email).trim().toLowerCase();
+    if (/^\S+@\S+\.\S+$/.test(trimmedEmail)) {
+      state.existingUserData.email = trimmedEmail;
+    } else {
+      state.existingUserData.email = null;
+    }
+  }
 }
 
 function computeCurrentStep(state) {
@@ -285,19 +479,32 @@ function computeCurrentStep(state) {
 
   if (state.flowMode === "UPLOAD") {
     const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
+    if (state.ocrFailed) return "ASK_UPLOAD_DOCUMENT_FAILED";
     if (!isUploaded) return "ASK_UPLOAD_DOCUMENT";
-    if (state.documentExtracted && !state.documentConfirmed) {
-      return "CONFIRM_DOCUMENT_DETAILS";
+    if (
+      state.documentExtracted &&
+      (state.documentOwnershipConfirmed === undefined || state.documentOwnershipConfirmed === null)
+    ) {
+      return "CONFIRM_DOCUMENT_OWNERSHIP";
     }
-    if (state.documentExtracted && state.hasSocialData && !state.socialDataConfirmed) {
-      return "ASK_USE_SOCIAL_LOGIN_INFO";
+    if (
+      state.documentExtracted &&
+      state.documentConfirmed &&
+      state.hasLoginData &&
+      !state.profileConfirmed
+    ) {
+      return "RESOLVE_PROFILE_SOURCE";
+    }
+  } else if (state.flowMode === "MANUAL" || state.flowMode === "SKIP") {
+    if (state.hasLoginData && !state.profileConfirmed) {
+      return "RESOLVE_PROFILE_SOURCE";
     }
   }
 
   return getNextRequiredOrOptionalStep(state);
 }
 
-async function updateStateFromMessage(state, message) {
+async function updateStateFromMessage(state, message, userId = null) {
   const msg = (message || "").trim();
   const lower = msg.toLowerCase();
   const isSkip = [
@@ -330,65 +537,45 @@ async function updateStateFromMessage(state, message) {
       const fmVal = msg;
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
-        if (fmVal === "MANUAL" && state.hasSocialData) {
-          state.socialDataConfirmed = true;
-          if (state.socialData) {
-            state.existingUserData.firstName =
-              state.socialData.firstName || state.existingUserData.firstName;
-            state.existingUserData.lastName =
-              state.socialData.lastName || state.existingUserData.lastName;
-            state.existingUserData.email = state.socialData.email || state.existingUserData.email;
-            state.existingUserData.gender =
-              state.socialData.gender || state.existingUserData.gender;
-            state.existingUserData.dateOfBirth =
-              state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
-          }
-        }
         state.currentStep = computeCurrentStep(state);
       } else {
         const extractedFM = await extractFieldFromMessage("flowMode", msg, state.preferredLanguage);
         if (extractedFM === "UPLOAD" || extractedFM === "MANUAL") {
           state.flowMode = extractedFM;
-          if (extractedFM === "MANUAL" && state.hasSocialData) {
-            state.socialDataConfirmed = true;
-            if (state.socialData) {
-              state.existingUserData.firstName =
-                state.socialData.firstName || state.existingUserData.firstName;
-              state.existingUserData.lastName =
-                state.socialData.lastName || state.existingUserData.lastName;
-              state.existingUserData.email = state.socialData.email || state.existingUserData.email;
-              state.existingUserData.gender =
-                state.socialData.gender || state.existingUserData.gender;
-              state.existingUserData.dateOfBirth =
-                state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
-            }
-          }
           state.currentStep = computeCurrentStep(state);
         }
       }
       break;
     }
 
-    case "ASK_USE_SOCIAL_LOGIN_INFO": {
-      const msgUpper = msg.toUpperCase();
-      const isSocial = msgUpper === "SOCIAL" || msgUpper === "YES";
-      const isDocument = msgUpper === "DOCUMENT" || msgUpper === "NO";
-
-      if (isSocial) {
-        state.socialDataConfirmed = true;
-        if (state.socialData) {
-          state.existingUserData.firstName =
-            state.socialData.firstName || state.existingUserData.firstName;
-          state.existingUserData.lastName =
-            state.socialData.lastName || state.existingUserData.lastName;
-          state.existingUserData.email = state.socialData.email || state.existingUserData.email;
-          state.existingUserData.gender = state.socialData.gender || state.existingUserData.gender;
-          state.existingUserData.dateOfBirth =
-            state.socialData.dateOfBirth || state.existingUserData.dateOfBirth;
-        }
+    case "RESOLVE_PROFILE_SOURCE": {
+      if (state.profileConfirmed) {
         state.currentStep = computeCurrentStep(state);
-      } else if (isDocument) {
-        state.socialDataConfirmed = true;
+        break;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        const msgUpper = msg.toUpperCase();
+        if (msgUpper === "SOCIAL" || msgUpper === "LOGIN" || msgUpper === "YES") {
+          payload = { source: "LOGIN" };
+        } else if (msgUpper === "DOCUMENT" || msgUpper === "NO") {
+          payload = { source: "DOCUMENT" };
+        }
+      }
+
+      if (payload && payload.confirmed) {
+        mergeAndApplyProfile(state);
+        state.profileConfirmed = true;
+        state.currentStep = computeCurrentStep(state);
+      } else if (payload && payload.source) {
+        mergeAndApplyProfile(state, payload.source);
+        state.profileConfirmed = true;
+        state.currentStep = computeCurrentStep(state);
+      } else if (payload && payload.edited) {
+        mergeAndApplyProfile(state, null, payload.edited);
+        state.profileConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -398,59 +585,98 @@ async function updateStateFromMessage(state, message) {
       const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
       if (isUploaded) {
         state.currentStep = getNextRequiredOrOptionalStep(state);
+      } else if (msg === "OCR_FAILED") {
+        state.ocrFailed = true;
+        state.currentStep = "ASK_UPLOAD_DOCUMENT_FAILED";
       }
       break;
     }
 
-    case "CONFIRM_DOCUMENT_DETAILS": {
-      const msgUpper = msg.toUpperCase();
-      if (msgUpper === "YES") {
+    case "ASK_UPLOAD_DOCUMENT_FAILED": {
+      if (msg === "RETRY_UPLOAD" || msg.toUpperCase() === "RETRY_UPLOAD") {
+        state.ocrFailed = false;
+        state.currentStep = "ASK_UPLOAD_DOCUMENT";
+      } else if (msg === "MANUAL" || msg.toUpperCase() === "MANUAL") {
+        state.flowMode = "MANUAL";
+        state.ocrFailed = false;
+        state.currentStep = getNextRequiredOrOptionalStep(state);
+      }
+      break;
+    }
+
+    case "CONFIRM_DOCUMENT_OWNERSHIP": {
+      if (
+        state.documentOwnershipConfirmed !== undefined &&
+        state.documentOwnershipConfirmed !== null
+      ) {
+        break;
+      }
+      let answer = null;
+      try {
+        const payload = JSON.parse(msg);
+        if (payload && payload.value) {
+          answer = String(payload.value).toUpperCase();
+        } else if (payload && payload.confirm !== undefined) {
+          answer = payload.confirm ? "YES" : "NO";
+        }
+      } catch {
+        const msgUpper = msg.toUpperCase();
+        if (msgUpper === "YES" || msgUpper === "Y") {
+          answer = "YES";
+        } else if (msgUpper === "NO" || msgUpper === "N") {
+          answer = "NO";
+        }
+      }
+
+      if (!answer) {
+        const extractedConf = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+        if (extractedConf === "YES" || extractedConf === "NO") {
+          answer = extractedConf;
+        }
+      }
+
+      if (answer === "YES") {
+        state.documentOwnershipConfirmed = true;
         state.documentConfirmed = true;
         state.currentStep = computeCurrentStep(state);
-      } else if (msgUpper === "NO") {
+      } else if (answer === "NO") {
+        state.documentOwnershipConfirmed = false;
         state.documentConfirmed = false;
         state.flowMode = "MANUAL";
         state.documentUploaded = false;
         state.uploadedMedicalDocument = false;
         state.documentText = "";
         state.documentExtracted = false;
+
+        const rollbackData = {
+          firstName: state.loginData?.firstName?.value || null,
+          lastName: state.loginData?.lastName?.value || null,
+          dateOfBirth: state.loginData?.dateOfBirth?.value
+            ? new Date(state.loginData.dateOfBirth.value)
+            : null,
+          gender: state.loginData?.gender?.value || null,
+          mobile: state.loginData?.phoneNumber?.value || null,
+        };
+        if (state.loginData?.email?.value) {
+          rollbackData.email = state.loginData.email.value;
+        }
+
         state.existingUserData = {
-          firstName: null,
-          lastName: null,
-          dateOfBirth: null,
-          gender: null,
-          email: null,
+          firstName: rollbackData.firstName,
+          lastName: rollbackData.lastName,
+          dateOfBirth: state.loginData?.dateOfBirth?.value || null,
+          gender: rollbackData.gender,
+          email: rollbackData.email,
           bloodGroup: null,
           allergies: [],
+          phoneNumber: rollbackData.mobile,
         };
-        state.currentStep = "ASK_FIRST_NAME";
-      } else {
-        const extractedConf = await extractFieldFromMessage(
-          "documentConfirmed",
-          msg,
-          state.preferredLanguage,
-        );
-        if (extractedConf === "YES") {
-          state.documentConfirmed = true;
-          state.currentStep = computeCurrentStep(state);
-        } else if (extractedConf === "NO") {
-          state.documentConfirmed = false;
-          state.flowMode = "MANUAL";
-          state.documentUploaded = false;
-          state.uploadedMedicalDocument = false;
-          state.documentText = "";
-          state.documentExtracted = false;
-          state.existingUserData = {
-            firstName: null,
-            lastName: null,
-            dateOfBirth: null,
-            gender: null,
-            email: null,
-            bloodGroup: null,
-            allergies: [],
-          };
-          state.currentStep = "ASK_FIRST_NAME";
+
+        if (userId) {
+          await patientRepository.updateById(userId, rollbackData);
         }
+
+        state.currentStep = getNextRequiredOrOptionalStep(state);
       }
       break;
     }
@@ -534,29 +760,10 @@ async function updateStateFromMessage(state, message) {
       if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
-          state.medicinesToAdd = (state.foundMedicines || []).map((m) => {
-            let parsedDose = undefined;
-            if (m.dosage && typeof m.dosage === "string") {
-              const parts = m.dosage
-                .split("-")
-                .map((p) => parseInt(p, 10))
-                .filter((n) => !isNaN(n));
-              if (parts.length > 0) {
-                parsedDose = Math.max(...parts);
-              }
-            }
-            return {
-              medicationName: m.name || m.medicationName,
-              medicationType: undefined,
-              dosePerIntake: parsedDose,
-              frequency: undefined,
-              medicationSchedule: undefined,
-              foodFrequency: undefined,
-              startDate: undefined,
-              totalQuantity: undefined,
-              ongoing: undefined,
-              isConfirmed: false,
-            };
+          const { normalizeMedicine } = require("../helpers/medicineNormalize");
+          state.medicinesToAdd = (state.foundMedicines || []).map((m, index) => {
+            const { onboardingMed } = normalizeMedicine(m, index);
+            return onboardingMed;
           });
           // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
         } else {
@@ -572,167 +779,183 @@ async function updateStateFromMessage(state, message) {
     }
 
     case "REVIEW_MEDICINES_LIST": {
-      const txt = msg.toUpperCase();
-      if (txt.includes("EDIT") || txt === "NO") {
-        // UI handle
-      } else {
-        state.medicinesConfirmed = true;
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-
-    case "ASK_MEDICINE_NAME": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.medicationName = await extractFieldFromMessage(
-        "medicationName",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_TYPE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const matchedType = medicationTypeValues.find((v) => v.toUpperCase() === msg.toUpperCase());
-      if (matchedType) {
-        med.medicationType = matchedType;
-      } else {
-        med.medicationType = await extractFieldFromMessage(
-          "medicationType",
-          msg,
-          state.preferredLanguage,
-        );
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_DOSE_PER_INTAKE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      med.dosePerIntake = await extractFieldFromMessage(
-        "dosePerIntake",
-        msg,
-        state.preferredLanguage,
-      );
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const matchedFreq = frequencyTypeValues.find((v) => v.toUpperCase() === msg.toUpperCase());
-      if (matchedFreq) {
-        med.frequency = matchedFreq;
-      } else {
-        med.frequency = await extractFieldFromMessage("frequency", msg, state.preferredLanguage);
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_SCHEDULE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (!med.tempTimes) med.tempTimes = [];
-
-      let expectedDoses = 1;
-      if (med.frequency === frequencyType.TWICE_DAILY) expectedDoses = 2;
-      if (med.frequency === frequencyType.THREE_TIMES_DAILY) expectedDoses = 3;
-
-      const timeVal = await extractFieldFromMessage("time24Hour", msg, state.preferredLanguage);
-      if (timeVal) {
-        med.tempTimes.push(timeVal);
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
       }
 
-      if (med.tempTimes.length >= expectedDoses || med.frequency === "AS_NEEDED") {
-        let schedule = {};
-        let customTimes = [];
+      if (payload.selected) {
+        const selectedIds = payload.selected;
+        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
+          ...m,
+          selected: selectedIds.includes(m.id),
+        }));
 
-        for (const timeStr of med.tempTimes) {
-          const hour = parseInt(timeStr.split(":")[0], 10);
-          let key = "Custom";
-          if (hour >= 5 && hour < 12) key = "Morning";
-          else if (hour >= 12 && hour < 17) key = "Noon";
-          else if (hour >= 17 || hour < 5) key = "Night";
-
-          if (key !== "Custom" && !schedule[key]) {
-            schedule[key] = timeStr;
-          } else {
-            customTimes.push(timeStr);
+        let nextIncompleteIndex = -1;
+        for (let i = 0; i < state.medicinesToAdd.length; i++) {
+          const m = state.medicinesToAdd[i];
+          if (m.selected) {
+            try {
+              await medicationService.validate(m);
+            } catch {
+              nextIncompleteIndex = i;
+              break;
+            }
           }
         }
 
-        if (customTimes.length > 0) {
-          schedule.CUSTOM = customTimes;
+        if (nextIncompleteIndex >= 0) {
+          state.currentMedicineIndex = nextIncompleteIndex;
+          state.currentStep = "ADD_MEDICINE";
+        } else {
+          state.validMedsToBulkCreate = state.medicinesToAdd.filter((m) => m.selected);
+          state.confirmMode = "BULK";
+          state.currentStep = "CONFIRM_MEDICINE";
+        }
+      } else if (payload.addNew) {
+        state.currentStep = "ADD_MEDICINE";
+        state.currentMedicineIndex = undefined;
+      } else if (payload.skipAll) {
+        state.medicationFlowDone = true;
+        state.currentStep = "MEDICINE_OPTIONS";
+      }
+      break;
+    }
+
+    case "ADD_MEDICINE": {
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
+      }
+
+      if (payload.medicine) {
+        try {
+          await medicationService.validate(payload.medicine);
+        } catch {
+          break;
         }
 
-        med.medicationSchedule = schedule;
-        delete med.tempTimes;
-      }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_FOOD_FREQUENCY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      if (msg.toUpperCase() === "BEFORE_FOOD" || msg.toUpperCase() === "AFTER_FOOD") {
-        med.foodFrequency = msg.toUpperCase();
-      } else {
-        med.foodFrequency = await extractFieldFromMessage(
-          "foodFrequency",
-          msg,
-          state.preferredLanguage,
+        const newMed = {
+          ...payload.medicine,
+          client_med_id: payload.clientMedId || payload.medicine.client_med_id,
+          id: payload.clientMedId || payload.medicine.client_med_id,
+        };
+
+        if (!state.medicinesToAdd) state.medicinesToAdd = [];
+
+        const existingIdx = state.medicinesToAdd.findIndex(
+          (m) => m.client_med_id === newMed.client_med_id,
         );
+        if (existingIdx >= 0) {
+          state.medicinesToAdd[existingIdx] = {
+            ...state.medicinesToAdd[existingIdx],
+            ...newMed,
+            selected: true,
+          };
+        } else {
+          state.medicinesToAdd.push({ ...newMed, selected: true });
+        }
+
+        state.activeMedicine = newMed;
+        state.confirmMode = "SINGLE";
+        state.currentStep = "CONFIRM_MEDICINE";
       }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_START_DATE": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const d = await extractFieldFromMessage("startDate", msg, state.preferredLanguage);
-      if (d) med.startDate = d;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_QUANTITY": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const quantity = await extractFieldFromMessage("totalQuantity", msg, state.preferredLanguage);
-      med.totalQuantity = parseInt(quantity, 10);
-      state.currentStep = getNextRequiredOrOptionalStep(state);
-      break;
-    }
-    case "ASK_MEDICINE_ONGOING": {
-      const idx = state.currentMedicineIndex;
-      const med = state.medicinesToAdd[idx];
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      med.ongoing = yesNoVal === "YES" || msg.toUpperCase() === "YES";
-      state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
     case "CONFIRM_MEDICINE": {
-      const txt = msg.toUpperCase();
-      const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      if (txt.includes("EDIT") || txt === "NO" || yesNoVal === "NO") {
-        // Keep the values but mark as unconfirmed so UI can open edit form
-        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = false;
-        state.currentStep = "EDIT_MEDICINE";
-      } else {
-        state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
-        state.currentStep = getNextRequiredOrOptionalStep(state);
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        payload = {};
+      }
+
+      if (payload.confirmed) {
+        if (state.confirmMode === "SINGLE") {
+          if (!state.activeMedicine?.client_med_id) {
+            throw new Error("client_med_id is missing");
+          }
+
+          await medicationService.create(userId, state.activeMedicine);
+
+          let nextIncompleteIndex = -1;
+          for (let i = 0; i < state.medicinesToAdd.length; i++) {
+            const m = state.medicinesToAdd[i];
+            if (m.selected && m.client_med_id !== state.activeMedicine.client_med_id) {
+              try {
+                await medicationService.validate(m);
+              } catch {
+                nextIncompleteIndex = i;
+                break;
+              }
+            }
+          }
+
+          if (nextIncompleteIndex >= 0) {
+            state.currentMedicineIndex = nextIncompleteIndex;
+            state.currentStep = "ADD_MEDICINE";
+          } else {
+            const savedClientMedIds = [state.activeMedicine.client_med_id];
+            const otherValidMeds = (state.medicinesToAdd || []).filter(
+              (m) => m.selected && !savedClientMedIds.includes(m.client_med_id),
+            );
+
+            if (otherValidMeds.length > 0) {
+              state.validMedsToBulkCreate = otherValidMeds;
+              state.confirmMode = "BULK";
+              state.currentStep = "CONFIRM_MEDICINE";
+            } else {
+              state.currentStep = "MEDICINE_OPTIONS";
+            }
+          }
+        } else if (state.confirmMode === "BULK") {
+          if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
+            await medicationService.bulkCreate(userId, state.validMedsToBulkCreate);
+          }
+          state.currentStep = "MEDICINE_OPTIONS";
+        }
+      } else if (payload.edit) {
+        state.currentStep = "ADD_MEDICINE";
+        if (state.confirmMode === "SINGLE") {
+          const idx = state.medicinesToAdd.findIndex(
+            (m) => m.client_med_id === state.activeMedicine.client_med_id,
+          );
+          if (idx >= 0) state.currentMedicineIndex = idx;
+        }
       }
       break;
     }
 
-    case "EDIT_MEDICINE": {
-      // The UI has sent the updated medicine details in the state.
-      // We mark it as confirmed and proceed.
-      state.medicinesToAdd[state.currentMedicineIndex].isConfirmed = true;
-      state.currentStep = getNextRequiredOrOptionalStep(state);
+    case "MEDICINE_OPTIONS": {
+      let payload;
+      try {
+        payload = JSON.parse(msg);
+      } catch {
+        if (msg === "ADD" || msg === "DASHBOARD" || msg === "ASK_REPORT") {
+          payload = { key: msg };
+        } else {
+          payload = {};
+        }
+      }
+
+      const key = payload.key || msg;
+      if (key === "ADD") {
+        state.currentStep = "ADD_MEDICINE";
+        state.currentMedicineIndex = undefined;
+      } else if (key === "DASHBOARD") {
+        state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
+        state.currentStep = "COMPLETE";
+      } else if (key === "ASK_REPORT") {
+        state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
+        state.currentStep = "POST_ONBOARDING";
+      }
       break;
     }
 
@@ -808,11 +1031,11 @@ function getNextStep(state) {
   return state.currentStep || computeCurrentStep(state);
 }
 
-function createResponse(step, state) {
-  return getLocalizedResponse(step, state);
+async function createResponse(step, state) {
+  return await getLocalizedResponse(step, state);
 }
 
-function getLocalizedResponse(step, state) {
+async function getLocalizedResponse(step, state) {
   switch (step) {
     case "ASK_LANGUAGE":
       return {
@@ -834,21 +1057,176 @@ function getLocalizedResponse(step, state) {
         ],
       };
 
-    case "ASK_USE_SOCIAL_LOGIN_INFO":
-      return {
-        action: "ASK_USE_SOCIAL_LOGIN_INFO",
-        message:
-          "We found existing details from your social login. Should we use those, or the details from the uploaded document?",
-        options: [
-          { label: "Use Login Details", value: "SOCIAL" },
-          { label: "Use Document Details", value: "DOCUMENT" },
-        ],
+    case "RESOLVE_PROFILE_SOURCE": {
+      const { hasMismatch, fields } = getProfileMismatches(state);
+      const mode = hasMismatch ? "CONFLICT" : "CONFIRM";
+
+      const loginFirstName = state.socialData?.firstName || "";
+      const loginLastName = state.socialData?.lastName || "";
+      const docFirstName = state.documentData?.firstName || "";
+      const docLastName = state.documentData?.lastName || "";
+
+      const loginName = [loginFirstName, loginLastName].filter(Boolean).join(" ");
+      const docName = [docFirstName, docLastName].filter(Boolean).join(" ");
+
+      let message, title, subtitle, explainer;
+      if (mode === "CONFLICT") {
+        message = await getLocalizedText(
+          "onboarding.source.conflict.message",
+          "I found two different sources for your details. Please review and choose which one is correct.",
+          state.preferredLanguage,
+        );
+        title = await getLocalizedText(
+          "onboarding.source.conflict.title",
+          "We found two different profiles",
+          state.preferredLanguage,
+        );
+        subtitle = await getLocalizedText(
+          "onboarding.source.conflict.subtitle",
+          "Please review and choose the one you prefer",
+          state.preferredLanguage,
+        );
+        explainer = await getLocalizedText(
+          "onboarding.source.conflict.explainer",
+          "Name details can sometimes be written differently in documents vs social profiles.",
+          state.preferredLanguage,
+        );
+      } else {
+        message = await getLocalizedText(
+          "onboarding.source.confirm.message",
+          "Here are your details. Please confirm they're correct — you can edit anything if needed.",
+          state.preferredLanguage,
+        );
+        title = await getLocalizedText(
+          "onboarding.source.confirm.title",
+          "Confirm your profile details",
+          state.preferredLanguage,
+        );
+        subtitle = await getLocalizedText(
+          "onboarding.source.confirm.subtitle",
+          "Please check and confirm all details below",
+          state.preferredLanguage,
+        );
+        explainer = null;
+      }
+
+      const useSocialText = await getLocalizedText(
+        "onboarding.source.useSocialLogin",
+        "Use Social Login",
+        state.preferredLanguage,
+      );
+      const useDocText = await getLocalizedText(
+        "onboarding.source.useDocument",
+        "Use Document",
+        state.preferredLanguage,
+      );
+
+      const loginSummary = loginName
+        ? `${loginName} (${useSocialText})`
+        : `${useSocialText} Details`;
+      const documentSummary = docName ? `${docName} (Medical Document)` : `${useDocText} Details`;
+
+      const localizedFields = await Promise.all(
+        fields.map(async (f) => {
+          let loginVal = f.loginValue;
+          let docVal = f.documentValue;
+          let singleVal = f.verified ? loginVal : loginVal || docVal || null;
+
+          if (f.key === "gender") {
+            if (loginVal)
+              loginVal = await getLocalizedText(
+                `onboarding.fieldValue.${loginVal}`,
+                loginVal,
+                state.preferredLanguage,
+              );
+            if (docVal)
+              docVal = await getLocalizedText(
+                `onboarding.fieldValue.${docVal}`,
+                docVal,
+                state.preferredLanguage,
+              );
+            if (singleVal)
+              singleVal = await getLocalizedText(
+                `onboarding.fieldValue.${singleVal}`,
+                singleVal,
+                state.preferredLanguage,
+              );
+          }
+
+          // Localize field label
+          const fieldLabelKey = `onboarding.field.${f.key}`;
+          const localizedLabel = await getLocalizedText(
+            fieldLabelKey,
+            f.label,
+            state.preferredLanguage,
+          );
+
+          return {
+            ...f,
+            label: localizedLabel,
+            loginValue: loginVal,
+            documentValue: docVal,
+            value: singleVal,
+            isMismatch: mode === "CONFIRM" ? false : f.isMismatch,
+            editable: !f.verified,
+          };
+        }),
+      );
+
+      const payload = {
+        action: "RESOLVE_PROFILE_SOURCE",
+        mode,
+        message,
+        title,
+        subtitle,
+        fields: localizedFields,
+        loginSummary,
+        documentSummary,
+        loginProvider: state.loginProvider || "email",
       };
+
+      if (mode === "CONFLICT") {
+        payload.explainer = explainer;
+      }
+
+      console.log(
+        "[INSTRUMENTATION] [RESOLVE_PROFILE_SOURCE] final payload fields:",
+        JSON.stringify(payload.fields, null, 2),
+      );
+      return payload;
+    }
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
         message: "Please upload your medical document (Prescription, Lab Report, etc.).",
       };
+
+    case "ASK_UPLOAD_DOCUMENT_FAILED": {
+      const retryLabel = await getLocalizedText(
+        "onboarding.retryUpload",
+        "Retry Upload",
+        state.preferredLanguage,
+      );
+      const manualLabel = await getLocalizedText(
+        "onboarding.manual",
+        "Enter Details Manually",
+        state.preferredLanguage,
+      );
+      const failedMsg = await getLocalizedText(
+        "onboarding.upload.failed",
+        "❌ Document processing failed. Please try again or enter details manually.",
+        state.preferredLanguage,
+      );
+
+      return {
+        action: "ASK_UPLOAD_DOCUMENT_FAILED",
+        message: failedMsg,
+        options: [
+          { label: retryLabel, value: "RETRY_UPLOAD" },
+          { label: manualLabel, value: "MANUAL" },
+        ],
+      };
+    }
 
     case "PROCESSING_DOCUMENT":
       return {
@@ -856,24 +1234,24 @@ function getLocalizedResponse(step, state) {
         message: "I am analyzing your document...",
       };
 
-    // case "CONFIRM_DOCUMENT_DETAILS":
-    //   return {
-    //     action: "CONFIRM_DOCUMENT_DETAILS",
-    //     message: "I have extracted the details. Please confirm if they are correct.",
-    //     options: [
-    //       { label: "Yes, they are correct", value: "YES" },
-    //       { label: "No, let me enter manually", value: "NO" },
-    //     ],
-    //   };
-    case "CONFIRM_DOCUMENT_DETAILS":
+    case "CONFIRM_DOCUMENT_OWNERSHIP": {
+      const yesLabel = await getLocalizedText("onboarding.yes", "Yes", state.preferredLanguage);
+      const noLabel = await getLocalizedText("onboarding.no", "No", state.preferredLanguage);
+      const ownershipMsg = await getLocalizedText(
+        "onboarding.document.ownership",
+        "Is this document yours?",
+        state.preferredLanguage,
+      );
+
       return {
-        action: "CONFIRM_DOCUMENT_DETAILS",
-        message: "I have extracted the details. Please confirm if they are correct.",
+        action: "CONFIRM_DOCUMENT_OWNERSHIP",
+        message: ownershipMsg,
         options: [
-          { label: "Yes, they are correct", value: "YES" },
-          { label: "No, let me enter manually", value: "NO" },
+          { label: yesLabel, value: "YES" },
+          { label: noLabel, value: "NO" },
         ],
       };
+    }
 
     case "ASK_FIRST_NAME":
       return { action: "ASK_FIRST_NAME", message: "What is your first name?" };
@@ -914,116 +1292,83 @@ function getLocalizedResponse(step, state) {
         options: [{ label: "Skip", value: "SKIP" }],
       };
 
-    case "ASK_FOUND_MEDICINES": {
-      const medNames = (state.foundMedicines || [])
-        .map((m) => m.name || m.medicationName)
-        .filter(Boolean)
-        .join(", ");
-      return {
-        action: "ASK_FOUND_MEDICINES",
-        message: `We found the following medicines in your document: ${medNames}. Do you want to add these to your profile?`,
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
-    }
-
-    case "ASK_ON_MEDICINES":
-      return {
-        action: "ASK_ON_MEDICINES",
-        message: "Would you like to manually add any medicines?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
-
     case "REVIEW_MEDICINES_LIST":
       return {
         action: "REVIEW_MEDICINES_LIST",
-        message: "Please review your medicine list.",
+        message: "Please review the list of medications extracted from your document:",
         options: [
-          { label: "Confirm", value: "CONFIRM" },
-          { label: "Edit", value: "EDIT" },
+          { label: "Confirm Selected", value: "CONFIRM" },
+          { label: "Add New", value: "ADD" },
+          { label: "Skip All", value: "SKIP" },
         ],
+        medicines: state.medicinesToAdd || [],
       };
 
-    case "ASK_MEDICINE_NAME":
+    case "ADD_MEDICINE": {
+      const idx = state.currentMedicineIndex;
+      const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
       return {
-        action: "ASK_MEDICINE_NAME",
-        message: "What is the name of the medicine?",
-      };
-    case "ASK_MEDICINE_TYPE":
-      return {
-        action: "ASK_MEDICINE_TYPE",
-        message: "What type of medicine is it?",
-        options: medicationTypeValues.map((mt) => ({ label: mt, value: mt })),
-      };
-    case "ASK_DOSE_PER_INTAKE":
-      return {
-        action: "ASK_DOSE_PER_INTAKE",
-        message: "What is the dose per intake?",
-      };
-    case "ASK_MEDICINE_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FREQUENCY",
-        message: "How often do you take it?",
-        options: frequencyTypeValues.map((ft) => ({ label: ft, value: ft })),
-      };
-    case "ASK_MEDICINE_SCHEDULE": {
-      const idx = state?.currentMedicineIndex || 0;
-      const med = state?.medicinesToAdd?.[idx] || {};
-      let doseNum = (med.tempTimes?.length || 0) + 1;
-      return {
-        action: "ASK_MEDICINE_SCHEDULE",
-        message: `Please provide the exact time for dose ${doseNum} (e.g. '09:00:00' or '22:00:00').`,
+        action: "ADD_MEDICINE",
+        message: med
+          ? `Please edit details for ${med.name}:`
+          : "Please enter the new medication details:",
+        medicine: med,
       };
     }
-    case "ASK_MEDICINE_FOOD_FREQUENCY":
-      return {
-        action: "ASK_MEDICINE_FOOD_FREQUENCY",
-        message: "When do you take it in relation to food?",
-        options: [
-          { label: "Before Food", value: "BEFORE_FOOD" },
-          { label: "After Food", value: "AFTER_FOOD" },
-        ],
-      };
-    case "ASK_MEDICINE_START_DATE":
-      return {
-        action: "ASK_MEDICINE_START_DATE",
-        message: "When did you start taking this medicine (YYYY-MM-DD)?",
-      };
-    case "ASK_MEDICINE_QUANTITY":
-      return {
-        action: "ASK_MEDICINE_QUANTITY",
-        message: "What is the total quantity prescribed?",
-      };
-    case "ASK_MEDICINE_ONGOING":
-      return {
-        action: "ASK_MEDICINE_ONGOING",
-        message: "Are you currently taking this medication (Ongoing)?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "No", value: "NO" },
-        ],
-      };
 
-    case "CONFIRM_MEDICINE":
+    case "CONFIRM_MEDICINE": {
+      let title = "";
+      let lines = [];
+
+      if (state.confirmMode === "SINGLE" && state.activeMedicine) {
+        const med = state.activeMedicine;
+        title = med.name || "Medicine Summary";
+        const doseStr =
+          med.type === "TABLET" || med.type === "CAPSULE"
+            ? `${med.dose.count} ${med.type.toLowerCase()}(s)`
+            : `${med.dose.value} ${med.dose.unit}`;
+        const timesVal =
+          med.medicationSchedule?.times || med.medicationSchedule?.reminderTimes || [];
+        const timesStr =
+          Array.isArray(timesVal) && timesVal.length > 0 ? timesVal.join(", ") : "None";
+        lines = [
+          `Type: ${med.type}`,
+          `Dose: ${doseStr}`,
+          `Frequency: ${med.frequency}`,
+          `Times: ${timesStr}`,
+          `Prescribed By: ${med.prescribed_by || "None"}`,
+          `Notes: ${med.notes || "None"}`,
+        ];
+      } else if (state.confirmMode === "BULK" && state.validMedsToBulkCreate) {
+        title = "Confirm all medications";
+        lines = state.validMedsToBulkCreate.map((m) => {
+          const doseStr =
+            m.type === "TABLET" || m.type === "CAPSULE"
+              ? `${m.dose.count} ${m.type.toLowerCase()}(s)`
+              : `${m.dose.value} ${m.dose.unit}`;
+          const timesVal = m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
+          const timesStr =
+            Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
+          return `${m.name} (${doseStr}, ${m.frequency}${timesStr})`;
+        });
+      }
+
       return {
         action: "CONFIRM_MEDICINE",
-        message: "Are these details correct?",
-        options: [
-          { label: "Yes", value: "YES" },
-          { label: "Edit", value: "EDIT" },
-        ],
+        message: "Please verify if these details are correct before saving:",
+        summary: { title, lines },
       };
+    }
 
-    case "EDIT_MEDICINE":
+    case "MEDICINE_OPTIONS":
       return {
-        action: "EDIT_MEDICINE",
-        message: "Please edit the medication details and submit.",
-        options: [{ label: "Confirm", value: "CONFIRM" }],
+        action: "MEDICINE_OPTIONS",
+        message: "What would you like to do next?",
+        options: [
+          { key: "ADD", label: "Add Another Medicine", primary: true },
+          { key: "DASHBOARD", label: "Go to Dashboard", primary: false },
+          { key: "ASK_REPORT", label: "Ask About My Report", primary: false },
+        ],
       };
 
     case "COMPLETE":
@@ -1059,7 +1404,37 @@ function getLocalizedResponse(step, state) {
 
 class OnboardingService {
   async chat(message, history = [], state = {}, userId = null) {
-    const msg = (message || "").trim();
+    if (!state) {
+      state = {};
+    }
+
+    // Ensure all medication-related state properties are initialized
+    if (state.medicinesToAdd === undefined || state.medicinesToAdd === null)
+      state.medicinesToAdd = [];
+    if (state.foundMedicines === undefined || state.foundMedicines === null)
+      state.foundMedicines = [];
+    if (state.medicinesFlowStarted === undefined || state.medicinesFlowStarted === null)
+      state.medicinesFlowStarted = false;
+    if (state.medicinesConfirmed === undefined || state.medicinesConfirmed === null)
+      state.medicinesConfirmed = false;
+    if (state.currentMedicineIndex === undefined || state.currentMedicineIndex === null)
+      state.currentMedicineIndex = 0;
+    if (state.medicinesSavedToDb === undefined || state.medicinesSavedToDb === null)
+      state.medicinesSavedToDb = false;
+    if (state.activeMedicine === undefined) state.activeMedicine = null;
+    if (state.confirmMode === undefined) state.confirmMode = null;
+    if (state.pendingQueue === undefined || state.pendingQueue === null) state.pendingQueue = [];
+    if (state.validMedsToBulkCreate === undefined || state.validMedsToBulkCreate === null)
+      state.validMedsToBulkCreate = [];
+    if (state.medicationFlowDone === undefined || state.medicationFlowDone === null)
+      state.medicationFlowDone = false;
+
+    let msg = "";
+    if (typeof message === "object" && message !== null) {
+      msg = JSON.stringify(message);
+    } else {
+      msg = (message || "").trim();
+    }
 
     // Ensure state fields are initialized
     if (!state.existingUserData) {
@@ -1080,33 +1455,169 @@ class OnboardingService {
     if (state.documentUploaded === undefined)
       state.documentUploaded = state.uploadedMedicalDocument || false;
     if (state.documentConfirmed === undefined) state.documentConfirmed = false;
+    if (state.documentOwnershipConfirmed === undefined) {
+      state.documentOwnershipConfirmed = state.documentConfirmed ? true : null;
+    }
     if (state.bloodGroupSkipped === undefined) state.bloodGroupSkipped = false;
     if (state.allergiesSkipped === undefined) state.allergiesSkipped = false;
     if (state.documentExtracted === undefined) state.documentExtracted = false;
 
+    // Synchronize medications from DB for UPLOAD flow if they are not loaded yet or if document changed
+    if (
+      state.flowMode === "UPLOAD" &&
+      (state.documentId !== state.loadedDocumentId ||
+        !state.foundMedicines ||
+        state.foundMedicines.length === 0)
+    ) {
+      try {
+        const { db } = require("../../../configs/db");
+        const { document } = require("../../../models/document");
+        const { eq, desc } = require("drizzle-orm");
+
+        let docRow = null;
+        if (state.documentId) {
+          const rows = await db.select().from(document).where(eq(document.id, state.documentId));
+          docRow = rows[0] || null;
+        } else if (userId) {
+          const rows = await db
+            .select()
+            .from(document)
+            .where(eq(document.userId, userId))
+            .orderBy(desc(document.createdAt))
+            .limit(1);
+          docRow = rows[0] || null;
+        }
+
+        if (docRow) {
+          // Handle async race: if extraction is in progress, poll up to 5 times (1s interval)
+          let attempts = 0;
+          while (docRow && docRow.ocrStatus === "in_progress" && attempts < 5) {
+            console.log(
+              `[OnboardingService] Document ${docRow.id} extraction in progress. Polling attempt ${attempts + 1}...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            const rows = await db.select().from(document).where(eq(document.id, docRow.id));
+            docRow = rows[0] || null;
+            attempts++;
+          }
+
+          if (docRow && docRow.ocrStatus === "completed" && docRow.structuredExtractedData) {
+            const structured = docRow.structuredExtractedData;
+            if (Array.isArray(structured.medications) && structured.medications.length > 0) {
+              state.foundMedicines = structured.medications;
+              state.loadedDocumentId = docRow.id;
+              console.log(
+                `[OnboardingService] Loaded ${state.foundMedicines.length} medications from DB document ${docRow.id}`,
+              );
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[OnboardingService] Failed to load medicines from DB:", err.message);
+      }
+    }
+
     // Check for social login data
-    if (state.hasSocialData === undefined) {
+    if (
+      state.hasLoginData === undefined ||
+      state.hasLoginData === null ||
+      state.loginData === undefined
+    ) {
       if (userId) {
         const patient = await patientRepository.findById(userId);
-        if (patient && patient.firstName && patient.firstName !== "User") {
-          state.hasSocialData = true;
+        if (patient) {
+          const providers = await authProviderRepository.findByUserId(userId);
+          const providerNames = providers.map((p) => p.provider);
+
+          let primaryProvider = "email";
+          if (providerNames.includes("google")) {
+            primaryProvider = "google";
+          } else if (providerNames.includes("facebook")) {
+            primaryProvider = "facebook";
+          } else if (providerNames.includes("microsoft")) {
+            primaryProvider = "microsoft";
+          } else if (providerNames.includes("apple")) {
+            primaryProvider = "apple";
+          } else if (providerNames.includes("mobile")) {
+            primaryProvider = "mobile";
+          } else if (providerNames.includes("password")) {
+            primaryProvider = "email";
+          }
+          state.loginProvider = primaryProvider;
+
+          let isPhoneVerified = false;
+          let isEmailVerified = false;
+
+          if (providerNames.includes("mobile")) {
+            isPhoneVerified = true;
+          }
+          if (providerNames.some((p) => ["google", "facebook", "microsoft", "apple"].includes(p))) {
+            if (patient.email) {
+              isEmailVerified = true;
+            }
+          }
+          if (patient.email && (providers.length === 0 || providerNames.includes("password"))) {
+            isEmailVerified = true;
+          }
+
+          let fullMobile = null;
+          if (patient.mobile) {
+            fullMobile = (patient.countryCode || "") + patient.mobile;
+          }
+
+          state.loginData = {
+            firstName: { value: patient.firstName || null, verified: false, provenance: "profile" },
+            lastName: {
+              value:
+                patient.lastName !== "+91" && !patient.lastName?.startsWith("+")
+                  ? patient.lastName
+                  : null,
+              verified: false,
+              provenance: "profile",
+            },
+            email: {
+              value: patient.email || null,
+              verified: isEmailVerified,
+              provenance: isEmailVerified ? "auth" : "profile",
+            },
+            gender: { value: patient.gender || null, verified: false, provenance: "profile" },
+            dateOfBirth: {
+              value: patient.dateOfBirth ? patient.dateOfBirth.toISOString().split("T")[0] : null,
+              verified: false,
+              provenance: "profile",
+            },
+            phoneNumber: {
+              value: fullMobile,
+              verified: isPhoneVerified,
+              provenance: isPhoneVerified ? "auth" : "profile",
+            },
+          };
+
+          state.hasLoginData = Object.values(state.loginData).some(
+            (field) => field.value !== null && field.value !== "",
+          );
+
+          // Backward compatibility aliases
+          state.hasSocialData = state.hasLoginData;
           state.socialData = {
-            firstName: patient.firstName,
-            lastName:
-              patient.lastName !== "+91" && !patient.lastName?.startsWith("+")
-                ? patient.lastName
-                : null,
-            email: patient.email,
-            gender: patient.gender,
-            dateOfBirth: patient.dateOfBirth
-              ? patient.dateOfBirth.toISOString().split("T")[0]
-              : null,
+            firstName: state.loginData.firstName.value,
+            lastName: state.loginData.lastName.value,
+            email: state.loginData.email.value,
+            gender: state.loginData.gender.value,
+            dateOfBirth: state.loginData.dateOfBirth.value,
+            phoneNumber: state.loginData.phoneNumber.value,
           };
         } else {
+          state.hasLoginData = false;
+          state.loginData = null;
           state.hasSocialData = false;
+          state.socialData = null;
         }
       } else {
+        state.hasLoginData = false;
+        state.loginData = null;
         state.hasSocialData = false;
+        state.socialData = null;
       }
     }
 
@@ -1126,6 +1637,16 @@ class OnboardingService {
     if (!state.currentStep) {
       state.currentStep = computeCurrentStep(state);
     }
+    // Apply alias map for backward compatibility
+    if (
+      state.currentStep === "CONFIRM_DOCUMENT_DETAILS" ||
+      state.currentStep === "ASK_DOCUMENT_CONFIRMATION"
+    ) {
+      state.currentStep = "CONFIRM_DOCUMENT_OWNERSHIP";
+    }
+    if (state.currentStep === "ASK_USE_SOCIAL_LOGIN_INFO") {
+      state.currentStep = "RESOLVE_PROFILE_SOURCE";
+    }
     // 1. If onboarding is completed, return completed status immediately
     if (state.isOnboardingCompleted) {
       if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
@@ -1140,7 +1661,7 @@ class OnboardingService {
 
     // 2. Process incoming user message based on current expected step BEFORE update
     if (!isInitCall) {
-      await updateStateFromMessage(state, msg);
+      await updateStateFromMessage(state, msg, userId);
     }
     // Extra safeguard: if a document has already been uploaded/extracted in UPLOAD flow,
     // ensure we don't get stuck in upload/confirm steps.
@@ -1148,10 +1669,16 @@ class OnboardingService {
     if (state.flowMode === "UPLOAD" && isDocUploaded) {
       if (
         state.currentStep === "ASK_UPLOAD_DOCUMENT" ||
-        state.currentStep === "ASK_UPLOAD_OR_SKIP" ||
-        state.currentStep === "ASK_DOCUMENT_CONFIRMATION"
+        state.currentStep === "ASK_UPLOAD_OR_SKIP"
       ) {
-        state.currentStep = getNextRequiredOrOptionalStep(state);
+        if (
+          state.documentOwnershipConfirmed === undefined ||
+          state.documentOwnershipConfirmed === null
+        ) {
+          state.currentStep = "CONFIRM_DOCUMENT_OWNERSHIP";
+        } else {
+          state.currentStep = computeCurrentStep(state);
+        }
       }
     }
 
@@ -1208,7 +1735,7 @@ class OnboardingService {
 
         if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
           state.foundMedicines = extracted.medications;
-        } else {
+        } else if (!state.foundMedicines || state.foundMedicines.length === 0) {
           state.foundMedicines = [];
         }
 
@@ -1385,19 +1912,36 @@ class OnboardingService {
     }
 
     if (userId && state.existingUserData) {
+      const shouldWritePatientProfile =
+        state.flowMode === "MANUAL" ||
+        state.flowMode === "SKIP" ||
+        (state.flowMode === "UPLOAD" &&
+          state.documentOwnershipConfirmed === true &&
+          (state.profileConfirmed === true || !state.hasLoginData));
+
       const updateData = {};
-      if (
-        state.existingUserData.firstName !== undefined &&
-        state.existingUserData.firstName !== null
-      )
-        updateData.firstName = state.existingUserData.firstName;
-      if (state.existingUserData.lastName !== undefined && state.existingUserData.lastName !== null)
-        updateData.lastName = state.existingUserData.lastName;
-      if (state.existingUserData.dateOfBirth)
-        updateData.dateOfBirth = new Date(state.existingUserData.dateOfBirth);
-      if (state.existingUserData.gender !== undefined && state.existingUserData.gender !== null)
-        updateData.gender = state.existingUserData.gender;
-      if (state.existingUserData.email) updateData.email = state.existingUserData.email;
+      if (shouldWritePatientProfile) {
+        if (
+          state.existingUserData.firstName !== undefined &&
+          state.existingUserData.firstName !== null
+        )
+          updateData.firstName = state.existingUserData.firstName;
+        if (
+          state.existingUserData.lastName !== undefined &&
+          state.existingUserData.lastName !== null
+        )
+          updateData.lastName = state.existingUserData.lastName;
+        if (state.existingUserData.dateOfBirth)
+          updateData.dateOfBirth = new Date(state.existingUserData.dateOfBirth);
+        if (state.existingUserData.gender !== undefined && state.existingUserData.gender !== null)
+          updateData.gender = state.existingUserData.gender || null;
+        if (state.existingUserData.email) updateData.email = state.existingUserData.email;
+        if (
+          state.existingUserData.phoneNumber !== undefined &&
+          state.existingUserData.phoneNumber !== null
+        )
+          updateData.mobile = state.existingUserData.phoneNumber;
+      }
       if (state.existingUserData.bloodGroup)
         updateData.bloodGroup = state.existingUserData.bloodGroup;
       if (state.existingUserData.allergies && state.existingUserData.allergies.length > 0)
@@ -1407,41 +1951,6 @@ class OnboardingService {
         updateData.status = "ACTIVE";
         updateData.isVerified = true;
         updateData.onboardingCompleted = true;
-
-        if (
-          state.medicinesConfirmed &&
-          Array.isArray(state.medicinesToAdd) &&
-          !state.medicinesSavedToDb
-        ) {
-          for (const med of state.medicinesToAdd) {
-            try {
-              // Only send if it has medicationName
-              if (med.medicationName) {
-                // Ensure ongoing is boolean and reminderBeforeMinutes is integer if present
-                const payload = {
-                  ...med,
-                  ongoing: med.ongoing === true || med.ongoing === "true",
-                  reminderBeforeMinutes: med.reminderBeforeMinutes
-                    ? parseInt(med.reminderBeforeMinutes, 10)
-                    : undefined,
-                };
-                delete payload.isConfirmed;
-                delete payload.tempTimes;
-                const medication = await medicationService.createMedication(userId, payload);
-                await medicationReminderService.createReminder(userId, {
-                  medicationId: medication.id,
-                });
-              }
-            } catch (err) {
-              console.error(
-                `[OnboardingService] Error creating medication ${med.medicationName}:`,
-                err,
-              );
-            }
-          }
-          // Mark as saved to prevent duplicate creation on subsequent steps, without clearing the array
-          state.medicinesSavedToDb = true;
-        }
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -1458,6 +1967,7 @@ class OnboardingService {
         currentStep: state.currentStep,
         documentUploaded: state.documentUploaded,
         documentConfirmed: state.documentConfirmed,
+        documentOwnershipConfirmed: state.documentOwnershipConfirmed,
         documentExtracted: state.documentExtracted,
         isOnboardingCompleted: state.isOnboardingCompleted,
         existingUserData: state.existingUserData,
@@ -1473,10 +1983,14 @@ class OnboardingService {
         medicinesSavedToDb: state.medicinesSavedToDb,
         hasSocialData: state.hasSocialData,
         socialData: state.socialData,
-        socialDataConfirmed: state.socialDataConfirmed,
+        hasLoginData: state.hasLoginData,
+        loginData: state.loginData,
+        profileConfirmed: state.profileConfirmed,
         documentText: state.documentText,
         documentData: state.documentData,
-        documentId: state.documentId,
+        loginProvider: state.loginProvider,
+        documentId: state.documentId || null,
+        loadedDocumentId: state.loadedDocumentId || null,
       };
 
       if (existingRecord) {
@@ -1495,7 +2009,7 @@ class OnboardingService {
     }
 
     const nextStep = getNextStep(state);
-    const response = createResponse(nextStep, state);
+    const response = await createResponse(nextStep, state);
 
     if (state.preferredLanguage && state.preferredLanguage !== "english") {
       if (response.message) {
@@ -1510,6 +2024,15 @@ class OnboardingService {
         );
       }
     }
+
+    console.log("[INSTRUMENTATION] FINAL outgoing onboarding assistant payload:", {
+      action: response.action,
+      mode: response.mode,
+      title: response.title,
+      subtitle: response.subtitle,
+      hasFields: !!response.fields,
+      fieldsLength: response.fields?.length,
+    });
 
     return {
       ...response,
