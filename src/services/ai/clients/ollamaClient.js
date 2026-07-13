@@ -267,6 +267,8 @@ class OllamaClient {
       return text;
     } catch (error) {
       console.error("[OllamaClient] Generate failed:", error.message);
+      console.log("[Ollama error]:==", error.response);
+
       throw error;
     }
   }

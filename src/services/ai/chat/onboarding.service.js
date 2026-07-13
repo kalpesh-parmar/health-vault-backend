@@ -254,6 +254,8 @@ User Input: "${text}"`,
     return parsed.value;
   } catch (err) {
     console.error(`[OnboardingService] Failed to extract ${fieldType} from user input:`, err);
+    console.log("error Response==", err.response?.data);
+
     return null;
   }
 }
@@ -540,30 +542,36 @@ async function updateStateFromMessage(state, message, userId = null) {
 
   switch (state.currentStep) {
     case "ASK_LANGUAGE": {
-      const langVal = msg;
+      const langVal = msg.toLowerCase();
       if (languageTypeValues.includes(langVal)) {
         state.preferredLanguage = langVal;
         state.currentStep = "ASK_UPLOAD_OR_SKIP";
       } else {
         const extractedLang = await extractFieldFromMessage("preferredLanguage", msg, "english");
-        if (languageTypeValues.includes(extractedLang)) {
-          state.preferredLanguage = extractedLang;
-          state.currentStep = "ASK_UPLOAD_OR_SKIP";
+        if (extractedLang && typeof extractedLang === "string") {
+          const langNorm = extractedLang.toLowerCase();
+          if (languageTypeValues.includes(langNorm)) {
+            state.preferredLanguage = langNorm;
+            state.currentStep = "ASK_UPLOAD_OR_SKIP";
+          }
         }
       }
       break;
     }
 
     case "ASK_UPLOAD_OR_SKIP": {
-      const fmVal = msg;
+      const fmVal = msg.toUpperCase();
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
         state.currentStep = computeCurrentStep(state);
       } else {
         const extractedFM = await extractFieldFromMessage("flowMode", msg, state.preferredLanguage);
-        if (extractedFM === "UPLOAD" || extractedFM === "MANUAL") {
-          state.flowMode = extractedFM;
-          state.currentStep = computeCurrentStep(state);
+        if (extractedFM && typeof extractedFM === "string") {
+          const fmNorm = extractedFM.toUpperCase();
+          if (fmNorm === "UPLOAD" || fmNorm === "MANUAL") {
+            state.flowMode = fmNorm;
+            state.currentStep = computeCurrentStep(state);
+          }
         }
       }
       break;
@@ -651,8 +659,11 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (!answer) {
         const extractedConf = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-        if (extractedConf === "YES" || extractedConf === "NO") {
-          answer = extractedConf;
+        if (extractedConf && typeof extractedConf === "string") {
+          const confNorm = extractedConf.toUpperCase();
+          if (confNorm === "YES" || confNorm === "NO") {
+            answer = confNorm;
+          }
         }
       }
 
@@ -736,8 +747,11 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "ASK_GENDER": {
       const genVal = await extractFieldFromMessage("gender", msg, state.preferredLanguage);
-      if (genVal === "male" || genVal === "female") {
-        state.existingUserData.gender = genVal;
+      if (genVal && typeof genVal === "string") {
+        const genNorm = genVal.toLowerCase();
+        if (genNorm === "male" || genNorm === "female") {
+          state.existingUserData.gender = genNorm;
+        }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
@@ -748,9 +762,16 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const bgVal = await extractFieldFromMessage("bloodGroup", msg, state.preferredLanguage);
-        if (bloodGroupTypeValues.includes(bgVal)) {
-          state.existingUserData.bloodGroup = bgVal;
+        const extractedBg = await extractFieldFromMessage(
+          "bloodGroup",
+          msg,
+          state.preferredLanguage,
+        );
+        if (extractedBg && typeof extractedBg === "string") {
+          const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
+          if (bloodGroupTypeValues.includes(bgVal)) {
+            state.existingUserData.bloodGroup = bgVal;
+          }
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -778,7 +799,10 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "ASK_FOUND_MEDICINES":
     case "ASK_ON_MEDICINES": {
       const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
+      const isYes =
+        (yesNoVal && typeof yesNoVal === "string" && yesNoVal.toUpperCase() === "YES") ||
+        msg.toUpperCase() === "YES";
+      if (isYes) {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
           const { normalizeMedicine } = require("../helpers/medicineNormalize");
@@ -845,6 +869,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       break;
     }
 
+    case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       let payload;
       try {
@@ -860,7 +885,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           break;
         }
 
-        const newMed = {
+        let newMed = {
           ...payload.medicine,
           client_med_id: payload.clientMedId || payload.medicine.client_med_id,
           id: payload.clientMedId || payload.medicine.client_med_id,
@@ -868,16 +893,36 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         if (!state.medicinesToAdd) state.medicinesToAdd = [];
 
-        const existingIdx = state.medicinesToAdd.findIndex(
-          (m) => m.client_med_id === newMed.client_med_id,
-        );
+        let existingIdx = -1;
+        if (
+          state.currentMedicineIndex !== undefined &&
+          state.currentMedicineIndex >= 0 &&
+          state.currentMedicineIndex < state.medicinesToAdd.length
+        ) {
+          existingIdx = state.currentMedicineIndex;
+          if (!newMed.client_med_id) {
+            newMed.client_med_id = state.medicinesToAdd[existingIdx].client_med_id;
+            newMed.id = state.medicinesToAdd[existingIdx].id;
+          }
+        } else {
+          existingIdx = state.medicinesToAdd.findIndex(
+            (m) => m.client_med_id && m.client_med_id === newMed.client_med_id,
+          );
+        }
+
         if (existingIdx >= 0) {
           state.medicinesToAdd[existingIdx] = {
             ...state.medicinesToAdd[existingIdx],
             ...newMed,
             selected: true,
           };
+          newMed = state.medicinesToAdd[existingIdx];
         } else {
+          if (!newMed.client_med_id) {
+            const newId = `med_${Date.now()}`;
+            newMed.client_med_id = newId;
+            newMed.id = newId;
+          }
           state.medicinesToAdd.push({ ...newMed, selected: true });
         }
 
@@ -919,7 +964,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
           if (nextIncompleteIndex >= 0) {
             state.currentMedicineIndex = nextIncompleteIndex;
-            state.currentStep = "ADD_MEDICINE";
+            state.currentStep = "EDIT_MEDICINE";
           } else {
             const savedClientMedIds = [state.activeMedicine.client_med_id];
             const otherValidMeds = (state.medicinesToAdd || []).filter(
@@ -941,7 +986,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (payload.edit) {
-        state.currentStep = "ADD_MEDICINE";
+        state.currentStep = "EDIT_MEDICINE";
         if (state.confirmMode === "SINGLE") {
           const idx = state.medicinesToAdd.findIndex(
             (m) => m.client_med_id === state.activeMedicine.client_med_id,
@@ -1440,6 +1485,7 @@ async function getLocalizedResponse(step, state) {
         medicines: state.medicinesToAdd || [],
       };
 
+    case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       const idx = state.currentMedicineIndex;
       const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
@@ -1456,7 +1502,7 @@ async function getLocalizedResponse(step, state) {
             state.preferredLanguage,
           );
       return {
-        action: "ADD_MEDICINE",
+        action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         message,
         medicine: med,
       };
