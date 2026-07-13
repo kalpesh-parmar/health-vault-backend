@@ -14,6 +14,7 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 // const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
+const { chatService } = require("./chat.service");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -187,7 +188,7 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
       "Determine if user confirmed (YES) or rejected (NO) the extracted document details. Return strictly either 'YES' or 'NO'.";
   } else if (fieldType === "firstName") {
     contextPrompt =
-      "Extract the first name from the user input. Transliterate or translate Gujarati, Hindi, Marathi, or Tamil names to English (e.g. કલ્પેશ -> Kalpesh, रमेश -> Ramesh, ரமேஷ் -> Ramesh).";
+      "Extract the name from the user input (e.g. Kalpesh, or Kalpesh Parmar). Transliterate Gujarati, Hindi, Marathi, or Tamil names to English.";
   } else if (fieldType === "lastName") {
     contextPrompt =
       "Extract the last name from the user input. Transliterate or translate Gujarati, Hindi, Marathi, or Tamil names to English (e.g. શાહ -> Shah, शाह -> Shah, ஷா -> Shah).";
@@ -238,7 +239,7 @@ Rule: Return ONLY a JSON object with a single key "value". If the value is missi
     },
     {
       role: "user",
-      content: `Field: ${fieldType}
+      content: `Field: ${fieldType === "firstName" ? "Name" : fieldType}
 Instructions: ${contextPrompt}
 User Input: "${text}"`,
     },
@@ -250,8 +251,55 @@ User Input: "${text}"`,
       maxTokens: 128,
       think: false,
     });
-    const parsed = cleanAndParseJson(response);
-    return parsed.value;
+
+    let parsed;
+    try {
+      parsed = cleanAndParseJson(response);
+    } catch (parseErr) {
+      const cleanedRaw =
+        typeof response === "string" ? response.replace(/^```(?:json)?|```$/gi, "").trim() : "";
+      if (
+        cleanedRaw &&
+        cleanedRaw.length < 100 &&
+        !cleanedRaw.includes("{") &&
+        !cleanedRaw.includes("[")
+      ) {
+        console.warn(
+          `[OnboardingService] AI returned raw string instead of JSON for ${fieldType}: "${cleanedRaw}"`,
+        );
+        return cleanedRaw;
+      }
+      throw parseErr;
+    }
+
+    let resultVal;
+    if (parsed.value !== undefined) resultVal = parsed.value;
+    else if (parsed[fieldType] !== undefined) resultVal = parsed[fieldType];
+    else if (fieldType === "firstName" && parsed.FullName !== undefined)
+      resultVal = parsed.FullName;
+    else if (fieldType === "firstName" && parsed.Name !== undefined) resultVal = parsed.Name;
+    else {
+      const keys = Object.keys(parsed);
+      if (keys.length === 1) resultVal = parsed[keys[0]];
+    }
+
+    if (
+      resultVal === null &&
+      text &&
+      text.length > 0 &&
+      text.length < 50 &&
+      !["skip", "no", "none"].includes(text.toLowerCase())
+    ) {
+      console.warn(
+        `[OnboardingService] AI explicitly returned null for ${fieldType}. Falling back to raw user input: "${text}"`,
+      );
+      return text.trim();
+    }
+
+    if (resultVal !== undefined) return resultVal;
+
+    console.warn(`[OnboardingService] Unexpected JSON structure for ${fieldType}:`, parsed);
+    return null;
   } catch (err) {
     console.error(`[OnboardingService] Failed to extract ${fieldType} from user input:`, err);
     console.log("error Response==", err.response?.data);
@@ -1710,7 +1758,7 @@ async function getLocalizedResponse(step, state) {
 }
 
 class OnboardingService {
-  async chat(message, history = [], state = {}, userId = null) {
+  async chat(message, history = [], state = {}, userId = null, sessionId = null) {
     if (!state) {
       state = {};
     }
@@ -1742,7 +1790,13 @@ class OnboardingService {
     } else {
       msg = (message || "").trim();
     }
-
+    if (sessionId && msg) {
+      await chatService.appendChatMessage({
+        sessionId,
+        role: "user",
+        content: msg,
+      });
+    }
     // Ensure state fields are initialized
     if (!state.existingUserData) {
       state.existingUserData = {
@@ -1965,7 +2019,30 @@ class OnboardingService {
       }
     }
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
+    if (userId && !state.chatSessionId) {
+      try {
+        const session = await chatService.createOnboardingSession({
+          userId,
+          title: "Health Onboarding",
+          metadata: {
+            type: "ONBOARDING",
+          },
+        });
+        state.chatSessionId = session.id;
+        console.log(`[OnboardingService] Created new onboarding chat session: ${session.id}`);
+      } catch (err) {
+        console.error("[OnboardingService] Failed to create onboarding session:", err);
+      }
+    }
 
+    if (!isInitCall && state.chatSessionId) {
+      await chatService.appendChatMessage({
+        sessionId: state.chatSessionId,
+        userId,
+        role: "user",
+        content: msg,
+      });
+    }
     // 2. Process incoming user message based on current expected step BEFORE update
     if (!isInitCall) {
       await updateStateFromMessage(state, msg, userId);
@@ -2058,6 +2135,23 @@ class OnboardingService {
           state.documentUploaded = true;
           state.currentStep = computeCurrentStep(state);
           console.log("[OnboardingService] Successfully loaded and merged document data.");
+
+          if (state.chatSessionId && !state.documentAttachedToChat) {
+            try {
+              await chatService.attachDocumentToSession({
+                sessionId: state.chatSessionId,
+                userId,
+                documentId: state.documentId,
+              });
+              state.documentAttachedToChat = true;
+              console.log("[OnboardingService] Successfully attached document to chat session.");
+            } catch (attachErr) {
+              console.error(
+                "[OnboardingService] Failed to attach document to chat session:",
+                attachErr,
+              );
+            }
+          }
         } else {
           console.warn("[OnboardingService] Document or structuredExtractedData not found in DB.");
         }
@@ -2164,6 +2258,8 @@ class OnboardingService {
         loginProvider: state.loginProvider,
         documentId: state.documentId || null,
         loadedDocumentId: state.loadedDocumentId || null,
+        chatSessionId: state.chatSessionId || null,
+        documentAttachedToChat: state.documentAttachedToChat || false,
       };
 
       if (existingRecord) {
@@ -2184,6 +2280,17 @@ class OnboardingService {
     const nextStep = getNextStep(state);
     const response = await createResponse(nextStep, state);
 
+    if (state.chatSessionId) {
+      await chatService.appendChatMessage({
+        sessionId: state.chatSessionId,
+        userId,
+        role: "assistant",
+        content: response.message,
+        metadata: {
+          action: response.action,
+        },
+      });
+    }
     // Response is already localized via getLocalizedResponse static key lookup.
     // Double translation block removed to prevent corruption of translated templates.
 

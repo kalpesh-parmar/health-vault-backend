@@ -38,7 +38,7 @@ class ChatService {
     return prompts.EMERGENCY_KEYWORDS.some((keyword) => cleanText.includes(keyword));
   }
 
-  async qwenHealthChat(messages, mode, contextChunks = []) {
+  async qwenHealthChat(messages, mode, contextChunks = [], patientContextStr = "") {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     const userQuery = lastUserMessage?.content || "";
 
@@ -68,7 +68,10 @@ class ChatService {
         )
         .join("\n\n");
 
-      const systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText);
+      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText);
+      if (patientContextStr) {
+        systemPrompt += `\n\n${patientContextStr}`;
+      }
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
       console.log(`[ChatService] Running local RAG chat using ${env.chatModel}...`);
@@ -84,10 +87,12 @@ class ChatService {
       };
     }
 
-    const formattedMessages = [
-      { role: "system", content: prompts.GENERAL_HEALTH_PROMPT },
-      ...messages,
-    ];
+    let systemPrompt = prompts.GENERAL_HEALTH_PROMPT;
+    if (patientContextStr) {
+      systemPrompt += `\n\n${patientContextStr}`;
+    }
+
+    const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
     console.log(`[ChatService] Running local general chat using ${env.chatModel}...`);
     const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
@@ -125,10 +130,11 @@ class ChatService {
     return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
   }
 
-  async sendMessage({ userId, documentKey, question }) {
+  async sendMessage({ userId, documentKey, question, sessionId: reqSessionId }) {
     debugLogger.info("sendMessage: Incoming payload", {
       userId,
       documentKey,
+      reqSessionId,
       question: question?.substring(0, 100),
     });
 
@@ -162,7 +168,12 @@ class ChatService {
       }
 
       let session;
-      if (!documentKey?.trim()) {
+      if (reqSessionId) {
+        session = await chatSessionRepository.findSessionById(reqSessionId, userId);
+        if (!session) {
+          throw new NotFoundException("Chat session not found");
+        }
+      } else if (!documentKey?.trim()) {
         const [existingSession] = await db
           .select()
           .from(chatSession)
@@ -253,12 +264,23 @@ class ChatService {
       };
     }
 
-    const isGeneralHealth = !documentKey?.trim();
+    let isGeneralHealth = !documentKey?.trim();
 
     let session;
     let doc = null;
 
-    if (isGeneralHealth) {
+    if (reqSessionId) {
+      session = await chatSessionRepository.findSessionById(reqSessionId, userId);
+      if (!session) {
+        throw new NotFoundException("Chat session not found");
+      }
+      if (session.documentId) {
+        doc = { id: session.documentId };
+        isGeneralHealth = false;
+      } else {
+        isGeneralHealth = true;
+      }
+    } else if (isGeneralHealth) {
       // Find or create general health session
       const [existingSession] = await db
         .select()
@@ -380,6 +402,27 @@ class ChatService {
     let citations = [];
     let isEmergency = false;
 
+    let patientContextStr = "";
+    try {
+      const p = await patientRepository.findById(userId);
+      if (p) {
+        let dobStr = "Unknown";
+        if (p.dateOfBirth) {
+          dobStr =
+            p.dateOfBirth instanceof Date
+              ? p.dateOfBirth.toISOString().split("T")[0]
+              : String(p.dateOfBirth).split("T")[0];
+        }
+        patientContextStr = `Patient Profile:
+Name: ${p.firstName || ""} ${p.lastName || ""}
+Gender: ${p.gender || "Unknown"}
+Date of Birth: ${dobStr}
+Blood Group: ${p.bloodGroup || "Unknown"}`;
+      }
+    } catch (err) {
+      debugLogger.error("sendMessage: Failed to fetch patient profile", { error: err.message });
+    }
+
     if (isGeneralHealth) {
       // General Health chat flow
       const recent = await chatSessionRepository.listMessages({
@@ -393,7 +436,12 @@ class ChatService {
 
       debugLogger.info("sendMessage: Calling general health chat provider");
       try {
-        const aiResponse = await this.qwenHealthChat(history, "GENERAL_HEALTH");
+        const aiResponse = await this.qwenHealthChat(
+          history,
+          "GENERAL_HEALTH",
+          [],
+          patientContextStr,
+        );
         assistantText = aiResponse.answer;
         isEmergency = !!aiResponse.emergency;
       } catch (error) {
@@ -461,7 +509,12 @@ class ChatService {
           documentId: doc.id,
         }));
 
-        const aiResponse = await this.qwenHealthChat(history, "DOCUMENT_RAG", formattedChunks);
+        const aiResponse = await this.qwenHealthChat(
+          history,
+          "DOCUMENT_RAG",
+          formattedChunks,
+          patientContextStr,
+        );
         assistantText = aiResponse.answer;
         citations = aiResponse.citations || formattedChunks;
         isEmergency = !!aiResponse.emergency;
@@ -503,6 +556,33 @@ class ChatService {
     const updated = await chatSessionRepository.softDeleteSession(sessionId, userId);
     if (!updated) throw new NotFoundException("Chat session not found");
     return updated;
+  }
+
+  //creat onboring session
+  async createOnboardingSession({ userId, title = "Health Onboarding", metadata = {} }) {
+    return chatSessionRepository.createSession({
+      userId,
+      documentId: null,
+      title,
+      lastMessageAt: new Date(),
+      metadata,
+    });
+  }
+
+  //appted chat messages
+  async appendChatMessage({ sessionId, userId, role, content, citations = [], metadata = {} }) {
+    return chatSessionRepository.appendMessage({
+      sessionId,
+      userId,
+      role,
+      content,
+      citations,
+      metadata,
+    });
+  }
+  //update document id
+  async attachDocumentToSession({ sessionId, userId, documentId }) {
+    return chatSessionRepository.attachDocument(sessionId, userId, documentId);
   }
 }
 

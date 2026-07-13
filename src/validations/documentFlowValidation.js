@@ -70,6 +70,7 @@ const createChatSessionSchema = z
   .object({
     title: z.string().trim().max(255).optional(),
     documentId: z.string().uuid().optional(),
+    sessionId: z.string().uuid().optional().nullable(),
   })
   .strict();
 
@@ -77,6 +78,7 @@ const sendChatMessageSchema = z
   .object({
     documentKey: z.string().trim().min(3).max(500).optional().nullable(),
     question: z.string().trim().min(1).max(4000),
+    sessionId: z.string().uuid().optional().nullable(),
   })
   .strict();
 
