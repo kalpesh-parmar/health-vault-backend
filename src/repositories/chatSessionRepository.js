@@ -184,5 +184,24 @@ class ChatSessionRepository {
       .where(and(eq(chatMessage.sessionId, sessionId), eq(chatMessage.userId, userId)));
     return Number(row?.value || 0);
   }
+
+  async attachDocument(sessionId, userId, documentId) {
+    const [updated] = await this.client
+      .update(chatSession)
+      .set({
+        documentId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chatSession.id, sessionId),
+          eq(chatSession.userId, userId),
+          eq(chatSession.softDelete, false),
+        ),
+      )
+      .returning();
+
+    return updated || null;
+  }
 }
 module.exports = new ChatSessionRepository();

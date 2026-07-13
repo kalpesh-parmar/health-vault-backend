@@ -36,11 +36,11 @@ components:
 
     SendChatMessageRequest:
       type: object
-      required: [sessionId, message]
+      required: [question]
       properties:
-        sessionId: { type: string, format: uuid }
-        message: { type: string }
-        documentId: { type: string, format: uuid }
+        question: { type: string }
+        sessionId: { type: string, format: uuid, nullable: true }
+        documentKey: { type: string, nullable: true }
 
 paths:
   /chat/session:
