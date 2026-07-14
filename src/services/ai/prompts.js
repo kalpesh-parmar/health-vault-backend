@@ -16,7 +16,42 @@ const EMERGENCY_KEYWORDS = [
   "heart attack",
 ];
 
-const GENERAL_HEALTH_PROMPT = `You are an experienced and trustworthy family doctor giving general health advice in a simple and friendly way.
+const LOCALIZED_HEADINGS = {
+  english: {
+    answer: "🩺 Answer",
+    todo: "✅ What to do",
+    important: "⚠️ Important",
+    tip: "💡 Doctor's Tip",
+  },
+  gujarati: {
+    answer: "🩺 ઉત્તર",
+    todo: "✅ શું કરવું",
+    important: "⚠️ મહત્વપૂર્ણ",
+    tip: "💡 ડૉક્ટરની સલાહ",
+  },
+  hindi: {
+    answer: "🩺 उत्तर",
+    todo: "✅ क्या करें",
+    important: "⚠️ महत्वपूर्ण",
+    tip: "💡 डॉक्टर की सलाह",
+  },
+  marathi: {
+    answer: "🩺 उत्तर",
+    todo: "✅ काय करावे",
+    important: "⚠️ महत्त्वाचे",
+    tip: "💡 डॉक्टरचा सल्ला",
+  },
+  tamil: {
+    answer: "🩺 பதில்",
+    todo: "✅ என்ன செய்ய வேண்டும்",
+    important: "⚠️ முக்கியமானது",
+    tip: "💡 மருத்துவரின் குறிப்பு",
+  },
+};
+
+const GENERAL_HEALTH_PROMPT = (language = "english") => {
+  const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
+  return `You are an experienced and trustworthy family doctor giving general health advice in a simple and friendly way.
 
 Rules:
 1. Give medically accurate and evidence-based information only.
@@ -30,23 +65,26 @@ Rules:
 9. Do not use markdown headings like "Medical Facts", "Recommendations", or "Emergency Advice".
 10. Format answers exactly like this:
 
-🩺 Answer
+${headings.answer}
 Provide a short and direct explanation.
 
-✅ What to do
+${headings.todo}
 • Point 1
 • Point 2
 • Point 3
 
-⚠️ Important
+${headings.important}
 Only if needed.
 
-💡 Doctor's Tip
-Provide one practical and encouraging tip.`;
+${headings.tip}
+Provide one practical and encouraging tip.
 
-const RAG_PROMPT_TEMPLATE = (
-  context,
-) => `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
+11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+};
+
+const RAG_PROMPT_TEMPLATE = (context, language = "english") => {
+  const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
+  return `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
 
 Retrieved Report Context:
 """
@@ -67,19 +105,22 @@ Rules:
 9. Do not use markdown headings.
 10. Format answers exactly like this:
 
-🩺 Answer
+${headings.answer}
 Provide a short and direct explanation based on the report.
 
-✅ What to do
+${headings.todo}
 • Point 1
 • Point 2
 • Point 3
 
-⚠️ Important
+${headings.important}
 Only if needed.
 
-💡 Doctor's Tip
-Provide one practical and encouraging tip.`;
+${headings.tip}
+Provide one practical and encouraging tip.
+
+11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+};
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
 Analyze the provided document (text or image) and determine if it is a medical document.

@@ -198,7 +198,7 @@ async function onboardingChat(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    let { message, history = [], state } = req.body;
+    let { message, history = [], state, displayLabel } = req.body;
     if (message === undefined) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "message is required" });
     }
@@ -246,7 +246,14 @@ async function onboardingChat(req, res, next) {
     );
 
     const beforeOllamaTime = Date.now();
-    const result = await onboardingService.chat(message, history, state, userId);
+    const result = await onboardingService.chat(
+      message,
+      history,
+      state,
+      userId,
+      null,
+      displayLabel,
+    );
     const ollamaResponseTime = Date.now();
 
     console.log(
@@ -289,6 +296,10 @@ async function getOnboardingStatus(req, res, next) {
     // Get saved onboarding state for resumption
     const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
     const resumableState = onboardingRecord?.data || null;
+    if (resumableState && resumableState.preferredLanguage) {
+      const { normalizeLanguage } = require("../utils/commonUtils");
+      resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
+    }
     let currentStep = resumableState?.currentStep || "ASK_LANGUAGE";
 
     const isStateCompleted =
@@ -324,6 +335,7 @@ async function getOnboardingStatus(req, res, next) {
         data: {
           isOnboardingCompleted: true,
           currentStep,
+          chatSessionId: resumableState?.chatSessionId || null,
           resumableState,
         },
       });
@@ -334,6 +346,7 @@ async function getOnboardingStatus(req, res, next) {
       data: {
         isOnboardingCompleted: false,
         currentStep,
+        chatSessionId: resumableState?.chatSessionId || null,
         resumableState,
       },
     });
@@ -374,10 +387,54 @@ async function cancelOcr(req, res, next) {
   }
 }
 
+async function getOnboardingHistory(req, res, next) {
+  try {
+    const userId = req.auth?.userId;
+    if (!userId) {
+      return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
+    }
+
+    const chatSessionRepository = require("../repositories/chatSessionRepository");
+
+    const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+    const resumableState = onboardingRecord?.data || null;
+    if (resumableState && resumableState.preferredLanguage) {
+      const { normalizeLanguage } = require("../utils/commonUtils");
+      resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
+    }
+    const chatSessionId = resumableState?.chatSessionId || null;
+
+    let messages = [];
+    if (chatSessionId) {
+      const result = await chatSessionRepository.listMessages({
+        sessionId: chatSessionId,
+        userId,
+        limit: 100,
+        direction: "after",
+      });
+      messages = result.items || [];
+    }
+
+    return res.status(StatusCodes.OK).json({
+      status: "SUCCESS",
+      data: {
+        chatSessionId,
+        messages,
+        currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
+        resumableState,
+      },
+    });
+  } catch (error) {
+    console.error("[OnboardingController] getOnboardingHistory failed:", error);
+    return next(error);
+  }
+}
+
 module.exports = {
   ocrExtract,
   getOcrStatus,
   cancelOcr,
   onboardingChat,
   getOnboardingStatus,
+  getOnboardingHistory,
 };

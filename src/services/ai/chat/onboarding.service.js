@@ -8,6 +8,7 @@ const { env } = require("../../../configs/env");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
+const { normalizeLanguage } = require("../../../utils/commonUtils");
 const medicationService = require("../../medicationService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
@@ -1742,7 +1743,7 @@ async function getLocalizedResponse(step, state) {
         action: step,
         message: await getLocalizedText(
           "onboarding.complete.message",
-          "Thank you! Onboarding is complete. What would you like to do next?",
+          "Thank you! Onboarding is complete.",
           state.preferredLanguage,
         ),
         options: finalOptions,
@@ -1758,9 +1759,20 @@ async function getLocalizedResponse(step, state) {
 }
 
 class OnboardingService {
-  async chat(message, history = [], state = {}, userId = null, sessionId = null) {
+  async chat(
+    message,
+    history = [],
+    state = {},
+    userId = null,
+    sessionId = null,
+    displayLabel = null,
+  ) {
     if (!state) {
       state = {};
+    }
+
+    if (state.preferredLanguage) {
+      state.preferredLanguage = normalizeLanguage(state.preferredLanguage);
     }
 
     // Ensure all medication-related state properties are initialized
@@ -2036,11 +2048,37 @@ class OnboardingService {
     }
 
     if (!isInitCall && state.chatSessionId) {
+      let resolvedLabel = null;
+      if (state.currentStep && msg !== undefined && msg !== null) {
+        try {
+          const prevResponse = await createResponse(state.currentStep, state);
+          if (prevResponse && Array.isArray(prevResponse.options)) {
+            const matchedOpt = prevResponse.options.find(
+              (opt) => opt && String(opt.value).toLowerCase() === String(msg).toLowerCase(),
+            );
+            if (matchedOpt && matchedOpt.label) {
+              resolvedLabel = matchedOpt.label;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to resolve option label server-side:",
+            err.message,
+          );
+        }
+      }
+      const userContent =
+        resolvedLabel || displayLabel || (msg !== undefined && msg !== null ? msg : "");
+
       await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
         role: "user",
-        content: msg,
+        content: userContent,
+        metadata: {
+          rawValue: msg !== undefined && msg !== null ? msg : "",
+          stepKey: state.currentStep || null,
+        },
       });
     }
     // 2. Process incoming user message based on current expected step BEFORE update
@@ -2220,6 +2258,10 @@ class OnboardingService {
         updateData.onboardingCompleted = true;
       }
 
+      if (state.preferredLanguage) {
+        updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
+      }
+
       if (Object.keys(updateData).length > 0) {
         await patientRepository.updateById(userId, updateData);
       }
@@ -2287,7 +2329,20 @@ class OnboardingService {
         role: "assistant",
         content: response.message,
         metadata: {
-          action: response.action,
+          action: response.action || null,
+          renderType: response.renderType || null,
+          options: response.options || null,
+          fields: response.fields || null,
+          mode: response.mode || null,
+          title: response.title || null,
+          subtitle: response.subtitle || null,
+          explainer: response.explainer || null,
+          loginSummary: response.loginSummary || null,
+          documentSummary: response.documentSummary || null,
+          loginProvider: response.loginProvider || null,
+          medicine: response.medicine || null,
+          summary: response.summary || null,
+          medicines: response.medicines || null,
         },
       });
     }

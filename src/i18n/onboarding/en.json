@@ -49,7 +49,7 @@
   "onboarding.medicineOptions.addAnother": "Add Another Medicine",
   "onboarding.medicineOptions.goToDashboard": "Go to Dashboard",
   "onboarding.medicineOptions.askAboutReport": "Ask About My Report",
-  "onboarding.complete.message": "Thank you! Onboarding is complete. What would you like to do next?",
+  "onboarding.complete.message": "Thank you! Onboarding is complete.",
   "onboarding.complete.goToDashboard": "Go to Dashboard",
   "onboarding.complete.askAboutReport": "Ask About My Report",
   "onboarding.complete.addMoreMedicines": "Add More Medicines",

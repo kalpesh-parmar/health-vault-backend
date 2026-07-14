@@ -40,6 +40,7 @@ const patient = pgTable(
     isMobileVerified: boolean("is_mobile_verified").default(false).notNull(),
     isEmailVerified: boolean("is_email_verified").default(false).notNull(),
     onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
+    preferredLanguage: varchar("preferred_language", { length: 50 }).default("english"),
 
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),

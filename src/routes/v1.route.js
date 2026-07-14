@@ -9,5 +9,6 @@ router.get("/ocr/status/:documentId", verifyToken, v1Controller.getOcrStatus);
 router.post("/ocr/cancel/:documentId", verifyToken, v1Controller.cancelOcr);
 router.post("/onboarding/chat", verifyToken, v1Controller.onboardingChat);
 router.get("/onboarding/status", verifyToken, v1Controller.getOnboardingStatus);
+router.get("/onboarding/history", verifyToken, v1Controller.getOnboardingHistory);
 
 module.exports = router;
