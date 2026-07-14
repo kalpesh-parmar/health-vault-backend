@@ -1705,40 +1705,6 @@ async function getLocalizedResponse(step, state) {
 
     case "COMPLETE":
     case "POST_ONBOARDING": {
-      const hasMedicines =
-        state.medicinesToAdd && state.medicinesToAdd.length > 0 && !state.medicinesSkipped;
-      const finalOptions = [];
-
-      const dashboardLabel = await getLocalizedText(
-        "onboarding.complete.goToDashboard",
-        "Go to Dashboard",
-        state.preferredLanguage,
-      );
-      finalOptions.push({ label: dashboardLabel, value: "GO_TO_DASHBOARD" });
-
-      if (step === "POST_ONBOARDING") {
-        const askReportLabel = await getLocalizedText(
-          "onboarding.complete.askAboutReport",
-          "Ask About My Report",
-          state.preferredLanguage,
-        );
-        finalOptions.push({ label: askReportLabel, value: "ASK_ABOUT_REPORT" });
-      }
-      if (hasMedicines) {
-        const addMoreLabel = await getLocalizedText(
-          "onboarding.complete.addMoreMedicines",
-          "Add More Medicines",
-          state.preferredLanguage,
-        );
-        const viewMedsLabel = await getLocalizedText(
-          "onboarding.complete.viewMyMedicines",
-          "View My Medicines",
-          state.preferredLanguage,
-        );
-        finalOptions.push({ label: addMoreLabel, value: "ADD_MORE_MEDICINES" });
-        finalOptions.push({ label: viewMedsLabel, value: "VIEW_MEDICINES" });
-      }
-
       return {
         action: step,
         message: await getLocalizedText(
@@ -1746,7 +1712,7 @@ async function getLocalizedResponse(step, state) {
           "Thank you! Onboarding is complete.",
           state.preferredLanguage,
         ),
-        options: finalOptions,
+        options: [],
       };
     }
 

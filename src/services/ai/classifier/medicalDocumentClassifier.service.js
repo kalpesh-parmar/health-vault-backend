@@ -53,7 +53,13 @@ class MedicalDocumentClassifierService {
     let doneReason = "N/A";
 
     if (responseObj && typeof responseObj === "object") {
-      text = responseObj.content || "";
+      if (typeof responseObj.text === "string" && responseObj.text.trim()) {
+        text = responseObj.text;
+      } else if (typeof responseObj.content === "string" && responseObj.content.trim()) {
+        text = responseObj.content;
+      } else if (typeof responseObj.thinking === "string" && responseObj.thinking.trim()) {
+        text = responseObj.thinking;
+      }
       doneReason = responseObj.done_reason || "N/A";
       isTruncated = doneReason === "length";
     } else {
@@ -61,6 +67,9 @@ class MedicalDocumentClassifierService {
     }
 
     if (!text || !text.trim()) {
+      console.error(
+        `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${responseObj?.content?.length || 0}, Thinking length: ${responseObj?.thinking?.length || 0}`,
+      );
       return {
         isMedicalDocument: false,
         confidence: 0,
@@ -150,6 +159,9 @@ class MedicalDocumentClassifierService {
       }
     }
 
+    console.error(
+      `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${responseObj?.content?.length || 0}, Thinking length: ${responseObj?.thinking?.length || 0}`,
+    );
     console.error(
       `[MedicalDocumentClassifierService] All parsing strategies failed. Content length: ${raw.length}, doneReason: ${doneReason}. Errors: ${parseErrors.join("; ")}`,
     );
