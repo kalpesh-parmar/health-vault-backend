@@ -28,12 +28,14 @@ paths:
               required: [file]
               properties:
                 file:
-                  type: string
-                  format: binary
-                  description: Medical report (PDF or Image) to extract data from
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: Medical reports (PDF or Image) to extract data from (Up to 5 files depending on onboarding status)
       responses:
-        "200":
-          description: Successful extraction
+        "202":
+          description: Document processing started
           content:
             application/json:
               schema:
@@ -42,11 +44,20 @@ paths:
                   status:
                     type: string
                     example: SUCCESS
+                  message:
+                    type: string
+                    example: Document processing started
                   data:
                     type: object
                     properties:
                       document:
                         type: object
+                        description: First document for backwards compatibility
+                      documents:
+                        type: array
+                        items:
+                          type: object
+                        description: Array of all uploaded documents
                       ocr:
                         type: object
                       structuredData:

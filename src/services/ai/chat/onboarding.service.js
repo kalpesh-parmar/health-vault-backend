@@ -15,6 +15,7 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
+const medicationReminderService = require("../../medicationReminderService");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -57,13 +58,16 @@ function cleanAndParseJson(text) {
 }
 
 function splitName(fullName) {
-  if (!fullName) return { firstName: "", lastName: "" };
+  if (!fullName) return { firstName: "", middleName: "", lastName: "" };
   const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+  if (parts.length === 0) return { firstName: "", middleName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], middleName: "", lastName: "" };
+  if (parts.length === 2) return { firstName: parts[0], middleName: "", lastName: parts[1] };
+
   const firstName = parts[0];
-  const lastName = parts.slice(1).join(" ");
-  return { firstName, lastName };
+  const lastName = parts[parts.length - 1];
+  const middleName = parts.slice(1, -1).join(" ");
+  return { firstName, middleName, lastName };
 }
 
 function normalizeName(name) {
@@ -995,7 +999,18 @@ async function updateStateFromMessage(state, message, userId = null) {
             throw new Error("client_med_id is missing");
           }
 
-          await medicationService.create(userId, state.activeMedicine);
+          const createdMedication = await medicationService.create(userId, state.activeMedicine);
+
+          try {
+            await medicationReminderService.createReminder(userId, {
+              medicationId: createdMedication[0].id,
+            });
+          } catch (err) {
+            console.error(
+              "[OnboardingService] Failed to create reminder for single medicine:",
+              err,
+            );
+          }
 
           let nextIncompleteIndex = -1;
           for (let i = 0; i < state.medicinesToAdd.length; i++) {
@@ -1029,7 +1044,21 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         } else if (state.confirmMode === "BULK") {
           if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
-            await medicationService.bulkCreate(userId, state.validMedsToBulkCreate);
+            const bulkCreated = await medicationService.bulkCreate(
+              userId,
+              state.validMedsToBulkCreate,
+            );
+
+            for (const med of bulkCreated) {
+              try {
+                await medicationReminderService.createReminder(userId, { medicationId: med.id });
+              } catch (err) {
+                console.error(
+                  `[OnboardingService] Failed to create reminder for bulk medicine ${med.id}:`,
+                  err,
+                );
+              }
+            }
           }
           state.currentStep = "MEDICINE_OPTIONS";
         }
@@ -1083,6 +1112,10 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.medicinesToAdd = [{}];
         state.currentMedicineIndex = 0;
         state.currentStep = "ASK_MEDICINE_NAME";
+        break;
+      } else if (msg === "GO_TO_DASHBOARD") {
+        state.isOnboardingCompleted = true;
+        state.currentStep = "COMPLETE";
         break;
       }
 
@@ -2163,7 +2196,6 @@ class OnboardingService {
     // 4. Resolve next step after updates
     // If the step is REGISTER_USER, mark as completed
     if (state.currentStep === "REGISTER_USER") {
-      state.isOnboardingCompleted = true;
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
@@ -2287,7 +2319,9 @@ class OnboardingService {
         role: "assistant",
         content: response.message,
         metadata: {
-          action: response.action,
+          // action: response.action,
+          ...response,
+          // message:undefined,
         },
       });
     }

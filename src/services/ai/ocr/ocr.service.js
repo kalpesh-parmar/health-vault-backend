@@ -348,7 +348,7 @@ class OcrService {
     fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     try {
-      const popplerPath = env.popplerPath || "C:/poppler-26.02.0/Library/bin";
+      const popplerPath = env.popplerPath || "D:/Release-26.02.0-0/poppler-26.02.0/Library/bin";
       const pdftoppmExe = path.join(popplerPath, "pdftoppm.exe");
       const cmd = `"${pdftoppmExe}" -png -r 150 "${tempPdfPath}" "${outputPrefix}"`;
 

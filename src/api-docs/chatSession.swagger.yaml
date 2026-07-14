@@ -40,7 +40,7 @@ components:
       properties:
         question: { type: string }
         sessionId: { type: string, format: uuid, nullable: true }
-        documentKey: { type: string, nullable: true }
+        documentId: { type: string, nullable: true }
 
 paths:
   /chat/session:

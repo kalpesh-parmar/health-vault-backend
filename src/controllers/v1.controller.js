@@ -29,65 +29,94 @@ async function ocrExtract(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    if (!req.file) {
+    const filesArray = req.files && req.files.length > 0 ? req.files : req.file ? [req.file] : [];
+    if (filesArray.length === 0) {
       console.warn(`[v1Controller] [${requestId}] Exit - No file uploaded`);
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "No file uploaded" });
     }
 
-    console.log(
-      `[v1Controller] [${requestId}] File Info: OriginalName=${req.file.originalname}, Size=${req.file.size} bytes, MimeType=${req.file.mimetype}`,
-    );
+    // const patientRepository = require("../repositories/patientRepository");
+    // const patientRecord = await patientRepository.findById(userId);
+    // const isOnboardingCompleted = patientRecord?.onboardingCompleted || false;
 
-    // 1. Upload and validate synchronously (fast, throws on non-medical document)
+    // if (!isOnboardingCompleted && filesArray.length > 1) {
+    //   return res
+    //     .status(StatusCodes.BAD_REQUEST)
+    //     .json({ error: "Only one document can be uploaded before completing onboarding." });
+    // }
+    // if (filesArray.length > 5) {
+    //   return res
+    //     .status(StatusCodes.BAD_REQUEST)
+    //     .json({ error: "Maximum 5 documents can be uploaded." });
+    // }
+
     const uploadFileService = require("../services/uploadFileService");
-    const uploadResult = await uploadFileService.uploadFile(req.file, "PATIENT_DOCUMENT", userId);
-
-    // 2. Create the document row with status = "in_progress" (maps to "processing")
     const { db } = require("../configs/db");
     const { document } = require("../models/document");
     const { ocrStatus } = require("../enums/ocrStatus");
     const { env } = require("../configs/env");
 
-    const fileKey = uploadResult.data.fileKey;
-    const bucketName =
-      uploadResult.data.s3Bucket ||
-      (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-    const filePath =
-      env.storageProvider === "gcp"
-        ? `gs://${bucketName}/${fileKey}`
-        : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+    const documentsResponse = [];
 
-    const [documentRow] = await db
-      .insert(document)
-      .values({
-        userId,
-        documentType: "medical_document",
-        fileName: uploadResult.data.originalFileName,
-        filePath,
-        s3Bucket: bucketName,
-        s3Key: fileKey,
-        fileType: inferFileType(uploadResult.data.mimeType),
-        fileSize: uploadResult.data.fileSize,
-        ocrStatus: ocrStatus.IN_PROGRESS,
-      })
-      .returning();
+    for (const file of filesArray) {
+      console.log(
+        `[v1Controller] [${requestId}] File Info: OriginalName=${file.originalname}, Size=${file.size} bytes, MimeType=${file.mimetype}`,
+      );
 
-    // 3. Fire-and-forget background pipeline
-    setImmediate(() => {
-      ocrService
-        .processAndStoreAsynchronously({
-          documentId: documentRow.id,
-          file: req.file,
+      // 1. Upload and validate synchronously (fast, throws on non-medical document)
+      const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
+
+      // 2. Create the document row with status = "in_progress" (maps to "processing")
+      const fileKey = uploadResult.data.fileKey;
+      const bucketName =
+        uploadResult.data.s3Bucket ||
+        (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
+      const filePath =
+        env.storageProvider === "gcp"
+          ? `gs://${bucketName}/${fileKey}`
+          : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+
+      const [documentRow] = await db
+        .insert(document)
+        .values({
           userId,
-          uploadResult,
+          documentType: "medical_document",
+          fileName: uploadResult.data.originalFileName,
+          filePath,
+          s3Bucket: bucketName,
+          s3Key: fileKey,
+          fileType: inferFileType(uploadResult.data.mimeType),
+          fileSize: uploadResult.data.fileSize,
+          ocrStatus: ocrStatus.IN_PROGRESS,
         })
-        .catch((err) => {
-          console.error(
-            `[v1Controller] [${requestId}] Background pipeline error for doc ${documentRow.id}:`,
-            err,
-          );
-        });
-    });
+        .returning();
+
+      // 3. Fire-and-forget background pipeline
+      setImmediate(() => {
+        ocrService
+          .processAndStoreAsynchronously({
+            documentId: documentRow.id,
+            file: file,
+            userId,
+            uploadResult,
+          })
+          .catch((err) => {
+            console.error(
+              `[v1Controller] [${requestId}] Background pipeline error for doc ${documentRow.id}:`,
+              err,
+            );
+          });
+      });
+
+      documentsResponse.push({
+        id: documentRow.id,
+        fileName: documentRow.fileName,
+        filePath: documentRow.filePath,
+        fileType: documentRow.fileType,
+        fileSize: documentRow.fileSize,
+        ocrStatus: documentRow.ocrStatus,
+      });
+    }
 
     const duration = Date.now() - startTime;
     console.log(
@@ -98,16 +127,10 @@ async function ocrExtract(req, res, next) {
       status: "SUCCESS",
       message: "Document processing started",
       data: {
-        document: {
-          id: documentRow.id,
-          fileName: documentRow.fileName,
-          filePath: documentRow.filePath,
-          fileType: documentRow.fileType,
-          fileSize: documentRow.fileSize,
-          ocrStatus: documentRow.ocrStatus,
-        },
-        documentId: documentRow.id,
+        // document: documentsResponse[0],
+        // documentId: documentsResponse[0].id,
         status: "processing",
+        documents: documentsResponse,
       },
     });
   } catch (error) {
@@ -291,10 +314,7 @@ async function getOnboardingStatus(req, res, next) {
     const resumableState = onboardingRecord?.data || null;
     let currentStep = resumableState?.currentStep || "ASK_LANGUAGE";
 
-    const isStateCompleted =
-      resumableState?.isOnboardingCompleted === true ||
-      currentStep === "COMPLETE" ||
-      currentStep === "POST_ONBOARDING";
+    const isStateCompleted = resumableState?.isOnboardingCompleted === true;
 
     const isBasicProfileComplete = !!(
       patient.firstName &&
@@ -359,7 +379,7 @@ async function cancelOcr(req, res, next) {
     await db
       .update(document)
       .set({
-        ocrStatus: ocrStatus.CANCELLED,
+        ocrStatus: ocrStatus.CANCELED,
         remarks: "ERR_CODE:USER_CANCELLED",
         updatedAt: new Date(),
       })
