@@ -12,6 +12,7 @@
 const {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -62,6 +63,7 @@ const chatMessage = pgTable(
     citations: jsonb("citations").default([]).notNull(),
     metadata: jsonb("metadata").default({}).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    seq: integer("seq").default(0).notNull(),
   },
   (table) => [
     index("chat_messages_session_idx").on(table.sessionId, table.createdAt),

@@ -28,11 +28,9 @@ paths:
               required: [file]
               properties:
                 file:
-                  type: array
-                  items:
-                    type: string
-                    format: binary
-                  description: Medical reports (PDF or Image) to extract data from (Up to 5 files depending on onboarding status)
+                  type: string
+                  format: binary
+                  description: Medical report (PDF or Image) to extract data from
       responses:
         "202":
           description: Document processing started
@@ -52,12 +50,7 @@ paths:
                     properties:
                       document:
                         type: object
-                        description: First document for backwards compatibility
-                      documents:
-                        type: array
-                        items:
-                          type: object
-                        description: Array of all uploaded documents
+                        description: Uploaded document details
                       ocr:
                         type: object
                       structuredData:

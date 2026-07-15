@@ -446,13 +446,13 @@ class PatientService {
       }
     }
 
-    const email = decodedToken.email || null;
-    let firstName = null;
-    let lastName = null;
+    const email = decodedToken.email || data.email || null;
+    let firstName = data.firstName || null;
+    let lastName = data.lastName || null;
     if (decodedToken.name) {
       const nameParts = decodedToken.name.trim().split(/\s+/);
-      firstName = nameParts[0] || null;
-      lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
+      if (!firstName) firstName = nameParts[0] || null;
+      if (!lastName) lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
     }
     const firebaseUid = decodedToken.uid;
     const providerUserId = firebaseUid; // Or decodedToken.sub
@@ -522,7 +522,7 @@ class PatientService {
         const patientCode = await createUniquePatientCode();
 
         const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
-        const socialProviders = ["google", "facebook", "microsoft"];
+        const socialProviders = ["google", "facebook", "apple", "microsoft"];
         const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
 
         patientUser = await patientRepository.create({
@@ -533,7 +533,9 @@ class PatientService {
           email: email,
           firstName: firstName,
           lastName: lastName,
-          fullName: decodedToken.name || null,
+          fullName:
+            decodedToken.name ||
+            (firstName && lastName ? `${firstName} ${lastName}` : firstName || null),
           isActive: true,
           status: USER_STATUS.ACTIVE,
           isVerified: true,
@@ -567,7 +569,7 @@ class PatientService {
       }
     }
 
-    const socialProvidersList = ["google", "facebook", "microsoft"];
+    const socialProvidersList = ["google", "facebook", "apple", "microsoft"];
     if (socialProvidersList.includes(provider) && loginType === "social") {
       updateData.isEmailVerified = true;
     }

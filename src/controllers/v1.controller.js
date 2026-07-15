@@ -29,8 +29,8 @@ async function ocrExtract(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    const filesArray = req.files && req.files.length > 0 ? req.files : req.file ? [req.file] : [];
-    if (filesArray.length === 0) {
+    const file = req.file;
+    if (!file) {
       console.warn(`[v1Controller] [${requestId}] Exit - No file uploaded`);
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "No file uploaded" });
     }
@@ -56,67 +56,54 @@ async function ocrExtract(req, res, next) {
     const { ocrStatus } = require("../enums/ocrStatus");
     const { env } = require("../configs/env");
 
-    const documentsResponse = [];
+    console.log(
+      `[v1Controller] [${requestId}] File Info: OriginalName=${file.originalname}, Size=${file.size} bytes, MimeType=${file.mimetype}`,
+    );
 
-    for (const file of filesArray) {
-      console.log(
-        `[v1Controller] [${requestId}] File Info: OriginalName=${file.originalname}, Size=${file.size} bytes, MimeType=${file.mimetype}`,
-      );
+    // 1. Upload and validate synchronously (fast, throws on non-medical document)
+    const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
 
-      // 1. Upload and validate synchronously (fast, throws on non-medical document)
-      const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
+    // 2. Create the document row with status = "in_progress" (maps to "processing")
+    const fileKey = uploadResult.data.fileKey;
+    const bucketName =
+      uploadResult.data.s3Bucket ||
+      (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
+    const filePath =
+      env.storageProvider === "gcp"
+        ? `gs://${bucketName}/${fileKey}`
+        : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
 
-      // 2. Create the document row with status = "in_progress" (maps to "processing")
-      const fileKey = uploadResult.data.fileKey;
-      const bucketName =
-        uploadResult.data.s3Bucket ||
-        (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-      const filePath =
-        env.storageProvider === "gcp"
-          ? `gs://${bucketName}/${fileKey}`
-          : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
+    const [documentRow] = await db
+      .insert(document)
+      .values({
+        userId,
+        documentType: "medical_document",
+        fileName: uploadResult.data.originalFileName,
+        filePath,
+        s3Bucket: bucketName,
+        s3Key: fileKey,
+        fileType: inferFileType(uploadResult.data.mimeType),
+        fileSize: uploadResult.data.fileSize,
+        ocrStatus: ocrStatus.IN_PROGRESS,
+      })
+      .returning();
 
-      const [documentRow] = await db
-        .insert(document)
-        .values({
+    // 3. Fire-and-forget background pipeline
+    setImmediate(() => {
+      ocrService
+        .processAndStoreAsynchronously({
+          documentId: documentRow.id,
+          file: file,
           userId,
-          documentType: "medical_document",
-          fileName: uploadResult.data.originalFileName,
-          filePath,
-          s3Bucket: bucketName,
-          s3Key: fileKey,
-          fileType: inferFileType(uploadResult.data.mimeType),
-          fileSize: uploadResult.data.fileSize,
-          ocrStatus: ocrStatus.IN_PROGRESS,
+          uploadResult,
         })
-        .returning();
-
-      // 3. Fire-and-forget background pipeline
-      setImmediate(() => {
-        ocrService
-          .processAndStoreAsynchronously({
-            documentId: documentRow.id,
-            file: file,
-            userId,
-            uploadResult,
-          })
-          .catch((err) => {
-            console.error(
-              `[v1Controller] [${requestId}] Background pipeline error for doc ${documentRow.id}:`,
-              err,
-            );
-          });
-      });
-
-      documentsResponse.push({
-        id: documentRow.id,
-        fileName: documentRow.fileName,
-        filePath: documentRow.filePath,
-        fileType: documentRow.fileType,
-        fileSize: documentRow.fileSize,
-        ocrStatus: documentRow.ocrStatus,
-      });
-    }
+        .catch((err) => {
+          console.error(
+            `[v1Controller] [${requestId}] Background pipeline error for doc ${documentRow.id}:`,
+            err,
+          );
+        });
+    });
 
     const duration = Date.now() - startTime;
     console.log(
@@ -127,10 +114,14 @@ async function ocrExtract(req, res, next) {
       status: "SUCCESS",
       message: "Document processing started",
       data: {
-        // document: documentsResponse[0],
-        // documentId: documentsResponse[0].id,
-        status: "processing",
-        documents: documentsResponse,
+        document: {
+          id: documentRow.id,
+          fileName: documentRow.fileName,
+          filePath: documentRow.filePath,
+          fileType: documentRow.fileType,
+          fileSize: documentRow.fileSize,
+          ocrStatus: documentRow.ocrStatus,
+        },
       },
     });
   } catch (error) {
@@ -221,7 +212,7 @@ async function onboardingChat(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    let { message, history = [], state } = req.body;
+    let { message, history = [], state, displayLabel } = req.body;
     if (message === undefined) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "message is required" });
     }
@@ -269,7 +260,14 @@ async function onboardingChat(req, res, next) {
     );
 
     const beforeOllamaTime = Date.now();
-    const result = await onboardingService.chat(message, history, state, userId);
+    const result = await onboardingService.chat(
+      message,
+      history,
+      state,
+      userId,
+      null,
+      displayLabel,
+    );
     const ollamaResponseTime = Date.now();
 
     console.log(
@@ -312,6 +310,10 @@ async function getOnboardingStatus(req, res, next) {
     // Get saved onboarding state for resumption
     const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
     const resumableState = onboardingRecord?.data || null;
+    if (resumableState && resumableState.preferredLanguage) {
+      const { normalizeLanguage } = require("../utils/commonUtils");
+      resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
+    }
     let currentStep = resumableState?.currentStep || "ASK_LANGUAGE";
 
     const isStateCompleted = resumableState?.isOnboardingCompleted === true;
@@ -344,6 +346,7 @@ async function getOnboardingStatus(req, res, next) {
         data: {
           isOnboardingCompleted: true,
           currentStep,
+          chatSessionId: resumableState?.chatSessionId || null,
           resumableState,
         },
       });
@@ -354,6 +357,7 @@ async function getOnboardingStatus(req, res, next) {
       data: {
         isOnboardingCompleted: false,
         currentStep,
+        chatSessionId: resumableState?.chatSessionId || null,
         resumableState,
       },
     });
@@ -394,10 +398,54 @@ async function cancelOcr(req, res, next) {
   }
 }
 
+async function getOnboardingHistory(req, res, next) {
+  try {
+    const userId = req.auth?.userId;
+    if (!userId) {
+      return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
+    }
+
+    const chatSessionRepository = require("../repositories/chatSessionRepository");
+
+    const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+    const resumableState = onboardingRecord?.data || null;
+    if (resumableState && resumableState.preferredLanguage) {
+      const { normalizeLanguage } = require("../utils/commonUtils");
+      resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
+    }
+    const chatSessionId = resumableState?.chatSessionId || null;
+
+    let messages = [];
+    if (chatSessionId) {
+      const result = await chatSessionRepository.listMessages({
+        sessionId: chatSessionId,
+        userId,
+        limit: 100,
+        direction: "after",
+      });
+      messages = result.items || [];
+    }
+
+    return res.status(StatusCodes.OK).json({
+      status: "SUCCESS",
+      data: {
+        chatSessionId,
+        messages,
+        currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
+        resumableState,
+      },
+    });
+  } catch (error) {
+    console.error("[OnboardingController] getOnboardingHistory failed:", error);
+    return next(error);
+  }
+}
+
 module.exports = {
   ocrExtract,
   getOcrStatus,
   cancelOcr,
   onboardingChat,
   getOnboardingStatus,
+  getOnboardingHistory,
 };
