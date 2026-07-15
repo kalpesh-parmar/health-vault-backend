@@ -2241,7 +2241,8 @@ class OnboardingService {
         role: "assistant",
         content: response.message,
         metadata: {
-          action: response.action,
+          ...response,
+          message: undefined, // Message is already saved in 'content'
         },
       });
     }

@@ -619,6 +619,23 @@ Do not include markdown.
 Do not include explanations.
 `;
 
+const QUERY_INTENT_CLASSIFIER_PROMPT = `You are a medical query intent classifier.
+Analyze the user's question and the list of their uploaded medical documents to determine the intent.
+
+Categories:
+- SPECIFIC_DOCUMENT: The user is asking about a specific document (e.g., "What was my blood sugar in the Jan 2023 report?", "Summarize my MRI").
+- ALL_DOCUMENTS: The user is asking a general health question related to their own data across multiple documents (e.g., "What is the trend of my cholesterol?", "Do I have any heart issues?").
+- GENERAL_HEALTH: The user is asking a general medical question unrelated to their documents (e.g., "What are the symptoms of flu?", "How to cure a headache?").
+
+If the intent is SPECIFIC_DOCUMENT, identify the ID of the document they are referring to from the provided list based on dates, names, or document types. If you cannot confidently determine which document, default to ALL_DOCUMENTS.
+
+Output strictly as JSON without any markdown formatting, explanations, or backticks:
+{
+  "intent": "SPECIFIC_DOCUMENT" | "ALL_DOCUMENTS" | "GENERAL_HEALTH",
+  "documentId": "uuid or null"
+}
+`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -633,4 +650,5 @@ module.exports = {
   CLASSIFICATION_PROMPT,
   GRAPHICAL_ANALYSIS_PROMPT,
   TRANSLATION_SYSTEM_PROMPT,
+  QUERY_INTENT_CLASSIFIER_PROMPT,
 };

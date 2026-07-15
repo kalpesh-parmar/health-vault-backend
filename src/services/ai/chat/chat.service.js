@@ -414,17 +414,19 @@ class ChatService {
               : String(p.dateOfBirth).split("T")[0];
         }
         patientContextStr = `Patient Profile:
-Name: ${p.firstName || ""} ${p.lastName || ""}
-Gender: ${p.gender || "Unknown"}
-Date of Birth: ${dobStr}
-Blood Group: ${p.bloodGroup || "Unknown"}`;
+          Name: ${p.firstName || ""} ${p.lastName || ""}
+          Gender: ${p.gender || "Unknown"}
+          Date of Birth: ${dobStr}
+          Blood Group: ${p.bloodGroup || "Unknown"}`;
       }
     } catch (err) {
       debugLogger.error("sendMessage: Failed to fetch patient profile", { error: err.message });
     }
 
+    let chatMode = isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
+
     if (isGeneralHealth) {
-      // General Health chat flow
+      // Intent Classification and RAG integration for General Health
       const recent = await chatSessionRepository.listMessages({
         direction: "before",
         limit: 8,
@@ -434,22 +436,127 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
-      debugLogger.info("sendMessage: Calling general health chat provider");
-      try {
-        const aiResponse = await this.qwenHealthChat(
-          history,
-          "GENERAL_HEALTH",
-          [],
-          patientContextStr,
-        );
-        assistantText = aiResponse.answer;
-        isEmergency = !!aiResponse.emergency;
-      } catch (error) {
-        debugLogger.error("sendMessage: General health provider call failed", {
-          error: error.message,
+      // Check for user's documents
+      const userDocs = await db
+        .select({
+          id: document.id,
+          fileName: document.fileName,
+          reportDate: document.reportDate,
+          documentType: document.documentType,
+        })
+        .from(document)
+        .where(and(eq(document.userId, userId), eq(document.softDelete, false)));
+
+      let classifiedIntent = "GENERAL_HEALTH";
+      let classifiedDocId = null;
+
+      if (userDocs.length > 0) {
+        debugLogger.info("sendMessage: Running query intent classifier");
+        const docListStr = userDocs
+          .map(
+            (d) =>
+              `- ID: ${d.id}, Name: ${d.fileName}, Date: ${d.reportDate}, Type: ${d.documentType}`,
+          )
+          .join("\n");
+        const classifierMessages = [
+          { role: "system", content: prompts.QUERY_INTENT_CLASSIFIER_PROMPT },
+          {
+            role: "user",
+            content: `Available Documents:\n${docListStr}\n\nUser Question: ${question.trim()}`,
+          },
+        ];
+
+        try {
+          const classifierResponse = await ollamaClient.chat(classifierMessages, env.chatModel, {
+            temperature: 0,
+          });
+          const intentJson = JSON.parse(classifierResponse.match(/\{.*\}/s)?.[0] || "{}");
+          if (intentJson.intent === "SPECIFIC_DOCUMENT" || intentJson.intent === "ALL_DOCUMENTS") {
+            classifiedIntent = intentJson.intent;
+            classifiedDocId = intentJson.documentId;
+          }
+        } catch (error) {
+          debugLogger.error("sendMessage: Classifier failed, defaulting to GENERAL_HEALTH", {
+            error: error.message,
+          });
+        }
+      }
+
+      if (classifiedIntent === "SPECIFIC_DOCUMENT" || classifiedIntent === "ALL_DOCUMENTS") {
+        debugLogger.info("sendMessage: Routing to RAG flow from classifier", {
+          intent: classifiedIntent,
+          docId: classifiedDocId,
         });
-        assistantText =
-          "Sorry, I am currently unable to process your request. Please try again later.";
+        chatMode = "DOCUMENT_RAG";
+        const queryEmbedding = await embeddingService.embedText(question);
+
+        let targetDocId = null;
+        if (classifiedIntent === "SPECIFIC_DOCUMENT" && classifiedDocId) {
+          const docExists = userDocs.some((d) => d.id === classifiedDocId);
+          if (docExists) targetDocId = classifiedDocId;
+        }
+
+        const chunks = await intelligenceRepository.searchSimilarChunks({
+          documentId: targetDocId,
+          limit: env.ragTopK,
+          queryEmbedding,
+          userId,
+        });
+
+        const safeChunks = Array.isArray(chunks) ? chunks : [];
+        const usableChunks = safeChunks
+          .map((chunk) => ({ ...chunk, score: relevance(chunk.distance) }))
+          .filter((chunk) =>
+            chunk.score == null ? true : chunk.score >= 1 - MIN_CITATION_RELEVANCE,
+          );
+
+        if (!usableChunks.length) {
+          assistantText = NO_CONTEXT_REPLY;
+        } else {
+          try {
+            const formattedChunks = usableChunks.map((c) => ({
+              chunkId: c.chunkId || c.id,
+              content: c.content,
+              score: c.score,
+              sectionTitle: c.sectionTitle,
+              sourceType: c.sourceType,
+              documentId: targetDocId || c.documentId,
+            }));
+
+            const aiResponse = await this.qwenHealthChat(
+              history,
+              "DOCUMENT_RAG",
+              formattedChunks,
+              patientContextStr,
+            );
+            assistantText = aiResponse.answer;
+            citations = aiResponse.citations || formattedChunks;
+            isEmergency = !!aiResponse.emergency;
+          } catch (error) {
+            debugLogger.error("sendMessage: Multi-doc RAG provider failed", {
+              error: error.message,
+            });
+            assistantText = NO_CONTEXT_REPLY;
+          }
+        }
+      } else {
+        debugLogger.info("sendMessage: Calling general health chat provider");
+        try {
+          const aiResponse = await this.qwenHealthChat(
+            history,
+            "GENERAL_HEALTH",
+            [],
+            patientContextStr,
+          );
+          assistantText = aiResponse.answer;
+          isEmergency = !!aiResponse.emergency;
+        } catch (error) {
+          debugLogger.error("sendMessage: General health provider call failed", {
+            error: error.message,
+          });
+          assistantText =
+            "Sorry, I am currently unable to process your request. Please try again later.";
+        }
       }
     } else {
       // Document RAG flow
@@ -528,13 +635,13 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
     const aiMessage = await chatSessionRepository.appendMessage({
       citations: (Array.isArray(citations) ? citations : []).map((chunk) => ({
         chunkId: chunk.chunkId || chunk.id || null,
-        documentId: doc ? doc.id : null,
+        documentId: chunk.documentId || (doc ? doc.id : null),
         score: chunk.score ?? null,
         sectionTitle: chunk.sectionTitle || null,
       })),
       content: assistantText,
       metadata: {
-        mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+        mode: chatMode,
         emergency: isEmergency,
       },
       role: "assistant",
@@ -547,7 +654,7 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
       citations,
       reply: assistantText,
       user: userMessage,
-      mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+      mode: chatMode,
       emergency: isEmergency,
     };
   }
