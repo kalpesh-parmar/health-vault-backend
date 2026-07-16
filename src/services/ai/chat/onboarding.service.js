@@ -1004,7 +1004,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
           try {
             await medicationReminderService.createReminder(userId, {
-              medicationId: createdMedication[0].id,
+              medicationId: createdMedication.id,
             });
           } catch (err) {
             console.error(
@@ -1632,11 +1632,20 @@ async function getLocalizedResponse(step, state) {
         );
 
         // Localize times:
-        const timesVal =
-          med.medicationSchedule?.times || med.medicationSchedule?.reminderTimes || [];
+        let timesVal = [];
+        if (med.medicationSchedule) {
+          if (Array.isArray(med.medicationSchedule.times)) {
+            timesVal = med.medicationSchedule.times;
+          } else {
+            const sch = med.medicationSchedule;
+            if (sch.Morning) timesVal.push(sch.Morning);
+            if (sch.Noon) timesVal.push(sch.Noon);
+            if (sch.Night) timesVal.push(sch.Night);
+            if (Array.isArray(sch.Custom)) timesVal.push(...sch.Custom);
+          }
+        }
         const noneText = await getLocalizedText("common.none", "None", lang);
-        const timesStr =
-          Array.isArray(timesVal) && timesVal.length > 0 ? timesVal.join(", ") : noneText;
+        const timesStr = timesVal.length > 0 ? timesVal.join(", ") : noneText;
 
         // Localize prescribed by and notes:
         const prescribedByStr = med.prescribed_by || noneText;
@@ -2300,6 +2309,11 @@ class OnboardingService {
         loadedDocumentId: state.loadedDocumentId || null,
         chatSessionId: state.chatSessionId || null,
         documentAttachedToChat: state.documentAttachedToChat || false,
+        activeMedicine: state.activeMedicine || null,
+        confirmMode: state.confirmMode || null,
+        pendingQueue: state.pendingQueue || [],
+        validMedsToBulkCreate: state.validMedsToBulkCreate || [],
+        medicationFlowDone: state.medicationFlowDone || false,
       };
 
       if (existingRecord) {

@@ -420,6 +420,43 @@ If the document is NOT medical:
   "reason": "Explain briefly why it is rejected (e.g. 'This is an ID card')"
 }`;
 
+const CLASSIFICATION_TEXT_PROMPT = `You are a strict medical document classifier.
+Analyze the provided document text and determine if it belongs to a medical document.
+
+Accept ONLY these medical document types:
+- Prescription (Prescription Slips)
+- Blood report (Blood Test Reports / CBC Reports / Lab Reports)
+- X-ray / MRI / CT Scan report
+- Hospital discharge summary
+- Medical invoice / Pharmacy bill
+- Vaccination record
+- Medical chart or graphical data (e.g., ECG, heart rate logs)
+- Any other medical related reports
+
+Reject immediately:
+- Non-medical documents (ID cards, Bank Statements, Social Media, Random text)
+
+IMPORTANT RULES:
+- Return ONLY a single valid JSON object.
+- The response must be directly parsable using JSON.parse().
+
+Return one of the following JSON structures:
+
+If the text IS medical:
+{
+  "isMedicalDocument": true,
+  "confidence": 0.95,
+  "documentType": "Prescription"
+}
+
+If the text is NOT medical:
+{
+  "isMedicalDocument": false,
+  "confidence": 0.92,
+  "reason": "Explain briefly why it is rejected"
+}
+`;
+
 const GRAPHICAL_ANALYSIS_PROMPT = `You are an expert medical AI specializing in interpreting graphical medical reports such as ECGs, Cardiograms, and charts.
 Please analyze the provided graphical document and extract the relevant medical insights.
 If the graph contains a continuous wave (like an ECG), do your best to approximate key metadata (like Heart Rate, PR interval, QRS duration, Rhythm) and describe the overall diagnosis in the text description.
@@ -672,6 +709,7 @@ module.exports = {
   GRAPHICAL_REPORT_EXTRACTION_PROMPT,
   ONBOARDING_SYSTEM_PROMPT,
   CLASSIFICATION_PROMPT,
+  CLASSIFICATION_TEXT_PROMPT,
   GRAPHICAL_ANALYSIS_PROMPT,
   TRANSLATION_SYSTEM_PROMPT,
 };

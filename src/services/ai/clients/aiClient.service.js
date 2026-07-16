@@ -4,7 +4,7 @@ const axios = require("axios");
 const { env } = require("../../../configs/env");
 const { InternalServerException } = require("../../../exceptions/appError");
 
-const DEFAULT_TIMEOUT = 120 * 1000;
+const DEFAULT_TIMEOUT = 300 * 1000; // Increased to 5 minutes for heavy OCR/Vision tasks
 const TRANSIENT_STATUS = new Set([502, 503, 504]);
 
 function shouldRetry(error) {

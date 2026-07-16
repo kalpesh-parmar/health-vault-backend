@@ -119,6 +119,7 @@ const env = Object.freeze({
   aiBaseUrl: stringFromEnv("AI_BASE_URL"),
   aiModel: stringFromEnv("AI_MODEL"),
   aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:8000",
+  useExternalOcrService: booleanFromEnv("USE_EXTERNAL_AI_SERVICE", true),
   aiTimeoutMs: numberFromEnv("AI_TIMEOUT_MS", 90 * 1000),
   aiMaxRetries: numberFromEnv("AI_MAX_RETRIES", 2),
   aiPageConcurrency: numberFromEnv("AI_PAGE_CONCURRENCY", 4),

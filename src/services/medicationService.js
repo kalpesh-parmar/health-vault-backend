@@ -287,18 +287,19 @@ class MedicationService {
 
   // Onboarding Helper: get times and food frequency defaults
   applyDefaults(frequency) {
-    const timesMap = {
-      ONCE: ["08:00"],
-      TWICE: ["08:00", "20:00"],
-      THRICE: ["08:00", "14:00", "20:00"],
-      "Once Daily": ["08:00"],
-      "Twice Daily": ["08:00", "20:00"],
-      "Three Times Daily": ["08:00", "14:00", "20:00"],
+    const defaultSchedules = {
+      ONCE: { Morning: "08:00:00" },
+      TWICE: { Morning: "08:00:00", Night: "20:00:00" },
+      THRICE: { Morning: "08:00:00", Noon: "14:00:00", Night: "20:00:00" },
+      "Once Daily": { Morning: "08:00:00" },
+      "Twice Daily": { Morning: "08:00:00", Night: "20:00:00" },
+      "Three Times Daily": { Morning: "08:00:00", Noon: "14:00:00", Night: "20:00:00" },
     };
-    const times = timesMap[frequency] || ["08:00"];
+
+    const schedule = defaultSchedules[frequency] || { Morning: "08:00:00" };
+
     return {
-      best_times: times,
-      reminder_times: times,
+      medicationSchedule: schedule,
       food_context: "AFTER_FOOD",
     };
   }
@@ -363,9 +364,26 @@ class MedicationService {
     const frequencyCount = this._getFrequencyCount(payload.frequency);
     const dailyConsumption = Math.ceil(value) * frequencyCount;
 
+    let timeSchedule;
+    if (
+      payload.medicationSchedule &&
+      (payload.medicationSchedule.Morning ||
+        payload.medicationSchedule.Noon ||
+        payload.medicationSchedule.Night ||
+        payload.medicationSchedule.Custom)
+    ) {
+      timeSchedule = {
+        Morning: payload.medicationSchedule.Morning,
+        Noon: payload.medicationSchedule.Noon,
+        Night: payload.medicationSchedule.Night,
+        Custom: payload.medicationSchedule.Custom,
+      };
+    } else {
+      timeSchedule = defaults.medicationSchedule;
+    }
+
     const medicationSchedule = {
-      times: payload.medicationSchedule?.times || defaults.best_times,
-      reminderTimes: payload.medicationSchedule?.reminderTimes || defaults.reminder_times,
+      ...timeSchedule,
       dose: { value, unit },
       source: payload.source || "MANUAL",
       refillAlert: !!payload.refill_alert,
@@ -428,9 +446,26 @@ class MedicationService {
       const frequencyCount = this._getFrequencyCount(payload.frequency);
       const dailyConsumption = Math.ceil(value) * frequencyCount;
 
+      let timeSchedule;
+      if (
+        payload.medicationSchedule &&
+        (payload.medicationSchedule.Morning ||
+          payload.medicationSchedule.Noon ||
+          payload.medicationSchedule.Night ||
+          payload.medicationSchedule.Custom)
+      ) {
+        timeSchedule = {
+          Morning: payload.medicationSchedule.Morning,
+          Noon: payload.medicationSchedule.Noon,
+          Night: payload.medicationSchedule.Night,
+          Custom: payload.medicationSchedule.Custom,
+        };
+      } else {
+        timeSchedule = defaults.medicationSchedule;
+      }
+
       const medicationSchedule = {
-        times: payload.medicationSchedule?.times || defaults.best_times,
-        reminderTimes: payload.medicationSchedule?.reminderTimes || defaults.reminder_times,
+        ...timeSchedule,
         dose: { value, unit },
         source: payload.source || "MANUAL",
         refillAlert: !!payload.refill_alert,

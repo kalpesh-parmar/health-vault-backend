@@ -4,6 +4,8 @@ const { env } = require("../../../configs/env");
 
 class MedicalDocumentClassifierService {
   async classify(file) {
+    /*
+    // --- OLD CODE (Vision Model approach) ---
     const isPdf =
       file.mimeType === "application/pdf" ||
       file.filename?.toLowerCase().endsWith(".pdf") ||
@@ -11,15 +13,35 @@ class MedicalDocumentClassifierService {
     let responseObj;
 
     if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.CLASSIFICATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+      console.log("[MedicalDocumentClassifierService] Converting PDF to image for classification...");
+      const { ocrService } = require("../ocr/ocr.service");
+      const base64Images = await ocrService.convertPdfToImages(file.buffer, { firstPageOnly: true });
+      
+      if (!base64Images || base64Images.length === 0) {
+        console.error("[MedicalDocumentClassifierService] Failed to convert PDF to images.");
+        return {
+          isMedicalDocument: false,
+          confidence: 0,
+          reason: "Failed to read PDF for classification.",
+        };
+      }
+
+      const messages = [
+        {
+          role: "user",
+          content: prompts.CLASSIFICATION_PROMPT,
+          images: [base64Images[0]],
+        },
+      ];
 
       console.log(
-        `[MedicalDocumentClassifierService] Validating PDF document using ${env.chatModel}...`,
+        `[MedicalDocumentClassifierService] Validating PDF document using ${env.aiModel}...`,
       );
-      responseObj = await ollamaClient.generate(prompt, env.chatModel, {
+      responseObj = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
+        maxTokens: 2048,
         format: "json",
+        fallbackToThinking: false,
         returnFullResponse: true,
       });
     } else {
@@ -43,6 +65,110 @@ class MedicalDocumentClassifierService {
         returnFullResponse: true,
       });
     }
+
+    return this.cleanAndParseJSON(responseObj);
+    */
+
+    // --- NEW CODE (Text Model approach using local pdf-parse + Python PaddleOCR) ---
+    const aiClient = require("../clients/aiClient.service");
+
+    console.log("[MedicalDocumentClassifierService] Extracting text for validation...");
+
+    let extractedText = "";
+    try {
+      const isPdf =
+        file.mimetype === "application/pdf" ||
+        file.mimeType === "application/pdf" ||
+        file.filename?.toLowerCase().endsWith(".pdf") ||
+        file.originalname?.toLowerCase().endsWith(".pdf");
+
+      if (isPdf) {
+        try {
+          const pdfParse = require("pdf-parse");
+          console.log("[MedicalDocumentClassifierService] Extracting text using pdf-parse...");
+          const pdfData = await pdfParse(file.buffer);
+          extractedText = pdfData.text || "";
+        } catch (err) {
+          console.warn(
+            "[MedicalDocumentClassifierService] pdf-parse failed, likely a scanned or large PDF. Falling back to OCR...",
+            err.message,
+          );
+          extractedText = "";
+        }
+
+        // Fallback for scanned PDFs
+        if (extractedText.trim().length < 50) {
+          console.log(
+            "[MedicalDocumentClassifierService] PDF seems scanned, falling back to Python PaddleOCR...",
+          );
+          const remoteResult = await aiClient.runOcrFromBuffer({
+            buffer: file.buffer,
+            filename: file.originalname || file.filename || "upload",
+            mimeType: file.mimetype || file.mimeType || "application/pdf",
+            mode: "detailed",
+          });
+          extractedText =
+            remoteResult.text ||
+            remoteResult.rawText ||
+            remoteResult.ocr_text ||
+            (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+        }
+      } else {
+        console.log(
+          "[MedicalDocumentClassifierService] Extracting image text using Python PaddleOCR...",
+        );
+        const remoteResult = await aiClient.runOcrFromBuffer({
+          buffer: file.buffer,
+          filename: file.originalname || file.filename || "upload",
+          mimeType: file.mimetype || file.mimeType || "image/png",
+          mode: "detailed",
+        });
+        extractedText =
+          remoteResult.text ||
+          remoteResult.rawText ||
+          remoteResult.ocr_text ||
+          (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+      }
+    } catch (error) {
+      console.error(
+        "[MedicalDocumentClassifierService] Local OCR failed for classification:",
+        error.message,
+        error.stack,
+      );
+      return {
+        isMedicalDocument: false,
+        confidence: 0,
+        reason: "Failed to read document for classification.",
+      };
+    }
+
+    if (!extractedText || !extractedText.trim()) {
+      return {
+        isMedicalDocument: false,
+        confidence: 0,
+        reason: "No readable text found in document.",
+      };
+    }
+
+    const messages = [
+      {
+        role: "user",
+        content:
+          prompts.CLASSIFICATION_TEXT_PROMPT +
+          `\n\nDocument Text:\n"""\n${extractedText.substring(0, 2000)}\n"""`,
+      },
+    ];
+
+    console.log(
+      `[MedicalDocumentClassifierService] Validating text document using ${env.chatModel}...`,
+    );
+    const responseObj = await ollamaClient.chat(messages, env.chatModel, {
+      temperature: 0,
+      maxTokens: 512,
+      format: "json",
+      fallbackToThinking: false,
+      returnFullResponse: true,
+    });
 
     return this.cleanAndParseJSON(responseObj);
   }
