@@ -135,7 +135,7 @@ const env = Object.freeze({
 
   ollamaUrl: stringFromEnv("AI_BASE_URL"),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen2.5:14b",
+  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3:32b",
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL,
   popplerPath: process.env.POPPLER_PATH,
