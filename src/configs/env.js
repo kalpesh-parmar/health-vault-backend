@@ -98,7 +98,7 @@ const env = Object.freeze({
 
   // Storage Buckets & Providers
   storageProvider: resolveStorageProvider(),
-  awsBucketName: stringFromEnv("AWS_BUCKET_NAME"),
+  awsBucketName: stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
 
   // AWS S3
   awsAccessKeyId: stringFromEnv("AWS_ACCESS_KEY_ID"),

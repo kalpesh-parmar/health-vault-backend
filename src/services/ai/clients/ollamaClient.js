@@ -69,7 +69,7 @@ class OllamaClient {
         method: "post",
         url,
         data: payload,
-        timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+        timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
         headers: { "Content-Type": "application/json" },
       };
 
@@ -186,7 +186,7 @@ class OllamaClient {
       url,
       data: payload,
       responseType: "stream",
-      timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+      timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
     };
 
@@ -240,7 +240,7 @@ class OllamaClient {
       method: "post",
       url,
       data: payload,
-      timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+      timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
     };
 
@@ -267,6 +267,8 @@ class OllamaClient {
       return text;
     } catch (error) {
       console.error("[OllamaClient] Generate failed:", error.message);
+      console.log("[Ollama error]:==", error.response);
+
       throw error;
     }
   }
@@ -283,7 +285,7 @@ class OllamaClient {
       method: "post",
       url,
       data: payload,
-      timeout: 60000,
+      timeout: 300000,
       headers: { "Content-Type": "application/json" },
     };
 

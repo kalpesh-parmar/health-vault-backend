@@ -15,7 +15,7 @@ def _settings(**overrides) -> Settings:
         "AI_BASE_URL": "http://localhost:11434/v1",
         "AI_API_KEY": "test-key",
         "STORAGE_PROVIDER": "s3",
-        "PATIENT_DOCUMENTS_BUCKET": "patient-documents",
+        "PATIENT_DOCUMENTS_BUCKET": "patient-documents-1",
         "AWS_REGION": "us-east-1",
     }
     base.update(overrides)

@@ -112,6 +112,10 @@ class DocumentService {
       throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
     }
 
+    // Also remove the document from any chat sessions where it's referenced
+    const chatSessionRepository = require("../repositories/chatSessionRepository");
+    await chatSessionRepository.removeDocumentFromSessions(params.id, userId);
+
     return deletedDocument;
   }
 

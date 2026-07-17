@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ocr_status" ADD VALUE 'canceled';

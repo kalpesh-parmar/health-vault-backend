@@ -8,6 +8,7 @@ const { env } = require("../../../configs/env");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
+const { normalizeLanguage } = require("../../../utils/commonUtils");
 const medicationService = require("../../medicationService");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
@@ -15,6 +16,7 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
+const medicationReminderService = require("../../medicationReminderService");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -57,13 +59,16 @@ function cleanAndParseJson(text) {
 }
 
 function splitName(fullName) {
-  if (!fullName) return { firstName: "", lastName: "" };
+  if (!fullName) return { firstName: "", middleName: "", lastName: "" };
   const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+  if (parts.length === 0) return { firstName: "", middleName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], middleName: "", lastName: "" };
+  if (parts.length === 2) return { firstName: parts[0], middleName: "", lastName: parts[1] };
+
   const firstName = parts[0];
-  const lastName = parts.slice(1).join(" ");
-  return { firstName, lastName };
+  const lastName = parts[parts.length - 1];
+  const middleName = parts.slice(1, -1).join(" ");
+  return { firstName, middleName, lastName };
 }
 
 function normalizeName(name) {
@@ -302,6 +307,8 @@ User Input: "${text}"`,
     return null;
   } catch (err) {
     console.error(`[OnboardingService] Failed to extract ${fieldType} from user input:`, err);
+    console.log("error Response==", err.response?.data);
+
     return null;
   }
 }
@@ -588,30 +595,36 @@ async function updateStateFromMessage(state, message, userId = null) {
 
   switch (state.currentStep) {
     case "ASK_LANGUAGE": {
-      const langVal = msg;
+      const langVal = msg.toLowerCase();
       if (languageTypeValues.includes(langVal)) {
         state.preferredLanguage = langVal;
         state.currentStep = "ASK_UPLOAD_OR_SKIP";
       } else {
         const extractedLang = await extractFieldFromMessage("preferredLanguage", msg, "english");
-        if (languageTypeValues.includes(extractedLang)) {
-          state.preferredLanguage = extractedLang;
-          state.currentStep = "ASK_UPLOAD_OR_SKIP";
+        if (extractedLang && typeof extractedLang === "string") {
+          const langNorm = extractedLang.toLowerCase();
+          if (languageTypeValues.includes(langNorm)) {
+            state.preferredLanguage = langNorm;
+            state.currentStep = "ASK_UPLOAD_OR_SKIP";
+          }
         }
       }
       break;
     }
 
     case "ASK_UPLOAD_OR_SKIP": {
-      const fmVal = msg;
+      const fmVal = msg.toUpperCase();
       if (fmVal === "UPLOAD" || fmVal === "MANUAL") {
         state.flowMode = fmVal;
         state.currentStep = computeCurrentStep(state);
       } else {
         const extractedFM = await extractFieldFromMessage("flowMode", msg, state.preferredLanguage);
-        if (extractedFM === "UPLOAD" || extractedFM === "MANUAL") {
-          state.flowMode = extractedFM;
-          state.currentStep = computeCurrentStep(state);
+        if (extractedFM && typeof extractedFM === "string") {
+          const fmNorm = extractedFM.toUpperCase();
+          if (fmNorm === "UPLOAD" || fmNorm === "MANUAL") {
+            state.flowMode = fmNorm;
+            state.currentStep = computeCurrentStep(state);
+          }
         }
       }
       break;
@@ -699,8 +712,11 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (!answer) {
         const extractedConf = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-        if (extractedConf === "YES" || extractedConf === "NO") {
-          answer = extractedConf;
+        if (extractedConf && typeof extractedConf === "string") {
+          const confNorm = extractedConf.toUpperCase();
+          if (confNorm === "YES" || confNorm === "NO") {
+            answer = confNorm;
+          }
         }
       }
 
@@ -784,8 +800,11 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "ASK_GENDER": {
       const genVal = await extractFieldFromMessage("gender", msg, state.preferredLanguage);
-      if (genVal === "male" || genVal === "female") {
-        state.existingUserData.gender = genVal;
+      if (genVal && typeof genVal === "string") {
+        const genNorm = genVal.toLowerCase();
+        if (genNorm === "male" || genNorm === "female") {
+          state.existingUserData.gender = genNorm;
+        }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
@@ -796,9 +815,16 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const bgVal = await extractFieldFromMessage("bloodGroup", msg, state.preferredLanguage);
-        if (bloodGroupTypeValues.includes(bgVal)) {
-          state.existingUserData.bloodGroup = bgVal;
+        const extractedBg = await extractFieldFromMessage(
+          "bloodGroup",
+          msg,
+          state.preferredLanguage,
+        );
+        if (extractedBg && typeof extractedBg === "string") {
+          const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
+          if (bloodGroupTypeValues.includes(bgVal)) {
+            state.existingUserData.bloodGroup = bgVal;
+          }
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -826,7 +852,10 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "ASK_FOUND_MEDICINES":
     case "ASK_ON_MEDICINES": {
       const yesNoVal = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
-      if (yesNoVal === "YES" || msg.toUpperCase() === "YES") {
+      const isYes =
+        (yesNoVal && typeof yesNoVal === "string" && yesNoVal.toUpperCase() === "YES") ||
+        msg.toUpperCase() === "YES";
+      if (isYes) {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
           const { normalizeMedicine } = require("../helpers/medicineNormalize");
@@ -893,6 +922,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       break;
     }
 
+    case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       let payload;
       try {
@@ -908,7 +938,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           break;
         }
 
-        const newMed = {
+        let newMed = {
           ...payload.medicine,
           client_med_id: payload.clientMedId || payload.medicine.client_med_id,
           id: payload.clientMedId || payload.medicine.client_med_id,
@@ -916,16 +946,36 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         if (!state.medicinesToAdd) state.medicinesToAdd = [];
 
-        const existingIdx = state.medicinesToAdd.findIndex(
-          (m) => m.client_med_id === newMed.client_med_id,
-        );
+        let existingIdx = -1;
+        if (
+          state.currentMedicineIndex !== undefined &&
+          state.currentMedicineIndex >= 0 &&
+          state.currentMedicineIndex < state.medicinesToAdd.length
+        ) {
+          existingIdx = state.currentMedicineIndex;
+          if (!newMed.client_med_id) {
+            newMed.client_med_id = state.medicinesToAdd[existingIdx].client_med_id;
+            newMed.id = state.medicinesToAdd[existingIdx].id;
+          }
+        } else {
+          existingIdx = state.medicinesToAdd.findIndex(
+            (m) => m.client_med_id && m.client_med_id === newMed.client_med_id,
+          );
+        }
+
         if (existingIdx >= 0) {
           state.medicinesToAdd[existingIdx] = {
             ...state.medicinesToAdd[existingIdx],
             ...newMed,
             selected: true,
           };
+          newMed = state.medicinesToAdd[existingIdx];
         } else {
+          if (!newMed.client_med_id) {
+            const newId = `med_${Date.now()}`;
+            newMed.client_med_id = newId;
+            newMed.id = newId;
+          }
           state.medicinesToAdd.push({ ...newMed, selected: true });
         }
 
@@ -950,7 +1000,18 @@ async function updateStateFromMessage(state, message, userId = null) {
             throw new Error("client_med_id is missing");
           }
 
-          await medicationService.create(userId, state.activeMedicine);
+          const createdMedication = await medicationService.create(userId, state.activeMedicine);
+
+          try {
+            await medicationReminderService.createReminder(userId, {
+              medicationId: createdMedication[0].id,
+            });
+          } catch (err) {
+            console.error(
+              "[OnboardingService] Failed to create reminder for single medicine:",
+              err,
+            );
+          }
 
           let nextIncompleteIndex = -1;
           for (let i = 0; i < state.medicinesToAdd.length; i++) {
@@ -967,7 +1028,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
           if (nextIncompleteIndex >= 0) {
             state.currentMedicineIndex = nextIncompleteIndex;
-            state.currentStep = "ADD_MEDICINE";
+            state.currentStep = "EDIT_MEDICINE";
           } else {
             const savedClientMedIds = [state.activeMedicine.client_med_id];
             const otherValidMeds = (state.medicinesToAdd || []).filter(
@@ -984,12 +1045,26 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         } else if (state.confirmMode === "BULK") {
           if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
-            await medicationService.bulkCreate(userId, state.validMedsToBulkCreate);
+            const bulkCreated = await medicationService.bulkCreate(
+              userId,
+              state.validMedsToBulkCreate,
+            );
+
+            for (const med of bulkCreated) {
+              try {
+                await medicationReminderService.createReminder(userId, { medicationId: med.id });
+              } catch (err) {
+                console.error(
+                  `[OnboardingService] Failed to create reminder for bulk medicine ${med.id}:`,
+                  err,
+                );
+              }
+            }
           }
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (payload.edit) {
-        state.currentStep = "ADD_MEDICINE";
+        state.currentStep = "EDIT_MEDICINE";
         if (state.confirmMode === "SINGLE") {
           const idx = state.medicinesToAdd.findIndex(
             (m) => m.client_med_id === state.activeMedicine.client_med_id,
@@ -1038,6 +1113,10 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.medicinesToAdd = [{}];
         state.currentMedicineIndex = 0;
         state.currentStep = "ASK_MEDICINE_NAME";
+        break;
+      } else if (msg === "GO_TO_DASHBOARD") {
+        state.isOnboardingCompleted = true;
+        state.currentStep = "COMPLETE";
         break;
       }
 
@@ -1488,6 +1567,7 @@ async function getLocalizedResponse(step, state) {
         medicines: state.medicinesToAdd || [],
       };
 
+    case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       const idx = state.currentMedicineIndex;
       const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
@@ -1504,7 +1584,7 @@ async function getLocalizedResponse(step, state) {
             state.preferredLanguage,
           );
       return {
-        action: "ADD_MEDICINE",
+        action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         message,
         medicine: med,
       };
@@ -1658,48 +1738,14 @@ async function getLocalizedResponse(step, state) {
 
     case "COMPLETE":
     case "POST_ONBOARDING": {
-      const hasMedicines =
-        state.medicinesToAdd && state.medicinesToAdd.length > 0 && !state.medicinesSkipped;
-      const finalOptions = [];
-
-      const dashboardLabel = await getLocalizedText(
-        "onboarding.complete.goToDashboard",
-        "Go to Dashboard",
-        state.preferredLanguage,
-      );
-      finalOptions.push({ label: dashboardLabel, value: "GO_TO_DASHBOARD" });
-
-      if (step === "POST_ONBOARDING") {
-        const askReportLabel = await getLocalizedText(
-          "onboarding.complete.askAboutReport",
-          "Ask About My Report",
-          state.preferredLanguage,
-        );
-        finalOptions.push({ label: askReportLabel, value: "ASK_ABOUT_REPORT" });
-      }
-      if (hasMedicines) {
-        const addMoreLabel = await getLocalizedText(
-          "onboarding.complete.addMoreMedicines",
-          "Add More Medicines",
-          state.preferredLanguage,
-        );
-        const viewMedsLabel = await getLocalizedText(
-          "onboarding.complete.viewMyMedicines",
-          "View My Medicines",
-          state.preferredLanguage,
-        );
-        finalOptions.push({ label: addMoreLabel, value: "ADD_MORE_MEDICINES" });
-        finalOptions.push({ label: viewMedsLabel, value: "VIEW_MEDICINES" });
-      }
-
       return {
         action: step,
         message: await getLocalizedText(
           "onboarding.complete.message",
-          "Thank you! Onboarding is complete. What would you like to do next?",
+          "Thank you! Onboarding is complete.",
           state.preferredLanguage,
         ),
-        options: finalOptions,
+        options: [],
       };
     }
 
@@ -1712,9 +1758,20 @@ async function getLocalizedResponse(step, state) {
 }
 
 class OnboardingService {
-  async chat(message, history = [], state = {}, userId = null, sessionId = null) {
+  async chat(
+    message,
+    history = [],
+    state = {},
+    userId = null,
+    sessionId = null,
+    displayLabel = null,
+  ) {
     if (!state) {
       state = {};
+    }
+
+    if (state.preferredLanguage) {
+      state.preferredLanguage = normalizeLanguage(state.preferredLanguage);
     }
 
     // Ensure all medication-related state properties are initialized
@@ -1990,11 +2047,37 @@ class OnboardingService {
     }
 
     if (!isInitCall && state.chatSessionId) {
+      let resolvedLabel = null;
+      if (state.currentStep && msg !== undefined && msg !== null) {
+        try {
+          const prevResponse = await createResponse(state.currentStep, state);
+          if (prevResponse && Array.isArray(prevResponse.options)) {
+            const matchedOpt = prevResponse.options.find(
+              (opt) => opt && String(opt.value).toLowerCase() === String(msg).toLowerCase(),
+            );
+            if (matchedOpt && matchedOpt.label) {
+              resolvedLabel = matchedOpt.label;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to resolve option label server-side:",
+            err.message,
+          );
+        }
+      }
+      const userContent =
+        resolvedLabel || displayLabel || (msg !== undefined && msg !== null ? msg : "");
+
       await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
         role: "user",
-        content: msg,
+        content: userContent,
+        metadata: {
+          rawValue: msg !== undefined && msg !== null ? msg : "",
+          stepKey: state.currentStep || null,
+        },
       });
     }
     // 2. Process incoming user message based on current expected step BEFORE update
@@ -2117,7 +2200,6 @@ class OnboardingService {
     // 4. Resolve next step after updates
     // If the step is REGISTER_USER, mark as completed
     if (state.currentStep === "REGISTER_USER") {
-      state.isOnboardingCompleted = true;
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
@@ -2172,6 +2254,10 @@ class OnboardingService {
         updateData.status = "ACTIVE";
         updateData.isVerified = true;
         updateData.onboardingCompleted = true;
+      }
+
+      if (state.preferredLanguage) {
+        updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -2241,8 +2327,20 @@ class OnboardingService {
         role: "assistant",
         content: response.message,
         metadata: {
-          ...response,
-          message: undefined, // Message is already saved in 'content'
+          action: response.action || null,
+          renderType: response.renderType || null,
+          options: response.options || null,
+          fields: response.fields || null,
+          mode: response.mode || null,
+          title: response.title || null,
+          subtitle: response.subtitle || null,
+          explainer: response.explainer || null,
+          loginSummary: response.loginSummary || null,
+          documentSummary: response.documentSummary || null,
+          loginProvider: response.loginProvider || null,
+          medicine: response.medicine || null,
+          summary: response.summary || null,
+          medicines: response.medicines || null,
         },
       });
     }

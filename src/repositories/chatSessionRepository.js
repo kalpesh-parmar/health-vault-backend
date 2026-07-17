@@ -19,18 +19,17 @@ const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
 function encodeCursor(message) {
-  if (!message) return null;
-  const ts =
-    message.createdAt instanceof Date ? message.createdAt.toISOString() : message.createdAt;
-  return Buffer.from(`${ts}|${message.id}`).toString("base64url");
+  if (!message || message.seq === undefined || message.seq === null) return null;
+  return Buffer.from(String(message.seq)).toString("base64url");
 }
 
 function decodeCursor(cursor) {
   if (!cursor) return null;
   try {
-    const [ts, id] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
-    if (!ts || !id) return null;
-    return { createdAt: new Date(ts), id };
+    const seqStr = Buffer.from(cursor, "base64url").toString("utf8");
+    const seq = parseInt(seqStr, 10);
+    if (isNaN(seq)) return null;
+    return { seq };
   } catch {
     return null;
   }
@@ -107,9 +106,18 @@ class ChatSessionRepository {
 
   async appendMessage({ sessionId, userId, role, content, citations = [], metadata = {} }) {
     return this.client.transaction(async (tx) => {
+      // Lock the parent session row to prevent race conditions on sequence generation
+      await tx.execute(sql`SELECT 1 FROM chat_sessions WHERE id = ${sessionId} FOR UPDATE`);
+
+      const [row] = await tx
+        .select({ maxSeq: sql`coalesce(max(${chatMessage.seq}), 0)` })
+        .from(chatMessage)
+        .where(eq(chatMessage.sessionId, sessionId));
+      const nextSeq = (row?.maxSeq || 0) + 1;
+
       const [created] = await tx
         .insert(chatMessage)
-        .values({ citations, content, metadata, role, sessionId, userId })
+        .values({ citations, content, metadata, role, sessionId, userId, seq: nextSeq })
         .returning();
 
       await tx
@@ -140,24 +148,14 @@ class ChatSessionRepository {
 
     if (direction === "before") {
       if (cur) {
-        conditions.push(
-          or(
-            lt(chatMessage.createdAt, cur.createdAt),
-            and(eq(chatMessage.createdAt, cur.createdAt), lt(chatMessage.id, cur.id)),
-          ),
-        );
+        conditions.push(lt(chatMessage.seq, cur.seq));
       }
-      orderClause = [desc(chatMessage.createdAt), desc(chatMessage.id)];
+      orderClause = [desc(chatMessage.seq)];
     } else {
       if (cur) {
-        conditions.push(
-          or(
-            gt(chatMessage.createdAt, cur.createdAt),
-            and(eq(chatMessage.createdAt, cur.createdAt), gt(chatMessage.id, cur.id)),
-          ),
-        );
+        conditions.push(gt(chatMessage.seq, cur.seq));
       }
-      orderClause = [asc(chatMessage.createdAt), asc(chatMessage.id)];
+      orderClause = [asc(chatMessage.seq)];
     }
 
     const rows = await this.client
@@ -202,6 +200,15 @@ class ChatSessionRepository {
       .returning();
 
     return updated || null;
+  }
+
+  async removeDocumentFromSessions(documentId, userId) {
+    // Removes the documentId from the jsonb array in chat_sessions using Postgres jsonb '-' operator
+    await this.client.execute(
+      sql`UPDATE chat_sessions 
+          SET document_id = document_id - ${documentId} 
+          WHERE user_id = ${userId} AND document_id ? ${documentId}`,
+    );
   }
 }
 module.exports = new ChatSessionRepository();

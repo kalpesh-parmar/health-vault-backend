@@ -127,6 +127,20 @@
       "when": 1783762006332,
       "tag": "0017_calm_gauntlet",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784008833834,
+      "tag": "0018_sweet_micromacro",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784182901013,
+      "tag": "0019_nervous_maggott",
+      "breakpoints": true
     }
   ]
 }

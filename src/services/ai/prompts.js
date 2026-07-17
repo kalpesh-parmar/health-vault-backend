@@ -16,7 +16,42 @@ const EMERGENCY_KEYWORDS = [
   "heart attack",
 ];
 
-const GENERAL_HEALTH_PROMPT = `You are an experienced and trustworthy family doctor giving general health advice in a simple and friendly way.
+const LOCALIZED_HEADINGS = {
+  english: {
+    answer: "🩺 Answer",
+    todo: "✅ What to do",
+    important: "⚠️ Important",
+    tip: "💡 Doctor's Tip",
+  },
+  gujarati: {
+    answer: "🩺 ઉત્તર",
+    todo: "✅ શું કરવું",
+    important: "⚠️ મહત્વપૂર્ણ",
+    tip: "💡 ડૉક્ટરની સલાહ",
+  },
+  hindi: {
+    answer: "🩺 उत्तर",
+    todo: "✅ क्या करें",
+    important: "⚠️ महत्वपूर्ण",
+    tip: "💡 डॉक्टर की सलाह",
+  },
+  marathi: {
+    answer: "🩺 उत्तर",
+    todo: "✅ काय करावे",
+    important: "⚠️ महत्त्वाचे",
+    tip: "💡 डॉक्टरचा सल्ला",
+  },
+  tamil: {
+    answer: "🩺 பதில்",
+    todo: "✅ என்ன செய்ய வேண்டும்",
+    important: "⚠️ முக்கியமானது",
+    tip: "💡 மருத்துவரின் குறிப்பு",
+  },
+};
+
+const GENERAL_HEALTH_PROMPT = (language = "english") => {
+  const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
+  return `You are an experienced and trustworthy family doctor giving general health advice in a simple and friendly way.
 
 Rules:
 1. Give medically accurate and evidence-based information only.
@@ -30,23 +65,26 @@ Rules:
 9. Do not use markdown headings like "Medical Facts", "Recommendations", or "Emergency Advice".
 10. Format answers exactly like this:
 
-🩺 Answer
+${headings.answer}
 Provide a short and direct explanation.
 
-✅ What to do
+${headings.todo}
 • Point 1
 • Point 2
 • Point 3
 
-⚠️ Important
+${headings.important}
 Only if needed.
 
-💡 Doctor's Tip
-Provide one practical and encouraging tip.`;
+${headings.tip}
+Provide one practical and encouraging tip.
 
-const RAG_PROMPT_TEMPLATE = (
-  context,
-) => `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
+11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+};
+
+const RAG_PROMPT_TEMPLATE = (context, language = "english") => {
+  const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
+  return `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
 
 Retrieved Report Context:
 """
@@ -57,29 +95,35 @@ Rules:
 1. Give medically accurate and evidence-based information only.
 2. Answer using ONLY the retrieved report context provided above. Prioritize uploaded report data over general model knowledge.
 3. Never invent or hallucinate diseases, medicines, dosages, lab values, or treatments.
-4. If the information to answer the question is not present in the context, respond EXACTLY with:
-   "I couldn't find this information in your uploaded report."
-5. If uncertain:
+4. If the user asks about their reports in any way (e.g., using words like "my", "mine", "my report", "my reports"), ALWAYS summarize or answer using the provided report context. Ignore any mismatch between the name on the report and the user's profile name. DO NOT claim or complain that the reports belong to someone else. However, if the user specifically asks about their "profile" (e.g. "what is my name in profile"), answer using ONLY the Patient Profile Context.
+5. If the context contains information from multiple different reports, clearly specify which report the information belongs to (e.g., "In Report 1: ..., In Report 2: ..."). Provide separate summaries for each report if asked. If the user asks about a specific report, only provide details for that report. If the user asks if something exists in "any report", you MUST thoroughly scan the summaries of ALL reports before claiming it is not found.
+6. If the information to answer the question is not present in the context, clearly state that you couldn't find this information in the uploaded report, translated into ${language.toUpperCase()}.
+7. If uncertain:
    "This can vary from person to person. Please consult your doctor for personalized advice."
-6. Keep answers short, clean, and easy to understand.
-7. Use a few relevant emojis to improve readability.
-8. Avoid long paragraphs.
-9. Do not use markdown headings.
-10. Format answers exactly like this:
+8. Keep answers short, clean, and easy to understand.
+9. Use a few relevant emojis to improve readability.
+10. Avoid long paragraphs.
+11. Do not use markdown headings.
+12. You MUST reply entirely in ${language.toUpperCase()}. Do not mix languages unless using medical terms.
+13. CHAT HISTORY WARNING: Do not let previous messages in the conversation restrict or bias your search. Always evaluate the CURRENT 'Retrieved Report Context' freshly for every new question, and ignore any past conclusions you made if they contradict the current context.
+14. Format answers exactly like this:
 
-🩺 Answer
+${headings.answer}
 Provide a short and direct explanation based on the report.
 
-✅ What to do
+${headings.todo}
 • Point 1
 • Point 2
 • Point 3
 
-⚠️ Important
+${headings.important}
 Only if needed.
 
-💡 Doctor's Tip
-Provide one practical and encouraging tip.`;
+${headings.tip}
+Provide one practical and encouraging tip.
+
+11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+};
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
 Analyze the provided document (text or image) and determine if it is a medical document.
@@ -201,7 +245,8 @@ Rules:
 3. Do NOT output JSON.
 4. Do NOT include any introductions, reasoning, explanations, comments, or notes.
 5. Preserve line breaks and paragraph spacing exactly.
-6. Never summarize or omit any visible details.`;
+6. Never summarize or omit any visible details.
+7. CRITICAL: DO NOT truncate or stop early. You MUST transcribe the entire page, including all table rows, until the very bottom. Double check your work to ensure no rows or footers are missed.`;
 
 const STRUCTURED_EXTRACTION_PROMPT = (rawText) => `You are a precise medical data extraction engine.
 Analyze the provided transcribed text from a medical document and convert it into the exact JSON format specified below.

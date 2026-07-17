@@ -4,7 +4,7 @@ const { InvalidRequestException, InternalServerException } = require("../excepti
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+  limits: { fileSize: 150 * 1024 * 1024 }, // 150 MB
 });
 const validateFile = (req, res, next) => {
   try {

@@ -66,6 +66,20 @@ function sanitizePatient(patient) {
   return safePatient;
 }
 
+function normalizeLanguage(lang) {
+  if (!lang) return "english";
+  const clean = String(lang).toLowerCase().trim();
+  if (clean === "en" || clean === "eng") return "english";
+  if (clean === "gu" || clean === "guj") return "gujarati";
+  if (clean === "hi" || clean === "hin") return "hindi";
+  if (clean === "mr" || clean === "mar") return "marathi";
+  if (clean === "ta" || clean === "tam") return "tamil";
+
+  const valid = ["english", "gujarati", "hindi", "marathi", "tamil"];
+  if (valid.includes(clean)) return clean;
+  return "english";
+}
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -73,4 +87,5 @@ module.exports = {
   hashToken,
   parseDurationToDate,
   sanitizePatient,
+  normalizeLanguage,
 };

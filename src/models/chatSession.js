@@ -12,6 +12,7 @@
 const {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -20,7 +21,6 @@ const {
   varchar,
 } = require("drizzle-orm/pg-core");
 
-const { document } = require("./document");
 const { patient } = require("./patient");
 
 const chatSession = pgTable(
@@ -30,7 +30,7 @@ const chatSession = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
-    documentId: uuid("document_id").references(() => document.id, { onDelete: "set null" }),
+    documentId: jsonb("document_id"),
     title: varchar("title", { length: 255 }),
     metadata: jsonb("metadata").default({}).notNull(),
     softDelete: boolean("soft_delete").default(false).notNull(),
@@ -62,6 +62,7 @@ const chatMessage = pgTable(
     citations: jsonb("citations").default([]).notNull(),
     metadata: jsonb("metadata").default({}).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    seq: integer("seq").default(0).notNull(),
   },
   (table) => [
     index("chat_messages_session_idx").on(table.sessionId, table.createdAt),

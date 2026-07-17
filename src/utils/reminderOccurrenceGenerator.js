@@ -28,6 +28,7 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       );
     }
   }
+
   // if (Array.isArray(schedule.times)) {
   //   timesList = schedule.times;
   // } else if (Array.isArray(schedule.reminderTimes)) {
@@ -36,15 +37,6 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   //   // Legacy mapping (flat object with time keys/values)
   //   timesList = Object.keys(schedule).filter((key) => typeof key === "string" && key.includes(":"));
   // }
-
-  if (Array.isArray(schedule.times)) {
-    timesList = schedule.times;
-  } else if (Array.isArray(schedule.reminderTimes)) {
-    timesList = schedule.reminderTimes;
-  } else {
-    // Legacy mapping (flat object with time keys/values)
-    timesList = Object.keys(schedule).filter((key) => typeof key === "string" && key.includes(":"));
-  }
 
   // Defensively filter and parse each time
   const parseTime = (t) => {
@@ -60,14 +52,23 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
   };
 
   const times = (timesList || []).filter(Boolean);
+  if (times.length === 0) {
+    return []; // Prevent infinite loop if no valid times are found
+  }
+
   const userTimezone = medication.timezone || "Asia/Kolkata";
   const { skipPastOccurrences = true } = options;
   const now = new Date();
   const currentDate = startFromDate ? new Date(startFromDate) : new Date(medication.startDate);
   const availableQuantity = Number(medication.remainingQuantity ?? medication.totalQuantity ?? 0);
   let consumedQuantity = 0;
+  let daysProcessed = 0;
+  const MAX_ONGOING_DAYS = 30; // Cap at 30 days for ongoing medications to prevent infinite loop
 
-  while (availableQuantity === 0 || consumedQuantity < availableQuantity) {
+  while (
+    (availableQuantity === 0 && daysProcessed < MAX_ONGOING_DAYS) ||
+    (availableQuantity > 0 && consumedQuantity < availableQuantity)
+  ) {
     for (const timeValue of times) {
       const dosePerIntake = Number(medication.dosePerIntake || 1);
 
@@ -107,6 +108,13 @@ function generateReminderOccurrences(reminder, medication, startFromDate = null,
       break;
     }
     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+
+    // Only increment daysProcessed if we have passed the start date (to ensure we generate enough future days)
+    if (currentDate >= now) {
+      daysProcessed++;
+    } else if (!skipPastOccurrences) {
+      daysProcessed++;
+    }
   }
   return occurrences;
 }

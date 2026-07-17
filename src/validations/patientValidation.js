@@ -126,6 +126,9 @@ const socialLogin = z
     providerType: z.string().optional(),
     providerToken: z.string().optional(),
     firebaseIdToken: z.string().min(1).optional(),
+    email: z.string().email().max(255).optional().nullable(),
+    firstName: z.string().max(100).optional().nullable(),
+    lastName: z.string().max(100).optional().nullable(),
   })
   .superRefine((data, ctx) => {
     if (data.loginType === "mobile" && data.provider !== "mobile") {
@@ -137,11 +140,11 @@ const socialLogin = z
     }
     if (
       data.loginType === "social" &&
-      !["google", "facebook", "microsoft"].includes(data.provider)
+      !["google", "facebook", "apple", "microsoft"].includes(data.provider)
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provider must be google, facebook, or microsoft when login type is social",
+        message: "Provider must be google, facebook, apple, or microsoft when login type is social",
         path: ["provider"],
       });
     }

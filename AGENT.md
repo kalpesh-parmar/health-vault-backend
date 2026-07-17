@@ -234,7 +234,7 @@ sequenceDiagram
 - `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN`: Expiry intervals (default `15m` / `7d`).
 - `STORAGE_PROVIDER`: File storage target (`s3` or `gcp`).
 - `FIREBASE_PROJECT_ID` / `FIREBASE_CREDENTIALS_BASE64`: Firebase admin configuration keys.
-- `AI_BASE_URL` / `AI_MODEL`: Target Ollama API base and target model name (e.g. `qwen3:32b`).
+- `AI_BASE_URL` / `AI_MODEL`: Target Ollama API base and target model name (e.g. `  `).
 - `MAX_LOGIN_ATTEMPTS`: Lockout limit (default `3`).
 
 ---
