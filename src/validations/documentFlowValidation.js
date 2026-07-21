@@ -75,6 +75,7 @@ const sendChatMessageSchema = z
     documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
     question: z.string().trim().min(1).max(4000),
     sessionId: z.string().uuid().optional().nullable(),
+    preferredLanguage: z.string().optional(),
   })
   .strict();
 

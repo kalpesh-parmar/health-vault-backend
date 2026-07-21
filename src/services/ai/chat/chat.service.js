@@ -13,6 +13,7 @@ const { and, eq, desc, isNull, inArray } = require("drizzle-orm");
 // const { ocrService } = require("../ocr/ocr.service");
 // const documentPersistenceService = require("../../documentPersistenceService");
 const { ollamaClient } = require("../clients/ollamaClient");
+const aiClient = require("../clients/aiClient.service");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
@@ -366,10 +367,38 @@ class ChatService {
       // If there are documentId provided in payload, it overrides general health
       if (documentId && documentId.length > 0) {
         isGeneralHealth = false;
-        await chatSessionRepository.attachDocument(reqSessionId, userId, documentId);
-        session.documentId = documentId;
+
+        let existingDocs = [];
+        if (session.documentId && Array.isArray(session.documentId)) {
+          existingDocs = session.documentId;
+        } else if (session.documentId && typeof session.documentId === "string") {
+          existingDocs = [session.documentId];
+        }
+
+        // Fetch up to 5 most recent documents for the user to enable cross-document comparison
+        const recentDocs = await db
+          .select({ id: document.id })
+          .from(document)
+          .where(eq(document.userId, userId))
+          .orderBy(desc(document.createdAt))
+          .limit(5);
+        const recentDocIds = recentDocs.map((d) => d.id);
+
+        const mergedDocumentIds = [...new Set([...existingDocs, ...documentId, ...recentDocIds])];
+
+        debugLogger.info("sendMessage: Merged old and new document IDs for RAG search", {
+          existingDocs,
+          newDocs: documentId,
+          mergedDocumentIds,
+        });
+
+        await chatSessionRepository.attachDocument(reqSessionId, userId, mergedDocumentIds);
+        session.documentId = mergedDocumentIds;
         if (!session.metadata) session.metadata = {};
-        session.metadata.documentId = documentId;
+        session.metadata.documentId = mergedDocumentIds;
+
+        // Update the payload parameter so the rest of the flow uses the merged IDs
+        documentId = mergedDocumentIds;
       } else if (
         session.documentId &&
         Array.isArray(session.documentId) &&
@@ -479,36 +508,57 @@ IMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
-      debugLogger.info("sendMessage: Calling general health chat provider in " + preferredLanguage);
+      debugLogger.info(
+        "sendMessage: Calling general health chat provider in english (Translate-Out approach)",
+      );
       try {
         const aiResponse = await this.qwenHealthChat(
           history,
           "GENERAL_HEALTH",
           [],
           patientContextStr,
-          preferredLanguage,
+          "english",
         );
-        assistantText = aiResponse.answer;
+        let rawAns = aiResponse.answer;
+        debugLogger.info(
+          `sendMessage: Generated AI English answer (GENERAL_HEALTH) using ${env.chatModel}`,
+          { rawAns },
+        );
+        if (preferredLanguage !== "english") {
+          rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+          debugLogger.info(`sendMessage: Translated AI answer (GENERAL_HEALTH) using IndicTrans2`, {
+            translatedAns: rawAns,
+            toLang: preferredLanguage,
+          });
+        }
+        assistantText = rawAns;
         isEmergency = !!aiResponse.emergency;
       } catch (error) {
-        debugLogger.error(
-          "sendMessage: Local direct language call failed, falling back to translation",
-          {
-            error: error.message,
-          },
-        );
+        debugLogger.error("sendMessage: Local English call failed, falling back", {
+          error: error.message,
+        });
         try {
           const aiResponse = await this.qwenHealthChat(
             history,
             "GENERAL_HEALTH",
             [],
             patientContextStr,
-            preferredLanguage,
+            "english",
           );
           let rawAns = aiResponse.answer;
-          isEmergency = !!aiResponse.emergency;
-
+          debugLogger.info(
+            `sendMessage: Generated AI English fallback answer (GENERAL_HEALTH) using ${env.chatModel}`,
+            { rawAns },
+          );
+          if (preferredLanguage !== "english") {
+            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+            debugLogger.info(
+              `sendMessage: Translated AI fallback answer (GENERAL_HEALTH) using IndicTrans2`,
+              { translatedAns: rawAns, toLang: preferredLanguage },
+            );
+          }
           assistantText = rawAns;
+          isEmergency = !!aiResponse.emergency;
         } catch (fallbackErr) {
           debugLogger.error("sendMessage: General health fallback failed", {
             error: fallbackErr.message,
@@ -546,14 +596,21 @@ IMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user
         debugLogger.error("sendMessage: Failed to fetch document metadata", { error: err.message });
       }
 
+      // Sort to ensure chronological order for numbering
+      docsMetadata.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      const docNumberMap = {};
+      docsMetadata.forEach((d, index) => {
+        docNumberMap[d.id] = index + 1;
+      });
+
       let searchDocumentIds = documentId;
-      // Skip intent classifier overhead for 3 or fewer explicitly selected documents
-      if (documentId && documentId.length > 3) {
+      // Skip intent classifier overhead for 5 or fewer explicitly selected documents
+      if (documentId && documentId.length > 5) {
         if (docsMetadata.length > 0) {
           const docsListStr = docsMetadata
             .map(
-              (d) =>
-                `- ID: ${d.id}, Name: ${d.fileName || "Unknown"}, Type: ${d.documentType || "Unknown"}, Date: ${d.createdAt.toISOString().split("T")[0]}`,
+              (d, index) =>
+                `${index + 1}. ID: ${d.id}, Name: ${d.fileName || "Unknown"}, Type: ${d.documentType || "Unknown"}, Date: ${d.createdAt.toISOString().split("T")[0]}`,
             )
             .join("\n");
           const intentPrompt = `The user uploaded the following medical documents:
@@ -601,6 +658,10 @@ Example output: ["id1", "id2"]`;
       debugLogger.info("sendMessage: Generating embedding for RAG query");
       const queryEmbedding = await embeddingService.embedText(question);
 
+      debugLogger.info("sendMessage: Searching semantic chunks across documents", {
+        searchDocumentIds,
+      });
+
       const chunks = await intelligenceRepository.searchSimilarChunks({
         documentIds: searchDocumentIds,
         limit: Math.min(15, env.ragTopK + searchDocumentIds.length),
@@ -608,7 +669,13 @@ Example output: ["id1", "id2"]`;
         userId,
       });
 
-      const safeChunks = Array.isArray(chunks) ? chunks : [];
+      const safeChunks = (Array.isArray(chunks) ? chunks : []).map((chunk) => {
+        const reportNum = docNumberMap[chunk.documentId] || "?";
+        return {
+          ...chunk,
+          sectionTitle: `[Report ${reportNum}] ${chunk.sectionTitle || "Report Content"}`,
+        };
+      });
       let usableChunks = safeChunks
         .map((chunk) => ({ ...chunk, score: relevance(chunk.distance) }))
         .filter((chunk) =>
@@ -636,7 +703,7 @@ Example output: ["id1", "id2"]`;
           return {
             chunkId: `summary-${d.id}`,
             documentId: d.id,
-            sectionTitle: `Full Document Summary: ${d.fileName || "Unknown"}${dateStr}`,
+            sectionTitle: `[Report ${docNumberMap[d.id] || "?"}] Full Document Summary: ${d.fileName || "Unknown"}${dateStr}`,
             content: d.summaryEnglish,
             score: 1.0,
             sourceType: "ai_summary",
@@ -694,9 +761,20 @@ Example output: ["id1", "id2"]`;
           "DOCUMENT_RAG",
           formattedChunks,
           patientContextStr,
-          preferredLanguage,
+          "english",
         );
         let rawAns = aiResponse.answer;
+        debugLogger.info(
+          `sendMessage: Generated AI English answer (DOCUMENT_RAG) using ${env.chatModel}`,
+          { rawAns },
+        );
+        if (preferredLanguage !== "english") {
+          rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+          debugLogger.info(`sendMessage: Translated AI answer (DOCUMENT_RAG) using IndicTrans2`, {
+            translatedAns: rawAns,
+            toLang: preferredLanguage,
+          });
+        }
         citations = aiResponse.citations || formattedChunks;
         isEmergency = !!aiResponse.emergency;
 

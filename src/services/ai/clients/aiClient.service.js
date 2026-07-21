@@ -70,12 +70,15 @@ class AiServiceClient {
     return env.aiServiceUrl;
   }
 
-  async translate(text, srcLang = "en", tgtLang) {
+  async _translateChunk(text, srcLang = "en", tgtLang) {
     if (!text || srcLang === tgtLang) return text;
     const cacheKey = `${srcLang}:${tgtLang}:${text}`;
     const cached = this.translationCache.get(cacheKey);
     if (cached) return cached;
 
+    console.log(
+      `[AiServiceClient] Calling IndicTrans2 model to translate chunk (${text.length} chars) from ${srcLang} to ${tgtLang}...`,
+    );
     try {
       const response = await postWithRetry(
         `${this.baseUrl}/api/v1/translate`,
@@ -84,7 +87,7 @@ class AiServiceClient {
           src_lang: srcLang,
           tgt_lang: tgtLang,
         },
-        { timeout: 30000, retries: 2 },
+        { timeout: 300000, retries: 0 },
       );
 
       const translatedText = response?.translated_text || text;
@@ -97,6 +100,46 @@ class AiServiceClient {
       );
       return text; // Fallback to original text
     }
+  }
+
+  async translate(text, srcLang = "en", tgtLang) {
+    if (!text || srcLang === tgtLang) return text;
+
+    // Check if the text is short enough to translate in one go
+    if (text.length <= 1500) {
+      return await this._translateChunk(text, srcLang, tgtLang);
+    }
+
+    // Otherwise, split the text into manageable paragraphs and translate them sequentially
+    const chunks = text.split("\n\n");
+    const translatedChunks = [];
+
+    for (const chunk of chunks) {
+      if (!chunk.trim()) {
+        translatedChunks.push(chunk);
+        continue;
+      }
+
+      // If a single paragraph is still absurdly long, split by single newline
+      if (chunk.length > 1500) {
+        const subChunks = chunk.split("\n");
+        const translatedSubChunks = [];
+        for (const subChunk of subChunks) {
+          if (!subChunk.trim()) {
+            translatedSubChunks.push(subChunk);
+          } else {
+            // Translate subchunk
+            translatedSubChunks.push(await this._translateChunk(subChunk, srcLang, tgtLang));
+          }
+        }
+        translatedChunks.push(translatedSubChunks.join("\n"));
+      } else {
+        // Translate normal paragraph
+        translatedChunks.push(await this._translateChunk(chunk, srcLang, tgtLang));
+      }
+    }
+
+    return translatedChunks.join("\n\n");
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {

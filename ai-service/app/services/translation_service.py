@@ -180,7 +180,7 @@ class TranslationService:
                         with torch.no_grad():
                             return self.model.generate(
                                 **inputs,
-                                use_cache=True,
+                                use_cache=False,
                                 min_length=0,
                                 max_length=256,
                                 num_beams=self.settings.translation_num_beams,
@@ -189,7 +189,8 @@ class TranslationService:
                     generated_tokens = await loop.run_in_executor(None, _generate)
 
                 decoded = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-                translated_sentences.append(decoded[0] if decoded else sentence)
+                postprocessed = self.ip.postprocess_batch(decoded, lang=tgt_code)
+                translated_sentences.append(postprocessed[0] if postprocessed else sentence)
 
             translated_text = " ".join(translated_sentences)
             unmasked_text = unmask_text(translated_text, masks)
