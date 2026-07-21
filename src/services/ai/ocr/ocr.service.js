@@ -1377,10 +1377,9 @@ ${rawText}
         mode: "detailed",
       });
       rawText =
-        remoteResult.text ||
-        remoteResult.rawText ||
-        remoteResult.ocr_text ||
-        (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+        typeof remoteResult === "string"
+          ? remoteResult
+          : remoteResult.ocr_text || remoteResult.text || remoteResult.rawText || "";
     }
 
     // 2. Summarize & Structure Data (Qwen3-VL via Remote Service)

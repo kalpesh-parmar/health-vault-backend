@@ -9,6 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from typing import Any
+import paddle
 
 from app.core.errors import ModelUnavailableError, OcrEmptyResultError
 from app.core.json_utils import parse_json_object
@@ -20,7 +21,6 @@ logger = logging.getLogger(__name__)
 # --- GLOBAL PADDLEOCR INITIALIZATION ---
 import sys
 import os
-
 
 # Dynamically add PaddleOCR packages from D: drive to sys.path
 paddle_path = r"D:\paddle_packages"
@@ -36,7 +36,12 @@ try:
     # Silence paddle logging
     p_logging.getLogger("ppocr").setLevel(p_logging.ERROR)
     # Initialize globally (only once)
-    global_ocr = PaddleOCR(use_textline_orientation=True, lang='en')
+    global_ocr = PaddleOCR(
+        use_textline_orientation=True,
+        use_doc_orientation_classify=True,
+        enable_mkldnn=False,
+        lang='en')
+    print("=======>",paddle.get_device())
 except Exception as e:
     logger.error(f"Failed to initialize global PaddleOCR: {e}")
     global_ocr = None
@@ -429,13 +434,35 @@ class VisionModelService:
             img_array = np.frombuffer(data, np.uint8)
             img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             
+            if img is None:
+                raise ValueError("Failed to decode image bytes using cv2.imdecode. (If this is a PDF, it must be rendered to images first).")
+
+            #  # 1. Convert to grayscale
+            # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # # 2. Apply CLAHE (Contrast Enhancement) to make faint text readable
+            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            # enhanced = clahe.apply(gray)
+            # # 3. Convert back to BGR (PaddleOCR expects 3 color channels)
+            # img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
             # Extract text
-            result = global_ocr.ocr(img, cls=True)
+            try:
+                result = global_ocr.ocr(img)
+            except Exception as e:
+                print(type(e))
+                print(e)
+                raise
             
             extracted_text = ""
             if result and result[0]:
-                extracted_text = "\n".join([line[1][0] for line in result[0]])
-
+                if isinstance(result[0], dict) and "rec_texts" in result[0]:
+                    # PaddleOCR 3.x (PaddleX Pipeline) format
+                    extracted_text = "\n".join(result[0]["rec_texts"])
+                elif isinstance(result[0], list) and isinstance(result[0][0], (list, tuple)) and len(result[0][0]) > 1:
+                    # PaddleOCR 2.x format
+                    try:
+                        extracted_text = "\n".join([line[1][0] for line in result[0]])
+                    except Exception:
+                        pass
             # 6. Format as Vision LLM JSON
             structured_json = {
                 "pages": [{"page": 1, "text": extracted_text, "confidence": 1.0}],

@@ -87,6 +87,8 @@ class MedicalDocumentClassifierService {
           const pdfParse = require("pdf-parse");
           console.log("[MedicalDocumentClassifierService] Extracting text using pdf-parse...");
           const pdfData = await pdfParse(file.buffer);
+          console.log("[SC]------> ", pdfData);
+
           extractedText = pdfData.text || "";
         } catch (err) {
           console.warn(
@@ -107,27 +109,37 @@ class MedicalDocumentClassifierService {
             mimeType: file.mimetype || file.mimeType || "application/pdf",
             mode: "detailed",
           });
+          let extracted = "";
+          if (remoteResult && remoteResult.document && Array.isArray(remoteResult.document.pages)) {
+            extracted = remoteResult.document.pages.map((p) => p.text || "").join("\n");
+          }
           extractedText =
-            remoteResult.text ||
-            remoteResult.rawText ||
-            remoteResult.ocr_text ||
-            (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+            typeof remoteResult === "string"
+              ? remoteResult
+              : extracted ||
+                remoteResult.ocr_text ||
+                remoteResult.text ||
+                remoteResult.rawText ||
+                "";
         }
       } else {
         console.log(
-          "[MedicalDocumentClassifierService] Extracting image text using Python PaddleOCR...",
+          "[MedicalDocumentClassifierService] Non-PDF document detected, falling back to Python PaddleOCR...",
         );
         const remoteResult = await aiClient.runOcrFromBuffer({
           buffer: file.buffer,
           filename: file.originalname || file.filename || "upload",
-          mimeType: file.mimetype || file.mimeType || "image/png",
+          mimeType: file.mimetype || file.mimeType || "image/jpeg", // default to image for non-pdfs
           mode: "detailed",
         });
+        let extracted = "";
+        if (remoteResult && remoteResult.document && Array.isArray(remoteResult.document.pages)) {
+          extracted = remoteResult.document.pages.map((p) => p.text || "").join("\n");
+        }
         extractedText =
-          remoteResult.text ||
-          remoteResult.rawText ||
-          remoteResult.ocr_text ||
-          (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+          typeof remoteResult === "string"
+            ? remoteResult
+            : extracted || remoteResult.ocr_text || remoteResult.text || remoteResult.rawText || "";
       }
     } catch (error) {
       console.error(

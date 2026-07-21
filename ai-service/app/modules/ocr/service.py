@@ -83,13 +83,21 @@ class OcrService:
         filename: str,
         mime_type: str | None,
     ) -> dict:
+        logger.info("ocr_extraction_started", extra={"document_name": filename, "mime_type": mime_type})
         if not document_bytes:
+            logger.error("ocr_extraction_failed_empty_payload", extra={"document_name": filename})
             raise ValueError("Empty document payload received")
-        return await self._extract(
-            document_bytes=document_bytes,
-            filename=filename,
-            mime_type=mime_type,
-        )
+        try:
+            result = await self._extract(
+                document_bytes=document_bytes,
+                filename=filename,
+                mime_type=mime_type,
+            )
+            logger.info("ocr_extraction_completed_successfully", extra={"document_name": filename})
+            return result
+        except Exception as e:
+            logger.error("ocr_extraction_failed", extra={"document_name": filename, "error": str(e)}, exc_info=True)
+            raise
 
     async def extract_document(
         self,
@@ -99,12 +107,23 @@ class OcrService:
         file_processing=None,  # retained for backward-compatible call sites
         workspace=None,
     ) -> dict:
-        document_bytes = await asyncio.to_thread(source.read_bytes)
-        return await self._extract(
-            document_bytes=document_bytes,
-            filename=source.name,
-            mime_type=mime_type,
-        )
+        logger.info("ocr_file_extraction_started", extra={"source": str(source), "mime_type": mime_type})
+        try:
+            document_bytes = await asyncio.to_thread(source.read_bytes)
+        except Exception as e:
+            logger.error("ocr_file_read_failed", extra={"source": str(source), "error": str(e)}, exc_info=True)
+            raise
+        try:
+            result = await self._extract(
+                document_bytes=document_bytes,
+                filename=source.name,
+                mime_type=mime_type,
+            )
+            logger.info("ocr_file_extraction_completed_successfully", extra={"source": str(source)})
+            return result
+        except Exception as e:
+            logger.error("ocr_file_extraction_failed", extra={"source": str(source), "error": str(e)}, exc_info=True)
+            raise
 
     async def _extract(
         self,
@@ -124,12 +143,16 @@ class OcrService:
         if document_kind == "image":
             logger.info("model_ocr_started", extra={"document_name": filename, "kind": "image"})
             ai_started = time.monotonic()
-            payload = await self.vision.extract_image(
-                document_bytes,
-                filename=filename,
-                mime_type=normalized_mime,
-                max_pages=self.max_pdf_pages,
-            )
+            try:
+                payload = await self.vision.extract_image(
+                    document_bytes,
+                    filename=filename,
+                    mime_type=normalized_mime,
+                    max_pages=self.max_pdf_pages,
+                )
+            except Exception as e:
+                logger.error("vision_engine_extract_image_failed", extra={"document_name": filename, "error": str(e)}, exc_info=True)
+                raise
             timings["aiVisionMs"] = int((time.monotonic() - ai_started) * 1000)
             self._guard_empty_result(payload, filename=filename)
             return _finalize(payload, started=started, mime_type=normalized_mime, timings=timings)
@@ -174,9 +197,13 @@ class OcrService:
         )
         logger.info("ai_request_started", extra={"document_name": filename})
         ai_started = time.monotonic()
-        payload = await self.vision.extract_pdf(
-            document_bytes, max_pages=self.max_pdf_pages
-        )
+        try:
+            payload = await self.vision.extract_pdf(
+                document_bytes, max_pages=self.max_pdf_pages
+            )
+        except Exception as e:
+            logger.error("vision_engine_extract_pdf_failed", extra={"document_name": filename, "error": str(e)}, exc_info=True)
+            raise
         timings["aiVisionMs"] = int((time.monotonic() - ai_started) * 1000)
         logger.info(
             "ai_request_completed",
@@ -212,10 +239,10 @@ class OcrService:
         page_errors = [err for err in (metrics.get("page_errors") or []) if err]
         # All pages blank and no error → the document really is empty. Allow it.
         recoverable = {"http_error", "timeout", "transport_error", "exhausted", "unknown", "empty_response"}
-        if page_errors and not (set(page_errors) & recoverable):
+        if not page_errors or not (set(page_errors) & recoverable):
             logger.info(
                 "ocr_empty_but_blank_document",
-                extra={"document_name": filename, "page_errors": ",".join(sorted(set(page_errors)))},
+                extra={"document_name": filename, "page_errors": ",".join(sorted(set(page_errors))) if page_errors else "none"},
             )
             return
 
