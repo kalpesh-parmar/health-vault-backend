@@ -21,6 +21,9 @@ def mask_text(text: str) -> tuple[str, list[str]]:
         ("phone", r'\+?\d{1,4}[-.\s]?\d{3,5}[-.\s]?\d{3,5}(?:[-.\s]?\d{1,4})?'),
         ("date", r'\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b'),
         ("blood", r'(?<![A-Za-z])(?:AB|A|B|O)[+-]'),
+        ("emoji", r'[\u2600-\u27BF\U00010000-\U0010ffff]+'),
+        ("markdown_list", r'(?m)^[\s]*(?:#{1,6}|-|\*|•)\s+'),
+        ("markdown_bold", r'\*\*'),
     ]
     
     masked_text = text
@@ -65,7 +68,8 @@ def unmask_text(masked_text: str, masks: list[str]) -> str:
             pass
         return match.group(0)
     
-    pattern = r'__\s*MASK_(\d+)\s*__'
+    # Matches original __MASK_0__ and variants like _ _ MASK _ 0 _
+    pattern = r'[_ ]*_[_ ]*MASK[_ ]*(\d+)[_ ]*_[_ ]*'
     unmasked = re.sub(pattern, replace_match, masked_text, flags=re.IGNORECASE)
     return unmasked
 
@@ -156,16 +160,32 @@ class TranslationService:
             return text
 
         masked_text, masks = mask_text(text)
-        sentences = self.split_sentences(masked_text)
-        if not sentences:
+        
+        paragraphs = masked_text.split('\n')
+        all_sentences = []
+        sentence_to_para_map = []
+        
+        for i, para in enumerate(paragraphs):
+            if not para.strip():
+                continue
+            sentences = self.split_sentences(para)
+            for s in sentences:
+                all_sentences.append(s)
+                sentence_to_para_map.append(i)
+                
+        if not all_sentences:
             return text
 
         try:
             import torch
+            import time
+            start_time = time.time()
             translated_sentences = []
             
-            for sentence in sentences:
-                batch = self.ip.preprocess_batch([sentence], src_lang=src_code, tgt_lang=tgt_code)
+            batch_size = 4
+            for i in range(0, len(all_sentences), batch_size):
+                sentence_batch = all_sentences[i:i + batch_size]
+                batch = self.ip.preprocess_batch(sentence_batch, src_lang=src_code, tgt_lang=tgt_code)
                 
                 inputs = self.tokenizer(
                     batch,
@@ -176,11 +196,11 @@ class TranslationService:
 
                 loop = asyncio.get_running_loop()
                 async with self._lock:
-                    def _generate():
+                    def _generate(inputs_arg=inputs):
                         with torch.no_grad():
                             return self.model.generate(
-                                **inputs,
-                                use_cache=False,
+                                **inputs_arg,
+                                use_cache=True,
                                 min_length=0,
                                 max_length=256,
                                 num_beams=self.settings.translation_num_beams,
@@ -190,10 +210,20 @@ class TranslationService:
 
                 decoded = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
                 postprocessed = self.ip.postprocess_batch(decoded, lang=tgt_code)
-                translated_sentences.append(postprocessed[0] if postprocessed else sentence)
+                translated_sentences.extend(postprocessed)
 
-            translated_text = " ".join(translated_sentences)
+            translated_paragraphs = [""] * len(paragraphs)
+            for i, translated_sent in zip(sentence_to_para_map, translated_sentences):
+                if translated_paragraphs[i]:
+                    translated_paragraphs[i] += " " + translated_sent
+                else:
+                    translated_paragraphs[i] = translated_sent
+                    
+            translated_text = "\n".join(translated_paragraphs)
             unmasked_text = unmask_text(translated_text, masks)
+            
+            end_time = time.time()
+            logger.info(f"[TranslationService] Translated {len(text)} chars from {src_lang} to {tgt_lang} in {end_time - start_time:.2f} seconds")
             return unmasked_text
         except Exception as e:
             logger.error(f"[TranslationService] Error during translation: {e}", exc_info=True)

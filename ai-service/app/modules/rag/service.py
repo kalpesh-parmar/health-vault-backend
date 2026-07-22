@@ -99,13 +99,24 @@ class RagService:
 
 
 def rerank_chunks(message: str, chunks: list[dict], *, limit: int) -> list[dict]:
+    unique_chunks = []
+    seen = set()
+    for c in chunks:
+        content = c.get("content", "").strip()
+        if not content or content in seen:
+            continue
+        seen.add(content)
+        if len(content) > 1500:
+            c["content"] = content[:1500] + "..."
+        unique_chunks.append(c)
+
     query_terms = {
         term.lower()
         for term in re.findall(r"[A-Za-z0-9.]+", message or "")
         if len(term) > 2
     }
     if not query_terms:
-        return chunks[:limit]
+        return unique_chunks[:limit]
 
     def score(chunk: dict) -> tuple[float, float]:
         content = str(chunk.get("content") or "").lower()
@@ -113,4 +124,4 @@ def rerank_chunks(message: str, chunks: list[dict], *, limit: int) -> list[dict]
         distance = float(chunk.get("distance") or 1.0)
         return (lexical_hits, -distance)
 
-    return sorted(chunks, key=score, reverse=True)[:limit]
+    return sorted(unique_chunks, key=score, reverse=True)[:limit]

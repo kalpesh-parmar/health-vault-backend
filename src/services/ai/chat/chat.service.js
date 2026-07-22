@@ -111,6 +111,24 @@ function relevance(distance) {
   return Math.max(0, Math.min(1, 1 - Number(distance)));
 }
 
+function isTextInLanguage(text, language) {
+  if (!text || !language) return false;
+  const lang = language.toLowerCase();
+  if (lang === "gujarati") {
+    return /[\u0A80-\u0AFF]/.test(text);
+  }
+  if (lang === "hindi" || lang === "marathi") {
+    return /[\u0900-\u097F]/.test(text);
+  }
+  if (lang === "tamil") {
+    return /[\u0B80-\u0BFF]/.test(text);
+  }
+  if (lang === "english") {
+    return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
+  }
+  return false;
+}
+
 class ChatService {
   detectEmergency(text) {
     const cleanText = String(text || "").toLowerCase();
@@ -149,17 +167,22 @@ class ChatService {
       }
 
       const contextText = contextChunks
-        .map(
-          (c, idx) =>
-            `[Chunk Index: ${idx + 1}, ID: ${c.chunkId || c.id}, Section: ${c.sectionTitle || "Report Content"}, Source: ${c.sourceType}, Similarity Score: ${(c.score ?? 1.0).toFixed(2)}]\nContent: ${c.content}`,
-        )
+        .map((c) => `[${c.sectionTitle || "Report Content"}]\nContent: ${c.content}`)
         .join("\n\n");
 
       let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang);
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
+      systemPrompt += `\n\nCRITICAL INSTRUCTION: Keep your answer highly concise (under 200 tokens).`;
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
+      if (normLang === "english") {
+        formattedMessages.push({
+          role: "system",
+          content:
+            "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+        });
+      }
 
       console.log(`[ChatService] Running local RAG chat in ${normLang} using ${env.chatModel}...`);
       const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
@@ -181,6 +204,13 @@ class ChatService {
     }
 
     const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
+    if (normLang === "english") {
+      formattedMessages.push({
+        role: "system",
+        content:
+          "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+      });
+    }
 
     console.log(
       `[ChatService] Running local general chat in ${normLang} using ${env.chatModel}...`,
@@ -222,6 +252,7 @@ class ChatService {
   }
 
   async sendMessage({ userId, documentId, question, sessionId: reqSessionId }) {
+    const _reqStartTime = Date.now();
     debugLogger.info("sendMessage: Incoming payload", {
       userId,
       documentId,
@@ -458,6 +489,15 @@ class ChatService {
       userId,
     });
 
+    const recent = await chatSessionRepository.listMessages({
+      direction: "before",
+      limit: 4,
+      sessionId,
+      userId,
+    });
+    const items = recent && Array.isArray(recent.items) ? recent.items : [];
+    const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
+
     let assistantText = NO_CONTEXT_REPLY;
     let citations = [];
     let isEmergency = false;
@@ -499,14 +539,7 @@ IMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user
 
     if (isGeneralHealth) {
       // General Health chat flow
-      const recent = await chatSessionRepository.listMessages({
-        direction: "before",
-        limit: 8,
-        sessionId,
-        userId,
-      });
-      const items = recent && Array.isArray(recent.items) ? recent.items : [];
-      const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
+      // General Health chat flow (history already fetched above)
 
       debugLogger.info(
         "sendMessage: Calling general health chat provider in english (Translate-Out approach)",
@@ -525,11 +558,20 @@ IMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user
           { rawAns },
         );
         if (preferredLanguage !== "english") {
-          rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-          debugLogger.info(`sendMessage: Translated AI answer (GENERAL_HEALTH) using IndicTrans2`, {
-            translatedAns: rawAns,
-            toLang: preferredLanguage,
-          });
+          if (!isTextInLanguage(rawAns, preferredLanguage)) {
+            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+            debugLogger.info(
+              `sendMessage: Translated AI answer (GENERAL_HEALTH) using IndicTrans2`,
+              {
+                translatedAns: rawAns,
+                toLang: preferredLanguage,
+              },
+            );
+          } else {
+            debugLogger.info(
+              `sendMessage: Skipped translation (GENERAL_HEALTH), answer already in ${preferredLanguage}`,
+            );
+          }
         }
         assistantText = rawAns;
         isEmergency = !!aiResponse.emergency;
@@ -551,11 +593,17 @@ IMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user
             { rawAns },
           );
           if (preferredLanguage !== "english") {
-            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-            debugLogger.info(
-              `sendMessage: Translated AI fallback answer (GENERAL_HEALTH) using IndicTrans2`,
-              { translatedAns: rawAns, toLang: preferredLanguage },
-            );
+            if (!isTextInLanguage(rawAns, preferredLanguage)) {
+              rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+              debugLogger.info(
+                `sendMessage: Translated AI fallback answer (GENERAL_HEALTH) using IndicTrans2`,
+                { translatedAns: rawAns, toLang: preferredLanguage },
+              );
+            } else {
+              debugLogger.info(
+                `sendMessage: Skipped translation fallback (GENERAL_HEALTH), answer already in ${preferredLanguage}`,
+              );
+            }
           }
           assistantText = rawAns;
           isEmergency = !!aiResponse.emergency;
@@ -655,8 +703,44 @@ Example output: ["id1", "id2"]`;
           }
         }
       }
+      let searchQuery = question;
+      if (history.length > 1) {
+        const pronounRegex = /\b(this|these|it|he|she|his|her|that|those)\b/i;
+        if (pronounRegex.test(question)) {
+          debugLogger.info(
+            "sendMessage: Rewriting query using conversation history (pronouns detected)",
+          );
+          const historyText = history
+            .slice(0, -1)
+            .map((h) => `${h.role}: ${h.content}`)
+            .join("\n");
+          const rewritePrompt = `History:
+${historyText}
+User: ${question}
+Rewrite question to be standalone. Max 15 words. ONLY the question text.`;
+
+          try {
+            const rewriteResponse = await ollamaClient.generate(rewritePrompt, env.chatModel, {
+              temperature: 0,
+              maxTokens: 30,
+            });
+            if (rewriteResponse && rewriteResponse.trim()) {
+              searchQuery = rewriteResponse.trim().replace(/^"|"$/g, "");
+              debugLogger.info("sendMessage: Query rewritten for RAG", {
+                original: question,
+                rewritten: searchQuery,
+              });
+            }
+          } catch (err) {
+            debugLogger.error("sendMessage: Query rewrite failed", { error: err.message });
+          }
+        } else {
+          debugLogger.info("sendMessage: Bypassing query rewrite (no pronouns detected)");
+        }
+      }
+
       debugLogger.info("sendMessage: Generating embedding for RAG query");
-      const queryEmbedding = await embeddingService.embedText(question);
+      const queryEmbedding = await embeddingService.embedText(searchQuery);
 
       debugLogger.info("sendMessage: Searching semantic chunks across documents", {
         searchDocumentIds,
@@ -734,14 +818,7 @@ Example output: ["id1", "id2"]`;
         };
       }
 
-      const recent = await chatSessionRepository.listMessages({
-        direction: "before",
-        limit: 8,
-        sessionId,
-        userId,
-      });
-      const items = recent && Array.isArray(recent.items) ? recent.items : [];
-      const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
+      // history already fetched above
 
       debugLogger.info(
         "sendMessage: Calling RAG chat provider in english (Translate-Out approach)",
@@ -769,11 +846,17 @@ Example output: ["id1", "id2"]`;
           { rawAns },
         );
         if (preferredLanguage !== "english") {
-          rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-          debugLogger.info(`sendMessage: Translated AI answer (DOCUMENT_RAG) using IndicTrans2`, {
-            translatedAns: rawAns,
-            toLang: preferredLanguage,
-          });
+          if (!isTextInLanguage(rawAns, preferredLanguage)) {
+            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+            debugLogger.info(`sendMessage: Translated AI answer (DOCUMENT_RAG) using IndicTrans2`, {
+              translatedAns: rawAns,
+              toLang: preferredLanguage,
+            });
+          } else {
+            debugLogger.info(
+              `sendMessage: Skipped translation (DOCUMENT_RAG), answer already in ${preferredLanguage}`,
+            );
+          }
         }
         citations = aiResponse.citations || formattedChunks;
         isEmergency = !!aiResponse.emergency;
@@ -802,6 +885,12 @@ Example output: ["id1", "id2"]`;
       role: "assistant",
       sessionId,
       userId,
+    });
+
+    const _reqEndTime = Date.now();
+    debugLogger.info("sendMessage: Total request execution time", {
+      durationMs: _reqEndTime - _reqStartTime,
+      durationSec: ((_reqEndTime - _reqStartTime) / 1000).toFixed(2),
     });
 
     return {

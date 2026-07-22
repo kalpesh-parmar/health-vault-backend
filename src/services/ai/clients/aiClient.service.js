@@ -80,6 +80,7 @@ class AiServiceClient {
       `[AiServiceClient] Calling IndicTrans2 model to translate chunk (${text.length} chars) from ${srcLang} to ${tgtLang}...`,
     );
     try {
+      const startTime = Date.now();
       const response = await postWithRetry(
         `${this.baseUrl}/api/v1/translate`,
         {
@@ -89,6 +90,8 @@ class AiServiceClient {
         },
         { timeout: 300000, retries: 0 },
       );
+      const endTime = Date.now();
+      console.log(`[AiServiceClient] Translation API call took ${endTime - startTime}ms`);
 
       const translatedText = response?.translated_text || text;
       this.translationCache.set(cacheKey, translatedText);
@@ -106,39 +109,36 @@ class AiServiceClient {
     if (!text || srcLang === tgtLang) return text;
 
     // Check if the text is short enough to translate in one go
-    if (text.length <= 1500) {
+    if (text.length <= 4000) {
       return await this._translateChunk(text, srcLang, tgtLang);
     }
 
     // Otherwise, split the text into manageable paragraphs and translate them sequentially
     const chunks = text.split("\n\n");
-    const translatedChunks = [];
 
-    for (const chunk of chunks) {
+    const chunkPromises = chunks.map(async (chunk) => {
       if (!chunk.trim()) {
-        translatedChunks.push(chunk);
-        continue;
+        return chunk;
       }
 
       // If a single paragraph is still absurdly long, split by single newline
-      if (chunk.length > 1500) {
+      if (chunk.length > 4000) {
         const subChunks = chunk.split("\n");
-        const translatedSubChunks = [];
-        for (const subChunk of subChunks) {
+        const subChunkPromises = subChunks.map(async (subChunk) => {
           if (!subChunk.trim()) {
-            translatedSubChunks.push(subChunk);
-          } else {
-            // Translate subchunk
-            translatedSubChunks.push(await this._translateChunk(subChunk, srcLang, tgtLang));
+            return subChunk;
           }
-        }
-        translatedChunks.push(translatedSubChunks.join("\n"));
+          return await this._translateChunk(subChunk, srcLang, tgtLang);
+        });
+        const translatedSubChunks = await Promise.all(subChunkPromises);
+        return translatedSubChunks.join("\n");
       } else {
         // Translate normal paragraph
-        translatedChunks.push(await this._translateChunk(chunk, srcLang, tgtLang));
+        return await this._translateChunk(chunk, srcLang, tgtLang);
       }
-    }
+    });
 
+    const translatedChunks = await Promise.all(chunkPromises);
     return translatedChunks.join("\n\n");
   }
 
