@@ -70,13 +70,22 @@ async def run_ocr(
         if "application/json" in request.headers.get("content-type", ""):
             body = await request.json()
             payload = DirectOcrRequest.model_validate(body)
+            logger.info("run_ocr_json_payload", extra={"request_id": request_id, "bucket": payload.bucket, "file_key": payload.file_key, "mime_type": payload.mime_type})
+            
             if slim is None and isinstance(body, dict) and body.get("slim") is not None:
                 slim = bool(body.get("slim"))
             read_started = time.monotonic()
-            document_bytes = await container.storage.read_bytes(
-                bucket=payload.bucket,
-                key=payload.file_key,
-            )
+            
+            try:
+                document_bytes = await container.storage.read_bytes(
+                    bucket=payload.bucket,
+                    key=payload.file_key,
+                )
+                logger.info("run_ocr_storage_read_success", extra={"request_id": request_id, "bytes_length": len(document_bytes)})
+            except Exception as e:
+                logger.error("run_ocr_storage_read_failed", extra={"request_id": request_id, "error": str(e)}, exc_info=True)
+                raise
+                
             storage_read_ms = int((time.monotonic() - read_started) * 1000)
             result = await container.documents.process_document_bytes(
                 document_bytes=document_bytes,

@@ -11,6 +11,8 @@ class OcrEmptyResultError extends AppError {
   constructor(message = "OCR produced no usable text", details = {}) {
     super(StatusCodes.UNPROCESSABLE_ENTITY, message, "OCR_EMPTY_RESULT");
     this.details = details;
+    this.details = details;
+    this.cause = details.cause;
   }
 }
 

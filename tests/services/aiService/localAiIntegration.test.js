@@ -1,4 +1,3 @@
-/* global describe, it, expect, jest, beforeEach */
 const axios = require("axios");
 const { chatService } = require("../../../src/services/ai/chat/chat.service");
 const { embeddingService } = require("../../../src/services/ai/chat/embedding.service");
@@ -99,9 +98,9 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
   });
 
   describe("Embeddings & Normalization Flow", () => {
-    it("should return 768-dimensional embeddings using local nomic model", async () => {
-      // Mock Ollama embeddings response with 768 dimensions
-      const mockVector = new Array(768).fill(0.1);
+    it("should return 1024-dimensional embeddings using local bge-m3:latest model", async () => {
+      // Mock Ollama embeddings response with 1024 dimensions
+      const mockVector = new Array(1024).fill(0.1);
       axios.post.mockResolvedValueOnce({
         data: {
           embedding: mockVector,
@@ -109,12 +108,12 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
       });
 
       const result = await embeddingService.embedText("test text");
-      expect(result).toHaveLength(768);
+      expect(result).toHaveLength(1024);
       expect(result[0]).toBe(0.1);
     });
 
-    it("should normalize and truncate embeddings to exactly 768 dimensions if they differ", async () => {
-      const mockVector = new Array(1024).fill(0.25);
+    it("should normalize and truncate embeddings to exactly 1024 dimensions if they differ", async () => {
+      const mockVector = new Array(1500).fill(0.25);
       axios.post.mockResolvedValueOnce({
         data: {
           embedding: mockVector,
@@ -122,7 +121,7 @@ describe("Local AI + RAG Healthcare Assistant Integration Tests", () => {
       });
 
       const result = await embeddingService.embedText("test text");
-      expect(result).toHaveLength(768);
+      expect(result).toHaveLength(1024);
       expect(result[0]).toBe(0.25);
     });
   });

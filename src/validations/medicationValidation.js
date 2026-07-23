@@ -1,7 +1,7 @@
 const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { foodTypeValues } = require("../enums/foodType");
-const { frequencyTypeValues } = require("../enums/frequencyType");
+const { frequencyTypeValues, frequencyType } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
 const { bestTakenType } = require("../enums/bestTakenType");
 // const { mediactionUnitValues } = require("../enums/medicationUnit");
@@ -57,19 +57,78 @@ const validateStartDate = (startDate, ctx) => {
   }
 };
 
+// const medicationScheduleSchema = z
+//   .preprocess(
+//     (val) => {
+//       if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+//         const newVal = {};
+//         for (const key of Object.keys(val)) {
+//           const normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
+//           newVal[normalizedKey] = val[key];
+//         }
+//         return newVal;
+//       }
+//       return val;
+//     },
+//     z.object({
+//       [bestTakenType.MORNING]: time24HourSchema.optional(),
+//       [bestTakenType.NOON]: time24HourSchema.optional(),
+//       [bestTakenType.NIGHT]: time24HourSchema.optional(),
+//       [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
+//     }),
+//   )
 const medicationScheduleSchema = z
-  .object({
-    [bestTakenType.MORNING]: time24HourSchema.optional(),
-    [bestTakenType.NOON]: time24HourSchema.optional(),
-    [bestTakenType.NIGHT]: time24HourSchema.optional(),
-    [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
-  })
+  .preprocess(
+    (val) => {
+      let parsedVal = val;
+      if (typeof val === "string") {
+        try {
+          parsedVal = JSON.parse(val);
+        } catch (e) {
+          console.log("error:-", e);
+
+          // Ignore parsing error, keep as string
+        }
+      }
+
+      if (Array.isArray(parsedVal)) {
+        return parsedVal;
+      }
+
+      if (typeof parsedVal === "object" && parsedVal !== null) {
+        const newVal = {};
+        for (const key of Object.keys(parsedVal)) {
+          const normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
+          let keyValue = parsedVal[key];
+
+          if (normalizedKey === "Custom" && typeof keyValue === "string") {
+            try {
+              const parsedKeyVal = JSON.parse(keyValue);
+              keyValue = Array.isArray(parsedKeyVal) ? parsedKeyVal : [keyValue];
+            } catch (e) {
+              console.log("error:-", e);
+              keyValue = keyValue.includes(",")
+                ? keyValue.split(",").map((s) => s.trim())
+                : [keyValue];
+            }
+          }
+
+          newVal[normalizedKey] = keyValue;
+        }
+        return newVal;
+      }
+      return parsedVal;
+    },
+    z.object({
+      [bestTakenType.MORNING]: time24HourSchema.optional(),
+      [bestTakenType.NOON]: time24HourSchema.optional(),
+      [bestTakenType.NIGHT]: time24HourSchema.optional(),
+      [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
+    }),
+  )
   .refine(
     (data) =>
-      //   Object.values(data).some(Boolean), {
-      //   message: errorConstants.ONE_REQUIRED,
-      // });
-      !!data.MORNING || !!data.NOON || !!data.NIGHT || (data.CUSTOM && data.CUSTOM.length > 0),
+      !!data.Morning || !!data.Noon || !!data.Night || (data.Custom && data.Custom.length > 0),
     {
       message: errorConstants.ONE_REQUIRED,
     },
@@ -80,14 +139,21 @@ const validateMedicationSelections = (data, ctx) => {
   }
 
   const frequencyLimitMap = {
-    ONCE_DAILY: 1,
-    TWICE_DAILY: 2,
-    THREE_TIMES_DAILY: 3,
+    [frequencyType.ONCE_DAILY]: 1,
+    [frequencyType.TWICE_DAILY]: 2,
+    [frequencyType.THREE_TIMES_DAILY]: 3,
   };
 
-  const selectedCount = Object.values(data.medicationSchedule).filter(
-    (value) => value !== undefined,
-  ).length;
+  let selectedCount = 0;
+  Object.values(data.medicationSchedule).forEach((value) => {
+    if (value !== undefined) {
+      if (Array.isArray(value)) {
+        selectedCount += value.length;
+      } else {
+        selectedCount += 1;
+      }
+    }
+  });
   const allowedCount = frequencyLimitMap[data.frequency];
 
   if (allowedCount && selectedCount !== allowedCount) {
@@ -251,9 +317,102 @@ const refillMedicationSchema = z.object({
     .positive(),
 });
 
+const medicationOnboardingSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    type: z.enum(["TABLET", "CAPSULE", "SYRUP", "INJECTION", "DROPS", "SPRAY", "INHALER"]),
+    frequency: z.enum(["ONCE", "TWICE", "THRICE"]),
+    dose: z.object({
+      count: z.number().optional(),
+      value: z.number().optional(),
+      unit: z.string().optional(),
+    }),
+    notes: z.string().trim().optional().nullable(),
+    prescribed_by: z.string().trim().optional().nullable(),
+    refill_alert: z.boolean().optional(),
+    total_quantity: z.number().int().min(0).optional().nullable(),
+    client_med_id: z.string().min(1),
+    source: z.enum(["OCR", "MANUAL"]).optional().default("MANUAL"),
+  })
+  .superRefine((data, ctx) => {
+    const { type, dose } = data;
+
+    if (type === "TABLET") {
+      if (dose.count === undefined || dose.count <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "count"],
+          message: "Count must be a positive number for tablets",
+        });
+      } else {
+        const remainder = dose.count % 0.25;
+        if (Math.abs(remainder) > 0.0001 && Math.abs(remainder - 0.25) > 0.0001) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["dose", "count"],
+            message: "Tablet count must be in increments of 0.25",
+          });
+        }
+      }
+    } else if (type === "CAPSULE") {
+      if (dose.count === undefined || dose.count <= 0 || !Number.isInteger(dose.count)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "count"],
+          message: "Capsule count must be a positive whole number (integer)",
+        });
+      }
+    } else {
+      if (dose.value === undefined || dose.value <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "value"],
+          message: "Dose value must be a positive number",
+        });
+      }
+
+      if (
+        (type === "SPRAY" || type === "INHALER") &&
+        dose.value !== undefined &&
+        !Number.isInteger(dose.value)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "value"],
+          message: `${type.toLowerCase()} dose must be a whole number (puffs)`,
+        });
+      }
+
+      if (!dose.unit) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["dose", "unit"],
+          message: "Unit is required for this medication type",
+        });
+      } else {
+        const allowedUnits = {
+          SYRUP: ["ml", "tsp", "tbsp"],
+          INJECTION: ["ml", "IU"],
+          DROPS: ["drops", "ml"],
+          SPRAY: ["puff"],
+          INHALER: ["puff"],
+        };
+        const list = allowedUnits[type] || [];
+        if (!list.includes(dose.unit)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["dose", "unit"],
+            message: `Unit must be one of: ${list.join(", ")}`,
+          });
+        }
+      }
+    }
+  });
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
   refillMedicationSchema,
+  medicationOnboardingSchema,
 };

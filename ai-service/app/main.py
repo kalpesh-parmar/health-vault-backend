@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.routes import chat, embeddings, extraction, health, ocr, rag, summary, voice
+from app.api.v1.routes import chat, embeddings, extraction, health, ocr, rag, summary, voice, translation
 from app.core.errors import install_exception_handlers
 from app.core.lifecycle import lifespan
 from app.settings import get_settings
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix="/v1")
     app.include_router(rag.router, prefix="/v1")
     app.include_router(voice.router, prefix="/v1")
+    app.include_router(translation.router, prefix="/api/v1")
     return app
 
 

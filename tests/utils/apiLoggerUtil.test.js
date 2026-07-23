@@ -1,4 +1,3 @@
-/* global describe, it, expect, afterEach */
 const { maskSensitiveData, truncatePayload } = require("../../src/utils/apiLoggerUtil");
 
 describe("apiLoggerUtil - maskSensitiveData", () => {

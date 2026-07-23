@@ -1,4 +1,3 @@
-/* global describe, it, expect, jest, beforeEach */
 const {
   medicalDocumentClassifierService,
 } = require("../../../../src/services/ai/classifier/medicalDocumentClassifier.service");
@@ -38,22 +37,42 @@ describe("MedicalDocumentClassifierService", () => {
       });
     });
 
-    it("should handle empty content gracefully and return descriptive error", () => {
+    it("should handle thinking-only response with valid JSON classification (empty content, populated thinking)", () => {
       const response = {
         content: "",
+        thinking: '{"isMedicalDocument":true,"confidence":0.95,"documentType":"Prescription"}',
         done_reason: "stop",
       };
 
       const result = medicalDocumentClassifierService.cleanAndParseJSON(response);
-      expect(result.isMedicalDocument).toBe(false);
-      expect(result.confidence).toBe(0);
-      expect(result.reason).toContain("Empty response");
+      expect(result).toEqual({
+        isMedicalDocument: true,
+        confidence: 0.95,
+        documentType: "Prescription",
+        reason: null,
+      });
     });
 
-    it("should handle thinking-only response (empty content, populated thinking)", () => {
+    it("should handle content-only response with valid JSON classification (populated content, empty thinking)", () => {
       const response = {
-        content: "",
-        thinking: "<think>This is just internal thinking</think>",
+        content: '{"isMedicalDocument":true,"confidence":0.98,"documentType":"Lab Report"}',
+        thinking: "",
+        done_reason: "stop",
+      };
+
+      const result = medicalDocumentClassifierService.cleanAndParseJSON(response);
+      expect(result).toEqual({
+        isMedicalDocument: true,
+        confidence: 0.98,
+        documentType: "Lab Report",
+        reason: null,
+      });
+    });
+
+    it("should handle empty content and empty thinking gracefully and return descriptive error", () => {
+      const response = {
+        content: " ",
+        thinking: " ",
         done_reason: "stop",
       };
 

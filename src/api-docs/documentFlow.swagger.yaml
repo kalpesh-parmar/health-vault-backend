@@ -78,6 +78,8 @@ components:
             vitals: { type: array, items: {} }
             recommendations: { type: array, items: {} }
             summary: { type: string }
+            summaryEnglish: { type: string }
+            summaryInPreferredLanguage: { type: string }
         graphs: { type: array, items: { type: object } }
         embeddingsGenerated: { type: boolean, example: false }
         documentType: { type: string, example: "lab_report" }
@@ -115,32 +117,6 @@ components:
             allergies: { type: array, items: { type: string } }
 
 paths:
-  # /documents/upload:
-  #   post:
-  #     tags: [Documents]
-  #     summary: Upload a medical document to GCS
-  #     description: |
-  #       Uploads a PDF to Google Cloud Storage and returns the
-  #       `fileKey`. No DB records or AI processing are triggered — call
-  #       `POST /documents/run-ocr` next.
-  #     security: [{ bearerAuth: [] }]
-  #     requestBody:
-  #       required: true
-  #       content:
-  #         multipart/form-data:
-  #           schema:
-  #             type: object
-  #             properties:
-  #               file:
-  #                 type: string
-  #                 format: binary
-  #     responses:
-  #       "201":
-  #         description: File uploaded
-  #         content:
-  #           application/json:
-  #             schema: { $ref: "#/components/schemas/UploadResponse" }
-
   /documents/ocr-progress/{fileKey}:
     get:
       tags: [Documents]

@@ -51,6 +51,38 @@ async function uploadFile(req, res) {
     }
   }
 
+  if (uploadType === "PATIENT_DOCUMENT" && patientId) {
+    const patientRepository = require("../repositories/patientRepository");
+    const patient = await patientRepository.findById(patientId);
+
+    if (patient) {
+      // 1. Onboarding flow constraints
+      if (!patient.onboardingCompleted) {
+        if (files.length > 1) {
+          return res
+            .status(StatusCodes.BAD_REQUEST)
+            .json({ error: "Onboarding flow allows only one document." });
+        }
+      } else {
+        // 2. Dashboard flow constraints
+        if (files.length > 5) {
+          return res
+            .status(StatusCodes.BAD_REQUEST)
+            .json({ error: "Dashboard allows a maximum of 5 documents at a time." });
+        }
+      }
+    }
+
+    const validMimes = ["application/pdf", "image/png", "image/jpeg", "image/jpg", "image/webp"];
+    for (const f of files) {
+      if (!validMimes.includes(f.mimetype.toLowerCase())) {
+        return res.status(StatusCodes.BAD_REQUEST).json({
+          error: `Invalid file format for ${f.originalname}. Allowed formats are images and PDF.`,
+        });
+      }
+    }
+  }
+
   const { NonMedicalDocumentException } = require("../exceptions/appError");
   try {
     const results = [];

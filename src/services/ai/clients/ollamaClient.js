@@ -52,6 +52,7 @@ class OllamaClient {
         model,
         messages,
         stream: false,
+        keep_alive: "30m",
         think: options.think ?? false,
         options: {
           temperature: options.temperature ?? 0.2,
@@ -172,6 +173,7 @@ class OllamaClient {
       model,
       messages,
       stream: true,
+      keep_alive: "30m",
       options: {
         temperature: options.temperature ?? 0.2,
         num_predict: options.maxTokens ?? 2048,
@@ -222,6 +224,7 @@ class OllamaClient {
       model,
       prompt,
       stream: false,
+      keep_alive: "30m",
       options: {
         temperature: options.temperature ?? 0,
         num_predict: options.maxTokens ?? 8192,
@@ -264,6 +267,8 @@ class OllamaClient {
       return text;
     } catch (error) {
       console.error("[OllamaClient] Generate failed:", error.message);
+      console.log("[Ollama error]:==", error.response);
+
       throw error;
     }
   }
@@ -273,13 +278,14 @@ class OllamaClient {
     const payload = {
       model,
       prompt,
+      keep_alive: "30m",
     };
 
     const config = {
       method: "post",
       url,
       data: payload,
-      timeout: 10000,
+      timeout: 60000,
       headers: { "Content-Type": "application/json" },
     };
 

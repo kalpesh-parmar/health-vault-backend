@@ -29,6 +29,8 @@ components:
           type: string
         providerToken:
           type: string
+        firebaseIdToken:
+          type: string
         deviceToken:
           type: string
           nullable: true
@@ -109,12 +111,18 @@ components:
       properties:
         success:
           type: boolean
+        token:
+          type: string
+          description: JWT access token (alias)
         accessToken:
           type: string
           description: JWT access token
         refreshToken:
           type: string
           description: JWT refresh token
+        firebaseCustomToken:
+          type: string
+          description: Custom token for Firebase auth, returned when provider is Microsoft
         sessionId:
           type: string
         isNewUser:

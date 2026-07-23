@@ -1,4 +1,3 @@
-/* global describe, it, expect, jest, beforeEach */
 const axios = require("axios");
 const { StatusCodes } = require("http-status-codes");
 const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient");
@@ -104,7 +103,7 @@ describe("Local AI Pipeline Tests", () => {
       expect(chunks).toEqual(["Streaming ", "response"]);
     });
 
-    it("should generate embeddings and normalize dimensions to 768", async () => {
+    it("should generate embeddings and normalize dimensions to 1024", async () => {
       axios.mockResolvedValueOnce({
         data: {
           embedding: new Array(512).fill(0.5),
@@ -112,9 +111,9 @@ describe("Local AI Pipeline Tests", () => {
       });
 
       const vector = await embeddingService.embedText("Embed me");
-      expect(vector).toHaveLength(768);
+      expect(vector).toHaveLength(1024);
       expect(vector[0]).toBe(0.5);
-      expect(vector[700]).toBe(0); // padded
+      expect(vector[1000]).toBe(0); // padded
     });
   });
 

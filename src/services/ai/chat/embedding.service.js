@@ -6,7 +6,7 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const CHUNK_TARGET_CHARS = 900;
 const CHUNK_OVERLAP_CHARS = 120;
 
-function normalizeVectorDimension(vector, targetDimension = 768) {
+function normalizeVectorDimension(vector, targetDimension = env.embeddingDim || 1024) {
   if (vector.length === targetDimension) {
     return vector;
   }
@@ -136,10 +136,10 @@ function asArray(value) {
 class EmbeddingService {
   async embedText(text) {
     if (!text || !text.trim()) {
-      return new Array(768).fill(0);
+      return new Array(env.embeddingDim || 1024).fill(0);
     }
-    const vector = await ollamaClient.embeddings(text, "nomic-embed-text:latest");
-    return normalizeVectorDimension(vector, 768);
+    const vector = await ollamaClient.embeddings(text, env.embeddingModel);
+    return normalizeVectorDimension(vector, env.embeddingDim || 1024);
   }
 
   async embedAndPersist({
@@ -176,7 +176,7 @@ class EmbeddingService {
         chunkId: chunk.id,
         embedding: vector,
         metadata: chunk.metadata || {},
-        model: env.embeddingModel || "nomic-embed-text:latest",
+        model: env.embeddingModel,
         sourceId: chunk.id,
         sourceType: chunk.sourceType,
         userId,
@@ -194,12 +194,10 @@ class EmbeddingService {
     };
   }
 }
-
-const embeddingService = new EmbeddingService();
+// module.exports = new EmbeddingService();
 
 module.exports = {
-  EmbeddingService,
-  embeddingService,
+  embeddingService: new EmbeddingService(),
   buildChunks,
   splitText,
 };

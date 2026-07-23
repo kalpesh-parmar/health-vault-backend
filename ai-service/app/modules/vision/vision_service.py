@@ -9,6 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from typing import Any
+import paddle
 
 from app.core.errors import ModelUnavailableError, OcrEmptyResultError
 from app.core.json_utils import parse_json_object
@@ -16,6 +17,35 @@ from app.modules.ocr.cleanup import clean_ocr_text
 from app.services.ai_client import AiClient, AiClientConfig, build_ai_client
 
 logger = logging.getLogger(__name__)
+
+# --- GLOBAL PADDLEOCR INITIALIZATION ---
+import sys
+import os
+
+# Dynamically add PaddleOCR packages from D: drive to sys.path
+paddle_path = r"D:\paddle_packages"
+if paddle_path not in sys.path:
+    sys.path.append(paddle_path)
+
+import cv2
+import numpy as np
+
+try:
+    from paddleocr import PaddleOCR
+    import logging as p_logging
+    # Silence paddle logging
+    p_logging.getLogger("ppocr").setLevel(p_logging.ERROR)
+    # Initialize globally (only once)
+    global_ocr = PaddleOCR(
+        use_textline_orientation=True,
+        use_doc_orientation_classify=True,
+        enable_mkldnn=False,
+        lang='en')
+    print("=======>",paddle.get_device())
+except Exception as e:
+    logger.error(f"Failed to initialize global PaddleOCR: {e}")
+    global_ocr = None
+# ---------------------------------------
 
 _JSON_FENCE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 
@@ -394,25 +424,64 @@ class VisionModelService:
         return payload
 
     async def _generate(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> tuple[str, str | None]:
-        client = self._ensure_client()
         t0 = time.monotonic()
         try:
-            text, finish_reason = await client.generate_json_from_bytes(
-                data=data,
-                mime_type=mime_type,
-                prompt=prompt or _OCR_PROMPT,
-                temperature=0,
-            )
+            if global_ocr is None:
+                raise VisionModelRequestError("Global PaddleOCR is not initialized.", classification="model_unavailable")
+
+            
+            # Decode image from bytes
+            img_array = np.frombuffer(data, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            
+            if img is None:
+                raise ValueError("Failed to decode image bytes using cv2.imdecode. (If this is a PDF, it must be rendered to images first).")
+
+            #  # 1. Convert to grayscale
+            # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # # 2. Apply CLAHE (Contrast Enhancement) to make faint text readable
+            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            # enhanced = clahe.apply(gray)
+            # # 3. Convert back to BGR (PaddleOCR expects 3 color channels)
+            # img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+            # Extract text
+            try:
+                result = global_ocr.ocr(img)
+            except Exception as e:
+                print(type(e))
+                print(e)
+                raise
+            
+            extracted_text = ""
+            if result and result[0]:
+                if isinstance(result[0], dict) and "rec_texts" in result[0]:
+                    # PaddleOCR 3.x (PaddleX Pipeline) format
+                    extracted_text = "\n".join(result[0]["rec_texts"])
+                elif isinstance(result[0], list) and isinstance(result[0][0], (list, tuple)) and len(result[0][0]) > 1:
+                    # PaddleOCR 2.x format
+                    try:
+                        extracted_text = "\n".join([line[1][0] for line in result[0]])
+                    except Exception:
+                        pass
+            # 6. Format as Vision LLM JSON
+            structured_json = {
+                "pages": [{"page": 1, "text": extracted_text, "confidence": 1.0}],
+                "medicalExtraction": empty_medical_extraction(),
+                "summary": empty_summary()
+            }
+            text = json.dumps(structured_json)
+            finish_reason = "STOP"
+            
         except Exception as exc:
             kind = _classify_error(exc)
-            logger.error("ai_request_error", extra={"engine": client.engine, "model": self.model, "kind": kind, "error": str(exc)[:300]})
-            raise VisionModelRequestError(f"Configured AI model request failed: {exc}", classification=kind) from exc
+            logger.error("ai_request_error", extra={"engine": "paddleocr", "model": "paddleocr", "kind": kind, "error": str(exc)[:300]})
+            raise VisionModelRequestError(f"PaddleOCR request failed: {exc}", classification=kind) from exc
 
         logger.info(
             "ai_response_received",
             extra={
-                "engine": client.engine,
-                "model": self.model,
+                "engine": "paddleocr",
+                "model": "paddleocr",
                 "response_chars": len(text),
                 "finish_reason": finish_reason,
                 "elapsed_ms": int((time.monotonic() - t0) * 1000),
@@ -421,7 +490,7 @@ class VisionModelService:
         if not text.strip():
             raise VisionModelOutputError(
                 "Configured AI model returned HTTP 200 but an empty response body",
-                details={"model": self.model, "mimeType": mime_type, "finishReason": finish_reason},
+                details={"model": "paddleocr", "mimeType": mime_type, "finishReason": finish_reason},
             )
         return text, finish_reason
 

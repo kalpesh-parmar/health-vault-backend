@@ -51,6 +51,7 @@ class DocumentAiService:
         ocr_ms = int((time.monotonic() - ocr_t0) * 1000)
 
         extracted_text = extracted.get("text", "")
+        logger.info("ocr_extracted_text_result", extra={"document_name": filename, "text_length": len(extracted_text) if extracted_text else 0, "is_text_null": extracted.get("text") is None})
 
         # ── Summary ─────────────────────────────────────────────────────────
         # Prefer the vision-derived summary returned by the same OCR call.

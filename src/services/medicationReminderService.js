@@ -86,12 +86,12 @@ class MedicationReminderService {
       throw new NotFoundException(errorConstants.MEDICATION_OCCURRENCE_ALREADY_COMPLETED);
     }
     //do not allow future reminders to be completed
-    if (
-      validData.status === reminderOccurrenceStatus.COMPLETED &&
-      new Date(occurrence.actualMedicationTime) > new Date()
-    ) {
-      throw new NotFoundException(errorConstants.FUTURE_REMINDER_CANNOT_BE_COMPLETED);
-    }
+    // if (
+    //   validData.status === reminderOccurrenceStatus.COMPLETED &&
+    //   new Date(occurrence.actualMedicationTime) > new Date()
+    // ) {
+    //   throw new NotFoundException(errorConstants.FUTURE_REMINDER_CANNOT_BE_COMPLETED);
+    // }
 
     const updatePayload = {
       status: validData.status,

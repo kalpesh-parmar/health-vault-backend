@@ -4,7 +4,6 @@ const documentController = require("../controllers/document.controller");
 const documentFlowController = require("../controllers/documentFlow.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
-const { upload } = require("../middlewares/upload");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
 
 const router = express.Router();
@@ -13,9 +12,9 @@ const router = express.Router();
 // 2. SSE channel keyed by fileKey. FE subscribes BEFORE calling /run-ocr.
 router.get("/ocr-progress/:fileKey", verifyToken, documentFlowController.ocrProgressStream);
 
-// 3. Non-blocking enqueue with optional file upload (up to 5 files).
+// 3. Non-blocking enqueue.
 // Returns 202 in <100ms; pipeline runs in background via setImmediate inside documentOcrJobService.
-router.post("/run-ocr", verifyToken, upload.array("files", 5), documentFlowController.runOcr);
+router.post("/run-ocr", verifyToken, documentFlowController.runOcr);
 
 // 4. Polling fallback if the FE drops the SSE connection. Returns the
 // persisted job row including final extraction data when COMPLETED.
@@ -36,6 +35,7 @@ router.get(
 );
 
 router.delete("/delete", verifyToken, documentController.deleteFile);
+router.get("/summary", verifyToken, documentController.getDocumentSummaryList);
 router.get("/list", verifyToken, documentController.getDocumentList);
 router.get("/:id", verifyToken, documentController.getDocumentById);
 router.delete("/:id", verifyToken, documentController.deleteDocument);

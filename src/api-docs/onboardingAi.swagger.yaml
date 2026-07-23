@@ -32,8 +32,8 @@ paths:
                   format: binary
                   description: Medical report (PDF or Image) to extract data from
       responses:
-        "200":
-          description: Successful extraction
+        "202":
+          description: Document processing started
           content:
             application/json:
               schema:
@@ -42,16 +42,121 @@ paths:
                   status:
                     type: string
                     example: SUCCESS
+                  message:
+                    type: string
+                    example: Document processing started
                   data:
                     type: object
                     properties:
                       document:
                         type: object
+                        description: Uploaded document details
                       ocr:
                         type: object
                       structuredData:
                         type: object
                         description: Pre-filled patient fields
+
+  /v1/ocr/status/{documentId}:
+    get:
+      tags: [OCR]
+      summary: Get the OCR processing status for a specific document
+      description: |
+        Retrieves the current status of an ongoing or completed OCR job for the provided document ID.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The unique identifier of the document
+      responses:
+        "200":
+          description: Successfully retrieved OCR status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174000"
+                  status:
+                    type: string
+                    example: "COMPLETED"
+                  stage:
+                    type: string
+                    example: "COMPLETED"
+                  percentage:
+                    type: integer
+                    example: 100
+                  currentStep:
+                    type: string
+                    example: "Extraction finished"
+                  completedSteps:
+                    type: integer
+                    example: 5
+                  pendingSteps:
+                    type: integer
+                    example: 0
+                  rawOcrData:
+                    type: object
+                    nullable: true
+                  extractedStructuredData:
+                    type: object
+                    nullable: true
+                  error:
+                    type: string
+                    nullable: true
+        "401":
+          description: Unauthorized
+        "404":
+          description: Document or OCR job not found
+        "500":
+          description: Internal server error
+
+  /v1/ocr/cancel/{documentId}:
+    post:
+      tags: [OCR]
+      summary: Cancel an ongoing OCR job for a specific document
+      description: |
+        Cancels the background OCR processing for the specified document ID if it has not yet completed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The unique identifier of the document
+      responses:
+        "200":
+          description: OCR job successfully cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "OCR processing cancelled successfully"
+        "400":
+          description: OCR job cannot be cancelled (e.g., already completed)
+        "401":
+          description: Unauthorized
+        "404":
+          description: Document or OCR job not found
+        "500":
+          description: Internal server error
 
   /v1/onboarding/chat:
     post:

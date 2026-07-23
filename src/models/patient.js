@@ -23,7 +23,7 @@ const patient = pgTable(
     firstName: varchar("first_name", { length: 255 }),
     lastName: varchar("last_name", { length: 255 }),
     fullName: varchar("full_name", { length: 255 }),
-    email: varchar("email", { length: 255 }).unique(),
+    email: varchar("email", { length: 255 }),
     password: varchar("password", { length: 255 }),
     status: userStatusEnum("status").default(USER_STATUS.ACTIVE).notNull(),
     isVerified: boolean("is_verified").default(false).notNull(),
@@ -40,6 +40,7 @@ const patient = pgTable(
     isMobileVerified: boolean("is_mobile_verified").default(false).notNull(),
     isEmailVerified: boolean("is_email_verified").default(false).notNull(),
     onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
+    preferredLanguage: varchar("preferred_language", { length: 50 }).default("english"),
 
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),
@@ -53,9 +54,9 @@ const patient = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("patients_email_unique_idx").on(table.email),
-    uniqueIndex("patients_code_unique_idx").on(table.patientCode),
-    uniqueIndex("patients_mobile_unique_idx").on(table.mobile),
+    // uniqueIndex("patients_email_unique_idx").on(table.email),
+    // uniqueIndex("patients_code_unique_idx").on(table.patientCode),
+    // uniqueIndex("patients_mobile_unique_idx").on(table.mobile),
     uniqueIndex("patients_firebase_uid_unique_idx").on(table.firebaseUid),
     index("patients_status_idx").on(table.status),
     index("patients_soft_delete_idx").on(table.softDelete),

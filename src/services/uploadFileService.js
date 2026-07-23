@@ -74,7 +74,9 @@ class UploadFileService {
       });
 
       if (validation.status === "FAILED") {
-        throw new InvalidRequestException(validation.error || "AI response format is invalid.");
+        throw new InvalidRequestException(
+          validation.error || validation.reason || "AI response format is invalid.",
+        );
       }
 
       if (!validation.isMedicalDocument) {

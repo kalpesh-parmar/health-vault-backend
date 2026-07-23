@@ -91,10 +91,12 @@ class Container:
             self.llm,
             settings.ai_model,
             settings.ai_model,
-            settings.summary_num_predict,
+            settings.ai_max_output_tokens,
         )
         self.rag = RagService(self.models.embeddings, settings.rag_top_k)
         self.chat = ChatService(self.llm, self.rag, settings.ai_model)
+        from app.services.translation_service import TranslationService
+        self.translation = TranslationService(settings)
 
     @property
     def vision(self):
@@ -102,6 +104,7 @@ class Container:
 
     async def start(self) -> None:
         await self.vision.warm_up()
+        await self.translation.warm_up()
 
     async def stop(self) -> None:
         await self.llm.close()

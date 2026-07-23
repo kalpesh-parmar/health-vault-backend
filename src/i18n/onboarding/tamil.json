@@ -1,0 +1,19 @@
+{
+  "ASK_LANGUAGE": {
+    "message": "வரவேற்கிறோம்! உங்கள் விருப்பமான மொழியைத் தேர்ந்தெடுக்கவும்.",
+    "options": [
+      { "label": "ஆங்கிலம் (English)", "value": "english" },
+      { "label": "குஜராத்தி (Gujarati)", "value": "gujarati" },
+      { "label": "ஹிந்தி (Hindi)", "value": "hindi" },
+      { "label": "மராத்தி (Marathi)", "value": "marathi" },
+      { "label": "தமிழ் (Tamil)", "value": "tamil" }
+    ]
+  },
+  "onboarding.medicine.morning": "காலை (08:00)",
+  "onboarding.medicine.noon": "மதியம் (13:00)",
+  "onboarding.medicine.night": "இரவு (20:00)",
+  "onboarding.medicine.custom": "தனிப்பயன்",
+  "onboarding.medicine.counter": "தேர்வு செய்க {required} முறைகள் · {selected} இல் {required} தேர்ந்தெடுக்கப்பட்டது",
+  "onboarding.medicine.duplicate": "இந்த நேரம் ஏற்கனவே சேர்க்கப்பட்டுள்ளது",
+  "onboarding.medicine.saveGateError": "சரியாக {required} நேர ஸ்லாட்டுகளைத் தேர்ந்தெடுக்கவும்"
+}

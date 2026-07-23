@@ -3,6 +3,7 @@ const ocrStatus = Object.freeze({
   FAILED: "failed",
   IN_PROGRESS: "in_progress",
   PENDING: "pending",
+  CANCELED: "canceled",
 });
 
 const ocrStatusValue = Object.values(ocrStatus);

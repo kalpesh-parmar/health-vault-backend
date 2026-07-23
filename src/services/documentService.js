@@ -55,6 +55,32 @@ class DocumentService {
     };
   }
 
+  async getDocumentSummaryList(userId, payload) {
+    const filters = await validateSchema(listDocumentsQuerySchema, payload);
+
+    const { rows, total } = await documentRepository.findAll({
+      ...filters,
+      userId,
+    });
+
+    // Map rows to include only the summary and basic details
+    const summaries = rows.map((doc) => ({
+      id: doc.id,
+      fileName: doc.fileName,
+      documentType: doc.documentType,
+      summaryEnglish: doc.summaryEnglish,
+      summaryInPreferredLanguage: doc.summaryInPreferredLanguage,
+      createdAt: doc.createdAt,
+    }));
+
+    return {
+      items: summaries,
+      limit: filters.limit,
+      page: filters.page,
+      total,
+    };
+  }
+
   async listDocuments(userId, payload) {
     const data = await validateSchema(listDocumentsFilterSortSchema, payload || {});
     return documentRepository.findAllByFilterAndSort({

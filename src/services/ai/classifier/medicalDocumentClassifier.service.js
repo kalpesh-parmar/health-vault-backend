@@ -1,8 +1,11 @@
 const prompts = require("../prompts");
 const { ollamaClient } = require("../clients/ollamaClient");
+const { env } = require("../../../configs/env");
 
 class MedicalDocumentClassifierService {
   async classify(file) {
+    /*
+    // --- OLD CODE (Vision Model approach) ---
     const isPdf =
       file.mimeType === "application/pdf" ||
       file.filename?.toLowerCase().endsWith(".pdf") ||
@@ -10,13 +13,35 @@ class MedicalDocumentClassifierService {
     let responseObj;
 
     if (isPdf) {
-      const rawText = file.buffer.toString("utf8").replace(/[^\x20-\x7E\n]/g, "");
-      const prompt = `${prompts.CLASSIFICATION_PROMPT}\n\nHere is the raw text extracted from the PDF:\n${rawText.slice(0, 4000)}`;
+      console.log("[MedicalDocumentClassifierService] Converting PDF to image for classification...");
+      const { ocrService } = require("../ocr/ocr.service");
+      const base64Images = await ocrService.convertPdfToImages(file.buffer, { firstPageOnly: true });
+      
+      if (!base64Images || base64Images.length === 0) {
+        console.error("[MedicalDocumentClassifierService] Failed to convert PDF to images.");
+        return {
+          isMedicalDocument: false,
+          confidence: 0,
+          reason: "Failed to read PDF for classification.",
+        };
+      }
 
-      console.log("[MedicalDocumentClassifierService] Validating PDF document...");
-      responseObj = await ollamaClient.generate(prompt, "qwen2.5:14b", {
+      const messages = [
+        {
+          role: "user",
+          content: prompts.CLASSIFICATION_PROMPT,
+          images: [base64Images[0]],
+        },
+      ];
+
+      console.log(
+        `[MedicalDocumentClassifierService] Validating PDF document using ${env.aiModel}...`,
+      );
+      responseObj = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
+        maxTokens: 2048,
         format: "json",
+        fallbackToThinking: false,
         returnFullResponse: true,
       });
     } else {
@@ -30,9 +55,9 @@ class MedicalDocumentClassifierService {
       ];
 
       console.log(
-        "[MedicalDocumentClassifierService] Validating image document using qwen3-vl:latest...",
+        `[MedicalDocumentClassifierService] Validating image document using ${env.aiModel}...`,
       );
-      responseObj = await ollamaClient.chat(messages, "qwen3-vl:latest", {
+      responseObj = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
         maxTokens: 2048,
         format: "json",
@@ -40,6 +65,128 @@ class MedicalDocumentClassifierService {
         returnFullResponse: true,
       });
     }
+
+    return this.cleanAndParseJSON(responseObj);
+    */
+
+    // --- NEW CODE (Text Model approach using local pdf-parse + Python PaddleOCR) ---
+    const aiClient = require("../clients/aiClient.service");
+
+    console.log("[MedicalDocumentClassifierService] Extracting text for validation...");
+
+    let extractedText = "";
+    try {
+      const isPdf =
+        file.mimetype === "application/pdf" ||
+        file.mimeType === "application/pdf" ||
+        file.filename?.toLowerCase().endsWith(".pdf") ||
+        file.originalname?.toLowerCase().endsWith(".pdf");
+
+      if (isPdf) {
+        try {
+          const pdfParse = require("pdf-parse");
+          console.log("[MedicalDocumentClassifierService] Extracting text using pdf-parse...");
+          const pdfData = await pdfParse(file.buffer);
+          console.log("[SC]------> ", pdfData);
+
+          extractedText = pdfData.text || "";
+        } catch (err) {
+          console.warn(
+            "[MedicalDocumentClassifierService] pdf-parse failed, likely a scanned or large PDF. Falling back to OCR...",
+            err.message,
+          );
+          extractedText = "";
+        }
+
+        // Fallback for scanned PDFs
+        if (extractedText.trim().length < 50) {
+          console.log(
+            "[MedicalDocumentClassifierService] PDF seems scanned, falling back to Python PaddleOCR...",
+          );
+          const remoteResult = await aiClient.runOcrFromBuffer({
+            buffer: file.buffer,
+            filename: file.originalname || file.filename || "upload",
+            mimeType: file.mimetype || file.mimeType || "application/pdf",
+            mode: "detailed",
+          });
+          let extracted = "";
+          if (remoteResult && remoteResult.document && Array.isArray(remoteResult.document.pages)) {
+            extracted = remoteResult.document.pages.map((p) => p.text || "").join("\n");
+          }
+          extractedText =
+            typeof remoteResult === "string"
+              ? remoteResult
+              : extracted ||
+                remoteResult.ocr_text ||
+                remoteResult.text ||
+                remoteResult.rawText ||
+                remoteResult.fullText ||
+                "";
+        }
+      } else {
+        console.log(
+          "[MedicalDocumentClassifierService] Non-PDF document detected, falling back to Python PaddleOCR...",
+        );
+        const remoteResult = await aiClient.runOcrFromBuffer({
+          buffer: file.buffer,
+          filename: file.originalname || file.filename || "upload",
+          mimeType: file.mimetype || file.mimeType || "image/jpeg", // default to image for non-pdfs
+          mode: "detailed",
+        });
+        let extracted = "";
+        if (remoteResult && remoteResult.document && Array.isArray(remoteResult.document.pages)) {
+          extracted = remoteResult.document.pages.map((p) => p.text || "").join("\n");
+        }
+        extractedText =
+          typeof remoteResult === "string"
+            ? remoteResult
+            : extracted ||
+              remoteResult.ocr_text ||
+              remoteResult.text ||
+              remoteResult.rawText ||
+              remoteResult.fullText ||
+              "";
+      }
+    } catch (error) {
+      console.error(
+        "[MedicalDocumentClassifierService] Local OCR failed for classification:",
+        error.message,
+        error.stack,
+      );
+      return {
+        isMedicalDocument: false,
+        confidence: 0,
+        reason: "Failed to read document for classification.",
+      };
+    }
+
+    if (!extractedText || !extractedText.trim()) {
+      return {
+        isMedicalDocument: false,
+        confidence: 0,
+        reason: "No readable text found in document.",
+      };
+    }
+
+    const messages = [
+      {
+        role: "user",
+        content:
+          prompts.CLASSIFICATION_TEXT_PROMPT +
+          `\n\nDocument Text:\n"""\n${extractedText.substring(0, 2000)}\n"""`,
+      },
+    ];
+
+    console.log(
+      `[MedicalDocumentClassifierService] Validating text document using ${env.chatModel}...`,
+    );
+    const responseObj = await ollamaClient.chat(messages, env.chatModel, {
+      temperature: 0,
+      maxTokens: 512,
+      format: "json",
+      fallbackToThinking: false,
+      returnFullResponse: true,
+    });
 
     return this.cleanAndParseJSON(responseObj);
   }
@@ -50,7 +197,13 @@ class MedicalDocumentClassifierService {
     let doneReason = "N/A";
 
     if (responseObj && typeof responseObj === "object") {
-      text = responseObj.content || "";
+      if (typeof responseObj.text === "string" && responseObj.text.trim()) {
+        text = responseObj.text;
+      } else if (typeof responseObj.content === "string" && responseObj.content.trim()) {
+        text = responseObj.content;
+      } else if (typeof responseObj.thinking === "string" && responseObj.thinking.trim()) {
+        text = responseObj.thinking;
+      }
       doneReason = responseObj.done_reason || "N/A";
       isTruncated = doneReason === "length";
     } else {
@@ -58,6 +211,9 @@ class MedicalDocumentClassifierService {
     }
 
     if (!text || !text.trim()) {
+      console.error(
+        `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${responseObj?.content?.length || 0}, Thinking length: ${responseObj?.thinking?.length || 0}`,
+      );
       return {
         isMedicalDocument: false,
         confidence: 0,
@@ -147,6 +303,9 @@ class MedicalDocumentClassifierService {
       }
     }
 
+    console.error(
+      `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${responseObj?.content?.length || 0}, Thinking length: ${responseObj?.thinking?.length || 0}`,
+    );
     console.error(
       `[MedicalDocumentClassifierService] All parsing strategies failed. Content length: ${raw.length}, doneReason: ${doneReason}. Errors: ${parseErrors.join("; ")}`,
     );

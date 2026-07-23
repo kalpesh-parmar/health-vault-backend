@@ -291,6 +291,13 @@ class PatientService {
       data.password = await bcrypt.hash(data.password, 10);
     }
 
+    if (data.firstName !== undefined || data.lastName !== undefined) {
+      const mergedFirstName =
+        data.firstName !== undefined ? data.firstName : existingPatient.firstName;
+      const mergedLastName = data.lastName !== undefined ? data.lastName : existingPatient.lastName;
+      data.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
+    }
+
     const updatedPatient = await patientRepository.updateById(params.id, data);
 
     if (!updatedPatient) {
@@ -374,8 +381,8 @@ class PatientService {
       if (env.enableDummyAuth && providerToken && providerToken.startsWith("dummy-")) {
         decodedToken = {
           uid: `microsoft_${providerToken.replace("dummy-", "")}`,
-          email: "microsoft-mockuser@example.com",
-          name: "Mock MicrosoftUser",
+          email: null,
+          name: null,
         };
       } else {
         if (!providerToken) {
@@ -411,8 +418,8 @@ class PatientService {
       if (env.enableDummyAuth && firebaseIdToken && firebaseIdToken.startsWith("dummy-")) {
         decodedToken = {
           uid: `mock-uid-${provider}-${firebaseIdToken}`,
-          email: `${provider}-mockuser@example.com`,
-          name: `Mock ${provider.charAt(0).toUpperCase() + provider.slice(1)}User`,
+          email: null,
+          name: null,
           phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
         };
       } else {
@@ -439,13 +446,13 @@ class PatientService {
       }
     }
 
-    const email = decodedToken.email || null;
-    let firstName = null;
-    let lastName = null;
+    const email = decodedToken.email || data.email || null;
+    let firstName = data.firstName || null;
+    let lastName = data.lastName || null;
     if (decodedToken.name) {
       const nameParts = decodedToken.name.trim().split(/\s+/);
-      firstName = nameParts[0] || null;
-      lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
+      if (!firstName) firstName = nameParts[0] || null;
+      if (!lastName) lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
     }
     const firebaseUid = decodedToken.uid;
     const providerUserId = firebaseUid; // Or decodedToken.sub
@@ -515,7 +522,7 @@ class PatientService {
         const patientCode = await createUniquePatientCode();
 
         const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
-        const socialProviders = ["google", "facebook", "microsoft"];
+        const socialProviders = ["google", "facebook", "apple", "microsoft"];
         const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
 
         patientUser = await patientRepository.create({
@@ -526,7 +533,9 @@ class PatientService {
           email: email,
           firstName: firstName,
           lastName: lastName,
-          fullName: decodedToken.name || null,
+          fullName:
+            decodedToken.name ||
+            (firstName && lastName ? `${firstName} ${lastName}` : firstName || null),
           isActive: true,
           status: USER_STATUS.ACTIVE,
           isVerified: true,
@@ -560,7 +569,7 @@ class PatientService {
       }
     }
 
-    const socialProvidersList = ["google", "facebook", "microsoft"];
+    const socialProvidersList = ["google", "facebook", "apple", "microsoft"];
     if (socialProvidersList.includes(provider) && loginType === "social") {
       updateData.isEmailVerified = true;
     }
@@ -604,7 +613,10 @@ class PatientService {
       onboardingData: onboardingState?.data || null,
       user: {
         id: patientUser.id,
-        name: patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
+        name:
+          patientUser.firstName || patientUser.lastName
+            ? `${patientUser.firstName || ""} ${patientUser.lastName || ""}`.trim()
+            : patientUser.fullName || `User ${patientUser.mobile || patientUser.email || ""}`,
         mobile: patientUser.mobile || "",
         email: patientUser.email || "",
         role: "patient",

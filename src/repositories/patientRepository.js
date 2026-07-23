@@ -2,6 +2,7 @@ const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { patient } = require("../models/patient");
+const { chatSession } = require("../models/chatSession");
 
 const patientSortColumns = Object.freeze({
   createdAt: patient.createdAt,
@@ -39,13 +40,19 @@ class PatientRepository {
   }
 
   async findById(userId) {
+    //join chatSession table and also send sessionId from it
     const result = await db
-      .select()
+      .select({
+        patient,
+        sessionId: chatSession.id,
+      })
       .from(patient)
+      .leftJoin(chatSession, eq(patient.id, chatSession.userId))
       .where(and(eq(patient.id, userId), eq(patient.softDelete, false)))
       .limit(1);
 
-    return result[0] || null;
+    if (result.length === 0) return null;
+    return { ...result[0].patient, sessionId: result[0].sessionId };
   }
 
   async findByEmail(email) {

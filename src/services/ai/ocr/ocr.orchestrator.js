@@ -188,41 +188,26 @@ class OcrOrchestrator {
 
     let result;
     try {
-      const { ocrService } = require("./ocr.service");
+      const aiClient = require("../clients/aiClient.service");
+      console.log(`[OCR_DEBUG] Calling aiClient.runOcrFromBuffer for ${filename}`);
 
-      console.log("[OCR_DEBUG] ocrService:", ocrService);
-      console.log("[OCR_DEBUG] Object.keys(ocrService):", Object.keys(ocrService || {}));
-      console.log(
-        "[OCR_DEBUG] typeof ocrService.extractMedicalData:",
-        typeof ocrService?.extractMedicalData,
-      );
-
-      if (!ocrService || typeof ocrService.extractMedicalData !== "function") {
-        const missingErr = new Error(
-          `OCR Service mismatch: ocrService is ${typeof ocrService} and extractMedicalData is ${typeof ocrService?.extractMedicalData}. Verify service exports.`,
-        );
-        ocrLogger.error(trace, "ocr_service_mismatch", { error: missingErr.message });
-        throw missingErr;
-      }
-
-      const jsonStr = await ocrService.extractMedicalData({
+      const parsedOCR = await aiClient.runOcrFromBuffer({
         buffer,
         filename,
         mimeType: resolvedMime,
-        traceId: trace,
+        mode: "detailed",
       });
-      const parsedOCR = JSON.parse(jsonStr);
 
       result = buildOcrResult({
         pages: parsedOCR.pages,
-        engine: `ollama:qwen3-vl`,
+        engine: `ollama:${env.aiModel}`,
         medicalExtraction: parsedOCR.medicalExtraction,
         filename,
         mimeType: resolvedMime,
       });
     } catch (error) {
       ocrLogger.error(trace, "ocr_model_failed", {
-        model: "qwen3-vl:latest",
+        model: env.aiModel,
         error: error.message,
         stack: error.stack,
       });
@@ -233,7 +218,7 @@ class OcrOrchestrator {
 
       throw new OcrEmptyResultError("OCR model failed and processing was stopped", {
         filename,
-        model: "qwen3-vl:latest",
+        model: env.aiModel,
         cause: error.message,
         stack: error.stack,
       });
@@ -242,23 +227,26 @@ class OcrOrchestrator {
     const quality = evaluateQuality(result);
     if (!quality.ok) {
       ocrLogger.error(trace, "ocr_model_result_rejected", {
-        model: "qwen3-vl:latest",
+        model: env.aiModel,
         reason: quality.reason,
         confidence: quality.confidence,
       });
       throw new OcrEmptyResultError("OCR model returned an invalid or unusable response", {
         filename,
-        model: "qwen3-vl:latest",
+        model: env.aiModel,
         reason: quality.reason,
         confidence: quality.confidence,
       });
     }
 
+    const durationMs = Date.now() - t0;
     ocrLogger.info(trace, "ocr_completed", {
       engine: result.engine,
-      ms: Date.now() - t0,
+      ms: durationMs,
       source: "configured-model",
     });
+    result.metrics = result.metrics || {};
+    result.metrics.processing_seconds = Number((durationMs / 1000).toFixed(2));
     return this._tag(result, { trace });
   }
 
