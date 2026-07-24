@@ -1,8 +1,8 @@
 const fileController = require("../../src/controllers/file.controller");
-const uploadFileService = require("../../src/services/uploadFileService");
+const uploadFileService = require("../../src/services/file.service");
 const { InvalidRequestException } = require("../../src/exceptions/appError");
 
-jest.mock("../../src/services/uploadFileService");
+jest.mock("../../src/services/file.service");
 
 describe("fileController - viewFile", () => {
   it("should throw InvalidRequestException if fileKey is missing", async () => {

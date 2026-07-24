@@ -1,7 +1,7 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { FileCategory } = require("../enums/fileCategory");
 const { InvalidRequestException, NonMedicalDocumentException } = require("../exceptions/appError");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 
 const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE", "PATIENT_DOCUMENT"]);
 

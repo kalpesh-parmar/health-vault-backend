@@ -17,7 +17,7 @@ const { errorConstants } = require("./constants/errorConstants");
 const { NotFoundException } = require("./exceptions/appError");
 const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes/index.route");
-const cronService = require("./services/cronService");
+const cronService = require("./services/cron.service");
 const cronRegisterHandler = require("./configs/cronConfig");
 
 const app = express();

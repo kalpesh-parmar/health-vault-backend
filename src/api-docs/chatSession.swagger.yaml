@@ -123,6 +123,27 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/ChatMessage" }
 
+  /chat/session/{id}:
+    delete:
+      tags: [Chat]
+      summary: Delete a chat session
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Session deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "SUCCESS" }
+                  message: { type: string, example: "Session deleted" }
+
   /chat/message:
     post:
       tags: [Chat]

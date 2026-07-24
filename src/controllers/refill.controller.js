@@ -1,6 +1,6 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse, paginatedSuccessResponse } = require("../helpers/generalResponse");
-const refillService = require("../services/refillService");
+const refillService = require("../services/refill.service");
 
 async function badgeCount(req, res) {
   const { medicationId } = req.query;

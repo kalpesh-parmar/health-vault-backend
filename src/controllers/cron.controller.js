@@ -1,4 +1,4 @@
-const cronService = require("../services/cronService");
+const cronService = require("../services/cron.service");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 

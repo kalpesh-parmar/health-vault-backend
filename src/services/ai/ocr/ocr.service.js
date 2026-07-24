@@ -13,7 +13,7 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { fileTypeValue } = require("../../../enums/fileType");
-const uploadFileService = require("../../uploadFileService");
+const uploadFileService = require("../../uploadFile.service");
 const {
   medicalDocumentClassifierService,
 } = require("../classifier/medicalDocumentClassifier.service");

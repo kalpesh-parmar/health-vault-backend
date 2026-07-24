@@ -19,7 +19,7 @@ const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const {
   idParamSchema,
   listDocumentsFilterSortSchema,

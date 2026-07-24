@@ -14,8 +14,8 @@ const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 const { attachSseStream } = require("../services/sse/sseTransport");
 const { NotFoundException } = require("../exceptions/appError");
-const documentOcrJobService = require("../services/documentOcrJobService");
-const documentPersistenceService = require("../services/documentPersistenceService");
+const documentOcrJobService = require("../services/documentOcrJob.service");
+const documentPersistenceService = require("../services/documentPersistence.service");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
 const { validateSchema } = require("../validations");
 const {

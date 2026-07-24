@@ -1,4 +1,4 @@
-const patientService = require("../../src/services/patientService");
+const patientService = require("../../src/services/patient.service");
 const patientRepository = require("../../src/repositories/patientRepository");
 const sessionRepository = require("../../src/repositories/sessionRepository");
 const loginAttemptRepository = require("../../src/repositories/loginAttemptRepository");

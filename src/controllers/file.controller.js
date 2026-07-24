@@ -5,7 +5,7 @@ const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 const { InvalidRequestException, NonMedicalDocumentException } = require("../exceptions/appError");
 const patientRepository = require("../repositories/patientRepository");
-const uploadFileService = require("../services/fileservice");
+const uploadFileService = require("../services/file.service");
 
 async function uploadFile(req, res) {
   let patientId = req.body.patientId || req.auth?.userId;

@@ -40,7 +40,7 @@ const documentProcessingJobRepository = require("../repositories/documentProcess
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
 
 const RUNNING_LOCKS = new Set();

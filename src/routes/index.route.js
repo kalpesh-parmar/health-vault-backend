@@ -15,7 +15,7 @@ const cronRoutes = require("./cron.route");
 const refillRoutes = require("./refillCount.route");
 const chatSessionRoutes = require("./chatSession.route");
 const { ocrService } = require("../services/ai");
-const v1Routes = require("./v1.route");
+const v1Routes = require("./ocr.route");
 
 const router = express.Router();
 

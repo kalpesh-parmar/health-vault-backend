@@ -2,7 +2,7 @@ const { StatusCodes } = require("http-status-codes");
 
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const sessionService = require("../services/sessionService");
+const sessionService = require("../services/session.service");
 
 async function createSession(req, res) {
   const result = await sessionService.createSession(req.auth.userId, req.body);

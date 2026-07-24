@@ -1,4 +1,6 @@
-# AGENT.md
+# AGENTS.md
+
+> **Rule precedence:** When any guidance conflicts, **Section 1.5 (Agent Operating Rules) wins.**
 
 ## 1. Project Overview
 
@@ -11,40 +13,36 @@
 ### Before writing code
 
 - ALWAYS read the existing folder structure (Section 3) and schema (Section 4) first.
-- Before adding a model field, service, repository, controller, util, enum, or
-  validation: SEARCH the codebase for an existing one and REUSE it. Do not create
-  a duplicate.
+- Before adding a model field, service, repository, controller, util, enum, or validation: SEARCH the codebase for an existing one and REUSE it. Do not create a duplicate.
 - If a similar service/repository exists, EXTEND it — do not create a parallel one.
 
 ### Scope discipline
 
-- Implement ONLY what the prompt asks. No speculative features, no refactors,
-  no "nice to have" extras, no unused code, no commented-out blocks.
+- Implement ONLY what the prompt asks. No speculative features, no refactors, no "nice to have" extras, no unused code, no commented-out blocks.
 - One feature/task per change. Do not touch unrelated files.
 
 ### File & language (NON-NEGOTIABLE)
 
-- This project uses JavaScript with CommonJS (require / module.exports).
-- NEVER create .ts / .tsx files. Use .js only. No TypeScript type annotations.
+- This project uses **JavaScript with CommonJS** (`require` / `module.exports`).
+- **NEVER create `.ts` / `.tsx` files. Write `.js` only. No TypeScript type annotations.**
+- Do not add TypeScript syntax to files. (The runtime is capable of stripping types, but this project intentionally does NOT use it — plain JS only.)
 
 ### Plan first
 
-- For any non-trivial task, first output a short plan: which existing files/
-  models/services you will reuse and what you will add. WAIT for confirmation
-  before writing code.
+- For any non-trivial task, first output a short plan: which existing files/models/services you will reuse and what you will add. WAIT for confirmation before writing code.
 
 ### Verify before finishing
 
-- Trace the requested use case end-to-end through the real layers
-  (route -> controller -> validation -> service -> repository -> model).
+- Trace the requested use case end-to-end through the real layers (route → validation → controller → service → repository → model).
 - Run `npm run test:unit` (and `npm run test:ocr` if OCR is touched) and fix failures.
 - Confirm migrations are generated when schema changes (Section 9).
+- Update Swagger docs whenever a route is added, removed, or its method/path/params/request/response change (Section 13). No route change is complete without its matching spec.
 
 ---
 
 ## 2. Tech Stack
 
-- **Core Runtime**: Node.js (v22/v23) using the native `--experimental-strip-types` flag to run TypeScript syntax.
+- **Core Runtime**: Node.js (v22/v23), CommonJS modules. Source is plain JavaScript (`.js`) only — no TypeScript.
 - **Server Framework**: Express.js.
 - **Database ORM**: Drizzle ORM.
 - **Database Driver**: `pg` (PostgreSQL client pool).
@@ -68,12 +66,12 @@ health-vault-backend/
 │   ├── controllers/        # Express request handler controllers (patients, medications, RAG/onboarding v1)
 │   ├── enums/              # Shared enums (userStatus, genderType, fileType, ocrStatus, foodType)
 │   ├── exceptions/         # Custom Application exception wrappers (AppError, NotFoundException, etc.)
-│   ├── helpers/            # HTTP responses formatting helpers
+│   ├── helpers/            # HTTP response formatting helpers
 │   ├── jobs/               # Scheduled cron tasks (medication alerts, overdue events)
-│   ├── middlewares/        # Express middleware chain (auth verification, file uploads, error handlers)
+│   ├── middlewares/        # Express middleware chain (auth verification, file uploads, validation, error handlers)
 │   ├── models/             # Drizzle PostgreSQL Table Schemas (patients, documents, medications, sessions)
 │   ├── prompt/             # Raw text templates for AI prompts
-│   ├── repositories/       # Encapsulated database query repository classes
+│   ├── repositories/       # Encapsulated database query repositories
 │   ├── routes/             # Express routes mount configurations
 │   ├── services/           # Business logic layer (medications, document processing, SSE)
 │   │   └── ai/             # AI core services (onboarding state machine, chatbot, RAG, Qwen Vision)
@@ -85,14 +83,21 @@ health-vault-backend/
 └── docker-compose.yml      # DB (pgvector) and ai-service container orchestration mapping
 ```
 
+### File naming convention (STRICT)
+
+- Use dot notation, with the SAME `<name>` across all layers for one resource:
+  - `<name>.controller.js` (e.g. `session.controller.js`)
+  - `<name>.service.js` (e.g. `session.service.js`)
+  - `<name>.repository.js` (e.g. `session.repository.js`)
+  - `<name>.validation.js` (e.g. `session.validation.js`)
+- Do NOT use other styles: no `sessionController.js`, no `session_controller.js`.
+- **Note:** the folder is `validations/` (plural) but each file is `.validation.js` (singular). This is intentional — do not "fix" one to match the other.
+
 ---
 
 ## 4. Database Schema Summary
 
-> AGENT RULE: This schema is the single source of truth. Do NOT add a new column
-> if an equivalent already exists (e.g. `softDelete` already handles deletions —
-> never add `isDeleted`/`deleted_at`). Reuse existing columns, enums, and FKs.
-> Any schema change MUST go through Drizzle migrations (Section 9), never ad-hoc.
+> **AGENT RULE:** This schema is the single source of truth. Do NOT add a new column if an equivalent already exists (e.g. `softDelete` already handles deletions — never add `isDeleted`/`deleted_at`). Reuse existing columns, enums, and FKs. Any schema change MUST go through Drizzle migrations (Section 9), never ad-hoc.
 
 ### `patients` (Table: `patients`)
 
@@ -189,7 +194,6 @@ sequenceDiagram
     participant App as Mobile Client
     participant FB as Firebase Auth
     participant API as Node Backend
-
     App->>FB: Verify OTP via SMS
     FB-->>App: Return firebaseIdToken
     App->>API: POST /auth/firebase-login { firebaseIdToken }
@@ -207,22 +211,52 @@ sequenceDiagram
 
 ## 7. Coding Standards
 
-- **Modules**: CommonJS (`require`/`module.exports`).
-- **Architecture**: Decoupled layers following Clean Architecture concepts:
-  - **Controllers**: Parse input, validate payloads using Zod, delegate to Services, format responses.
-  - **Services**: Execute domain logic and business rule sets.
-  - **Repositories**: Execute database queries using Drizzle ORM wrappers.
-  - **Models**: Declare schemas and table fields.
-- **Validations**: Strict request validation using Zod.
-- **Formatting**: Prettier configuration with trailing commas, double quotes, and semicolons.
-- **Layer boundaries (enforced)**: Controllers never query the DB directly —
-  they call Services; Services call Repositories; Repositories use Drizzle.
-  Never bypass a layer or duplicate logic across layers.
-- **Reuse first**: New business logic belongs in an EXISTING service when one
-  fits (e.g. medication logic -> existing medications service). Create a new
-  service only if no existing one is responsible for that domain.
-- **No duplicate utils**: Check `src/utils/` (commonUtils.js, jwtUtils.js) before
-  writing helpers like hashing, patient codes, or JWT — reuse them.
+### Modules & language
+
+- CommonJS (`require` / `module.exports`). Plain JavaScript (`.js`) only — no TypeScript.
+- **All `require()` / imports go at the TOP of the file.** No in-method/inline requires. No duplicate requires — reuse the existing top-level import if the module is already required.
+
+### Architecture — decoupled layers (Clean Architecture)
+
+Layer flow, enforced strictly:
+
+```
+Route → Validation (Zod middleware) → Controller → Service → Repository → Model (Drizzle) → DB
+```
+
+Each layer may only call the layer directly below it. Never skip a layer, never call upward, never duplicate logic across layers.
+
+- **Validation** (`src/validations/<name>.validation.js`, Zod):
+  - Define Zod schemas for request body/params/query.
+  - Runs as **route middleware BEFORE the controller**. Controllers consume already-validated input and must NOT re-validate raw request shape.
+  - No business logic, no DB access, no service/repository calls.
+- **Controllers** (`src/controllers/<name>.controller.js`, THIN):
+  - Read already-validated input from `req`, call **exactly one** service method, and return via the response helper.
+  - No business logic, no calculations, no domain conditionals, no direct DB/repository access.
+- **Services** (`src/services/<name>.service.js` — business logic ONLY):
+  - All domain logic, decisions, calculations, orchestration, and data transformation.
+  - Compose one or more repository calls. Enforce domain rules and throw domain errors via the exception wrappers.
+  - No raw DB/ORM/model calls — always go through a repository. No `req`/`res`; take plain arguments, return plain data (never touch HTTP).
+- **Repositories** (`src/repositories/<name>.repository.js` — CRUD/DB ONLY):
+  - Pure database operations via Drizzle (create, read, update, delete, queries, aggregations). Return raw data/entities.
+  - Use the functional `module.exports = { ... }` style (consistent with controllers/services). No business logic, no `req`/`res`, no HTTP status codes.
+- **Models** (`src/models/`): Declare Drizzle schemas and table fields only.
+
+### Responses & errors
+
+- Always return via the standard response helpers (`successResponse` / error helper) in `src/helpers/`, with the correct `StatusCodes` and `messageConstants`.
+- Services throw domain errors via the exception wrappers (`AppError`, `NotFoundException`, etc.) in `src/exceptions/`; a service must never return `res` directly.
+- Never hardcode a message string or status code that already exists as a constant — reuse `constants/` and `StatusCodes`.
+
+### Reuse & consistency
+
+- **Reuse first**: new business logic belongs in an EXISTING service when one fits (e.g. medication logic → existing medications service). Create a new service only if no existing one owns that domain.
+- **No duplicate utils**: check `src/utils/` (`commonUtils.js`, `jwtUtils.js`) before writing helpers like hashing, patient codes, or JWT — reuse them.
+- Keep function names, exports style, and async/await usage consistent across files.
+
+### Formatting
+
+- Prettier configuration: trailing commas, double quotes, and semicolons.
 
 ---
 
@@ -234,7 +268,8 @@ sequenceDiagram
 - `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN`: Expiry intervals (default `15m` / `7d`).
 - `STORAGE_PROVIDER`: File storage target (`s3` or `gcp`).
 - `FIREBASE_PROJECT_ID` / `FIREBASE_CREDENTIALS_BASE64`: Firebase admin configuration keys.
-- `AI_BASE_URL` / `AI_MODEL`: Target Ollama API base and target model name (e.g. `  `).
+- `AI_BASE_URL`: Target Ollama API base URL (e.g. `http://localhost:11434`).
+- `AI_MODEL`: Target model name (e.g. `qwen3:32b`).
 - `MAX_LOGIN_ATTEMPTS`: Lockout limit (default `3`).
 
 ---
@@ -257,7 +292,7 @@ npm run db:push
 ### Run Locally
 
 ```bash
-# Run server with hot reload and TypeScript stripping
+# Run server with hot reload
 npm run dev
 
 # Run in production mode
@@ -276,32 +311,32 @@ npm run test:ocr
 
 ### Definition of Done (agent must satisfy)
 
-1. Code compiles and `npm run dev` starts with no errors.
+1. Code runs and `npm run dev` starts with no errors.
 2. `npm run test:unit` passes (plus `npm run test:ocr` if OCR changed).
 3. Schema changes have a generated migration via `npm run db:generate`.
 4. The target use case is traced end-to-end and confirmed working.
-5. No new .ts files, no unused/extra code.
+5. No new `.ts` files, no TypeScript syntax, no unused/extra code.
+6. All `require()` are at file top with no duplicates; each new file follows the `<name>.<layer>.js` naming convention.
+7. Swagger/OpenAPI docs are added or updated for every new or changed route (Section 13), the spec loads without YAML errors, and the endpoint appears correctly in `/swagger-ui`.
 
 ---
 
 ## 10. Important Business Rules
 
-> AGENT RULE: NEVER let the LLM decide onboarding step transitions. Steps are
-> fixed in the backend state engine. The LLM only extracts/cleans/translates
-> values for the current step. Do not add dynamic branching driven by LLM output.
+> **AGENT RULE:** NEVER let the LLM decide onboarding step transitions. Steps are fixed in the backend state engine. The LLM only extracts/cleans/translates values for the current step. Do not add dynamic branching driven by LLM output.
 
 - **Deterministic AI Onboarding**: Onboarding follows a strict backend-defined step sequence:
-  `ASK_LANGUAGE` -> `ASK_UPLOAD_OR_SKIP` -> `ASK_UPLOAD_DOCUMENT` -> `ASK_DOCUMENT_CONFIRMATION` -> `ASK_FIRST_NAME` -> `ASK_LAST_NAME` -> `ASK_DOB` -> `ASK_GENDER` -> `ASK_BLOOD_GROUP` -> `ASK_ALLERGIES` -> `REGISTER_USER` -> `COMPLETE`.
-- **AI Onboarding Boundary**: The LLM is used **strictly** to extract details, parse languages, and clean unstructured responses. The step transitions are strictly written in the backend state engine and _never_ decided dynamically by the LLM context.
+  `ASK_LANGUAGE` → `ASK_UPLOAD_OR_SKIP` → `ASK_UPLOAD_DOCUMENT` → `ASK_DOCUMENT_CONFIRMATION` → `ASK_FIRST_NAME` → `ASK_LAST_NAME` → `ASK_DOB` → `ASK_GENDER` → `ASK_BLOOD_GROUP` → `ASK_ALLERGIES` → `REGISTER_USER` → `COMPLETE`.
+- **AI Onboarding Boundary**: The LLM is used **strictly** to extract details, parse languages, and clean unstructured responses. Step transitions are written in the backend state engine and are _never_ decided dynamically by the LLM.
 - **Name Transliteration**: Non-English names provided in Gujarati must be translated or transliterated to English format.
-- **Deletions**: Document, patient, session, and medication deletions are handled via `soft_delete` markers to preserve compliance and history.
+- **Deletions**: Document, patient, session, and medication deletions are handled via `softDelete` markers to preserve compliance and history.
 
 ---
 
 ## 11. Common Utilities
 
 - `commonUtils.js`: Contains `generateNumericPatientCode`, `hashToken` (for refresh tokens), and `sanitizePatient`.
-- `jwtUtils.js`: Wraps jsonwebtoken for generating/validating access tokens and refresh tokens.
+- `jwtUtils.js`: Wraps `jsonwebtoken` for generating/validating access tokens and refresh tokens.
 
 ---
 
@@ -309,4 +344,45 @@ npm run test:ocr
 
 - **Ollama/GenAI Reliability**: Always configure request retries and fallback to alternative models/endpoints if Ollama fails or times out.
 - **JSON Output Mode**: Force JSON outputs by providing structured system instructions and validating output structures via `cleanAndParseJson`.
-- **Prompt Isolation**: System instructions must remain decoupled from business rules; keep templates defined inside template files.
+- **Prompt Isolation**: System instructions must remain decoupled from business rules; keep templates defined inside template files (`src/prompt/`).
+
+---
+
+## 13. API Documentation (Swagger / OpenAPI) — MANDATORY
+
+> **AGENT RULE:** Documentation is part of the route, not an optional extra. Any time you add, remove, or change a route, you MUST update the matching Swagger spec in the SAME change. A route change without its Swagger update is INCOMPLETE and fails the Definition of Done.
+
+### Setup (do not re-scaffold)
+
+- Swagger is already configured in `src/configs/swagger.js` using `swagger-jsdoc` + `swagger-ui-express`.
+- Specs are written as YAML files in `src/api-docs/*.yaml` and served at **`/swagger-ui`**.
+- Do NOT introduce a second/parallel Swagger setup, switch libraries, or change the mount path. Reuse the existing config.
+
+### When you MUST update Swagger
+
+Update the relevant `src/api-docs/*.yaml` file whenever you:
+
+- Add a new route.
+- Remove or rename a route (delete/rename the stale spec entry too).
+- Change the HTTP method or path.
+- Change path params, query params, request body, or response shape.
+- Change auth/security requirements (protected vs public).
+- Change status codes or error responses.
+
+### Where the spec goes
+
+- Use the existing per-domain YAML file that matches the route’s domain (e.g. `document.route.js` → `document.swagger.yaml`, `medication.route.js` → `medication.swagger.yaml`).
+- Only create a new `<domain>.swagger.yaml` if no existing file owns that domain, and register it the same way the existing specs are loaded.
+
+### How to write the spec (accuracy first)
+
+- Derive method, path, params, request body, and responses from the ACTUAL route + controller + validation schema. Do NOT invent fields, params, or responses.
+- The documented path must EXACTLY match the mounted route path (including prefixes like `/v1`, and full sub-paths like `/file/hard-delete` — never a truncated `/file/`).
+- Match the existing style: indentation, `tags`, `security` schemes, and `$ref` components already used in neighboring specs.
+- Reuse shared components/schemas/responses that already exist; add a new schema only if none fits.
+- Every endpoint must include: correct `tags`, a clear `summary`, `security` matching reality (JWT-protected vs public), documented params/body, and realistic success + error responses (with examples where the neighboring specs use them).
+
+### Verify
+
+- After editing, confirm the YAML loads without errors and the endpoint renders correctly in `/swagger-ui`.
+- When touching routes in bulk, confirm coverage stays at 100% (every route in `src/routes/` has a matching, correctly-pathed spec entry).

@@ -11,7 +11,7 @@ const { and, eq, desc, isNull } = require("drizzle-orm");
 
 const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
 const { ocrService } = require("../ocr/ocr.service");
-const documentPersistenceService = require("../../documentPersistenceService");
+const documentPersistenceService = require("../../documentPersistence.service");
 const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");

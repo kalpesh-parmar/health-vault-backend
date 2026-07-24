@@ -9,7 +9,7 @@ const DocumentArtifactsRepository = require("../repositories/documentArtifactsRe
 const documentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const patientRepository = require("../repositories/patientRepository");
 const medicationMapper = require("./ai/helpers/medicationMapper");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
 const { embeddingService } = require("./ai/chat/embedding.service");
 

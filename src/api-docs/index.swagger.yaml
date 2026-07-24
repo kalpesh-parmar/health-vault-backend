@@ -15,3 +15,29 @@ paths:
                   status:
                     type: string
                     example: "OK"
+
+  /health/ocr:
+    get:
+      tags:
+        - Health
+      summary: "OCR Health check"
+      responses:
+        "200":
+          description: "OCR Health Status"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  ai:
+                    type: object
+                  limits:
+                    type: object
+        "503":
+          description: "Service Unavailable"

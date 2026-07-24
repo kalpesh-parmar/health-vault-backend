@@ -1,6 +1,6 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const patientService = require("../services/patientService");
+const patientService = require("../services/patient.service");
 
 // async function firebaseLogin(req, res) {
 //   const result = await patientService.firebaseLogin(req.body);

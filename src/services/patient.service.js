@@ -37,7 +37,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const axios = require("axios");
 const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
 
