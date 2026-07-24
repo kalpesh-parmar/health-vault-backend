@@ -1,10 +1,19 @@
 const { StatusCodes } = require("http-status-codes");
-const { onboardingService } = require("../services/ai");
-const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const patientRepository = require("../repositories/patientRepository");
+const { eq, and } = require("drizzle-orm");
+const { env } = require("../configs/env");
+const { db } = require("../configs/db");
 const { fileTypeValue } = require("../enums/fileType");
-const { ocrService } = require("../services/ai/ocr/ocr.service");
+const { ocrStatus } = require("../enums/ocrStatus");
 const { NonMedicalDocumentException } = require("../exceptions/appError");
+const { document } = require("../models/document");
+const chatSessionRepository = require("../repositories/chatSessionRepository");
+const documentRepository = require("../repositories/documentRepository");
+const patientRepository = require("../repositories/patientRepository");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const { onboardingService } = require("../services/ai");
+const { ocrService } = require("../services/ai/ocr/ocr.service");
+const uploadFileService = require("../services/uploadFileService");
+const { normalizeLanguage } = require("../utils/commonUtils");
 
 function inferFileType(mimeType) {
   if (!mimeType) return null;
@@ -15,6 +24,7 @@ function inferFileType(mimeType) {
 
   return supportedTypes.has(lower) ? lower : null;
 }
+
 async function ocrExtract(req, res, next) {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).substring(7);
@@ -35,7 +45,6 @@ async function ocrExtract(req, res, next) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "No file uploaded" });
     }
 
-    // const patientRepository = require("../repositories/patientRepository");
     // const patientRecord = await patientRepository.findById(userId);
     // const isOnboardingCompleted = patientRecord?.onboardingCompleted || false;
 
@@ -49,12 +58,6 @@ async function ocrExtract(req, res, next) {
     //     .status(StatusCodes.BAD_REQUEST)
     //     .json({ error: "Maximum 5 documents can be uploaded." });
     // }
-
-    const uploadFileService = require("../services/uploadFileService");
-    const { db } = require("../configs/db");
-    const { document } = require("../models/document");
-    const { ocrStatus } = require("../enums/ocrStatus");
-    const { env } = require("../configs/env");
 
     console.log(
       `[v1Controller] [${requestId}] File Info: OriginalName=${file.originalname}, Size=${file.size} bytes, MimeType=${file.mimetype}`,
@@ -163,7 +166,6 @@ async function getOcrStatus(req, res, next) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "documentId is required" });
     }
 
-    const documentRepository = require("../repositories/documentRepository");
     const docRow = await documentRepository.findById(documentId);
 
     if (!docRow || String(docRow.userId) !== String(userId)) {
@@ -311,7 +313,6 @@ async function getOnboardingStatus(req, res, next) {
     const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
     const resumableState = onboardingRecord?.data || null;
     if (resumableState && resumableState.preferredLanguage) {
-      const { normalizeLanguage } = require("../utils/commonUtils");
       resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
     }
     let currentStep = resumableState?.currentStep || "ASK_LANGUAGE";
@@ -375,11 +376,6 @@ async function cancelOcr(req, res, next) {
       return res.status(StatusCodes.BAD_REQUEST).json({ error: "Missing parameters" });
     }
 
-    const { db } = require("../configs/db");
-    const { document } = require("../models/document");
-    const { ocrStatus } = require("../enums/ocrStatus");
-    const { eq, and } = require("drizzle-orm");
-
     await db
       .update(document)
       .set({
@@ -405,12 +401,9 @@ async function getOnboardingHistory(req, res, next) {
       return res.status(StatusCodes.UNAUTHORIZED).json({ error: "Unauthorized access" });
     }
 
-    const chatSessionRepository = require("../repositories/chatSessionRepository");
-
     const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
     const resumableState = onboardingRecord?.data || null;
     if (resumableState && resumableState.preferredLanguage) {
-      const { normalizeLanguage } = require("../utils/commonUtils");
       resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
     }
     const chatSessionId = resumableState?.chatSessionId || null;

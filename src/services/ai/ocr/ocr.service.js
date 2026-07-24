@@ -1,13 +1,25 @@
 const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const { z } = require("zod");
-
 const { env } = require("../../../configs/env");
 const { ollamaClient } = require("../clients/ollamaClient");
 const { NonMedicalDocumentException } = require("../../../exceptions/appError");
 const prompts = require("../prompts");
 const sharp = require("sharp");
+const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const { eq } = require("drizzle-orm");
+const { embeddingService } = require("../chat/embedding.service");
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { ocrStatus } = require("../../../enums/ocrStatus");
+const { fileTypeValue } = require("../../../enums/fileType");
+const uploadFileService = require("../../uploadFileService");
+const {
+  medicalDocumentClassifierService,
+} = require("../classifier/medicalDocumentClassifier.service");
+const aiClient = require("../clients/aiClient.service");
+const pdfParse = require("pdf-parse");
+const { MedicalExtractionSchema } = require("../../../validations/ocr.validation");
 
 async function preprocessImage(imageBuffer) {
   try {
@@ -60,52 +72,6 @@ function cleanOcrText(text) {
 
   return filteredLines.join("\n").trim();
 }
-
-// DB dependencies for processAndStoreSynchronously
-const { db } = require("../../../configs/db");
-const { document } = require("../../../models/document");
-const { ocrStatus } = require("../../../enums/ocrStatus");
-const { fileTypeValue } = require("../../../enums/fileType");
-const uploadFileService = require("../../uploadFileService");
-
-const TestResultSchema = z.object({
-  testName: z.string().nullable().default(null),
-  value: z.string().nullable().or(z.number().nullable()).default(null),
-  unit: z.string().nullable().default(null),
-  referenceRange: z.string().nullable().default(null),
-  status: z.string().nullable().default(null),
-});
-
-const MedicationSchema = z.object({
-  name: z.string().nullable().default(null),
-  dosage: z.string().nullable().default(null),
-  frequency: z.string().nullable().default(null),
-  duration: z.string().nullable().default(null),
-  instructions: z.string().nullable().default(null),
-});
-
-const MedicalExtractionSchema = z.object({
-  patientName: z.string().nullable().default(null),
-  firstName: z.string().nullable().default(null),
-  lastName: z.string().nullable().default(null),
-  age: z.number().nullable().or(z.string().nullable()).default(null),
-  gender: z.string().nullable().default(null),
-  reportDate: z.string().nullable().default(null),
-  visitDate: z.string().nullable().default(null),
-  dateOfBirth: z.string().nullable().default(null),
-  doctorName: z.string().nullable().default(null),
-  hospitalName: z.string().nullable().default(null),
-  diagnosis: z.string().nullable().or(z.array(z.string())).default(null),
-  medications: z.array(MedicationSchema).default([]),
-  testResults: z.array(TestResultSchema).default([]),
-  remarks: z.string().nullable().default(null),
-  email: z.string().nullable().default(null),
-  phoneNumber: z.string().nullable().default(null),
-  bloodGroup: z.string().nullable().default(null),
-  allergies: z.array(z.string()).default([]),
-  medicalConditions: z.array(z.string()).default([]),
-  address: z.string().nullable().default(null),
-});
 
 function normalizeDate(dobStr) {
   if (!dobStr) return null;
@@ -597,10 +563,6 @@ class OcrService {
   }
 
   async validateDocument(file) {
-    const {
-      medicalDocumentClassifierService,
-    } = require("../classifier/medicalDocumentClassifier.service");
-
     console.log("[OcrService] Delegating validation to MedicalDocumentClassifierService...");
     const classification = await medicalDocumentClassifierService.classify(file);
 
@@ -1318,7 +1280,6 @@ ${rawText}
   }
 
   async extractViaExternalService(file, preferredLanguage) {
-    const aiClient = require("../clients/aiClient.service");
     console.log(`[OcrService] Delegating OCR extraction to external AI Service (PaddleOCR)...`);
 
     const isPdf =
@@ -1333,7 +1294,6 @@ ${rawText}
     if (isPdf) {
       let pdfData = { text: "" };
       try {
-        const pdfParse = require("pdf-parse");
         console.log(`[OcrService] Delegating OCR extraction to pdf-parse...`);
         pdfData = await pdfParse(file.buffer);
       } catch (err) {
@@ -1412,17 +1372,16 @@ ${rawText}
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
     // Fetch preferred language from onboarding state
-    let preferredLanguage = "gujarati";
+    let preferredLanguage = "english";
     if (userId) {
       try {
-        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
         if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
           preferredLanguage = onboardingRecord.data.preferredLanguage;
         }
       } catch (err) {
         console.warn(
-          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to english`,
           err.message,
         );
       }
@@ -1544,8 +1503,6 @@ ${rawText}
       `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. ID=${documentRow.id}. Indexing in RAG...`,
     );
 
-    // 6. Index Document in RAG
-    const { embeddingService } = require("../chat/embedding.service");
     //remove await so that time reduce and embedding performs in bachground
     await embeddingService.embedAndPersist({
       documentId: documentRow.id,
@@ -1579,20 +1536,18 @@ ${rawText}
     console.log(
       `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
     );
-    const { eq } = require("drizzle-orm");
 
     // Fetch preferred language from onboarding state
-    let preferredLanguage = "gujarati";
+    let preferredLanguage = "english";
     if (userId) {
       try {
-        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
         if (onboardingRecord && onboardingRecord.data && onboardingRecord.data.preferredLanguage) {
           preferredLanguage = onboardingRecord.data.preferredLanguage;
         }
       } catch (err) {
         console.warn(
-          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to gujarati`,
+          `[OcrService] Failed to fetch preferred language for user ${userId}, defaulting to english`,
           err.message,
         );
       }
@@ -1686,7 +1641,6 @@ ${rawText}
       );
 
       // 6. Index Document in RAG
-      const { embeddingService } = require("../chat/embedding.service");
       await embeddingService.embedAndPersist({
         documentId,
         userId,

@@ -1,5 +1,7 @@
 const { medicationOnboardingSchema } = require("../../src/validations/medicationValidation");
 const medicationService = require("../../src/services/medicationService");
+const patientRepository = require("../../src/repositories/patientRepository");
+const medicationRepository = require("../../src/repositories/medicationRepository");
 
 describe("Medication Validation, Defaults & Round-trip", () => {
   describe("Zod Validation Schema (medicationOnboardingSchema)", () => {
@@ -107,8 +109,6 @@ describe("Medication Validation, Defaults & Round-trip", () => {
     };
 
     beforeEach(() => {
-      const patientRepository = require("../../src/repositories/patientRepository");
-      const medicationRepository = require("../../src/repositories/medicationRepository");
       jest.spyOn(patientRepository, "findById").mockResolvedValue(mockPatient);
       jest
         .spyOn(medicationRepository, "insert")

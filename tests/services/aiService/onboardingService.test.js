@@ -15,8 +15,16 @@ jest.mock("../../../src/configs/db", () => {
   return { db: queryMock };
 });
 
-const { onboardingService } = require("../../../src/services/ai/chat/onboarding.service");
+const {
+  onboardingService,
+  splitName,
+  normalizeDOB,
+} = require("../../../src/services/ai/chat/onboarding.service");
 const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient");
+const patientRepository = require("../../../src/repositories/patientRepository");
+const authProviderRepository = require("../../../src/repositories/authProviderRepository");
+const medicationRepository = require("../../../src/repositories/medicationRepository");
+const { db } = require("../../../src/configs/db");
 
 jest.mock("../../../src/services/ai/clients/ollamaClient", () => ({
   ollamaClient: {
@@ -225,7 +233,6 @@ describe("OnboardingService Structured Flow", () => {
   });
 
   it("Should split full names correctly and handle single names", async () => {
-    const { splitName } = require("../../../src/services/ai/chat/onboarding.service");
     expect(splitName("Sarah Anderson")).toEqual({ firstName: "Sarah", lastName: "Anderson" });
     expect(splitName("John Michael Smith")).toEqual({
       firstName: "John",
@@ -235,7 +242,6 @@ describe("OnboardingService Structured Flow", () => {
   });
 
   it("Should normalize Date of Birth formats correctly", async () => {
-    const { normalizeDOB } = require("../../../src/services/ai/chat/onboarding.service");
     expect(normalizeDOB("01.01.1989")).toBe("1989-01-01");
     expect(normalizeDOB("01/01/1989")).toBe("1989-01-01");
     expect(normalizeDOB("01-01-1989")).toBe("1989-01-01");
@@ -270,7 +276,6 @@ describe("OnboardingService Structured Flow", () => {
 
   describe("New Refined Onboarding Flow Steps", () => {
     beforeEach(() => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
       patientRepository.updateById.mockClear();
     });
 
@@ -323,7 +328,6 @@ describe("OnboardingService Structured Flow", () => {
       expect(result.state.existingUserData.firstName).toBe("GoogleFirst");
       expect(result.state.existingUserData.lastName).toBe("GoogleLast");
 
-      const patientRepository = require("../../../src/repositories/patientRepository");
       expect(patientRepository.updateById).toHaveBeenCalled();
     });
 
@@ -444,9 +448,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should auto-fill unverified email from document for phone-OTP user with no conflict", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "otp-user-id",
         firstName: "OtpUser",
@@ -484,9 +485,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should lock verified fields (phone + Google) when both exist", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "multi-user-id",
         firstName: "MultiUser",
@@ -527,9 +525,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should lock verified fields from manual edits and exclude them from { edited }", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "lock-user-id",
         firstName: "LockUser",
@@ -589,9 +584,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should route to CONFIRM mode and return all six fields in the payload when there are no mismatches", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "confirm-user-id",
         firstName: "ConfirmUser",
@@ -632,9 +624,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should preserve non-conflicting/document-only fields when source choice is applied", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "source-user-id",
         firstName: "SourceUser",
@@ -687,9 +676,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should skip required fields that are pre-filled in existingUserData", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "skip-user-id",
         firstName: "SkipUser",
@@ -760,9 +746,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should show CONFIRM mode when unverified fields are empty on login side but present on document side (auto-fill case)", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "otp-confirm-user-id",
         firstName: null,
@@ -820,9 +803,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Should show CONFLICT mode when unverified fields differ on both sides", async () => {
-      const patientRepository = require("../../../src/repositories/patientRepository");
-      const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-
       patientRepository.findById.mockResolvedValue({
         id: "conflict-otp-user-id",
         firstName: "OldName",
@@ -866,11 +846,7 @@ describe("OnboardingService Structured Flow", () => {
   });
 
   describe("Medications Flow Integration", () => {
-    let medicationRepository;
-    let patientRepository;
     beforeEach(() => {
-      medicationRepository = require("../../../src/repositories/medicationRepository");
-      patientRepository = require("../../../src/repositories/patientRepository");
       jest
         .spyOn(patientRepository, "findById")
         .mockResolvedValue({ id: "test-user-id", patientCode: "P-111" });
@@ -990,7 +966,6 @@ describe("OnboardingService Structured Flow", () => {
     });
 
     it("Case 7: Uma Clinic prescription (Uma Clinic, Urmila)", async () => {
-      const { db } = require("../../../src/configs/db");
       db.then = (onFulfilled) =>
         Promise.resolve([
           {

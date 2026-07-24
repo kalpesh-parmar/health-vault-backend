@@ -17,6 +17,10 @@ const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
 const medicationReminderService = require("../../medicationReminderService");
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { eq, desc } = require("drizzle-orm");
+const { normalizeMedicine } = require("../helpers/medicineNormalize");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -858,7 +862,6 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (isYes) {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
-          const { normalizeMedicine } = require("../helpers/medicineNormalize");
           state.medicinesToAdd = (state.foundMedicines || []).map((m, index) => {
             const { onboardingMed } = normalizeMedicine(m, index);
             return onboardingMed;
@@ -1851,10 +1854,6 @@ class OnboardingService {
         state.foundMedicines.length === 0)
     ) {
       try {
-        const { db } = require("../../../configs/db");
-        const { document } = require("../../../models/document");
-        const { eq, desc } = require("drizzle-orm");
-
         let docRow = null;
         if (state.documentId) {
           const rows = await db.select().from(document).where(eq(document.id, state.documentId));
@@ -2118,10 +2117,6 @@ class OnboardingService {
         `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
       );
       try {
-        const { db } = require("../../../configs/db");
-        const { document } = require("../../../models/document");
-        const { eq } = require("drizzle-orm");
-
         const [doc] = await db.select().from(document).where(eq(document.id, state.documentId));
 
         if (doc && doc.structuredExtractedData) {

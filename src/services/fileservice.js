@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
 const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { s3Client } = require("../configs/file");
@@ -21,7 +22,6 @@ class S3Service {
       throw new InvalidRequestException("Category is required");
     }
 
-    const crypto = require("crypto");
     const uuid = crypto.randomUUID();
     const sanitizedName = file.originalname.replace(/\s+/g, "_");
 

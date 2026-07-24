@@ -38,6 +38,7 @@ const { InvalidRequestException, NotFoundException } = require("../exceptions/ap
 const { aiClient: aiServiceClient, ocrOrchestrator, ocrService } = require("./ai");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorageService");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -209,7 +210,6 @@ class DocumentOcrJobService {
       let preferredLanguage = "gujarati";
       try {
         if (userId) {
-          const userOnboardingRepository = require("../repositories/userOnboardingRepository");
           const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
           if (onboardingRecord?.data?.preferredLanguage) {
             preferredLanguage = onboardingRecord.data.preferredLanguage;

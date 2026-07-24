@@ -16,6 +16,8 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
+const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 
@@ -215,7 +217,6 @@ class ChatService {
     }
     if (!preferredLanguage || preferredLanguage === "english") {
       try {
-        const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
         if (onboardingRecord?.data?.preferredLanguage) {
           preferredLanguage = onboardingRecord.data.preferredLanguage;
@@ -543,7 +544,6 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
           let rawAns = aiResponse.answer;
           isEmergency = !!aiResponse.emergency;
 
-          const aiClient = require("../clients/aiClient.service");
           if (aiClient && typeof aiClient.translate === "function") {
             assistantText = await aiClient.translate(rawAns, "english", preferredLanguage);
           } else {
@@ -663,7 +663,6 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
           citations = aiResponse.citations || formattedChunks;
           isEmergency = !!aiResponse.emergency;
 
-          const aiClient = require("../clients/aiClient.service");
           if (aiClient && typeof aiClient.translate === "function") {
             assistantText = await aiClient.translate(rawAns, "english", preferredLanguage);
           } else {

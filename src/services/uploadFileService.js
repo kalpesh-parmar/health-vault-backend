@@ -1,6 +1,6 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { FileCategory } = require("../enums/fileCategory");
-const { InvalidRequestException } = require("../exceptions/appError");
+const { InvalidRequestException, NonMedicalDocumentException } = require("../exceptions/appError");
 const objectStorageService = require("./objectStorageService");
 
 const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE", "PATIENT_DOCUMENT"]);
@@ -64,8 +64,8 @@ class UploadFileService {
     }
 
     if (uploadType === "PATIENT_DOCUMENT") {
+      // Kept in-method to prevent circular dependency: ./ai -> ./ocr/ocr.service -> uploadFileService
       const { ocrService } = require("./ai");
-      const { NonMedicalDocumentException } = require("../exceptions/appError");
 
       const validation = await ocrService.validateDocument({
         buffer: file.buffer,
