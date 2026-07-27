@@ -1,5 +1,5 @@
-const cronService = require("../services/cronService");
-const reminderService = require("../services/reminderService");
+const cronService = require("../services/cron.service");
+const reminderService = require("../services/reminder.service");
 
 async function cronRegisterHandler() {
   cronService.register("SEND_REMINDERS", async () => {

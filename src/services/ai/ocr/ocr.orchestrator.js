@@ -1,11 +1,12 @@
 const { env } = require("../../../configs/env");
-const objectStorageService = require("../../objectStorageService");
+const objectStorageService = require("../../objectStorage.service");
 const {
   OcrEmptyResultError,
   OcrInvalidResponseError,
   validateDocument,
 } = require("./ocr.validator");
 const { createTrace, ocrLogger } = require("./ocr.logger");
+const { ocrService } = require("./ocr.service");
 
 function evaluateQuality(result) {
   const textLen = String(result?.ocr_text || "").trim().length;
@@ -188,18 +189,32 @@ class OcrOrchestrator {
 
     let result;
     try {
-      const aiClient = require("../clients/aiClient.service");
-      console.log(`[OCR_DEBUG] Calling aiClient.runOcrFromBuffer for ${filename}`);
+      console.log("[OCR_DEBUG] ocrService:", ocrService);
+      console.log("[OCR_DEBUG] Object.keys(ocrService):", Object.keys(ocrService || {}));
+      console.log(
+        "[OCR_DEBUG] typeof ocrService.extractMedicalData:",
+        typeof ocrService?.extractMedicalData,
+      );
 
-      const parsedOCR = await aiClient.runOcrFromBuffer({
+      if (!ocrService || typeof ocrService.extractMedicalData !== "function") {
+        const missingErr = new Error(
+          `OCR Service mismatch: ocrService is ${typeof ocrService} and extractMedicalData is ${typeof ocrService?.extractMedicalData}. Verify service exports.`,
+        );
+        ocrLogger.error(trace, "ocr_service_mismatch", { error: missingErr.message });
+        throw missingErr;
+      }
+
+      const jsonStr = await ocrService.extractMedicalData({
         buffer,
         filename,
         mimeType: resolvedMime,
         mode: "detailed",
       });
 
+      const parsedOCR = this._parseOcrJson(jsonStr);
+
       result = buildOcrResult({
-        pages: parsedOCR.pages,
+        pages: [],
         engine: `ollama:${env.aiModel}`,
         medicalExtraction: parsedOCR.medicalExtraction,
         filename,

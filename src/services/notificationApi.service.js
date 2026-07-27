@@ -9,7 +9,7 @@ const {
   validateSchema,
   userIdBodySchema,
 } = require("../validations");
-const notificationService = require("./notificationService");
+const notificationService = require("./notification.service");
 
 class NotificationApiService {
   async testSend(userId, payload) {

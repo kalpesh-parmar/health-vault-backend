@@ -84,7 +84,7 @@ const env = Object.freeze({
   passwordResetWindowMinutes: numberFromEnv("PASSWORD_RESET_WINDOW_MINUTES", 15),
   patientDocumentsBucket: process.env.PATIENT_DOCUMENTS_BUCKET || "patient-documents",
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
-  rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 100),
+  rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 200),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
 
   // Email / SMTP
@@ -119,12 +119,13 @@ const env = Object.freeze({
   aiBaseUrl: stringFromEnv("AI_BASE_URL"),
   aiModel: stringFromEnv("AI_MODEL"),
   aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:8000",
-  useExternalOcrService: booleanFromEnv("USE_EXTERNAL_AI_SERVICE", true),
+  useExternalOcrService: booleanFromEnv("USE_EXTERNAL_AI_SERVICE", false),
   aiTimeoutMs: numberFromEnv("AI_TIMEOUT_MS", 90 * 1000),
   aiMaxRetries: numberFromEnv("AI_MAX_RETRIES", 2),
   aiPageConcurrency: numberFromEnv("AI_PAGE_CONCURRENCY", 4),
   aiMaxOutputTokens: numberFromEnv("AI_MAX_OUTPUT_TOKENS", 8192),
-  aiMaxInlineBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 100 * 1024 * 1024),
+  aiMaxInlineBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 150 * 1024 * 1024),
+  ocrMaxFileBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 150 * 1024 * 1024),
   aiMinTextChars: numberFromEnv("AI_MIN_TEXT_CHARS", 8),
   aiMinConfidence: Number.isFinite(Number(process.env.AI_MIN_CONFIDENCE))
     ? Number(process.env.AI_MIN_CONFIDENCE)

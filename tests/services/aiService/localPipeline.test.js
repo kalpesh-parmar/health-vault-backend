@@ -4,7 +4,7 @@ const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient"
 const { ocrService } = require("../../../src/services/ai/ocr/ocr.service");
 const { chatService: chatbotService } = require("../../../src/services/ai/chat/chat.service");
 const { embeddingService } = require("../../../src/services/ai/chat/embedding.service");
-const v1Controller = require("../../../src/controllers/v1.controller");
+const v1Controller = require("../../../src/controllers/ocr.controller");
 
 jest.mock("axios", () => {
   const mockAxios = jest.fn();

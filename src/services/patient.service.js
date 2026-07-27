@@ -4,6 +4,7 @@ const { env } = require("../configs/env");
 const { errorConstants } = require("../constants/errorConstants");
 const { responseConstants } = require("../constants/responseConstants");
 const { USER_STATUS } = require("../enums/userStatus.enum");
+const { FileCategory } = require("../enums/fileCategory");
 const {
   AlreadyExistsException,
   InvalidRequestException,
@@ -37,7 +38,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const axios = require("axios");
 const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
 
@@ -670,6 +671,38 @@ class PatientService {
       blocked: false,
       failedAttempts: attemptRecord.failedAttempts,
       remainingAttempts: 3 - attemptRecord.failedAttempts,
+    };
+  }
+
+  async uploadProfileImage(patientId, file, authUserId) {
+    if (!patientId || patientId !== authUserId) {
+      throw new UnauthorizedException("Unauthorized access to patient resource");
+    }
+
+    const existingPatient = await patientRepository.findById(patientId);
+    if (!existingPatient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    if (!file) {
+      throw new InvalidRequestException("File is required");
+    }
+
+    const uploadResult = await objectStorageService.uploadFile(
+      file,
+      FileCategory.PROFILE,
+      patientId,
+    );
+    const signedUrl = await objectStorageService.getSignedFileUrl(uploadResult.fileKey);
+
+    const updatedPatientResult = await this.updatePatient(patientId, {
+      profileImageKey: uploadResult.fileKey,
+    });
+
+    return {
+      ...updatedPatientResult,
+      profileImageUrl: signedUrl,
+      fileUrl: signedUrl,
     };
   }
 }

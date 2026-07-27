@@ -1,8 +1,11 @@
+const jwt = require("jsonwebtoken");
 const { StatusCodes } = require("http-status-codes");
+const { env } = require("../configs/env");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const { InvalidRequestException } = require("../exceptions/appError");
-const uploadFileService = require("../services/fileservice");
+const { InvalidRequestException, NonMedicalDocumentException } = require("../exceptions/appError");
+const patientRepository = require("../repositories/patientRepository");
+const uploadFileService = require("../services/file.service");
 
 async function uploadFile(req, res) {
   let patientId = req.body.patientId || req.auth?.userId;
@@ -11,8 +14,6 @@ async function uploadFile(req, res) {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       try {
         const token = authHeader.split(" ")[1];
-        const jwt = require("jsonwebtoken");
-        const { env } = require("../configs/env");
         const decoded = jwt.verify(token, env.jwtSecret);
         patientId = decoded.userId;
       } catch {
@@ -52,7 +53,6 @@ async function uploadFile(req, res) {
   }
 
   if (uploadType === "PATIENT_DOCUMENT" && patientId) {
-    const patientRepository = require("../repositories/patientRepository");
     const patient = await patientRepository.findById(patientId);
 
     if (patient) {
@@ -83,7 +83,6 @@ async function uploadFile(req, res) {
     }
   }
 
-  const { NonMedicalDocumentException } = require("../exceptions/appError");
   try {
     const results = [];
     for (const file of files) {

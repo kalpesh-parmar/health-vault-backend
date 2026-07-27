@@ -1,6 +1,6 @@
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
-const notificationApiService = require("../services/notificationApiService");
+const notificationApiService = require("../services/notificationApi.service");
 
 async function testSend(req, res) {
   const result = await notificationApiService.testSend(req.auth.userId, req.body);

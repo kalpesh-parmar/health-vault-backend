@@ -141,10 +141,11 @@ function validateDocument({ buffer, filename, mimeType }) {
   if (!buffer || buffer.length === 0) {
     throw new CorruptedFileError("File is empty", { filename });
   }
-  if (buffer.length > env.aiMaxInlineBytes) {
+  const maxBytes = env.ocrMaxFileBytes || env.aiMaxInlineBytes || 150 * 1024 * 1024;
+  if (buffer.length > maxBytes) {
     throw new FileTooLargeError(
-      `File exceeds the ${Math.round(env.aiMaxInlineBytes / (1024 * 1024))}MB limit`,
-      { filename, size: buffer.length, limit: env.aiMaxInlineBytes },
+      `File exceeds the ${Math.round(maxBytes / (1024 * 1024))}MB limit`,
+      { filename, size: buffer.length, limit: maxBytes },
     );
   }
 

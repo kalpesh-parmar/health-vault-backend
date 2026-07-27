@@ -1,7 +1,8 @@
+const { env } = require("../configs/env");
 const { messageConstants } = require("../constants/messageConstants");
 const { FileCategory } = require("../enums/fileCategory");
 const { InvalidRequestException } = require("../exceptions/appError");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 
 const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE", "PATIENT_DOCUMENT"]);
 
@@ -19,7 +20,7 @@ const ALLOWED_MIME_TYPES = {
 
 const MAX_FILE_SIZES = {
   PATIENT_PROFILE: 5 * 1024 * 1024, // 5 MB
-  PATIENT_DOCUMENT: 150 * 1024 * 1024, // 150 MB
+  PATIENT_DOCUMENT: env.ocrMaxFileBytes || env.aiMaxInlineBytes || 150 * 1024 * 1024, // 150 MB
 };
 
 const UPLOAD_TYPE_TO_CATEGORY = {
@@ -63,53 +64,23 @@ class UploadFileService {
       );
     }
 
-    if (uploadType === "PATIENT_DOCUMENT") {
-      const { ocrService } = require("./ai");
-      const { NonMedicalDocumentException } = require("../exceptions/appError");
-
-      const validation = await ocrService.validateDocument({
-        buffer: file.buffer,
-        mimeType: file.mimetype,
-        filename: file.originalname,
-      });
-
-      if (validation.status === "FAILED") {
-        throw new InvalidRequestException(
-          validation.error || validation.reason || "AI response format is invalid.",
-        );
-      }
-
-      if (!validation.isMedicalDocument) {
-        throw new NonMedicalDocumentException(
-          validation.reason || "The uploaded file is not a medical document.",
-        );
-      }
-
-      const upload = await objectStorageService.uploadFile(file, category, patientId);
-      const signedUrl = await objectStorageService.getSignedFileUrl(upload.fileKey);
-
-      return {
-        isMedicalDocument: true,
-        documentType: validation.documentType,
-        data: {
-          fileKey: upload.fileKey,
-          originalFileName: upload.fileName || file.originalname,
-          mimeType: upload.fileType || file.mimetype,
-          fileSize: upload.fileSize || file.size,
-          fileUrl: signedUrl,
-        },
-      };
-    }
-
     const upload = await objectStorageService.uploadFile(file, category, patientId);
     const signedUrl = await objectStorageService.getSignedFileUrl(upload.fileKey);
 
     return {
+      isMedicalDocument: true,
       fileKey: upload.fileKey,
       originalFileName: upload.fileName || file.originalname,
       mimeType: upload.fileType || file.mimetype,
       fileSize: upload.fileSize || file.size,
       fileUrl: signedUrl,
+      data: {
+        fileKey: upload.fileKey,
+        originalFileName: upload.fileName || file.originalname,
+        mimeType: upload.fileType || file.mimetype,
+        fileSize: upload.fileSize || file.size,
+        fileUrl: signedUrl,
+      },
     };
   }
 
@@ -131,3 +102,6 @@ class UploadFileService {
 }
 
 module.exports = new UploadFileService();
+module.exports.UploadFileService = UploadFileService;
+module.exports.ALLOWED_MIME_TYPES = ALLOWED_MIME_TYPES;
+module.exports.MAX_FILE_SIZES = MAX_FILE_SIZES;

@@ -9,6 +9,7 @@ const {
   updateMedicationSchema,
   listMedicationQuerySchema,
   refillMedicationSchema,
+  medicationOnboardingSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
@@ -306,7 +307,6 @@ class MedicationService {
 
   // Onboarding Helper: validate payload
   async validate(payload) {
-    const { medicationOnboardingSchema } = require("../validations");
     return await validateSchema(medicationOnboardingSchema, payload);
   }
 

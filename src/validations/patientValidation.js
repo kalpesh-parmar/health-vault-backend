@@ -3,7 +3,7 @@ const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { genderTypeValue } = require("../enums/genderType");
 const { userStatusValues } = require("../enums/userStatus.enum");
-// const { provider } = require("../services/objectStorageService");
+// const { provider } = require("../services/objectStorage.service");
 const { providerValues } = require("../enums/providerType");
 const { loginTypeValues } = require("../enums/loginType.enum");
 

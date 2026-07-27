@@ -258,3 +258,27 @@ paths:
                             type: string
                           existingUserData:
                             type: object
+
+  /v1/onboarding/history:
+    get:
+      tags: [Intelligent Onboarding]
+      summary: Get onboarding chat interaction history
+      description: |
+        Retrieves the onboarding chat history for the user.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Onboarding chat history fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    type: array
+                    items:
+                      type: object

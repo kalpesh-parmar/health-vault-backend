@@ -1,5 +1,7 @@
+const pdfParse = require("pdf-parse");
 const prompts = require("../prompts");
 const { ollamaClient } = require("../clients/ollamaClient");
+const aiClient = require("../clients/aiClient.service");
 const { env } = require("../../../configs/env");
 
 class MedicalDocumentClassifierService {
@@ -70,8 +72,6 @@ class MedicalDocumentClassifierService {
     */
 
     // --- NEW CODE (Text Model approach using local pdf-parse + Python PaddleOCR) ---
-    const aiClient = require("../clients/aiClient.service");
-
     console.log("[MedicalDocumentClassifierService] Extracting text for validation...");
 
     let extractedText = "";
@@ -84,7 +84,6 @@ class MedicalDocumentClassifierService {
 
       if (isPdf) {
         try {
-          const pdfParse = require("pdf-parse");
           console.log("[MedicalDocumentClassifierService] Extracting text using pdf-parse...");
           const pdfData = await pdfParse(file.buffer);
           console.log("[SC]------> ", pdfData);

@@ -6,56 +6,114 @@ const { documentProcessingJob } = require("../models/documentProcessingJob");
 const DEFAULT_TTL_HOURS = 24;
 
 class DocumentProcessingJobRepository {
+  async findById(jobId) {
+    const [row] = await db
+      .select()
+      .from(documentProcessingJob)
+      .where(eq(documentProcessingJob.id, jobId))
+      .limit(1);
+    return row || null;
+  }
+
+  async findByIdAndUserId(jobId, userId) {
+    const [row] = await db
+      .select()
+      .from(documentProcessingJob)
+      .where(and(eq(documentProcessingJob.id, jobId), eq(documentProcessingJob.userId, userId)))
+      .limit(1);
+    return row || null;
+  }
+
+  async createQueuedJob(
+    { fileKey, userId, mimeType, originalName, ttlHours = DEFAULT_TTL_HOURS },
+    tx = null,
+  ) {
+    const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+    const client = tx || db;
+
+    const baseValues = {
+      completedAt: null,
+      completedSteps: 0,
+      currentStep: "Queued",
+      error: null,
+      expiresAt,
+      extractedStructuredData: null,
+      graphs: [],
+      message: null,
+      metadata: {
+        ...(mimeType ? { mimeType } : {}),
+        ...(originalName ? { originalName } : {}),
+      },
+      pendingSteps: 0,
+      percentage: 0,
+      rawOcrData: null,
+      stage: "OCR_QUEUED",
+      startedAt: null,
+      status: "QUEUED",
+      updatedAt: new Date(),
+      userId,
+    };
+
+    const [existing] = await client
+      .select()
+      .from(documentProcessingJob)
+      .where(eq(documentProcessingJob.fileKey, fileKey))
+      .limit(1);
+
+    if (existing) {
+      const mergedMetadata = {
+        ...(existing.metadata || {}),
+        ...baseValues.metadata,
+      };
+      const [updated] = await client
+        .update(documentProcessingJob)
+        .set({
+          ...baseValues,
+          metadata: mergedMetadata,
+        })
+        .where(eq(documentProcessingJob.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await client
+      .insert(documentProcessingJob)
+      .values({ ...baseValues, fileKey })
+      .returning();
+    return created;
+  }
+
   /**
    * Idempotent upsert keyed by fileKey. If a previous job for this file
    * key terminated successfully, we still create a fresh QUEUED row so the
    * caller can re-run extraction with different settings.
    */
-  async startJob({ fileKey, userId, ttlHours = DEFAULT_TTL_HOURS }) {
-    const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  async startJob({ fileKey, userId, mimeType, ttlHours = DEFAULT_TTL_HOURS }) {
+    return this.createQueuedJob({ fileKey, userId, mimeType, ttlHours });
+  }
 
-    return db.transaction(async (tx) => {
-      const [existing] = await tx
-        .select()
-        .from(documentProcessingJob)
-        .where(eq(documentProcessingJob.fileKey, fileKey))
-        .limit(1);
-
-      const baseValues = {
-        completedAt: null,
-        completedSteps: 0,
-        currentStep: "Queued",
-        error: null,
-        expiresAt,
-        extractedStructuredData: null,
-        graphs: [],
-        message: null,
-        metadata: {},
-        pendingSteps: 0,
-        percentage: 0,
-        rawOcrData: null,
-        stage: "OCR_QUEUED",
-        startedAt: null,
-        status: "QUEUED",
+  /**
+   * Atomically claims a QUEUED job by updating its status to RUNNING in a single SQL operation.
+   * Prevents race conditions from rapid concurrent start requests.
+   */
+  async claimQueuedJob(jobId, userId) {
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        startedAt: new Date(),
+        status: "RUNNING",
+        stage: "OCR_STARTED",
         updatedAt: new Date(),
-        userId,
-      };
-
-      if (existing) {
-        const [updated] = await tx
-          .update(documentProcessingJob)
-          .set(baseValues)
-          .where(eq(documentProcessingJob.id, existing.id))
-          .returning();
-        return updated;
-      }
-
-      const [created] = await tx
-        .insert(documentProcessingJob)
-        .values({ ...baseValues, fileKey })
-        .returning();
-      return created;
-    });
+      })
+      .where(
+        and(
+          eq(documentProcessingJob.id, jobId),
+          eq(documentProcessingJob.userId, userId),
+          eq(documentProcessingJob.status, "QUEUED"),
+        ),
+      )
+      .returning();
+    return row || null;
   }
 
   async markRunning(jobId, patch = {}) {

@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { env } = require("../configs/env");
 const { gcpStorage } = require("../configs/gcpStorage");
 const { messageConstants } = require("../constants/messageConstants");
@@ -16,7 +17,6 @@ class GcpStorageService {
       throw new InvalidRequestException("Category is required");
     }
 
-    const crypto = require("crypto");
     const uuid = crypto.randomUUID();
     const sanitizedName = file.originalname.replace(/\s+/g, "_");
 

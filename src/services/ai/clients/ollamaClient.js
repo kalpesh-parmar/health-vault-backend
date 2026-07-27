@@ -39,20 +39,63 @@ class OllamaClient {
     }
   }
 
+  extractResponseText(responseData, apiType = "chat", options = {}) {
+    const data = responseData || {};
+    let primaryText = "";
+    let thinkingText = "";
+
+    if (apiType === "chat") {
+      primaryText = data.message?.content || "";
+      thinkingText = data.message?.thinking || "";
+    } else {
+      primaryText = data.response || "";
+      thinkingText = data.thinking || "";
+    }
+
+    let text = typeof primaryText === "string" ? primaryText : "";
+    const fallbackToThinking = options.fallbackToThinking ?? true;
+
+    if (
+      !text.trim() &&
+      fallbackToThinking &&
+      typeof thinkingText === "string" &&
+      thinkingText.trim()
+    ) {
+      console.warn(
+        `[OllamaClient] Primary response field ('${apiType === "chat" ? "message.content" : "response"}') was empty. ` +
+          `Falling back to 'thinking' field (length: ${thinkingText.length}).`,
+      );
+      text = thinkingText;
+    }
+
+    if (typeof text !== "string" || !text.trim()) {
+      throw new Error(`Invalid response format from Ollama ${apiType}`);
+    }
+
+    let cleaned = text.trim();
+    if (options.stripMarkdown !== false) {
+      cleaned = cleaned
+        .replace(/```(?:json)?\s*/gi, "")
+        .replace(/```\s*$/g, "")
+        .trim();
+    }
+
+    return cleaned;
+  }
+
   async chat(messages, model, options = {}) {
     const url = `${this.baseUrl}/api/chat`;
     let numPredict = options.maxTokens ?? 1024;
     let attempt = 1;
     let response;
     let raw;
-    let message;
 
     while (attempt <= 2) {
       const payload = {
         model,
         messages,
         stream: false,
-        keep_alive: "30m",
+        keep_alive: options.keep_alive || "24h",
         think: options.think ?? false,
         options: {
           temperature: options.temperature ?? 0.2,
@@ -75,12 +118,8 @@ class OllamaClient {
 
       try {
         response = await this.requestWithRetry(config);
-        message = response.data?.message;
-        if (!message) {
-          throw new Error("Invalid response structure from Ollama chat");
-        }
-
         raw = response.data || {};
+        const message = raw.message || {};
         const doneReason = raw.done_reason || "N/A";
         const promptEvalCount = raw.prompt_eval_count || 0;
         const evalCount = raw.eval_count || 0;
@@ -101,15 +140,6 @@ class OllamaClient {
           console.log(
             `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
           );
-        if (raw.prompt_eval_duration)
-          console.log(
-            `[OllamaClient] Prompt eval duration: ${(raw.prompt_eval_duration / 1e6).toFixed(2)}ms`,
-          );
-        if (raw.eval_duration)
-          console.log(
-            `[OllamaClient] Output generation duration: ${(raw.eval_duration / 1e6).toFixed(2)}ms`,
-          );
-        console.log(`[OllamaClient] Raw Response: ${JSON.stringify(raw)}`);
 
         // Check retry conditions:
         // - done_reason === "length"
@@ -120,9 +150,8 @@ class OllamaClient {
           console.warn(
             `[OllamaClient] Response truncated (done_reason=length with empty content). Retrying with larger output budget (attempt 2)...`,
           );
-          // Increase token budget (e.g., double the num_predict or set to 4096)
           numPredict = Math.min((options.maxTokens || 1024) * 2, 8192);
-          if (numPredict < 4096) numPredict = 4096; // ensure we have enough room
+          if (numPredict < 4096) numPredict = 4096;
           attempt++;
           continue;
         }
@@ -134,31 +163,18 @@ class OllamaClient {
       }
     }
 
-    let text = message.content;
-    const thinking = message.thinking;
-    const fallbackToThinking = options.fallbackToThinking ?? true;
-    if (
-      fallbackToThinking &&
-      (typeof text !== "string" || !text.trim()) &&
-      typeof thinking === "string" &&
-      thinking.trim()
-    ) {
-      text = thinking;
-    }
-    if (typeof text !== "string") {
-      throw new Error("Invalid response format from Ollama chat");
-    }
+    const text = this.extractResponseText(raw, "chat", options);
 
     if (options.returnFullResponse) {
       return {
         text,
-        content: message.content,
-        thinking: message.thinking,
+        content: raw.message?.content || "",
+        thinking: raw.message?.thinking || "",
         done_reason: raw.done_reason,
         prompt_eval_count: raw.prompt_eval_count || 0,
         eval_count: raw.eval_count || 0,
-        content_len: message.content?.length || 0,
-        thinking_len: message.thinking?.length || 0,
+        content_len: (raw.message?.content || "").length,
+        thinking_len: (raw.message?.thinking || "").length,
         total_duration: raw.total_duration,
         retry_attempts: attempt - 1,
       };
@@ -173,7 +189,8 @@ class OllamaClient {
       model,
       messages,
       stream: true,
-      keep_alive: "30m",
+      keep_alive: options.keep_alive || "24h",
+      think: options.think ?? false,
       options: {
         temperature: options.temperature ?? 0.2,
         num_predict: options.maxTokens ?? 2048,
@@ -224,7 +241,8 @@ class OllamaClient {
       model,
       prompt,
       stream: false,
-      keep_alive: "30m",
+      keep_alive: options.keep_alive || "24h",
+      think: options.think ?? false,
       options: {
         temperature: options.temperature ?? 0,
         num_predict: options.maxTokens ?? 8192,
@@ -246,20 +264,19 @@ class OllamaClient {
 
     try {
       const response = await this.requestWithRetry(config);
-      const text = response.data?.response;
-      if (typeof text !== "string") {
-        throw new Error("Invalid response format from Ollama generate");
-      }
-
       const raw = response.data || {};
+      const text = this.extractResponseText(raw, "generate", options);
+
       if (options.returnFullResponse) {
         return {
           text,
-          content: text,
+          content: raw.response || "",
+          thinking: raw.thinking || "",
           done_reason: raw.done_reason,
           prompt_eval_count: raw.prompt_eval_count || 0,
           eval_count: raw.eval_count || 0,
-          content_len: text.length,
+          content_len: (raw.response || "").length,
+          thinking_len: (raw.thinking || "").length,
           total_duration: raw.total_duration,
         };
       }
@@ -278,7 +295,7 @@ class OllamaClient {
     const payload = {
       model,
       prompt,
-      keep_alive: "30m",
+      keep_alive: "24h",
     };
 
     const config = {
@@ -299,6 +316,24 @@ class OllamaClient {
     } catch (error) {
       console.error("[OllamaClient] Embeddings failed:", error.message);
       throw error;
+    }
+  }
+
+  async warmUp(model, numCtx = 8192) {
+    if (!model) return;
+    console.log(`[OllamaClient] Pre-warming GPU VRAM for model '${model}' (num_ctx: ${numCtx})...`);
+    try {
+      await this.generate("", model, {
+        keep_alive: "24h",
+        rawOptions: { num_ctx: numCtx },
+        timeout: 10000,
+      });
+      console.log(`[OllamaClient] Warm-up completed successfully for model '${model}'.`);
+    } catch (err) {
+      console.warn(
+        `[OllamaClient] Warm-up ping failed (model will load on first request):`,
+        err.message,
+      );
     }
   }
 }

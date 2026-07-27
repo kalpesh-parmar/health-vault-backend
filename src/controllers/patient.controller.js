@@ -1,6 +1,8 @@
+const { StatusCodes } = require("http-status-codes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const patientService = require("../services/patientService");
+const patientService = require("../services/patient.service");
+const documentService = require("../services/document.service");
 
 // async function firebaseLogin(req, res) {
 //   const result = await patientService.firebaseLogin(req.body);
@@ -57,6 +59,24 @@ async function reportAuthFailure(req, res) {
   return successResponse(res, result, messageConstants.FAILED_ATTEMPT_LOGGED);
 }
 
+async function uploadProfileImage(req, res) {
+  const result = await patientService.uploadProfileImage(
+    req.params.patientId,
+    req.file,
+    req.auth.userId,
+  );
+  return successResponse(res, result, messageConstants.FILE_UPLOADED, StatusCodes.OK);
+}
+
+async function uploadDocuments(req, res) {
+  const result = await documentService.uploadPatientDocuments(
+    req.params.patientId,
+    req.files,
+    req.auth.userId,
+  );
+  return successResponse(res, result, messageConstants.FILE_UPLOADED, StatusCodes.ACCEPTED);
+}
+
 module.exports = {
   deletePatient,
   getPatientProfile,
@@ -68,4 +88,6 @@ module.exports = {
   updatePatient,
   socialLogin,
   reportAuthFailure,
+  uploadProfileImage,
+  uploadDocuments,
 };

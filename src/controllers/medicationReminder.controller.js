@@ -1,7 +1,7 @@
 const { StatusCodes } = require("http-status-codes");
 const { successResponse } = require("../helpers/generalResponse");
 const { messageConstants } = require("../constants/messageConstants");
-const medicationReminderService = require("../services/medicationReminderService");
+const medicationReminderService = require("../services/medicationReminder.service");
 
 //create
 async function createReminder(req, res) {

@@ -8,7 +8,7 @@
 
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
-const documentService = require("../services/documentService");
+const documentService = require("../services/document.service");
 
 async function getDocumentById(req, res) {
   const result = await documentService.getDocumentById(req.params.id, req.auth.userId);
