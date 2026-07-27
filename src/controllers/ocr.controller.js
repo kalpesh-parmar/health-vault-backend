@@ -1,35 +1,35 @@
 const { StatusCodes } = require("http-status-codes");
 
 const { successResponse } = require("../helpers/generalResponse");
-const v1Service = require("../services/ocr.service");
+const ocrService = require("../services/ocr.service");
 
 async function ocrExtract(req, res) {
-  const result = await v1Service.ocrExtract(req.auth?.userId, req.file);
+  const result = await ocrService.ocrExtract(req.auth?.userId, req.file);
   return successResponse(res, result, "Document processing started", StatusCodes.ACCEPTED);
 }
 
 async function getOcrStatus(req, res) {
-  const result = await v1Service.getOcrStatus(req.auth?.userId, req.params.documentId);
+  const result = await ocrService.getOcrStatus(req.auth?.userId, req.params.documentId);
   return successResponse(res, result);
 }
 
 async function cancelOcr(req, res) {
-  const result = await v1Service.cancelOcr(req.auth?.userId, req.params.documentId);
+  const result = await ocrService.cancelOcr(req.auth?.userId, req.params.documentId);
   return successResponse(res, result, "Job cancelled successfully");
 }
 
 async function onboardingChat(req, res) {
-  const result = await v1Service.onboardingChat(req.auth?.userId, req.body);
+  const result = await ocrService.onboardingChat(req.auth?.userId, req.body);
   return successResponse(res, result);
 }
 
 async function getOnboardingStatus(req, res) {
-  const result = await v1Service.getOnboardingStatus(req.auth?.userId);
+  const result = await ocrService.getOnboardingStatus(req.auth?.userId);
   return successResponse(res, result);
 }
 
 async function getOnboardingHistory(req, res) {
-  const result = await v1Service.getOnboardingHistory(req.auth?.userId);
+  const result = await ocrService.getOnboardingHistory(req.auth?.userId);
   return successResponse(res, result);
 }
 

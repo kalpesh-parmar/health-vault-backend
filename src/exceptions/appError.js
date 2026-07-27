@@ -65,10 +65,24 @@ class SessionExpiredException extends AppError {
   }
 }
 
+class ConflictException extends AppError {
+  constructor(message = "Resource conflict") {
+    super(StatusCodes.CONFLICT, message, "CONFLICT");
+  }
+}
+
+class ClassifierUnavailableException extends AppError {
+  constructor(message = "Document classification service is temporarily unavailable.") {
+    super(StatusCodes.SERVICE_UNAVAILABLE, message, "CLASSIFIER_UNAVAILABLE");
+  }
+}
+
 module.exports = {
   AccessDeniedException,
   AlreadyExistsException,
   AppError,
+  ClassifierUnavailableException,
+  ConflictException,
   InternalServerException,
   InvalidRequestException,
   NotFoundException,

@@ -2119,41 +2119,93 @@ class OnboardingService {
       try {
         const [doc] = await db.select().from(document).where(eq(document.id, state.documentId));
 
-        if (doc && doc.structuredExtractedData) {
-          const extracted = doc.structuredExtractedData;
+        const extracted = doc?.structuredExtractedData;
+        const hasStructuredData =
+          extracted && typeof extracted === "object" && Object.keys(extracted).length > 0;
+
+        if (doc && hasStructuredData) {
           const patientInfo = extracted.patientInfo || {};
 
-          if (patientInfo.firstName || patientInfo.lastName) {
-            state.existingUserData.firstName =
-              patientInfo.firstName || state.existingUserData.firstName;
-            state.existingUserData.lastName =
-              patientInfo.lastName || state.existingUserData.lastName;
+          // Extract raw values from patientInfo or top-level extracted fields
+          let rawFirstName = patientInfo.firstName || extracted.firstName || "";
+          let rawLastName = patientInfo.lastName || extracted.lastName || "";
+          if (!rawFirstName && !rawLastName && (patientInfo.patientName || extracted.patientName)) {
+            const parts = splitName(patientInfo.patientName || extracted.patientName);
+            rawFirstName = parts.firstName;
+            rawLastName = parts.lastName;
           }
 
-          if (patientInfo.dateOfBirth) {
-            state.existingUserData.dateOfBirth = normalizeDOB(patientInfo.dateOfBirth);
+          const rawDob =
+            patientInfo.dateOfBirth ||
+            extracted.dateOfBirth ||
+            patientInfo.reportDate ||
+            extracted.reportDate ||
+            "";
+          const rawGender = patientInfo.gender || extracted.gender || "";
+          const rawEmail = patientInfo.email || extracted.email || "";
+          const rawPhone =
+            patientInfo.phoneNumber ||
+            extracted.phoneNumber ||
+            patientInfo.mobile ||
+            extracted.mobile ||
+            "";
+          const rawBloodGroup = extracted.bloodGroup || patientInfo.bloodGroup || "";
+          const rawAllergies = Array.isArray(extracted.allergies)
+            ? extracted.allergies
+            : Array.isArray(patientInfo.allergies)
+              ? patientInfo.allergies
+              : [];
+
+          // Normalize each value with the same helpers used for login data
+          const normFirstName = normalizeName(rawFirstName) || "";
+          const normLastName = normalizeName(rawLastName) || "";
+          const normDob = normalizeDOB(rawDob) || "";
+          const normGender = rawGender ? String(rawGender).trim().toLowerCase() : "";
+          const normEmail = rawEmail ? String(rawEmail).trim() : "";
+          const normPhone = normalizePhone(rawPhone) || (rawPhone ? String(rawPhone).trim() : "");
+          const normBloodGroup = rawBloodGroup ? String(rawBloodGroup).trim() : "";
+          const normAllergies = rawAllergies.map((a) => String(a).trim()).filter(Boolean);
+
+          // Build state.documentData as a FLAT object
+          state.documentData = {
+            firstName: normFirstName || null,
+            lastName: normLastName || null,
+            dateOfBirth: normDob || null,
+            gender: normGender || null,
+            email: normEmail || null,
+            phoneNumber: normPhone || null,
+            bloodGroup: normBloodGroup || null,
+            allergies: normAllergies,
+          };
+
+          // Existing state.existingUserData assignment
+          if (normFirstName || normLastName) {
+            state.existingUserData.firstName = normFirstName || state.existingUserData.firstName;
+            state.existingUserData.lastName = normLastName || state.existingUserData.lastName;
           }
 
-          if (patientInfo.gender) {
-            state.existingUserData.gender = patientInfo.gender;
+          if (normDob) {
+            state.existingUserData.dateOfBirth = normDob;
           }
 
-          if (patientInfo.email) {
-            state.existingUserData.email = patientInfo.email.trim();
+          if (normGender) {
+            state.existingUserData.gender = normGender;
           }
 
-          if (extracted.bloodGroup || patientInfo.bloodGroup) {
-            state.existingUserData.bloodGroup = extracted.bloodGroup || patientInfo.bloodGroup;
+          if (normEmail) {
+            state.existingUserData.email = normEmail;
           }
 
-          if (Array.isArray(extracted.allergies)) {
-            state.existingUserData.allergies = extracted.allergies.map((a) => String(a).trim());
-          } else if (Array.isArray(patientInfo.allergies)) {
-            state.existingUserData.allergies = patientInfo.allergies.map((a) => String(a).trim());
+          if (normBloodGroup) {
+            state.existingUserData.bloodGroup = normBloodGroup;
           }
 
-          if (patientInfo.phoneNumber) {
-            state.existingUserData.phoneNumber = patientInfo.phoneNumber.trim();
+          if (normAllergies.length > 0) {
+            state.existingUserData.allergies = normAllergies;
+          }
+
+          if (normPhone) {
+            state.existingUserData.phoneNumber = normPhone;
           }
 
           if (Array.isArray(patientInfo.medicalConditions)) {
@@ -2172,10 +2224,14 @@ class OnboardingService {
             state.foundMedicines = [];
           }
 
+          // Set state.documentExtracted = true ONLY after documentData is successfully assigned
           state.documentExtracted = true;
           state.documentUploaded = true;
           state.currentStep = computeCurrentStep(state);
-          console.log("[OnboardingService] Successfully loaded and merged document data.");
+          console.log(
+            "[OnboardingService] Successfully loaded and merged document data:",
+            state.documentData,
+          );
 
           if (state.chatSessionId && !state.documentAttachedToChat) {
             try {
@@ -2194,10 +2250,18 @@ class OnboardingService {
             }
           }
         } else {
-          console.warn("[OnboardingService] Document or structuredExtractedData not found in DB.");
+          console.warn(
+            "[OnboardingService] Document or structuredExtractedData not found/empty in DB.",
+          );
+          state.ocrFailed = true;
+          state.documentExtracted = false;
+          state.currentStep = "ASK_UPLOAD_DOCUMENT_FAILED";
         }
       } catch (err) {
         console.error("[OnboardingService] Failed to load document data from DB:", err);
+        state.ocrFailed = true;
+        state.documentExtracted = false;
+        state.currentStep = "ASK_UPLOAD_DOCUMENT_FAILED";
       }
     }
 

@@ -27,6 +27,13 @@
 - **NEVER create `.ts` / `.tsx` files. Write `.js` only. No TypeScript type annotations.**
 - Do not add TypeScript syntax to files. (The runtime is capable of stripping types, but this project intentionally does NOT use it — plain JS only.)
 
+### Non-negotiable code rules (apply to EVERY change)
+
+1. **No inline imports.** NEVER write `require` / `import` inside a function, method, or class — all imports live at the TOP of the file. If hoisting causes a circular dependency, FIX the cycle instead of lazy-loading (see Section 7).
+2. **Messages come from constants.** All response/error messages MUST come from `messageConstants` / `errorConstants` in `src/constants/`. Never hardcode a message inline and never use `CONSTANT || "fallback"`. Add a new constant if one is missing (see Section 7).
+3. **Typed values are enums.** Any field with a fixed set of values (gender, status, file type, OCR status, etc.) MUST be an enum in `src/enums/` and imported — never inline arrays or magic strings like `["male", "female"]`. Enum values MUST match the DB schema (see Section 7).
+4. **Zod validates every request.** Every request carrying input (body / params / query) MUST have a Zod schema in `src/validations/`, run as middleware BEFORE the controller (see Section 7).
+
 ### Plan first
 
 - For any non-trivial task, first output a short plan: which existing files/models/services you will reuse and what you will add. WAIT for confirmation before writing code.
@@ -214,7 +221,8 @@ sequenceDiagram
 ### Modules & language
 
 - CommonJS (`require` / `module.exports`). Plain JavaScript (`.js`) only — no TypeScript.
-- **All `require()` / imports go at the TOP of the file.** No in-method/inline requires. No duplicate requires — reuse the existing top-level import if the module is already required.
+- **All `require()` / imports go at the TOP of the file. NEVER put `require` / `import` inside a function, method, class, or any block.** No in-method/inline requires. No duplicate requires — reuse the existing top-level import if the module is already required.
+  - **Circular dependencies:** if moving a `require` to the top creates a circular dependency, FIX the cycle (extract the shared code into a separate module that both files import) — do NOT lazy-load inside a method to hide it. Only as a genuine last resort may a `require` stay inside a function, and then it MUST carry an inline comment explaining the specific circular dependency.
 
 ### Architecture — decoupled layers (Clean Architecture)
 
@@ -227,12 +235,17 @@ Route → Validation (Zod middleware) → Controller → Service → Repository 
 Each layer may only call the layer directly below it. Never skip a layer, never call upward, never duplicate logic across layers.
 
 - **Validation** (`src/validations/<name>.validation.js`, Zod):
+  - **Every request that carries input (body, params, or query) MUST have a Zod schema and be validated — no route with input may skip validation.**
   - Define Zod schemas for request body/params/query.
   - Runs as **route middleware BEFORE the controller**. Controllers consume already-validated input and must NOT re-validate raw request shape.
+  - Validate enum-typed fields against the shared enums in `src/enums/` (see "Typed values (enums)" below), not against inline value lists.
   - No business logic, no DB access, no service/repository calls.
+  - **File uploads:** mimetype allowlists, size limits, file-count limits, and required-file checks MUST be validated in middleware — via the multer config (`fileFilter` + `limits`) or a dedicated upload-validation middleware in `src/middlewares/` — NEVER inside controllers or services. Allowed mime types and size/count limits live in `constants/` or `configs/`; never hardcode them inline.
+  - **No request-shape normalization outside middleware:** controllers must NOT parse or normalize `req.files` / `req.body` shapes (e.g. array-vs-object juggling like `req.files.file || req.files.files`). Normalize in middleware so the controller receives ready-to-use input.
 - **Controllers** (`src/controllers/<name>.controller.js`, THIN):
   - Read already-validated input from `req`, call **exactly one** service method, and return via the response helper.
   - No business logic, no calculations, no domain conditionals, no direct DB/repository access.
+  - **Call exactly ONE service method.** Any workflow that touches multiple services/repositories (e.g. upload → object storage → OCR job creation) must be orchestrated INSIDE a single service method, never chained in the controller. The controller must not build/transform response payloads (loops, shaping `{ jobs, count }`, etc.) — the service returns ready data.
 - **Services** (`src/services/<name>.service.js` — business logic ONLY):
   - All domain logic, decisions, calculations, orchestration, and data transformation.
   - Compose one or more repository calls. Enforce domain rules and throw domain errors via the exception wrappers.
@@ -246,13 +259,21 @@ Each layer may only call the layer directly below it. Never skip a layer, never 
 
 - Always return via the standard response helpers (`successResponse` / error helper) in `src/helpers/`, with the correct `StatusCodes` and `messageConstants`.
 - Services throw domain errors via the exception wrappers (`AppError`, `NotFoundException`, etc.) in `src/exceptions/`; a service must never return `res` directly.
-- Never hardcode a message string or status code that already exists as a constant — reuse `constants/` and `StatusCodes`.
+- **All user-facing / response / error messages MUST come from the constants files** (`messageConstants`, `errorConstants` in `src/constants/`). NEVER hardcode a message string inline, and NEVER use fallback patterns like `messageConstants.FOO || "hardcoded text"`. If a message does not exist, ADD it to the appropriate constants file (following the existing naming pattern) and reference it.
+- Never hardcode a status code that already exists as a constant — reuse `StatusCodes`.
 
 ### Reuse & consistency
 
 - **Reuse first**: new business logic belongs in an EXISTING service when one fits (e.g. medication logic → existing medications service). Create a new service only if no existing one owns that domain.
 - **No duplicate utils**: check `src/utils/` (`commonUtils.js`, `jwtUtils.js`) before writing helpers like hashing, patient codes, or JWT — reuse them.
 - Keep function names, exports style, and async/await usage consistent across files.
+
+### Typed values (enums) — MANDATORY
+
+- Any field or argument with a fixed set of allowed values (gender, status, file type, OCR status, food type, etc.) MUST be defined ONCE as an enum in `src/enums/` and imported from there — never inline arrays or magic strings like `["male", "female"]` scattered across controllers/services/validations.
+- Use the enum everywhere (validation, services, repositories) so the allowed values live in a single place. Example: define `genderType` in `src/enums/` and reference `genderType.MALE` (or iterate its values), instead of hand-writing `["male", "female", "other"]`.
+- **Enum values MUST match the database schema (Section 4), which is the single source of truth.** Do not add a value the schema does not allow. If a new value is genuinely needed (e.g. adding `other` to gender), FIRST update the DB schema and generate a migration (Section 9), THEN update the enum — keep them in sync.
+- Before creating a new enum, check `src/enums/` for an existing one and reuse/extend it — no duplicates.
 
 ### Formatting
 
@@ -316,8 +337,11 @@ npm run test:ocr
 3. Schema changes have a generated migration via `npm run db:generate`.
 4. The target use case is traced end-to-end and confirmed working.
 5. No new `.ts` files, no TypeScript syntax, no unused/extra code.
-6. All `require()` are at file top with no duplicates; each new file follows the `<name>.<layer>.js` naming convention.
-7. Swagger/OpenAPI docs are added or updated for every new or changed route (Section 13), the spec loads without YAML errors, and the endpoint appears correctly in `/swagger-ui`.
+6. All `require()` / imports are at file top (NONE inside functions/methods/classes) with no duplicates; each new file follows the `<name>.<layer>.js` naming convention.
+7. No hardcoded messages — all response/error messages come from `messageConstants` / `errorConstants`; no `CONSTANT || "fallback"` patterns remain.
+8. All fixed-value fields use enums from `src/enums/` (no inline value arrays / magic strings), and enum values match the DB schema.
+9. Every route that carries input has a Zod validation schema wired as middleware before the controller.
+10. Swagger/OpenAPI docs are added or updated for every new or changed route (Section 13), the spec loads without YAML errors, and the endpoint appears correctly in `/swagger-ui`.
 
 ---
 

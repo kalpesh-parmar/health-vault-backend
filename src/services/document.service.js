@@ -15,11 +15,21 @@
  * inside a single transaction (see documentPersistenceService).
  */
 
+const { db } = require("../configs/db");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
-const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
+const { FileCategory } = require("../enums/fileCategory");
+const { documentType } = require("../enums/documentType");
+const { ocrStatus } = require("../enums/ocrStatus");
+const {
+  NotFoundException,
+  InvalidRequestException,
+  UnauthorizedException,
+} = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
+const patientRepository = require("../repositories/patientRepository");
 const objectStorageService = require("./objectStorage.service");
+const documentOcrJobService = require("./documentOcrJob.service");
 const {
   idParamSchema,
   listDocumentsFilterSortSchema,
@@ -130,6 +140,92 @@ class DocumentService {
     await objectStorageService.deleteFile(fileKey);
     await documentRepository.deleteByPatientId(userId);
     return { message: messageConstants.DOCUMENT_DELETED };
+  }
+
+  async uploadPatientDocuments(patientId, files, authUserId) {
+    if (!patientId || patientId !== authUserId) {
+      throw new UnauthorizedException("Unauthorized access to patient resource");
+    }
+
+    const existingPatient = await patientRepository.findById(patientId);
+    if (!existingPatient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      throw new InvalidRequestException("At least one document file is required.");
+    }
+
+    if (files.length > 5) {
+      throw new InvalidRequestException("Maximum 5 document files allowed.");
+    }
+
+    const uploadedFileKeys = [];
+    try {
+      const documentRecords = [];
+      for (const file of files) {
+        const uploadResult = await objectStorageService.uploadFile(
+          file,
+          FileCategory.DOCUMENT,
+          patientId,
+        );
+        uploadedFileKeys.push(uploadResult.fileKey);
+
+        const signedUrl = await objectStorageService.getSignedFileUrl(uploadResult.fileKey);
+
+        documentRecords.push({
+          userId: patientId,
+          documentType: documentType.MEDICAL_DOCUMENT,
+          fileName: uploadResult.fileName || file.originalname,
+          filePath: uploadResult.fileKey,
+          s3Key: uploadResult.fileKey,
+          s3Bucket: uploadResult.s3Bucket || null,
+          fileType: file.mimetype,
+          fileSize: uploadResult.fileSize || file.size,
+          ocrStatus: ocrStatus.PENDING,
+          _signedUrl: signedUrl,
+        });
+      }
+
+      const insertPayloads = documentRecords.map(({ _signedUrl, ...rest }) => rest);
+      const createdRows = await db.transaction(async (tx) => {
+        const rows = await documentRepository.createMany(insertPayloads, tx);
+        const jobRows = await Promise.all(
+          documentRecords.map((docRec) =>
+            documentOcrJobService.createQueuedJob(
+              {
+                fileKey: docRec.filePath,
+                userId: patientId,
+                mimeType: docRec.fileType,
+                originalName: docRec.fileName,
+              },
+              tx,
+            ),
+          ),
+        );
+        return rows.map((row, idx) => ({
+          ...row,
+          jobId: jobRows[idx]?.id || null,
+        }));
+      });
+
+      return createdRows.map((doc, idx) => ({
+        ...doc,
+        fileKey: doc.filePath || doc.s3Key,
+        signedUrl: documentRecords[idx]?._signedUrl || null,
+        fileUrl: documentRecords[idx]?._signedUrl || null,
+      }));
+    } catch (error) {
+      console.error("Error in file upload: ", error);
+      for (const key of uploadedFileKeys) {
+        try {
+          await objectStorageService.deleteFile(key);
+        } catch (cleanupErr) {
+          console.warn(`[DocumentService] Cleanup failed for file key ${key}:`, cleanupErr.message);
+        }
+      }
+      throw error;
+    }
   }
 }
 
