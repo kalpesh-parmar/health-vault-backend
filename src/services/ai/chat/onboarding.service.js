@@ -819,15 +819,20 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const extractedBg = await extractFieldFromMessage(
-          "bloodGroup",
-          msg,
-          state.preferredLanguage,
-        );
-        if (extractedBg && typeof extractedBg === "string") {
-          const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
-          if (bloodGroupTypeValues.includes(bgVal)) {
-            state.existingUserData.bloodGroup = bgVal;
+        const norm = msg.trim().toUpperCase().replace(/\s+/g, "");
+        if (bloodGroupTypeValues.includes(norm)) {
+          state.existingUserData.bloodGroup = norm;
+        } else {
+          const extractedBg = await extractFieldFromMessage(
+            "bloodGroup",
+            msg,
+            state.preferredLanguage,
+          );
+          if (extractedBg && typeof extractedBg === "string") {
+            const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
+            if (bloodGroupTypeValues.includes(bgVal)) {
+              state.existingUserData.bloodGroup = bgVal;
+            }
           }
         }
       }
