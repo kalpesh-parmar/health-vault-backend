@@ -328,7 +328,7 @@ class OcrService {
     fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     try {
-      const popplerPath = env.popplerPath || "D:/Release-26.02.0-0/poppler-26.02.0/Library/bin";
+      const popplerPath = env.popplerPath || "C:/Users/hp/Downloads/poppler-26.02.0/Library/bin";
       const pdftoppmExe = path.join(popplerPath, "pdftoppm.exe");
       let cmd = `"${pdftoppmExe}" -jpeg -r 100`;
       if (options.firstPageOnly) {
@@ -1092,7 +1092,13 @@ Return STRICT JSON only:
 
       // Document-Level Medical Check: Reject only if NO page in the document was medical
       if (!hasMedicalPage) {
-        throw new NonMedicalDocumentException("The uploaded file is not a medical document.");
+        const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
+        const uniqueCategories = [...new Set(detectedCategories)];
+        const categoryStr =
+          uniqueCategories.length > 0 ? ` (detected category: ${uniqueCategories.join(", ")})` : "";
+        throw new NonMedicalDocumentException(
+          `The uploaded file is not a medical document${categoryStr}.`,
+        );
       }
     }
 
@@ -1484,6 +1490,8 @@ ${rawText}
 
     const rawOcrData = {
       blocks: ocrPayload?.paragraphs || [],
+      // confidence:typeof existingConfidence === "number"?
+      //   existingConfidence: extractedText.trim().length > 0? 0.95 : null,
       confidence: ocrPayload?.confidence ?? rawOcr?.metadata?.confidence ?? null,
       engine: rawOcr?.metrics?.engine || "pymupdf",
       fullText: ocrPayload?.fullText || ocrPayload?.text || rawOcr?.ocr_text || "",

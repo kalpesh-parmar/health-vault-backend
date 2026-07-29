@@ -283,7 +283,6 @@ class DocumentOcrJobService {
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
-
       // 4. Analyzing Report stage
       await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
         metadata: {
@@ -322,7 +321,6 @@ class DocumentOcrJobService {
       let summaryEnglish = structured?.medicalExtraction?.summary || structured?.summary || "";
       let summaryPreferredLanguage = "";
       const rawTextToSummarize = rawOcrData.fullText || "";
-
       if (rawTextToSummarize) {
         if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
           if (!summaryEnglish) {
@@ -346,6 +344,8 @@ class DocumentOcrJobService {
               rawTextToSummarize,
               preferredLanguage,
             );
+            console.log("[SC]>>>> pref summary", summaryPreferredLanguage);
+            console.log("[SC]>>>>>language", preferredLanguage);
           }
         }
       }
@@ -355,11 +355,11 @@ class DocumentOcrJobService {
 
       // Best-effort graph extraction
       let graphs = [];
-      // try {
-      // graphs = await aiServiceClient.extractGraphs(normalized);
-      // } catch (error) {
-      //   console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
-      // }
+      try {
+        // graphs = await aiServiceClient.extractGraphs(normalized);
+      } catch (error) {
+        console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
+      }
 
       const finalPayload = {
         embeddingsGenerated: false,

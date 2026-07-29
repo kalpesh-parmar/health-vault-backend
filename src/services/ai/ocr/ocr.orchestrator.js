@@ -1,5 +1,6 @@
 const { env } = require("../../../configs/env");
 const objectStorageService = require("../../objectStorage.service");
+const { AppError, NonMedicalDocumentException } = require("../../../exceptions/appError");
 const {
   OcrEmptyResultError,
   OcrInvalidResponseError,
@@ -208,13 +209,12 @@ class OcrOrchestrator {
         buffer,
         filename,
         mimeType: resolvedMime,
-        mode: "detailed",
+        traceId: trace,
       });
-
-      const parsedOCR = this._parseOcrJson(jsonStr);
+      const parsedOCR = JSON.parse(jsonStr);
 
       result = buildOcrResult({
-        pages: [],
+        pages: parsedOCR.pages,
         engine: `ollama:${env.aiModel}`,
         medicalExtraction: parsedOCR.medicalExtraction,
         filename,
@@ -227,16 +227,23 @@ class OcrOrchestrator {
         stack: error.stack,
       });
 
-      if (error instanceof OcrInvalidResponseError) {
+      if (
+        error instanceof OcrInvalidResponseError ||
+        error instanceof NonMedicalDocumentException ||
+        error instanceof AppError
+      ) {
         throw error;
       }
 
-      throw new OcrEmptyResultError("OCR model failed and processing was stopped", {
-        filename,
-        model: env.aiModel,
-        cause: error.message,
-        stack: error.stack,
-      });
+      throw new OcrEmptyResultError(
+        error.message || "OCR model failed and processing was stopped",
+        {
+          filename,
+          model: env.aiModel,
+          cause: error.message,
+          stack: error.stack,
+        },
+      );
     }
 
     const quality = evaluateQuality(result);
