@@ -19,12 +19,13 @@ const {
   onboardingService,
   splitName,
   normalizeDOB,
+  normalizeGenderLocally,
+  isValidGender,
+  extractFieldFromMessage,
 } = require("../../../src/services/ai/chat/onboarding.service");
 const { ollamaClient } = require("../../../src/services/ai/clients/ollamaClient");
 const patientRepository = require("../../../src/repositories/patientRepository");
 const authProviderRepository = require("../../../src/repositories/authProviderRepository");
-const medicationRepository = require("../../../src/repositories/medicationRepository");
-const { db } = require("../../../src/configs/db");
 
 jest.mock("../../../src/services/ai/clients/ollamaClient", () => ({
   ollamaClient: {
@@ -47,994 +48,813 @@ jest.mock("../../../src/repositories/authProviderRepository", () => ({
   findByUserId: jest.fn().mockResolvedValue([]),
 }));
 
-describe("OnboardingService Structured Flow", () => {
+describe("OnboardingService Re-sequenced Target Flow", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it("Case 1: Document contains complete required fields (Sarah Anderson, DOB: 01.01.1989, Gender: Female) + optional email", async () => {
+  it("Path 1: UPLOAD 'Yes' with conflict -> required Q&A -> CONFLICT card -> confirm -> optional Q&A -> medication -> REGISTER_USER", async () => {
+    patientRepository.findById.mockResolvedValue({
+      id: "path1-user",
+      firstName: "LoginFirstName",
+      lastName: "LoginLastName",
+      email: "login@test.com",
+    });
+    authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
+
     const mockState = {
-      isOnboardingCompleted: false,
-      uploadedMedicalDocument: true,
-      documentText:
-        "Patient Name: Sarah Anderson, DOB: 01.01.1989, Sex: Female, Email: sarah@anderson.com",
-      preferredLanguage: "en",
+      preferredLanguage: "english",
       flowMode: "UPLOAD",
-      currentStep: "ASK_FIRST_NAME",
-      documentExtracted: false,
-      documentConfirmed: true,
-      bloodGroupSkipped: true,
-      allergiesSkipped: true,
-      existingUserData: {
-        firstName: "",
-        lastName: "",
-        dateOfBirth: "",
-        gender: "",
-        email: "",
-        bloodGroup: "",
-        allergies: [],
-      },
-    };
-
-    ollamaClient.chat.mockResolvedValue({
-      text: JSON.stringify({
-        firstName: "Sarah",
-        lastName: "Anderson",
-        dateOfBirth: "01.01.1989",
-        gender: "Female",
-        email: "sarah@anderson.com",
-      }),
-      done_reason: "stop",
-    });
-
-    const result = await onboardingService.chat("Document Uploaded", [], mockState);
-
-    expect(result.action).toBe("REGISTER_USER");
-    expect(result.data).toEqual({
-      firstName: "Sarah",
-      lastName: "Anderson",
-      dateOfBirth: "1989-01-01",
-      gender: "female",
-      email: "sarah@anderson.com",
-      bloodGroup: null,
-      allergies: [],
-    });
-  });
-
-  it("Case 2: Document contains Name (Sarah Anderson) but missing DOB and Gender", async () => {
-    const mockState = {
-      isOnboardingCompleted: false,
-      uploadedMedicalDocument: true,
-      documentText: "Patient Name: Sarah Anderson",
-      preferredLanguage: "en",
-      flowMode: "UPLOAD",
-      currentStep: "ASK_FIRST_NAME",
-      documentExtracted: false,
-      documentConfirmed: true,
-      existingUserData: {
-        firstName: "",
-        lastName: "",
-        dateOfBirth: "",
-        gender: "",
-        email: "",
-        bloodGroup: "",
-        allergies: [],
-      },
-    };
-
-    ollamaClient.chat.mockResolvedValue({
-      text: JSON.stringify({
-        firstName: "Sarah",
-        lastName: "Anderson",
-      }),
-      done_reason: "stop",
-    });
-
-    const result = await onboardingService.chat("Document Uploaded", [], mockState);
-
-    expect(result.action).toBe("ASK_DOB");
-    expect(result.message_en).toBe("What is your date of birth? (Example: 1989-01-01)");
-  });
-
-  it("Case 3: Document contains Name and DOB but missing Gender -> Must not guess gender", async () => {
-    const mockState = {
-      isOnboardingCompleted: false,
-      uploadedMedicalDocument: true,
-      documentText: "Patient Name: Sarah Anderson, DOB: 01.01.1989",
-      preferredLanguage: "en",
-      flowMode: "UPLOAD",
-      currentStep: "ASK_FIRST_NAME",
-      documentExtracted: false,
-      documentConfirmed: true,
-      existingUserData: {
-        firstName: "",
-        lastName: "",
-        dateOfBirth: "",
-        gender: "",
-        email: "",
-        bloodGroup: "",
-        allergies: [],
-      },
-    };
-
-    ollamaClient.chat.mockResolvedValue({
-      text: JSON.stringify({
-        firstName: "Sarah",
-        lastName: "Anderson",
-        dateOfBirth: "01.01.1989",
-        gender: "", // No guessing
-      }),
-      done_reason: "stop",
-    });
-
-    const result = await onboardingService.chat("Document Uploaded", [], mockState);
-
-    expect(result.action).toBe("ASK_GENDER");
-    expect(result.message_en).toBe("What is your gender?");
-    expect(result.options).toEqual([
-      { label_en: "Male", label_gu: "પુરુષ", value: "male" },
-      { label_en: "Female", label_gu: "સ્ત્રી", value: "female" },
-    ]);
-  });
-
-  it("Case 4: Manual entry flow, no document provided", async () => {
-    const mockState = {
-      isOnboardingCompleted: false,
-      uploadedMedicalDocument: false,
-      documentText: "",
-      preferredLanguage: "en",
-      flowMode: null,
-      currentStep: "ASK_UPLOAD_OR_SKIP",
-      documentExtracted: false,
-      existingUserData: {
-        firstName: "",
-        lastName: "",
-        dateOfBirth: "",
-        gender: "",
-        email: "",
-        bloodGroup: "",
-        allergies: [],
-      },
-    };
-
-    const result = await onboardingService.chat("MANUAL", [], mockState);
-
-    expect(result.action).toBe("ASK_FIRST_NAME");
-    expect(result.message_en).toBe("What is your first name?");
-    expect(result.message_en).not.toBe("Please provide the information");
-  });
-
-  it("Should support language selection at start", async () => {
-    const mockState = {
-      isOnboardingCompleted: false,
-      uploadedMedicalDocument: false,
-      documentText: "",
-      preferredLanguage: null,
-      flowMode: null,
-      documentExtracted: false,
-      existingUserData: {
-        firstName: "",
-        lastName: "",
-        dateOfBirth: "",
-        gender: "",
-        email: "",
-        bloodGroup: "",
-        allergies: [],
-      },
-    };
-
-    const result = await onboardingService.chat("hello", [], mockState);
-
-    expect(result.action).toBe("ASK_LANGUAGE");
-    expect(result.options).toEqual([
-      { label: "English / અંગ્રેજી", value: "english" },
-      { label: "ગુજરાતી", value: "gujarati" },
-    ]);
-  });
-
-  it("Should split full names correctly and handle single names", async () => {
-    expect(splitName("Sarah Anderson")).toEqual({ firstName: "Sarah", lastName: "Anderson" });
-    expect(splitName("John Michael Smith")).toEqual({
-      firstName: "John",
-      lastName: "Michael Smith",
-    });
-    expect(splitName("Madonna")).toEqual({ firstName: "Madonna", lastName: "" });
-  });
-
-  it("Should normalize Date of Birth formats correctly", async () => {
-    expect(normalizeDOB("01.01.1989")).toBe("1989-01-01");
-    expect(normalizeDOB("01/01/1989")).toBe("1989-01-01");
-    expect(normalizeDOB("01-01-1989")).toBe("1989-01-01");
-    expect(normalizeDOB("1989-01-01")).toBe("1989-01-01");
-  });
-
-  it("Should transition past ASK_UPLOAD_OR_SKIP and ASK_UPLOAD_DOCUMENT if document is already uploaded and extracted", async () => {
-    const mockState = {
-      currentStep: "ASK_UPLOAD_OR_SKIP",
-      uploadedMedicalDocument: true,
+      currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
       documentUploaded: true,
       documentExtracted: true,
-      flowMode: null,
-      preferredLanguage: "gujarati",
+      documentConfirmed: true,
+      useDocumentData: true,
+      documentData: {
+        firstName: "DocFirstName", // Mismatch with LoginFirstName
+        lastName: "DocLastName", // Mismatch with LoginLastName
+      },
+      loginData: {
+        firstName: { value: "LoginFirstName", verified: false },
+        lastName: { value: "LoginLastName", verified: false },
+        email: { value: "login@test.com", verified: true },
+      },
       existingUserData: {
-        firstName: "Sarah",
-        lastName: "Anderson",
-        dateOfBirth: "2023-11-14",
-        gender: null,
-        bloodGroup: null,
-        allergies: [],
-        email: null,
+        firstName: "DocFirstName",
+        lastName: "DocLastName",
       },
     };
 
-    const result = await onboardingService.chat("UPLOAD", [], mockState);
+    // Step 1: User says YES to document ownership -> Missing required Q&A (dateOfBirth / gender) is asked BEFORE card
+    let result = await onboardingService.chat("YES", [], mockState, "path1-user");
+    expect(result.action).toBe("ASK_DOB");
 
-    expect(result.action).not.toBe("ASK_UPLOAD_DOCUMENT");
-    expect(result.action).not.toBe("ASK_UPLOAD_OR_SKIP");
-    expect(result.state.currentStep).toBe("ASK_GENDER");
+    // Step 2: Answer DOB
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "1990-01-01" }) });
+    result = await onboardingService.chat("1990-01-01", [], result.state, "path1-user");
+    expect(result.action).toBe("ASK_GENDER");
+
+    // Step 3: Answer Gender -> All required Q&A collected -> CONFLICT Card triggers ONCE
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "male" }) });
+    result = await onboardingService.chat("male", [], result.state, "path1-user");
+    expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.mode).toBe("CONFLICT");
+
+    // Verify card payload includes Q&A answers and required fields, but NOT optional fields
+    const keysOnCard = result.fields.map((f) => f.key);
+    expect(keysOnCard).toContain("firstName");
+    expect(keysOnCard).toContain("dateOfBirth");
+    expect(keysOnCard).not.toContain("bloodGroup");
+
+    // Step 4: User resolves conflict by selecting "LOGIN"
+    result = await onboardingService.chat(
+      JSON.stringify({ source: "LOGIN" }),
+      [],
+      result.state,
+      "path1-user",
+    );
+    expect(result.state.profileConfirmed).toBe(true);
+
+    // Step 5: AFTER card confirmation -> Optional Q&A (ASK_BLOOD_GROUP) runs
+    expect(result.action).toBe("ASK_BLOOD_GROUP");
+
+    // Step 6: Skip Blood Group -> ASK_ALLERGIES
+    result = await onboardingService.chat("SKIP", [], result.state, "path1-user");
+    expect(result.action).toBe("ASK_ALLERGIES");
+
+    // Step 7: Skip Allergies -> Medication flow (or REGISTER_USER)
+    result = await onboardingService.chat("SKIP", [], result.state, "path1-user");
+    expect(result.action).toBe("MEDICINE_OPTIONS");
   });
 
-  describe("New Refined Onboarding Flow Steps", () => {
-    beforeEach(() => {
-      patientRepository.updateById.mockClear();
+  it("Path 2: UPLOAD 'No' -> document excluded (useDocumentData = false) -> required Q&A -> CONFIRM card -> confirm -> optional Q&A -> complete", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "UPLOAD",
+      currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+      documentUploaded: true,
+      documentExtracted: true,
+      documentData: {
+        firstName: "DocOnlyFirstName",
+        lastName: "DocOnlyLastName",
+      },
+      loginData: {
+        firstName: { value: "LoginUser", verified: false },
+        lastName: { value: "LoginLast", verified: false },
+      },
+      existingUserData: {
+        firstName: "DocOnlyFirstName",
+        lastName: "DocOnlyLastName",
+      },
+    };
+
+    // User says NO to document ownership -> useDocumentData set to false -> revert to MANUAL
+    let result = await onboardingService.chat("NO", [], mockState, "path2-user");
+    expect(result.state.useDocumentData).toBe(false);
+
+    // Missing DOB & Gender are asked via Q&A
+    expect(result.action).toBe("ASK_DOB");
+
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "1995-05-15" }) });
+    result = await onboardingService.chat("1995-05-15", [], result.state, "path2-user");
+    expect(result.action).toBe("ASK_GENDER");
+
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "female" }) });
+    result = await onboardingService.chat("female", [], result.state, "path2-user");
+
+    // Card triggers in CONFIRM mode because useDocumentData === false (no document conflict)
+    expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.mode).toBe("CONFIRM");
+
+    // Confirm card
+    result = await onboardingService.chat(
+      JSON.stringify({ confirmed: true }),
+      [],
+      result.state,
+      "path2-user",
+    );
+    expect(result.state.profileConfirmed).toBe(true);
+
+    // Optional Q&A runs post-card
+    expect(result.action).toBe("ASK_BLOOD_GROUP");
+  });
+
+  it("Path 3: Mobile OTP -> required Q&A -> CONFIRM card -> confirm -> optional Q&A -> complete", async () => {
+    patientRepository.findById.mockResolvedValue({
+      id: "otp-user",
+      mobile: "9876543210",
+      countryCode: "+91",
     });
+    authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
 
-    it("Should map old step names (CONFIRM_DOCUMENT_DETAILS) to CONFIRM_DOCUMENT_OWNERSHIP via alias mapping", async () => {
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_DETAILS",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        existingUserData: {
-          firstName: "John",
-          lastName: "Doe",
-        },
-      };
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      currentStep: "ASK_FIRST_NAME",
+      loginData: {
+        phoneNumber: { value: "+919876543210", verified: true },
+      },
+      existingUserData: {},
+    };
 
-      const result = await onboardingService.chat("YES", [], mockState);
-      expect(result.state.currentStep).not.toBe("CONFIRM_DOCUMENT_DETAILS");
-    });
+    // User provides First Name
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "John" }) });
+    let result = await onboardingService.chat("John", [], mockState, "otp-user");
+    expect(result.action).toBe("ASK_LAST_NAME");
 
-    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'NO' by discarding extracted details and reverting to MANUAL flow", async () => {
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        documentText: "Extracted Patient Profile text",
-        hasSocialData: true,
-        socialData: {
-          firstName: "GoogleFirst",
-          lastName: "GoogleLast",
-          email: "google@gmail.com",
-          phoneNumber: "+1234567890",
-        },
-        documentData: {
-          firstName: "DocFirst",
-          lastName: "DocLast",
-        },
-        existingUserData: {
-          firstName: "DocFirst",
-          lastName: "DocLast",
-          phoneNumber: "",
-        },
-      };
+    // Last Name
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "Doe" }) });
+    result = await onboardingService.chat("Doe", [], result.state, "otp-user");
+    expect(result.action).toBe("ASK_DOB");
 
-      const result = await onboardingService.chat("NO", [], mockState, "test-user-id");
+    // DOB
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "1988-08-08" }) });
+    result = await onboardingService.chat("1988-08-08", [], result.state, "otp-user");
+    expect(result.action).toBe("ASK_GENDER");
 
-      expect(result.state.flowMode).toBe("MANUAL");
-      expect(result.state.documentUploaded).toBe(false);
-      expect(result.state.documentExtracted).toBe(false);
-      expect(result.state.existingUserData.firstName).toBe("GoogleFirst");
-      expect(result.state.existingUserData.lastName).toBe("GoogleLast");
+    // Gender
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "male" }) });
+    result = await onboardingService.chat("male", [], result.state, "otp-user");
 
-      expect(patientRepository.updateById).toHaveBeenCalled();
-    });
+    // CONFIRM mode card
+    expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.mode).toBe("CONFIRM");
 
-    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and transition to RESOLVE_PROFILE_SOURCE if there are differences", async () => {
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        hasSocialData: true,
-        socialData: {
-          firstName: "GoogleFirst",
-          lastName: "GoogleLast",
-        },
-        documentData: {
-          firstName: "DocFirst",
-          lastName: "DocLast",
-        },
-        existingUserData: {
-          firstName: "DocFirst",
-          lastName: "DocLast",
-        },
-      };
+    // Confirm Card
+    result = await onboardingService.chat(
+      JSON.stringify({ confirmed: true }),
+      [],
+      result.state,
+      "otp-user",
+    );
+    expect(result.state.profileConfirmed).toBe(true);
 
-      const result = await onboardingService.chat("YES", [], mockState);
-      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
-    });
+    // Optional Q&A
+    expect(result.action).toBe("ASK_BLOOD_GROUP");
+  });
 
-    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and highlight conflicting last names", async () => {
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        hasSocialData: true,
-        socialData: {
-          firstName: "John",
-          lastName: "Doe",
-        },
-        documentData: {
-          firstName: "John",
-          lastName: "Smith",
-        },
-        existingUserData: {
-          firstName: "John",
-          lastName: "Smith",
-        },
-      };
+  it("Path 4: MANUAL + Google Login (name present) -> skip name Q&A, ask DOB+Gender -> CONFIRM card -> optional Q&A", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      loginData: {
+        firstName: { value: "GoogleUser", verified: false },
+        lastName: { value: "GoogleLast", verified: false },
+        email: { value: "user@gmail.com", verified: true },
+      },
+      existingUserData: {},
+    };
 
-      const result = await onboardingService.chat("YES", [], mockState);
-      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    // First call: names are already present in loginData, so it skips names and asks ASK_DOB directly
+    let result = await onboardingService.chat("hello", [], mockState, "google-user");
+    expect(result.action).toBe("ASK_DOB");
 
-      const lastNameField = result.fields.find((f) => f.key === "lastName");
-      expect(lastNameField).toBeDefined();
-      expect(lastNameField.isMismatch).toBe(true);
-      expect(lastNameField.loginValue).toBe("Doe");
-      expect(lastNameField.documentValue).toBe("Smith");
-    });
+    // Answer DOB
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "1992-02-02" }) });
+    result = await onboardingService.chat("1992-02-02", [], result.state, "google-user");
+    expect(result.action).toBe("ASK_GENDER");
 
-    it("Should handle CONFIRM_DOCUMENT_OWNERSHIP = 'YES' and silently merge if no mismatch is present", async () => {
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        hasSocialData: true,
-        socialData: {
-          firstName: "Sarah",
-          lastName: "Anderson",
-        },
-        documentData: {
-          firstName: "Sarah",
-          lastName: "Anderson",
-        },
-        existingUserData: {
-          firstName: "Sarah",
-          lastName: "Anderson",
-        },
-      };
+    // Answer Gender
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "female" }) });
+    result = await onboardingService.chat("female", [], result.state, "google-user");
+    expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.mode).toBe("CONFIRM");
+  });
 
-      const result = await onboardingService.chat("YES", [], mockState);
-      expect(result.state.currentStep).toBe("ASK_DOB");
-    });
+  it("Guard: Once profileConfirmed === true, REQUIRED Q&A and RESOLVE_PROFILE_SOURCE card are never returned again", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: null, // missing required, but profileConfirmed is TRUE
+        lastName: null,
+      },
+    };
 
-    it("Should resolve profile conflict card with Use Social Login", async () => {
-      const mockState = {
-        currentStep: "RESOLVE_PROFILE_SOURCE",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        hasSocialData: true,
-        socialData: {
-          firstName: "SocialSarah",
-          lastName: "SocialAnderson",
-        },
-        documentData: {
-          firstName: "DocSarah",
-          lastName: "DocAnderson",
-        },
-        existingUserData: {
-          firstName: "DocSarah",
-          lastName: "DocAnderson",
-        },
-      };
+    const result = await onboardingService.chat("hello", [], mockState, "guard-user");
+    expect(result.action).not.toBe("ASK_FIRST_NAME");
+    expect(result.action).not.toBe("ASK_LAST_NAME");
+    expect(result.action).not.toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.action).toBe("ASK_BLOOD_GROUP");
+  });
 
-      const result = await onboardingService.chat(
-        JSON.stringify({ source: "LOGIN" }),
-        [],
-        mockState,
-      );
-      expect(result.state.profileConfirmed).toBe(true);
-      expect(result.state.existingUserData.firstName).toBe("SocialSarah");
-      expect(result.state.existingUserData.lastName).toBe("SocialAnderson");
-    });
+  it("mergeAndApplyProfile: Choosing a source that lacks gender/DOB does NOT null out Q&A-collected required values", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "UPLOAD",
+      currentStep: "RESOLVE_PROFILE_SOURCE",
+      loginData: {
+        firstName: { value: "LoginName", verified: false },
+        lastName: { value: "LoginLast", verified: false },
+        gender: { value: null, verified: false },
+        dateOfBirth: { value: null, verified: false },
+      },
+      documentData: {
+        firstName: "DocName",
+        lastName: "DocLast",
+        gender: null,
+        dateOfBirth: null,
+      },
+      existingUserData: {
+        firstName: "LoginName",
+        lastName: "LoginLast",
+        dateOfBirth: "1990-01-01", // Collected via Q&A previously
+        gender: "male", // Collected via Q&A previously
+      },
+    };
 
-    it("Should auto-fill unverified email from document for phone-OTP user with no conflict", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "otp-user-id",
-        firstName: "OtpUser",
-        lastName: "OtpLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: null,
-      });
+    const result = await onboardingService.chat(
+      JSON.stringify({ source: "LOGIN" }),
+      [],
+      mockState,
+      "preserve-user",
+    );
 
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+    expect(result.state.existingUserData.dateOfBirth).toBe("1990-01-01");
+    expect(result.state.existingUserData.gender).toBe("male");
+  });
 
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        documentData: {
-          firstName: "OtpUser",
-          lastName: "OtpLast",
-          phoneNumber: "+919000000002",
-          email: "document@email.com",
-        },
-        existingUserData: {
-          firstName: "OtpUser",
-          lastName: "OtpLast",
-        },
-      };
+  it("Resume Test 1: Resume after profileConfirmed === true -> no required ASK_* and no card re-shown; continues at optional Q&A", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: "ResumeUser",
+        lastName: "ResumeLast",
+        dateOfBirth: "1991-11-11",
+        gender: "female",
+      },
+    };
 
-      const result = await onboardingService.chat("YES", [], mockState, "otp-user-id");
+    const result = await onboardingService.chat("hello", [], mockState, "resume-user-1");
 
-      expect(result.state.currentStep).toBe("ASK_DOB");
-      expect(result.state.existingUserData.email).toBe("document@email.com");
-      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
-    });
+    expect(result.action).not.toBe("ASK_FIRST_NAME");
+    expect(result.action).not.toBe("RESOLVE_PROFILE_SOURCE");
+    expect(result.action).toBe("ASK_BLOOD_GROUP");
+  });
 
-    it("Should lock verified fields (phone + Google) when both exist", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "multi-user-id",
-        firstName: "MultiUser",
-        lastName: "MultiLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: "verified@gmail.com",
-      });
-
-      authProviderRepository.findByUserId.mockResolvedValue([
-        { provider: "mobile" },
-        { provider: "google" },
-      ]);
-
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        documentData: {
-          firstName: "MultiUser",
-          lastName: "MultiLast",
-          phoneNumber: "+919000000002",
-          email: "different@gmail.com",
-        },
-        existingUserData: {
-          firstName: "MultiUser",
-          lastName: "MultiLast",
-        },
-      };
-
-      const result = await onboardingService.chat("YES", [], mockState, "multi-user-id");
-
-      expect(result.state.currentStep).toBe("ASK_DOB");
-      expect(result.state.existingUserData.email).toBe("verified@gmail.com");
-      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
-    });
-
-    it("Should lock verified fields from manual edits and exclude them from { edited }", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "lock-user-id",
-        firstName: "LockUser",
-        lastName: "LockLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: "verified@gmail.com",
-      });
-
-      authProviderRepository.findByUserId.mockResolvedValue([
-        { provider: "mobile" },
-        { provider: "google" },
-      ]);
-
-      const mockState = {
-        currentStep: "RESOLVE_PROFILE_SOURCE",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        hasLoginData: true,
-        loginData: {
-          firstName: { value: "LockUser", verified: false },
-          lastName: { value: "LockLast", verified: false },
-          phoneNumber: { value: "+919000000001", verified: true },
-          email: { value: "verified@gmail.com", verified: true },
-        },
-        documentData: {
-          firstName: "DocUser",
-          lastName: "DocLast",
-          phoneNumber: "+919000000002",
-          email: "different@gmail.com",
-        },
-        existingUserData: {
-          firstName: "DocUser",
-          lastName: "DocLast",
-        },
-      };
-
-      const result = await onboardingService.chat(
-        JSON.stringify({
-          edited: {
-            firstName: "NewFirstName",
-            lastName: "NewLastName",
-            phoneNumber: "+919999999999",
-            email: "hacked@gmail.com",
-          },
-        }),
-        [],
-        mockState,
-        "lock-user-id",
-      );
-
-      expect(result.state.profileConfirmed).toBe(true);
-      expect(result.state.existingUserData.firstName).toBe("NewFirstName");
-      expect(result.state.existingUserData.lastName).toBe("NewLastName");
-      expect(result.state.existingUserData.email).toBe("verified@gmail.com");
-      expect(result.state.existingUserData.phoneNumber).toBe("+919000000001");
-    });
-
-    it("Should route to CONFIRM mode and return all six fields in the payload when there are no mismatches", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "confirm-user-id",
-        firstName: "ConfirmUser",
-        lastName: "ConfirmLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: "confirm@gmail.com",
-      });
-
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
-
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        documentData: {
-          firstName: "ConfirmUser",
-          lastName: "ConfirmLast",
-          phoneNumber: "+919000000001",
-          email: "confirm@gmail.com",
-        },
-        existingUserData: {
-          firstName: "ConfirmUser",
-          lastName: "ConfirmLast",
-        },
-      };
-
-      const result = await onboardingService.chat("YES", [], mockState, "confirm-user-id");
-
-      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.mode).toBe("CONFIRM");
-      expect(result.fields).toHaveLength(6);
-      expect(result.fields[0].key).toBe("firstName");
-      expect(result.fields[5].key).toBe("email");
-    });
-
-    it("Should preserve non-conflicting/document-only fields when source choice is applied", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "source-user-id",
-        firstName: "SourceUser",
-        lastName: "SourceLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: "source@gmail.com",
-      });
-
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
-
-      const mockState = {
-        currentStep: "RESOLVE_PROFILE_SOURCE",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        hasLoginData: true,
-        loginData: {
-          firstName: { value: "SourceUser", verified: false },
-          lastName: { value: "SourceLast", verified: false },
-          phoneNumber: { value: "+919000000001", verified: true },
-          email: { value: "source@gmail.com", verified: true },
-        },
-        documentData: {
-          firstName: "DocUser",
-          lastName: "SourceLast",
-          phoneNumber: "+919000000001",
-          email: "source@gmail.com",
-          gender: "female",
-          dateOfBirth: "1995-05-15",
-        },
-        existingUserData: {
-          firstName: "SourceUser",
-          lastName: "SourceLast",
-        },
-      };
-
-      // User picks source: "LOGIN" (which chooses "SourceUser" over "DocUser" for firstName conflict)
-      const result = await onboardingService.chat(
-        JSON.stringify({ source: "LOGIN" }),
-        [],
-        mockState,
-        "source-user-id",
-      );
-
-      expect(result.state.profileConfirmed).toBe(true);
-      expect(result.state.existingUserData.firstName).toBe("SourceUser");
-      // Mismatched fields not selected are kept if empty on other side, but document-only fields are NOT wiped!
-      expect(result.state.existingUserData.gender).toBe("female");
-      expect(result.state.existingUserData.dateOfBirth).toBe("1995-05-15");
-    });
-
-    it("Should skip required fields that are pre-filled in existingUserData", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "skip-user-id",
+  it("Resume Test 2: bloodGroupSkipped / allergiesSkipped persist across resume -> optional questions not re-asked", async () => {
+    const mockState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      medicationFlowDone: true,
+      existingUserData: {
         firstName: "SkipUser",
         lastName: "SkipLast",
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: "skip@gmail.com",
-      });
+        dateOfBirth: "1991-11-11",
+        gender: "female",
+      },
+    };
 
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
+    const result = await onboardingService.chat("hello", [], mockState, "resume-user-2");
 
-      const mockState = {
-        currentStep: "RESOLVE_PROFILE_SOURCE",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        hasLoginData: true,
-        loginData: {
-          firstName: { value: "SkipUser", verified: false },
-          lastName: { value: "SkipLast", verified: false },
-          phoneNumber: { value: "+919000000001", verified: true },
-          email: { value: "skip@gmail.com", verified: true },
-        },
-        documentData: {
-          firstName: "SkipUser",
-          lastName: "SkipLast",
-          phoneNumber: "+919000000001",
-          email: "skip@gmail.com",
-        },
-        existingUserData: {
-          firstName: "SkipUser",
-          lastName: "SkipLast",
-          // Let's pre-fill dateOfBirth and gender
-          dateOfBirth: "1990-01-01",
-          gender: "male",
-        },
-      };
+    expect(result.action).not.toBe("ASK_BLOOD_GROUP");
+    expect(result.action).not.toBe("ASK_ALLERGIES");
+    expect(result.action).toBe("REGISTER_USER");
+  });
 
-      const result = await onboardingService.chat(
-        JSON.stringify({ confirmed: true }),
-        [],
-        mockState,
-        "skip-user-id",
-      );
+  it("Should build RESOLVE_PROFILE_SOURCE payload without error in both CONFLICT and CONFIRM modes", async () => {
+    patientRepository.findById.mockResolvedValue({
+      id: "repro-user",
+      firstName: "Kalpesh",
+      lastName: "Parmar",
+      email: "kalpesh@test.com",
+    });
+    authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
 
-      expect(result.state.profileConfirmed).toBe(true);
-      // Since firstName, lastName, phone, email, dob, gender are all present, next step should bypass them
-      // Next step should proceed to blood group/allergies/medicines add step
-      expect(result.state.currentStep).not.toBe("ASK_DOB");
-      expect(result.state.currentStep).not.toBe("ASK_GENDER");
+    // CONFLICT mode repro state: UPLOAD path, "Yes" to ownership, conflicting names (Kalpesh/Shraddha, Parmar/Chauhan), gender answered
+    const conflictState = {
+      preferredLanguage: "english",
+      flowMode: "UPLOAD",
+      currentStep: "ASK_GENDER",
+      documentUploaded: true,
+      documentExtracted: true,
+      documentConfirmed: true,
+      useDocumentData: true,
+      documentData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        gender: "female",
+        dateOfBirth: "1992-05-15",
+      },
+      loginData: {
+        firstName: { value: "Kalpesh", verified: false },
+        lastName: { value: "Parmar", verified: false },
+        email: { value: "kalpesh@test.com", verified: true },
+      },
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "1992-05-15",
+      },
+    };
+
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "female" }) });
+    const conflictResult = await onboardingService.chat("female", [], conflictState, "repro-user");
+
+    expect(conflictResult.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(conflictResult.mode).toBe("CONFLICT");
+    expect(conflictResult.fields).toHaveLength(6);
+
+    const fnField = conflictResult.fields.find((f) => f.key === "firstName");
+    expect(fnField.isMismatch).toBe(true);
+    expect(fnField.loginValue).toBe("Kalpesh");
+    expect(fnField.documentValue).toBe("Shraddha");
+    expect(fnField.editable).toBe(true);
+
+    const emailField = conflictResult.fields.find((f) => f.key === "email");
+    expect(emailField.verified).toBe(true);
+    expect(emailField.editable).toBe(false);
+
+    // CONFIRM mode check
+    const confirmState = {
+      ...conflictState,
+      documentData: {
+        firstName: "Kalpesh",
+        lastName: "Parmar",
+      },
+    };
+    ollamaClient.chat.mockResolvedValueOnce({ text: JSON.stringify({ value: "male" }) });
+    const confirmResult = await onboardingService.chat("male", [], confirmState, "repro-user");
+
+    expect(confirmResult.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(confirmResult.mode).toBe("CONFIRM");
+    expect(confirmResult.fields.every((f) => f.isMismatch === false)).toBe(true);
+  });
+
+  describe("Fast-Path & Latency Optimization Tests", () => {
+    it("Should normalize gender locally using existing i18n dictionaries for English, Gujarati, and Tamil tokens", () => {
+      expect(normalizeGenderLocally("female")).toBe("female");
+      expect(normalizeGenderLocally("male")).toBe("male");
+      expect(normalizeGenderLocally("other")).toBe("other");
+      expect(normalizeGenderLocally("M")).toBe("male");
+      expect(normalizeGenderLocally("f")).toBe("female");
+      expect(normalizeGenderLocally("woman")).toBe("female");
+      expect(normalizeGenderLocally("boy")).toBe("male");
+
+      // Gujarati from i18n
+      expect(normalizeGenderLocally("સ્ત્રી")).toBe("female");
+      expect(normalizeGenderLocally("પુરુષ")).toBe("male");
+      expect(normalizeGenderLocally("અન્ય")).toBe("other");
+
+      // Tamil from i18n
+      expect(normalizeGenderLocally("பெண்")).toBe("female");
+      expect(normalizeGenderLocally("ஆண்")).toBe("male");
+      expect(normalizeGenderLocally("மற்றவை")).toBe("other");
+
+      // Unmapped fallback
+      expect(normalizeGenderLocally("not sure yet")).toBeNull();
     });
 
-    it("Should immediately advance flow on idempotency guard when profileConfirmed is already true", async () => {
-      const mockState = {
-        currentStep: "RESOLVE_PROFILE_SOURCE",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        profileConfirmed: true,
-        existingUserData: {
-          firstName: "IdempotentUser",
-          lastName: "IdempotentLast",
-          dateOfBirth: "1990-01-01",
-          gender: "male",
-        },
-      };
-
-      const result = await onboardingService.chat("YES", [], mockState, "idem-user-id");
-      expect(result.state.currentStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+    it("Should accept male, female, and other in isValidGender", () => {
+      expect(isValidGender("male")).toBe(true);
+      expect(isValidGender("female")).toBe(true);
+      expect(isValidGender("other")).toBe(true);
+      expect(isValidGender("unknown")).toBe(false);
     });
 
-    it("Should show CONFIRM mode when unverified fields are empty on login side but present on document side (auto-fill case)", async () => {
+    it("Fast-Path: Should extract closed-choice fields locally without calling ollamaClient.chat", async () => {
+      ollamaClient.chat.mockClear();
+
+      const genRes = await extractFieldFromMessage("gender", "woman", "english");
+      expect(genRes).toBe("female");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+
+      const gujGenRes = await extractFieldFromMessage("gender", "સ્ત્રી", "gujarati");
+      expect(gujGenRes).toBe("female");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+
+    it("Fallback: Should call LLM path when input is unrecognized free text and handle timeout gracefully", async () => {
+      ollamaClient.chat.mockClear();
+      ollamaClient.chat.mockRejectedValueOnce(new Error("Request timed out after 8000ms"));
+
+      const res = await extractFieldFromMessage("gender", "i am not sure yet", "english");
+      expect(ollamaClient.chat).toHaveBeenCalled();
+      expect(res).toBeNull();
+    });
+
+    it("Latency Guard: Answering ASK_GENDER with recognized input should transition to RESOLVE_PROFILE_SOURCE with ZERO ollamaClient.chat calls", async () => {
+      ollamaClient.chat.mockClear();
       patientRepository.findById.mockResolvedValue({
-        id: "otp-confirm-user-id",
-        firstName: null,
-        lastName: null,
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: null,
+        id: "fast-user",
+        firstName: "Kalpesh",
+        lastName: "Parmar",
       });
-
-      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "mobile" }]);
-
-      const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
-        preferredLanguage: "english",
-        flowMode: "UPLOAD",
-        documentUploaded: true,
-        documentExtracted: true,
-        documentData: {
-          firstName: "URMILA",
-          lastName: "HIPARPA",
-          phoneNumber: "+919000000001",
-          dateOfBirth: "1992-08-20",
-          gender: "female",
-        },
-        existingUserData: {
-          firstName: null,
-          lastName: null,
-        },
-      };
-
-      const result = await onboardingService.chat("YES", [], mockState, "otp-confirm-user-id");
-
-      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.mode).toBe("CONFIRM");
-      expect(result.fields).toHaveLength(6);
-      expect(result.loginProvider).toBe("mobile");
-
-      // Verified phone is locked (verified: true, not editable)
-      const phoneField = result.fields.find((f) => f.key === "phoneNumber");
-      expect(phoneField.verified).toBe(true);
-      expect(phoneField.editable).toBe(false);
-      expect(phoneField.isMismatch).toBe(false);
-
-      // Unverified email is empty on both sides -> no conflict, editable: true
-      const emailField = result.fields.find((f) => f.key === "email");
-      expect(emailField.verified).toBe(false);
-      expect(emailField.editable).toBe(true);
-      expect(emailField.isMismatch).toBe(false);
-
-      // First name is populated from document and has value, no mismatch
-      const firstNameField = result.fields.find((f) => f.key === "firstName");
-      expect(firstNameField.value).toBe("URMILA");
-      expect(firstNameField.isMismatch).toBe(false);
-    });
-
-    it("Should show CONFLICT mode when unverified fields differ on both sides", async () => {
-      patientRepository.findById.mockResolvedValue({
-        id: "conflict-otp-user-id",
-        firstName: "OldName",
-        lastName: null,
-        mobile: "9000000001",
-        countryCode: "+91",
-        email: null,
-      });
-
       authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
 
       const mockState = {
-        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
         preferredLanguage: "english",
         flowMode: "UPLOAD",
+        currentStep: "ASK_GENDER",
         documentUploaded: true,
         documentExtracted: true,
+        documentConfirmed: true,
+        useDocumentData: true,
         documentData: {
-          firstName: "URMILA",
-          lastName: "HIPARPA",
-          phoneNumber: "+919000000001",
-          dateOfBirth: "1992-08-20",
-          gender: "female",
+          firstName: "Shraddha",
+          lastName: "Chauhan",
+        },
+        loginData: {
+          firstName: { value: "Kalpesh", verified: false },
+          lastName: { value: "Parmar", verified: false },
         },
         existingUserData: {
-          firstName: "OldName",
-          lastName: null,
+          firstName: "Shraddha",
+          lastName: "Chauhan",
+          dateOfBirth: "1990-01-01",
         },
       };
 
-      const result = await onboardingService.chat("YES", [], mockState, "conflict-otp-user-id");
+      const result = await onboardingService.chat("female", [], mockState, "fast-user");
 
-      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
       expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
-      expect(result.mode).toBe("CONFLICT");
-      expect(result.loginProvider).toBe("google");
+      expect(result.state.existingUserData.gender).toBe("female");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+    it("Should extract flowMode deterministically without calling LLM for DOCUMENT_UPLOADED, UPLOAD, MANUAL, SKIP", async () => {
+      ollamaClient.chat.mockClear();
 
-      const firstNameField = result.fields.find((f) => f.key === "firstName");
-      expect(firstNameField.isMismatch).toBe(true);
+      expect(await extractFieldFromMessage("flowMode", "DOCUMENT_UPLOADED", "english")).toBe(
+        "UPLOAD",
+      );
+      expect(await extractFieldFromMessage("flowMode", "UPLOAD", "english")).toBe("UPLOAD");
+      expect(await extractFieldFromMessage("flowMode", "MANUAL", "english")).toBe("MANUAL");
+      expect(await extractFieldFromMessage("flowMode", "SKIP", "english")).toBe("MANUAL");
+      expect(await extractFieldFromMessage("flowMode", "MANUAL_ENTRY", "english")).toBe("MANUAL");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+
+    it("Should extract medicine closed-choice fields without calling LLM", async () => {
+      ollamaClient.chat.mockClear();
+
+      expect(await extractFieldFromMessage("medicationType", "TABLET", "english")).toBe("TABLET");
+      expect(await extractFieldFromMessage("frequency", "ONCE_DAILY", "english")).toBe(
+        "ONCE_DAILY",
+      );
+      expect(await extractFieldFromMessage("foodFrequency", "BEFORE_FOOD", "english")).toBe(
+        "BEFORE_FOOD",
+      );
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+
+    it("Should process DOCUMENT_UPLOADED in ASK_UPLOAD_OR_SKIP step with zero LLM calls and advance currentStep", async () => {
+      ollamaClient.chat.mockClear();
+      patientRepository.findById.mockResolvedValue({ id: "upload-user" });
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
+
+      const mockState = {
+        preferredLanguage: "english",
+        currentStep: "ASK_UPLOAD_OR_SKIP",
+        documentUploaded: true,
+        documentExtracted: true,
+        documentConfirmed: true,
+        useDocumentData: true,
+        loginData: {
+          firstName: { value: "Kalpesh", verified: false },
+          lastName: { value: "Parmar", verified: false },
+        },
+        documentData: {
+          firstName: "Shraddha",
+          lastName: "Chauhan",
+        },
+      };
+
+      const result = await onboardingService.chat(
+        "DOCUMENT_UPLOADED",
+        [],
+        mockState,
+        "upload-user",
+      );
+
+      expect(result.state.flowMode).toBe("UPLOAD");
+      expect(result.state.currentStep).not.toBe("ASK_UPLOAD_OR_SKIP");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+
+    it("Fallback: Should set state.flowMode to UPLOAD safely when LLM times out if documentUploaded === true", async () => {
+      ollamaClient.chat.mockClear();
+      ollamaClient.chat.mockRejectedValueOnce(new Error("Request timed out after 8000ms"));
+
+      const mockState = {
+        preferredLanguage: "english",
+        currentStep: "ASK_UPLOAD_OR_SKIP",
+        documentUploaded: true,
+      };
+
+      const result = await onboardingService.chat(
+        "unknown option string",
+        [],
+        mockState,
+        "fallback-user",
+      );
+
+      expect(result.state.flowMode).toBe("UPLOAD");
+      expect(result.state.currentStep).not.toBe("ASK_UPLOAD_OR_SKIP");
+    });
+
+    it("Should extract dateOfBirth deterministically for ISO, DMY, and Gujarati/Devanagari numerals without calling LLM", async () => {
+      ollamaClient.chat.mockClear();
+      // ISO format
+      expect(await extractFieldFromMessage("dateOfBirth", "1994-05-16", "english")).toBe(
+        "1994-05-16",
+      );
+      // DMY formats
+      expect(await extractFieldFromMessage("dateOfBirth", "16/05/1994", "english")).toBe(
+        "1994-05-16",
+      );
+      expect(await extractFieldFromMessage("dateOfBirth", "16-05-1994", "english")).toBe(
+        "1994-05-16",
+      );
+      expect(await extractFieldFromMessage("dateOfBirth", "16.05.1994", "english")).toBe(
+        "1994-05-16",
+      );
+      // Localized numerals (Gujarati & Devanagari)
+      expect(await extractFieldFromMessage("dateOfBirth", "૧૬-૦૫-૧૯૯૪", "gujarati")).toBe(
+        "1994-05-16",
+      );
+      expect(await extractFieldFromMessage("dateOfBirth", "१६-०५-१९९४", "hindi")).toBe(
+        "1994-05-16",
+      );
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
+    });
+    it("DOB Fallback Hardening: free text falls through to LLM path; on timeout invalid raw text is NOT stored", async () => {
+      ollamaClient.chat.mockClear();
+      ollamaClient.chat.mockRejectedValueOnce(new Error("Request timed out after 8000ms"));
+      const res = await extractFieldFromMessage("dateOfBirth", "invalid garbage string", "english");
+      expect(ollamaClient.chat).toHaveBeenCalled();
+      expect(res).toBeNull(); // Must NOT return unvalidated raw garbage
+    });
+    it("Latency Guard: Answering ASK_DOB with valid date advances to ASK_GENDER with ZERO LLM calls", async () => {
+      ollamaClient.chat.mockClear();
+      patientRepository.findById.mockResolvedValue({ id: "dob-user" });
+      authProviderRepository.findByUserId.mockResolvedValue([{ provider: "google" }]);
+      const mockState = {
+        preferredLanguage: "english",
+        currentStep: "ASK_DOB",
+        flowMode: "MANUAL",
+        existingUserData: {
+          firstName: "Shraddha",
+          lastName: "Chauhan",
+        },
+      };
+      const result = await onboardingService.chat("1994-05-16", [], mockState, "dob-user");
+      expect(result.state.existingUserData.dateOfBirth).toBe("1994-05-16");
+      expect(result.state.currentStep).toBe("ASK_GENDER");
+      expect(ollamaClient.chat).not.toHaveBeenCalled();
     });
   });
 
-  describe("Medications Flow Integration", () => {
-    beforeEach(() => {
-      jest
-        .spyOn(patientRepository, "findById")
-        .mockResolvedValue({ id: "test-user-id", patientCode: "P-111" });
-      jest
-        .spyOn(medicationRepository, "insert")
-        .mockResolvedValue({ id: "med-123", clientMedId: "doc_med_1" });
-      jest
-        .spyOn(medicationRepository, "bulkInsert")
-        .mockResolvedValue([{ id: "med-123", clientMedId: "doc_med_0" }]);
-    });
+  it("Should support name splitting and DOB normalization utilities", () => {
+    expect(splitName("Sarah Anderson")).toEqual({ firstName: "Sarah", lastName: "Anderson" });
+    expect(normalizeDOB("01.01.1989")).toBe("1989-01-01");
+  });
 
-    afterEach(() => {
-      jest.restoreAllMocks();
-    });
-
-    it("Case 5: document-found -> list -> add -> confirm -> store -> options", async () => {
+  describe("Profile Confirmation Edit & Save Flow", () => {
+    it("Change 1 & 2: { edited } updates state, keeps profileConfirmed=false, re-shows CONFIRM card (mode CONFIRM)", async () => {
       const mockState = {
-        medicationFlowDone: false,
-        medicationFlowStarted: false,
-        currentStep: null,
-        documentData: {
-          doctorName: "Dr. Smith",
-          medications: [
-            { name: "Aspirin 150mg", dosage: "1 tablet", frequency: "once daily", type: "tablet" },
-            { name: "Paracetamol", dosage: "", frequency: "twice daily", type: "tablet" },
-          ],
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        loginData: {
+          firstName: { value: "JohnLogin", verified: false },
+          lastName: { value: "DoeLogin", verified: false },
         },
         existingUserData: {
-          firstName: "Sarah",
-          lastName: "Anderson",
-          dateOfBirth: "1989-01-01",
-          gender: "female",
+          firstName: "JohnLogin",
+          lastName: "DoeLogin",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
         },
       };
 
-      // Step 1: Start medication flow
-      let result = await onboardingService.chat("hello", [], mockState, "test-user-id");
-      expect(result.state.currentStep).toBe("REVIEW_MEDICINES_LIST");
-      expect(result.action).toBe("REVIEW_MEDICINES_LIST");
-      expect(result.medicines).toHaveLength(2);
-
-      // Step 2: Submit selected medicines from list
-      const selectedIds = [result.medicines[0].id, result.medicines[1].id];
-      result = await onboardingService.chat(
-        JSON.stringify({ selected: selectedIds }),
-        [],
-        result.state,
-        "test-user-id",
-      );
-
-      expect(result.state.currentStep).toBe("ADD_MEDICINE");
-      expect(result.action).toBe("ADD_MEDICINE");
-      expect(result.medicine.name).toBe("Paracetamol");
-
-      // Step 3: Complete Paracetamol details
-      const addPayload = {
-        clientMedId: result.medicine.client_med_id,
-        medicine: {
-          name: "Paracetamol",
-          type: "TABLET",
-          dose: { count: 1 },
-          frequency: "TWICE",
+      const editedPayload = JSON.stringify({
+        edited: {
+          firstName: "JohnEdited",
+          lastName: "DoeEdited",
         },
-      };
-      result = await onboardingService.chat(
-        JSON.stringify(addPayload),
-        [],
-        result.state,
-        "test-user-id",
-      );
-      expect(result.state.currentStep).toBe("CONFIRM_MEDICINE");
-      expect(result.action).toBe("CONFIRM_MEDICINE");
-      expect(result.summary.title).toBe("Paracetamol");
+      });
 
-      // Step 4: Confirm Paracetamol (writes to DB)
-      result = await onboardingService.chat(
-        JSON.stringify({ confirmed: true }),
-        [],
-        result.state,
-        "test-user-id",
-      );
-      expect(medicationRepository.insert).toHaveBeenCalled();
+      const result = await onboardingService.chat(editedPayload, [], mockState, "test-user");
 
-      expect(result.state.currentStep).toBe("CONFIRM_MEDICINE");
-      expect(result.action).toBe("CONFIRM_MEDICINE");
-      expect(result.summary.title).toBe("Confirm all medications");
+      expect(result.state.profileConfirmed).toBe(false);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.mode).toBe("CONFIRM");
+      expect(result.state.existingUserData.firstName).toBe("JohnEdited");
+      expect(result.state.existingUserData.lastName).toBe("DoeEdited");
 
-      // Step 5: Confirm bulk list
-      result = await onboardingService.chat(
-        JSON.stringify({ confirmed: true }),
-        [],
-        result.state,
-        "test-user-id",
-      );
-      expect(medicationRepository.bulkInsert).toHaveBeenCalled();
-      expect(result.state.currentStep).toBe("MEDICINE_OPTIONS");
-      expect(result.action).toBe("MEDICINE_OPTIONS");
+      const firstNameField = result.fields.find((f) => f.key === "firstName");
+      expect(firstNameField.value).toBe("JohnEdited");
     });
 
-    it("Case 6: document-not-found -> options", async () => {
+    it("Change 2: CONFLICT card -> edit -> re-render forces single CONFIRM card (mode CONFIRM)", async () => {
       const mockState = {
-        medicationFlowDone: false,
-        medicationFlowStarted: false,
-        currentStep: null,
-        documentData: null,
-        existingUserData: {
-          firstName: "Sarah",
-          lastName: "Anderson",
-          dateOfBirth: "1989-01-01",
-          gender: "female",
-        },
-      };
-
-      const result = await onboardingService.chat("hello", [], mockState, "test-user-id");
-      expect(result.state.currentStep).toBe("MEDICINE_OPTIONS");
-      expect(result.action).toBe("MEDICINE_OPTIONS");
-    });
-
-    it("Case 7: Uma Clinic prescription (Uma Clinic, Urmila)", async () => {
-      db.then = (onFulfilled) =>
-        Promise.resolve([
-          {
-            id: "doc-urmila",
-            ocrStatus: "completed",
-            structuredExtractedData: {
-              medications: [
-                {
-                  name: "TAB. MBSON SL",
-                  dosage: "",
-                  frequency: "1-0-0",
-                  type: "",
-                  duration: "30 Days",
-                  quantity: 30,
-                },
-                {
-                  name: "Caldison D3",
-                  dosage: "",
-                  frequency: "1-0-0",
-                  type: "",
-                  duration: "4 Days",
-                  quantity: 4,
-                },
-              ],
-            },
-          },
-        ]).then(onFulfilled);
-
-      const mockState = {
-        medicationFlowDone: false,
-        medicationFlowStarted: false,
-        currentStep: null,
-        documentId: "doc-urmila",
+        preferredLanguage: "english",
         flowMode: "UPLOAD",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        documentConfirmed: true,
+        useDocumentData: true,
+        loginData: {
+          firstName: { value: "LoginName", verified: false },
+        },
+        documentData: {
+          firstName: "DocName",
+        },
         existingUserData: {
-          firstName: "Urmila",
-          lastName: "Shah",
-          dateOfBirth: "1992-08-20",
-          gender: "female",
+          firstName: "DocName",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
         },
       };
 
-      // Step 1: Start medication flow
-      let result = await onboardingService.chat("hello", [], mockState, "test-user-id");
-      expect(result.state.currentStep).toBe("REVIEW_MEDICINES_LIST");
-      expect(result.action).toBe("REVIEW_MEDICINES_LIST");
-      expect(result.medicines).toHaveLength(2);
+      const editedPayload = JSON.stringify({
+        edited: { firstName: "ReconciledName" },
+      });
 
-      // Verify "MBSON SL" normalization
-      const mbson = result.medicines[0];
-      expect(mbson.name).toBe("MBSON SL");
-      expect(mbson.type).toBe("TABLET");
-      expect(mbson.dose.count).toBe(1);
-      expect(mbson.frequency).toBe("ONCE");
-      expect(mbson.duration).toBe("30 Days");
-      expect(mbson.total_quantity).toBe(30);
-      expect(mbson.medicationSchedule.times).toEqual(["08:00"]);
-      expect(mbson.medicationSchedule.reminderTimes).toEqual(["08:00"]);
+      const result = await onboardingService.chat(editedPayload, [], mockState, "test-user");
 
-      // Verify "Caldison D3" normalization
-      const caldison = result.medicines[1];
-      expect(caldison.name).toBe("Caldison D3");
-      expect(caldison.type).toBe("TABLET");
-      expect(caldison.dose.count).toBe(1);
-      expect(caldison.frequency).toBe("ONCE");
-      expect(caldison.duration).toBe("4 Days");
-      expect(caldison.total_quantity).toBe(4);
-      expect(caldison.medicationSchedule.times).toEqual(["08:00"]);
-      expect(caldison.medicationSchedule.reminderTimes).toEqual(["08:00"]);
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.mode).toBe("CONFIRM");
+      expect(result.state.profileManuallyEdited).toBe(true);
+    });
+
+    it("Change 3: Partial edit preserves unedited fields", async () => {
+      const mockState = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        existingUserData: {
+          firstName: "OriginalFirst",
+          lastName: "OriginalLast",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const editedPayload = JSON.stringify({
+        edited: { firstName: "NewFirstOnly" },
+      });
+
+      const result = await onboardingService.chat(editedPayload, [], mockState, "test-user");
+
+      expect(result.state.existingUserData.firstName).toBe("NewFirstOnly");
+      expect(result.state.existingUserData.lastName).toBe("OriginalLast");
+      expect(result.state.existingUserData.dateOfBirth).toBe("1990-01-01");
+    });
+
+    it("Change 4: Invalid edited required field re-shows card with clarification, profileConfirmed=false, no advance", async () => {
+      const mockState = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        existingUserData: {
+          firstName: "ValidFirst",
+          lastName: "ValidLast",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const invalidEditedPayload = JSON.stringify({
+        edited: { gender: "invalid_gender_val" },
+      });
+
+      const result = await onboardingService.chat(invalidEditedPayload, [], mockState, "test-user");
+
+      expect(result.state.profileConfirmed).toBe(false);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.state.existingUserData.gender).toBe("male");
+      expect(result.state.stepClarificationNeeded).toBe(true);
+    });
+
+    it("Change 4b: Defense-in-depth normalizes edited gender (e.g. 'Male', 'પુરુષ', 'स्त्री') and DOB ('15/05/1995') to canonical values", async () => {
+      const mockState = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        existingUserData: {
+          firstName: "ValidFirst",
+          lastName: "ValidLast",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const editedPayload = JSON.stringify({
+        edited: { gender: "Male", dateOfBirth: "15/05/1995" },
+      });
+
+      const result = await onboardingService.chat(editedPayload, [], mockState, "test-user");
+
+      expect(result.state.profileConfirmed).toBe(false);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.state.existingUserData.gender).toBe("male");
+      expect(result.state.existingUserData.dateOfBirth).toBe("1995-05-15");
+    });
+
+    it("Change 5: Unrecognized message on RESOLVE_PROFILE_SOURCE re-shows card once with no side effects (idempotent)", async () => {
+      const mockState = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const result = await onboardingService.chat(
+        "random unknown text message",
+        [],
+        mockState,
+        "test-user",
+      );
+
+      expect(result.state.profileConfirmed).toBe(false);
+      expect(result.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(result.state.existingUserData.firstName).toBe("John");
+    });
+
+    it("Change 6 & 7: { confirmed: true } preserves edited values and advances to next step without re-asking questions", async () => {
+      const mockState = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "RESOLVE_PROFILE_SOURCE",
+        profileConfirmed: false,
+        profileManuallyEdited: true,
+        existingUserData: {
+          firstName: "EditedFirst",
+          lastName: "EditedLast",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const confirmPayload = JSON.stringify({ confirmed: true });
+
+      const result = await onboardingService.chat(confirmPayload, [], mockState, "test-user");
+
+      expect(result.state.profileConfirmed).toBe(true);
+      expect(result.state.existingUserData.firstName).toBe("EditedFirst");
+      expect(result.state.existingUserData.lastName).toBe("EditedLast");
+      expect(result.action).toBe("ASK_BLOOD_GROUP");
     });
   });
 });
