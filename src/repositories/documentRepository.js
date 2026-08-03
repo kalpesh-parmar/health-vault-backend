@@ -126,10 +126,21 @@ class DocumentRepository {
     return result[0] || null;
   }
   async update(id, data) {
-    const result = await db.update(document).set(data).where(eq(document.id, id)).returning();
+    const result = await db
+      .update(document)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(document.id, id))
+      .returning();
 
     return result[0] || null;
   }
+
+  // async updateById(id, data) {
+  //   return this.update(id, data);
+  // }
 
   async updateOcrStatusByFileKey(fileKey, status, extraData = {}) {
     if (!fileKey) return null;
@@ -140,7 +151,7 @@ class DocumentRepository {
         updatedAt: new Date(),
         ...extraData,
       })
-      .where(or(eq(document.filePath, fileKey), eq(document.s3Key, fileKey)))
+      .where(eq(document.s3Key, fileKey))
       .returning();
     return result[0] || null;
   }
@@ -223,7 +234,7 @@ class DocumentRepository {
     const result = await db
       .update(document)
       .set({
-        deletedAt: new Date(),
+        // deletedAt: new Date(),
         softDelete: true,
         updatedAt: new Date(),
       })
@@ -235,6 +246,11 @@ class DocumentRepository {
 
   async deleteByPatientId(userId) {
     return db.delete(document).where(eq(document.userId, userId)).returning();
+  }
+  async updateById(id, data) {
+    const result = await db.update(document).set(data).where(eq(document.id, id)).returning();
+
+    return result[0] || null;
   }
 
   async createMany(dataArray, tx = null) {

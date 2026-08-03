@@ -3,7 +3,7 @@ const { z } = require("zod");
 const { errorConstants } = require("../constants/errorConstants");
 const { documentTypeValue } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");
-const { ocrStatus, ocrStatusValue } = require("../enums/ocrStatus");
+const { ocrStatusValue } = require("../enums/ocrStatus");
 const maxFileSize = 25 * 1024 * 1024;
 const documentFilterSortKeys = [
   "createdAt",
@@ -34,7 +34,6 @@ const createDocumentSchema = z
       .positive(errorConstants.FILE_SIZE_INVALID)
       .max(maxFileSize, errorConstants.FILE_SIZE_INVALID)
       .optional(),
-    // filePath: z.string().trim().min(1, errorConstants.INVALID_REQUEST).optional(),
     fileType: z
       .enum(fileTypeValue, {
         invalid_type_error: errorConstants.FILE_TYPE_INVALID,
@@ -49,10 +48,18 @@ const createDocumentSchema = z
 
 const updateDocumentSchema = z
   .object({
+    fileName: z.string().trim().min(1).max(255).optional(),
+    originalName: z.string().trim().min(1).max(255).nullable().optional(),
+    documentType: z
+      .enum(documentTypeValue, {
+        invalid_type_error: errorConstants.VALID_DOCUMENT_TYPE_REQUIRED,
+      })
+      .optional(),
+    category: z.enum(documentTypeValue).nullable().optional(),
     doctorName: z.string().trim().max(255).nullable().optional(),
     hospitalName: z.string().trim().max(255).nullable().optional(),
     ocrExtractedText: z.record(z.any()).optional().nullable(),
-    ocrStatus: z.enum(ocrStatusValue).default(ocrStatus.IN_PROGRESS),
+    ocrStatus: z.enum(ocrStatusValue).optional(),
     remarks: z.string().optional().nullable(),
     reportDate: z.preprocess((val) => {
       if (!val || val === "" || val === "Not Found") return null;

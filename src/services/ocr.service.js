@@ -58,10 +58,6 @@ class V1Service {
       const bucketName =
         uploadResult.data.s3Bucket ||
         (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-      const filePath =
-        env.storageProvider === "gcp"
-          ? `gs://${bucketName}/${fileKey}`
-          : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
 
       const [documentRow] = await db
         .insert(document)
@@ -69,7 +65,7 @@ class V1Service {
           userId,
           documentType: "medical_document",
           fileName: uploadResult.data.originalFileName,
-          filePath,
+          //optional fileName from given by user
           s3Bucket: bucketName,
           s3Key: fileKey,
           fileType: inferFileType(uploadResult.data.mimeType),
@@ -104,7 +100,6 @@ class V1Service {
         document: {
           id: documentRow.id,
           fileName: documentRow.fileName,
-          filePath: documentRow.filePath,
           fileType: documentRow.fileType,
           fileSize: documentRow.fileSize,
           ocrStatus: documentRow.ocrStatus,
@@ -152,7 +147,6 @@ class V1Service {
       document: {
         id: docRow.id,
         fileName: docRow.fileName,
-        filePath: docRow.filePath,
         fileType: docRow.fileType,
         fileSize: docRow.fileSize,
         ocrStatus: docRow.ocrStatus,
@@ -302,10 +296,10 @@ class V1Service {
 
     // If we have an onboarding record, trust its completion status
     if (resumableState) {
-      isOnboardingCompleted = isStateCompleted;
+      isOnboardingCompleted = patient.onboardingCompleted || isStateCompleted;
     } else {
       // Fallback for users without an onboarding record (legacy)
-      isOnboardingCompleted = isBasicProfileComplete;
+      isOnboardingCompleted = patient.onboardingCompleted || isBasicProfileComplete;
     }
 
     // If onboarding is considered complete, return completed status

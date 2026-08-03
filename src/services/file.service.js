@@ -32,7 +32,6 @@ class S3Service {
       fileKey = `${category}/${uuid}-${sanitizedName}`;
     }
 
-    const filePath = `https://${this.bucket}.s3.amazonaws.com/${fileKey}`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: fileKey,
@@ -44,7 +43,6 @@ class S3Service {
     return {
       fileKey,
       fileType: file.mimetype,
-      filePath,
       fileName: file.originalname,
       fileSize: file.size,
       s3Bucket: this.bucket,

@@ -26,14 +26,14 @@ const patient = pgTable(
     email: varchar("email", { length: 255 }),
     password: varchar("password", { length: 255 }),
     status: userStatusEnum("status").default(USER_STATUS.ACTIVE).notNull(),
-    isVerified: boolean("is_verified").default(false).notNull(),
+    // isVerified: boolean("is_verified").default(false).notNull(),
     gender: genderEnum("gender"),
 
     // Phone authentication fields
     mobile: varchar("mobile", { length: 20 }),
     countryCode: varchar("country_code", { length: 10 }),
     firebaseUid: varchar("firebase_uid", { length: 255 }),
-    isActive: boolean("is_active").default(true).notNull(),
+    // isActive: boolean("is_active").default(true).notNull(),
     lastLoginAt: timestamp("last_login_at"),
 
     // Social and verification fields
@@ -46,7 +46,6 @@ const patient = pgTable(
     dateOfBirth: date("date_of_birth", { mode: "date" }),
     profileImageKey: text("profile_image_key"),
     bloodGroup: varchar("blood_group", { length: 8 }),
-    bloodType: varchar("blood_type", { length: 255 }),
     allergies: text("allergies").array(),
     softDelete: boolean("soft_delete").default(false).notNull(),
     deletedAt: timestamp("deleted_at"),

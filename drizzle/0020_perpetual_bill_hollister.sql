@@ -1,0 +1,4 @@
+ALTER TABLE "documents" ALTER COLUMN "document_type" SET DATA TYPE text;--> statement-breakpoint
+DROP TYPE "public"."document_type";--> statement-breakpoint
+CREATE TYPE "public"."document_type" AS ENUM('family', 'medical_document', 'medication', 'insurance', 'prescription', 'lab report', 'imaging report', 'discharge summary', 'consultation report', 'surgery procedure report', 'vaccination record', 'medical certificate', 'other medical document');--> statement-breakpoint
+ALTER TABLE "documents" ALTER COLUMN "document_type" SET DATA TYPE "public"."document_type" USING "document_type"::"public"."document_type";

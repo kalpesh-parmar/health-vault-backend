@@ -37,7 +37,6 @@ class GcpStorageService {
     return {
       fileKey,
       fileType: file.mimetype,
-      filePath: `gs://${this.bucket}/${fileKey}`,
       fileName: file.originalname,
       fileSize: file.size,
       s3Bucket: this.bucket,

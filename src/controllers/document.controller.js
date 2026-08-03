@@ -51,6 +51,11 @@ async function deleteFile(req, res) {
   const result = await documentService.deleteFile(req.auth.userId, fileKey);
   return successResponse(res, result, messageConstants.DOCUMENT_DELETED);
 }
+async function updateDocument(req, res) {
+  const result = await documentService.updateDocument(req.params.id, req.body, req.auth.userId);
+  return successResponse(res, result, messageConstants.DOCUMENT_UPDATED);
+}
+
 async function getDocumentSummaryList(req, res) {
   const result = await documentService.getDocumentSummaryList(req.auth.userId, req.query);
   return successResponse(res, result, "Document summaries fetched successfully");
@@ -64,5 +69,6 @@ module.exports = {
   getDocumentSummaryList,
   getDownloadFile,
   listDocuments,
+  updateDocument,
   listDocumentsPaginated,
 };

@@ -276,11 +276,6 @@ paths:
                         id: { type: string, format: uuid }
                         userId: { type: string, format: uuid }
                         fileName: { type: string, example: "lab_report.pdf" }
-                        filePath:
-                          {
-                            type: string,
-                            example: "documents/11111111-1111-1111-1111-111111111111/uuid-lab_report.pdf",
-                          }
                         s3Key:
                           {
                             type: string,

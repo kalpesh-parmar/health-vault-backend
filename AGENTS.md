@@ -141,7 +141,7 @@ health-vault-backend/
 - `id` (UUID): Primary key.
 - `userId` (UUID): References `patients.id`.
 - `documentType` (ENUM): `medical_document`, etc.
-- `fileName` (VARCHAR), `filePath` (TEXT), `s3Bucket` (VARCHAR), `s3Key` (VARCHAR).
+- `fileName` (VARCHAR), `s3Bucket` (VARCHAR), `s3Key` (VARCHAR).
 - `fileSize` (INTEGER), `fileType` (ENUM).
 - `ocrStatus` (ENUM): `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`.
 - `ocrExtractedText` (TEXT).

@@ -15,6 +15,8 @@
  * inside a single transaction (see documentPersistenceService).
  */
 
+const path = require("path");
+
 const { db } = require("../configs/db");
 const { errorConstants } = require("../constants/errorConstants");
 const { messageConstants } = require("../constants/messageConstants");
@@ -37,6 +39,7 @@ const {
   listDocumentsQuerySchema,
   validateSchema,
 } = require("../validations");
+const { updateDocumentSchema } = require("../validations/documentValidation");
 
 class DocumentService {
   async getDocumentById(id, userId) {
@@ -141,6 +144,38 @@ class DocumentService {
     await documentRepository.deleteByPatientId(userId);
     return { message: messageConstants.DOCUMENT_DELETED };
   }
+  //updateDocument api service
+  async updateDocument(id, payload, authUserId) {
+    const params = await validateSchema(idParamSchema, { id });
+    const existingDocument = await documentRepository.findById(params.id);
+    if (!existingDocument || existingDocument.userId !== authUserId) {
+      throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
+    }
+    // verifypayload
+    const data = await validateSchema(updateDocumentSchema, payload);
+
+    const updateData = { ...data };
+    if (updateData.originalName && !updateData.fileName) {
+      updateData.fileName = updateData.originalName;
+    }
+    delete updateData.originalName;
+
+    if (updateData.category && !updateData.documentType) {
+      updateData.documentType = updateData.category;
+    }
+    delete updateData.category;
+
+    if (updateData.fileName) {
+      const existingExt = path.extname(existingDocument.fileName || "");
+      const newExt = path.extname(updateData.fileName);
+      if (!newExt && existingExt) {
+        updateData.fileName = `${updateData.fileName}${existingExt}`;
+      }
+    }
+
+    const updatedDocument = await documentRepository.update(params.id, updateData);
+    return updatedDocument;
+  }
 
   async uploadPatientDocuments(patientId, files, authUserId) {
     if (!patientId || patientId !== authUserId) {
@@ -177,7 +212,6 @@ class DocumentService {
           userId: patientId,
           documentType: documentType.MEDICAL_DOCUMENT,
           fileName: uploadResult.fileName || file.originalname,
-          filePath: uploadResult.fileKey,
           s3Key: uploadResult.fileKey,
           s3Bucket: uploadResult.s3Bucket || null,
           fileType: file.mimetype,
@@ -194,7 +228,7 @@ class DocumentService {
           documentRecords.map((docRec) =>
             documentOcrJobService.createQueuedJob(
               {
-                fileKey: docRec.filePath,
+                fileKey: docRec.s3Key,
                 userId: patientId,
                 mimeType: docRec.fileType,
                 originalName: docRec.fileName,
@@ -211,7 +245,7 @@ class DocumentService {
 
       return createdRows.map((doc, idx) => ({
         ...doc,
-        fileKey: doc.filePath || doc.s3Key,
+        fileKey: doc.s3Key,
         signedUrl: documentRecords[idx]?._signedUrl || null,
         fileUrl: documentRecords[idx]?._signedUrl || null,
       }));
