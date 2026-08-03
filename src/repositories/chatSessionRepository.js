@@ -41,7 +41,14 @@ class ChatSessionRepository {
   }
 
   async createSession(data) {
-    const [created] = await this.client.insert(chatSession).values(data).returning();
+    const sessionData = { ...data };
+    if ("documentId" in sessionData) {
+      delete sessionData.documentId; // Never store in chat_sessions
+    }
+    if (sessionData.metadata && sessionData.metadata.documentId) {
+      delete sessionData.metadata.documentId;
+    }
+    const [created] = await this.client.insert(chatSession).values(sessionData).returning();
     return created;
   }
 
@@ -183,32 +190,6 @@ class ChatSessionRepository {
     return Number(row?.value || 0);
   }
 
-  async attachDocument(sessionId, userId, documentId) {
-    const [updated] = await this.client
-      .update(chatSession)
-      .set({
-        documentId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(chatSession.id, sessionId),
-          eq(chatSession.userId, userId),
-          eq(chatSession.softDelete, false),
-        ),
-      )
-      .returning();
-
-    return updated || null;
-  }
-
-  async removeDocumentFromSessions(documentId, userId) {
-    // Removes the documentId from the jsonb array in chat_sessions using Postgres jsonb '-' operator
-    await this.client.execute(
-      sql`UPDATE chat_sessions 
-          SET document_id = document_id - ${documentId} 
-          WHERE user_id = ${userId} AND document_id ? ${documentId}`,
-    );
-  }
+  // attachDocument and removeDocumentFromSessions removed as documentId is no longer tracked at session level
 }
 module.exports = new ChatSessionRepository();

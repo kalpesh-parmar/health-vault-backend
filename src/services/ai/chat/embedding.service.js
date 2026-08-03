@@ -3,8 +3,8 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { ollamaClient } = require("../clients/ollamaClient");
 
-const CHUNK_TARGET_CHARS = 900;
-const CHUNK_OVERLAP_CHARS = 120;
+const CHUNK_TARGET_CHARS = 1500;
+const CHUNK_OVERLAP_CHARS = 250;
 
 function normalizeVectorDimension(vector, targetDimension = env.embeddingDim || 1024) {
   if (vector.length === targetDimension) {

@@ -59,6 +59,15 @@ async function listMessages(req, res) {
 async function sendMessage(req, res) {
   const data = await validateSchema(sendChatMessageSchema, req.body);
   const result = await chatService.sendMessage({ ...data, userId: req.auth.userId });
+  if (result && result.requireSelection) {
+    return successResponse(
+      res,
+      result,
+      messageConstants.DOCUMENT_SELECTION_REQUIRED,
+      StatusCodes.OK,
+    );
+  }
+
   return successResponse(res, result, messageConstants.SUMMARY_CREATED, StatusCodes.CREATED);
 }
 

@@ -22,30 +22,80 @@ const LOCALIZED_HEADINGS = {
     todo: "✅ What to do",
     important: "⚠️ Important",
     tip: "💡 Doctor's Tip",
+    keyHighlights: "**Key Highlights**",
+    overallStatus: "**Overall Status**",
+    overallSummary: "**Overall Summary**",
+    keyInsights: "**Key Insights**",
+    recommendation: "**Recommendation**",
+    totalReports: "Total Reports",
+    reportsEvaluated: "Reports Evaluated",
+    normal: "Normal",
+    needsAttention: "Needs Attention",
+    abnormal: "Abnormal",
   },
   gujarati: {
     answer: "🩺 ઉત્તર",
     todo: "✅ શું કરવું",
     important: "⚠️ મહત્વપૂર્ણ",
     tip: "💡 ડૉક્ટરની સલાહ",
+    keyHighlights: "**મુખ્ય હાઇલાઇટ્સ**",
+    overallStatus: "**એકંદર સ્થિતિ**",
+    overallSummary: "**એકંદર સારાંશ**",
+    keyInsights: "**મુખ્ય આંતરદૃષ્ટિ**",
+    recommendation: "**ભલામણ**",
+    totalReports: "કુલ રિપોર્ટ્સ",
+    reportsEvaluated: "તપાસેલા રિપોર્ટ્સ",
+    normal: "સામાન્ય",
+    needsAttention: "ધ્યાન આપવાની જરૂર",
+    abnormal: "અસામાન્ય",
   },
   hindi: {
     answer: "🩺 उत्तर",
     todo: "✅ क्या करें",
     important: "⚠️ महत्वपूर्ण",
     tip: "💡 डॉक्टर की सलाह",
+    keyHighlights: "**मुख्य हाइलाइट्स**",
+    overallStatus: "**समग्र स्थिति**",
+    overallSummary: "**समग्र सारांश**",
+    keyInsights: "**मुख्य अंतर्दृष्टि**",
+    recommendation: "**सिफारिश**",
+    totalReports: "कुल रिपोर्ट",
+    reportsEvaluated: "जांची गई रिपोर्ट",
+    normal: "सामान्य",
+    needsAttention: "ध्यान देने की आवश्यकता",
+    abnormal: "असामान्य",
   },
   marathi: {
     answer: "🩺 उत्तर",
     todo: "✅ काय करावे",
     important: "⚠️ महत्त्वाचे",
     tip: "💡 डॉक्टरचा सल्ला",
+    keyHighlights: "**मुख्य ठळक मुद्दे**",
+    overallStatus: "**एकूण स्थिती**",
+    overallSummary: "**एकूण सारांश**",
+    keyInsights: "**मुख्य अंतर्दृष्टी**",
+    recommendation: "**शिफारस**",
+    totalReports: "एकूण अहवाल",
+    reportsEvaluated: "तपासलेले अहवाल",
+    normal: "सामान्य",
+    needsAttention: "लक्ष देण्याची गरज",
+    abnormal: "असामान्य",
   },
   tamil: {
     answer: "🩺 பதில்",
     todo: "✅ என்ன செய்ய வேண்டும்",
     important: "⚠️ முக்கியமானது",
     tip: "💡 மருத்துவரின் குறிப்பு",
+    keyHighlights: "**முக்கிய சிறப்பம்சங்கள்**",
+    overallStatus: "**ஒட்டுமொத்த நிலை**",
+    overallSummary: "**ஒட்டுமொத்த சுருக்கம்**",
+    keyInsights: "**முக்கிய நுண்ணறிவுகள்**",
+    recommendation: "**பரிந்துரை**",
+    totalReports: "மொத்த அறிக்கைகள்",
+    reportsEvaluated: "மதிப்பிடப்பட்ட அறிக்கைகள்",
+    normal: "இயல்பானது",
+    needsAttention: "கவனம் தேவை",
+    abnormal: "அசாதாரணமானது",
   },
 };
 
@@ -63,7 +113,7 @@ Rules:
 7. Use a few relevant emojis to improve readability.
 8. Avoid long paragraphs.
 9. Do not use markdown headings like "Medical Facts", "Recommendations", or "Emergency Advice".
-10. Format answers exactly like this:
+10. Format answers strictly using the following markdown structure where applicable:
 
 ${headings.answer}
 Provide a short and direct explanation.
@@ -106,23 +156,40 @@ Rules:
 11. Do not use markdown headings.
 12. You MUST reply entirely in ${language.toUpperCase()}. Do not mix languages unless using medical terms.
 13. CHAT HISTORY WARNING: Do not let previous messages in the conversation restrict or bias your search. Always evaluate the CURRENT 'Retrieved Report Context' freshly for every new question, and ignore any past conclusions you made if they contradict the current context.
-14. Format answers exactly like this:
+14. CRITICAL FORMATTING INSTRUCTION: You MUST format your answer using EXACTLY ONE of the following scenarios depending on the user's question. Choose the ONE that fits best and DO NOT mix or combine formats from different scenarios. DO NOT append old formats from chat history like "What to do" or "Doctor's Tip":
 
-${headings.answer}
-Provide a short and direct explanation based on the report.
+SCENARIO A: If the user asks for a SUMMARY of a single report:
+[Write a polite 1-sentence intro acknowledging the specific report they asked about, e.g., "Here is the summary of your first report" or "Here is the summary of your MRI report." Write this intro in ${language.toUpperCase()}.]
 
-${headings.todo}
-• Point 1
-• Point 2
-• Point 3
+${headings.keyHighlights}
+- Parameter Name: Value (Status e.g. Normal, Low, High, Slightly High)
+- Parameter Name: Value (Status)
 
-${headings.important}
-Only if needed.
+${headings.overallStatus}
+Provide a brief 1-2 sentence overall status (e.g., "[Normal] Your report looks good. Maintain a healthy lifestyle.").
 
-${headings.tip}
-Provide one practical and encouraging tip.
+SCENARIO B: If the user asks for an OVERVIEW or SUMMARY of multiple/all reports:
+CRITICAL: Do NOT list individual parameters or detailed summaries for each report. Keep it extremely short to save tokens. You MUST output ONLY the exact format below, and nothing else:
+[Write a polite 1-sentence intro, e.g., "Here is an overview of all your uploaded documents." or "Here is the summary of the reports you asked about." Write this intro in ${language.toUpperCase()}.]
 
-11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+${headings.overallSummary}
+- ${headings.totalReports}: [Total number of reports]
+- ${headings.reportsEvaluated}: [Number of reports evaluated]
+- ${headings.normal}: [Number of normal reports]
+- ${headings.needsAttention}: [Number of reports needing attention]
+- ${headings.abnormal}: [Number of abnormal reports]
+
+${headings.keyInsights}
+- [Provide exactly 3 to 4 short bullet points of high-level insights across all reports. Do NOT list every parameter.]
+
+SCENARIO C: If the user asks a SPECIFIC question (e.g., "Which report shows high blood sugar?" or "What is my vitamin D?"):
+**[Parameter Name]**
+Value (Status)
+Reference Range: Range
+
+${headings.recommendation}
+Brief recommendation based on the specific parameter.
+15. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
 };
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
