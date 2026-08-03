@@ -1,5 +1,5 @@
 const { env } = require("../configs/env");
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 
 class StorageService {
   getBuckets() {

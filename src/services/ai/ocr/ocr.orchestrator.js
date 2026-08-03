@@ -1,11 +1,12 @@
 const { env } = require("../../../configs/env");
-const objectStorageService = require("../../objectStorageService");
+const objectStorageService = require("../../objectStorage.service");
 const {
   OcrEmptyResultError,
   OcrInvalidResponseError,
   validateDocument,
 } = require("./ocr.validator");
 const { createTrace, ocrLogger } = require("./ocr.logger");
+const { ocrService } = require("./ocr.service");
 
 function evaluateQuality(result) {
   const textLen = String(result?.ocr_text || "").trim().length;
@@ -188,8 +189,6 @@ class OcrOrchestrator {
 
     let result;
     try {
-      const { ocrService } = require("./ocr.service");
-
       console.log("[OCR_DEBUG] ocrService:", ocrService);
       console.log("[OCR_DEBUG] Object.keys(ocrService):", Object.keys(ocrService || {}));
       console.log(

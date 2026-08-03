@@ -131,6 +131,20 @@ class DocumentRepository {
     return result[0] || null;
   }
 
+  async updateOcrStatusByFileKey(fileKey, status, extraData = {}) {
+    if (!fileKey) return null;
+    const result = await db
+      .update(document)
+      .set({
+        ocrStatus: status,
+        updatedAt: new Date(),
+        ...extraData,
+      })
+      .where(or(eq(document.filePath, fileKey), eq(document.s3Key, fileKey)))
+      .returning();
+    return result[0] || null;
+  }
+
   async findById(id) {
     const result = await db
       .select()
@@ -221,6 +235,12 @@ class DocumentRepository {
 
   async deleteByPatientId(userId) {
     return db.delete(document).where(eq(document.userId, userId)).returning();
+  }
+
+  async createMany(dataArray, tx = null) {
+    if (!dataArray || dataArray.length === 0) return [];
+    const client = tx || db;
+    return client.insert(document).values(dataArray).returning();
   }
 }
 

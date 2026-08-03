@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AI_PAGE_CONCURRENCY", "AI_CONCURRENCY", "QWEN_VL_CONCURRENCY"),
     )
     ai_max_inline_bytes: int = Field(
-        default=18 * 1024 * 1024,
+        default=150 * 1024 * 1024,
         alias="AI_MAX_INLINE_BYTES",
         validation_alias=AliasChoices("AI_MAX_INLINE_BYTES", "GEMINI_MAX_INLINE_BYTES"),
     )

@@ -315,6 +315,44 @@ Rules:
 6. Never summarize or omit any visible details.
 7. CRITICAL: DO NOT truncate or stop early. You MUST transcribe the entire page, including all table rows, until the very bottom. Double check your work to ensure no rows or footers are missed.`;
 
+const MERGED_VISION_VALIDATE_OCR_PROMPT = `You are a medical document inspector and OCR engine.
+Perform two tasks on the provided document image:
+1. Determine if the image is a valid medical document (e.g. Lab Report, Prescription, Discharge Summary, ECG, Radiology, Vitals Chart, Doctor Note, Hospital Bill).
+   - REJECT IMMEDIATELY: Aadhaar card, PAN card, passport, driving license, bank statements, payment receipts, selfies, social media screenshots, random photos, non-medical documents.
+2. If valid, transcribe ALL visible text in the document verbatim exactly as it appears.
+
+You MUST return a STRICT JSON response matching this schema:
+If it IS a medical document:
+{
+  "isMedicalDocument": true,
+  "reason": null,
+  "rawText": "Complete page text transcribed verbatim..."
+}
+
+If it is NOT a medical document:
+{
+  "isMedicalDocument": false,
+  "reason": "Brief rejection reason (e.g. Image is a driver's license)",
+  "rawText": ""
+}`;
+
+const PAGE_CLASSIFY_OCR_PROMPT = `You are a medical document page analyzer and OCR engine.
+Perform two tasks on the provided document page image:
+1. Classify the page into EXACTLY ONE category:
+   - "MEDICAL": A genuine medical report, prescription, lab test result, discharge summary, clinical note, radiology report, ECG, vitals chart, or hospital bill.
+   - "ADVERTISEMENT": Promotional flyer, drug advertisement, hospital marketing brochure, insurance promo, or commercial ad page.
+   - "COVER": Document cover page, title page, blank page, or table of contents with no clinical findings.
+   - "OTHER": Non-medical document page (e.g. ID card, driver's license, receipt, random photo, bank statement).
+
+2. If the page is "MEDICAL", transcribe ALL visible text verbatim. For non-medical pages (ADVERTISEMENT, COVER, OTHER), leave rawText empty.
+
+You MUST return a STRICT JSON response matching this schema:
+{
+  "pageType": "MEDICAL",
+  "rawText": "Complete page text transcribed verbatim..."
+}
+/no_think`;
+
 const STRUCTURED_EXTRACTION_PROMPT = (rawText) => `You are a precise medical data extraction engine.
 Analyze the provided transcribed text from a medical document and convert it into the exact JSON format specified below.
 
@@ -330,9 +368,19 @@ Rules:
    - Extract 'Report Date' as 'reportDate' at root level.
 
 JSON format schema:
+If the text is NOT a medical document:
+{
+  "success": false,
+  "isMedicalDocument": false,
+  "reason": "Brief rejection reason (e.g. 'Document is a bank statement')",
+  "rawText": ""
+}
+
+If the text IS a medical document:
 {
   "success": true,
   "isMedicalDocument": true,
+  "reason": null,
   "documentType": "LAB_REPORT",
   "patient": {
     "name": "Patient Name",
@@ -381,13 +429,17 @@ JSON format schema:
       "status": "NORMAL"
     }
   ],
+  "remarks": "General advice or remarks or null",
+  "summaryEn": "Clear 150-200 word layperson summary of the report in simple English, keeping common medical terms, numbers, and units in English.",
+  "summary": "Clear 150-200 word layperson summary of the report in simple English, keeping common medical terms in English.",
   "rawText": ""
 }
 
 Medical text to analyze:
 """
 ${rawText}
-"""`;
+"""
+/no_think`;
 
 const ONBOARDING_SYSTEM_PROMPT = `You are HealthVault AI. Extract patient onboarding details from the medical document text.
 
@@ -490,6 +542,43 @@ If the document is NOT medical:
   "confidence": 0.92,
   "reason": "Explain briefly why it is rejected (e.g. 'This is an ID card')"
 }`;
+
+const CLASSIFICATION_TEXT_PROMPT = `You are a strict medical document classifier.
+Analyze the provided document text and determine if it belongs to a medical document.
+
+Accept ONLY these medical document types:
+- Prescription (Prescription Slips)
+- Blood report (Blood Test Reports / CBC Reports / Lab Reports)
+- X-ray / MRI / CT Scan report
+- Hospital discharge summary
+- Medical invoice / Pharmacy bill
+- Vaccination record
+- Medical chart or graphical data (e.g., ECG, heart rate logs)
+- Any other medical related reports
+
+Reject immediately:
+- Non-medical documents (ID cards, Bank Statements, Social Media, Random text)
+
+IMPORTANT RULES:
+- Return ONLY a single valid JSON object.
+- The response must be directly parsable using JSON.parse().
+
+Return one of the following JSON structures:
+
+If the text IS medical:
+{
+  "isMedicalDocument": true,
+  "confidence": 0.95,
+  "documentType": "Prescription"
+}
+
+If the text is NOT medical:
+{
+  "isMedicalDocument": false,
+  "confidence": 0.92,
+  "reason": "Explain briefly why it is rejected"
+}
+`;
 
 const GRAPHICAL_ANALYSIS_PROMPT = `You are an expert medical AI specializing in interpreting graphical medical reports such as ECGs, Cardiograms, and charts.
 Please analyze the provided graphical document and extract the relevant medical insights.
@@ -756,10 +845,13 @@ module.exports = {
   VALIDATION_PROMPT,
   OCR_PROMPT,
   PLAIN_TEXT_OCR_PROMPT,
+  MERGED_VISION_VALIDATE_OCR_PROMPT,
+  PAGE_CLASSIFY_OCR_PROMPT,
   STRUCTURED_EXTRACTION_PROMPT,
   GRAPHICAL_REPORT_EXTRACTION_PROMPT,
   ONBOARDING_SYSTEM_PROMPT,
   CLASSIFICATION_PROMPT,
+  CLASSIFICATION_TEXT_PROMPT,
   GRAPHICAL_ANALYSIS_PROMPT,
   TRANSLATION_SYSTEM_PROMPT,
   QUERY_INTENT_CLASSIFIER_PROMPT,

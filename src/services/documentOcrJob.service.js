@@ -34,12 +34,19 @@
 const { env } = require("../configs/env");
 const { STAGES, buildStageEvent } = require("../constants/ocrStages");
 const { messageConstants } = require("../constants/messageConstants");
-const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
-const { aiClient: aiServiceClient, ocrOrchestrator, ocrService } = require("./ai");
+const {
+  ConflictException,
+  InvalidRequestException,
+  NotFoundException,
+} = require("../exceptions/appError");
+const { ocrStatus } = require("../enums/ocrStatus");
+const { ocrOrchestrator, ocrService } = require("./ai");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
+const documentRepository = require("../repositories/documentRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const objectStorageService = require("./objectStorageService");
+const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
 
 const RUNNING_LOCKS = new Set();
@@ -93,6 +100,107 @@ async function emitAndPersist(jobId, fileKey, stage, payload = {}) {
 }
 
 class DocumentOcrJobService {
+  async createQueuedJob({ fileKey, userId, mimeType, originalName }, tx = null) {
+    if (!fileKey) {
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "fileKey is required");
+    }
+    return documentProcessingJobRepository.createQueuedJob(
+      { fileKey, userId, mimeType, originalName },
+      tx,
+    );
+  }
+
+  async startJobById(jobId, userId) {
+    if (!jobId) {
+      throw new InvalidRequestException("jobId is required");
+    }
+
+    const claimedJob = await documentProcessingJobRepository.claimQueuedJob(jobId, userId);
+    if (claimedJob) {
+      const mimeType = claimedJob.metadata?.mimeType || null;
+
+      let patientContext = null;
+      try {
+        patientContext = await intelligenceRepository.getPatientContext(userId);
+      } catch {
+        patientContext = null;
+      }
+
+      setImmediate(() => {
+        this._runPipeline({
+          fileKey: claimedJob.fileKey,
+          jobId: claimedJob.id,
+          mimeType,
+          patientContext,
+          userId,
+        }).catch((error) => {
+          console.error("[ocr-job] uncaught pipeline error", {
+            error: error.message,
+            fileKey: claimedJob.fileKey,
+            jobId: claimedJob.id,
+          });
+        });
+      });
+
+      return claimedJob;
+    }
+
+    const existingJob = await documentProcessingJobRepository.findByIdAndUserId(jobId, userId);
+    if (!existingJob) {
+      throw new NotFoundException("OCR job not found");
+    }
+
+    throw new InvalidRequestException(
+      `Job cannot be started because its current status is '${existingJob.status}'. Only QUEUED jobs can be started.`,
+    );
+  }
+
+  async getJobById(jobId, userId) {
+    if (!jobId) {
+      throw new InvalidRequestException("jobId is required");
+    }
+    const job = await documentProcessingJobRepository.findByIdAndUserId(jobId, userId);
+    if (!job) {
+      throw new NotFoundException("OCR job not found");
+    }
+    return job;
+  }
+
+  async getJobResult(jobId, userId) {
+    if (!jobId) {
+      throw new InvalidRequestException("jobId is required");
+    }
+
+    const job = await documentProcessingJobRepository.findByIdAndUserId(jobId, userId);
+    if (!job) {
+      throw new NotFoundException("OCR job not found");
+    }
+
+    if (job.status === "FAILED") {
+      throw new InvalidRequestException(`OCR job failed: ${job.error || "Unknown error"}`);
+    }
+
+    if (job.status === "CANCELLED") {
+      throw new InvalidRequestException("OCR job was cancelled.");
+    }
+
+    if (job.status !== "COMPLETED") {
+      throw new ConflictException(`OCR job result is not ready. Current status: ${job.status}`);
+    }
+
+    return {
+      jobId: job.id,
+      fileKey: job.fileKey,
+      status: job.status,
+      extractedStructuredData: job.extractedStructuredData,
+      summaries: {
+        summaryEnglish: job.extractedStructuredData?.summaryEnglish || "",
+        summaryInPreferredLanguage: job.extractedStructuredData?.summaryInPreferredLanguage || "",
+      },
+      graphs: job.graphs || [],
+    };
+  }
+
   /**
    * Schedule an OCR + AI extraction run for a previously uploaded file.
    *
@@ -107,10 +215,8 @@ class DocumentOcrJobService {
 
     await ensureFileExists(fileKey);
 
-    const job = await documentProcessingJobRepository.startJob({ fileKey, userId });
+    const job = await documentProcessingJobRepository.startJob({ fileKey, userId, mimeType });
 
-    // Capture patient context once outside the pipeline to keep its body
-    // free of repository fetches that should not block the worker chain.
     let patientContext = null;
     try {
       patientContext = await intelligenceRepository.getPatientContext(userId);
@@ -118,13 +224,9 @@ class DocumentOcrJobService {
       patientContext = null;
     }
 
-    // Schedule the pipeline. We deliberately do NOT await it. Errors are
-    // captured inside `_runPipeline` and persisted to the job row.
     setImmediate(() => {
       this._runPipeline({ fileKey, jobId: job.id, mimeType, patientContext, userId }).catch(
         (error) => {
-          // _runPipeline already handles its own failures; this catch is a
-          // last-resort guard against bugs in the error path itself.
           console.error("[ocr-job] uncaught pipeline error", {
             error: error.message,
             fileKey,
@@ -151,37 +253,36 @@ class DocumentOcrJobService {
 
     try {
       //print timing in teminal or console for each steps
-      const startTime = Date.now();
-
-      console.log(`[ocr-job] OCR job started at ${new Date(startTime).toISOString()}`);
+      console.time("[OCR]: starting process");
+      // console.log(`[ocr-job] OCR job started at ${new Date(startTime).toISOString()}`);
       await documentProcessingJobRepository.markRunning(jobId);
       await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 1. Uploading File / Download check stage
       await emitAndPersist(jobId, fileKey, STAGES.UPLOADING_FILE);
       await ensureFileExists(fileKey);
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 2. Medical Document Validation stage
       await emitAndPersist(jobId, fileKey, STAGES.VALIDATING);
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 3. Extracting Text stage
       await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrResponse = await ocrOrchestrator.runFromStorage({
         bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
         fileKey,
         mimeType: inferMimeType(fileKey, mimeType),
         traceId: `ocr_job_${jobId}`,
       });
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrPayload = ocrResponse?.structuredDocument || ocrResponse?.ocr || ocrResponse || {};
       const pageCount =
         ocrPayload?.pageCount ||
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 4. Analyzing Report stage
       await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
@@ -196,11 +297,11 @@ class DocumentOcrJobService {
           fallbackUsed: false,
         },
       });
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 5. Generating Summary stage
       await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
-      console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const { rawOcrData, structured, normalized, summary } = await ocrService.normalizeExtraction({
         patientContext,
         rawOcr: ocrResponse,
@@ -209,7 +310,6 @@ class DocumentOcrJobService {
       let preferredLanguage = "gujarati";
       try {
         if (userId) {
-          const userOnboardingRepository = require("../repositories/userOnboardingRepository");
           const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
           if (onboardingRecord?.data?.preferredLanguage) {
             preferredLanguage = onboardingRecord.data.preferredLanguage;
@@ -219,20 +319,34 @@ class DocumentOcrJobService {
         console.warn("[ocr-job] failed to fetch preferred language", err);
       }
 
-      let summaryEnglish = "";
+      let summaryEnglish = structured?.medicalExtraction?.summary || structured?.summary || "";
       let summaryPreferredLanguage = "";
       const rawTextToSummarize = rawOcrData.fullText || "";
+
       if (rawTextToSummarize) {
         if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
-          summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+          if (!summaryEnglish) {
+            summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+          } else {
+            console.log(
+              "[OCR] => Reusing structured extraction summary for English (0ms extra latency)",
+            );
+          }
           summaryPreferredLanguage = summaryEnglish;
         } else {
-          const [sumEng, sumPref] = await Promise.all([
-            ocrService.generateSummary(rawTextToSummarize, "english"),
-            ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
-          ]);
-          summaryEnglish = sumEng;
-          summaryPreferredLanguage = sumPref;
+          if (!summaryEnglish) {
+            const [sumEng, sumPref] = await Promise.all([
+              ocrService.generateSummary(rawTextToSummarize, "english"),
+              ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
+            ]);
+            summaryEnglish = sumEng;
+            summaryPreferredLanguage = sumPref;
+          } else {
+            summaryPreferredLanguage = await ocrService.generateSummary(
+              rawTextToSummarize,
+              preferredLanguage,
+            );
+          }
         }
       }
 
@@ -241,11 +355,11 @@ class DocumentOcrJobService {
 
       // Best-effort graph extraction
       let graphs = [];
-      try {
-        graphs = await aiServiceClient.extractGraphs(normalized);
-      } catch (error) {
-        console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
-      }
+      // try {
+      // graphs = await aiServiceClient.extractGraphs(normalized);
+      // } catch (error) {
+      //   console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
+      // }
 
       const finalPayload = {
         embeddingsGenerated: false,
@@ -271,7 +385,20 @@ class DocumentOcrJobService {
         pendingSteps: 0,
         rawOcrData,
       });
-
+      console.time("[OCR]: updateOcrStatusByFileKey");
+      await documentRepository
+        .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
+          summaryEnglish,
+          summaryInPreferredLanguage: summaryPreferredLanguage,
+          structuredExtractedData: finalPayload.extractedStructuredData,
+        })
+        .catch((err) => {
+          console.warn("[ocr-job] sync to documents.ocrStatus failed", {
+            error: err.message,
+            fileKey,
+          });
+        });
+      console.timeEnd("[OCR]: updateOcrStatusByFileKey");
       ocrProgressBus.publish(
         fileKey,
         buildStageEvent(STAGES.COMPLETED, {
@@ -285,8 +412,15 @@ class DocumentOcrJobService {
         }),
       );
       ocrProgressBus.complete(fileKey);
+      console.timeEnd("[OCR]: starting process");
     } catch (error) {
       await documentProcessingJobRepository.markFailed(jobId, error).catch(() => {});
+      await documentRepository.updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED).catch((err) => {
+        console.warn("[ocr-job] sync to documents.ocrStatus failed", {
+          error: err.message,
+          fileKey,
+        });
+      });
       ocrProgressBus.fail(fileKey, error);
       console.error("[ocr-job] pipeline failed", { error: error.message, fileKey, jobId, userId });
     } finally {

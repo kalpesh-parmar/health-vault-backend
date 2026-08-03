@@ -12,7 +12,7 @@ class NormalizeRequest(BaseModel):
 
 class SummaryRequest(BaseModel):
     structuredDocument: dict
-    patientContext: dict | None = None
+    patientContext: dict | str | None = None
     medications: list[dict] = []
     medicalEntities: list[dict] = []
 

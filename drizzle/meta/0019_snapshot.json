@@ -1,5 +1,9 @@
 {
+<<<<<<< HEAD
   "id": "40127670-43a4-48b9-b7f4-7517ad5bf48b",
+=======
+  "id": "4d31d84f-2815-4250-bcef-5fb8bd04717f",
+>>>>>>> d259376ca4ff183e1ebb902a12c065a5ec675775
   "prevId": "34887dec-92ef-4548-b14e-3c4fac388862",
   "version": "7",
   "dialect": "postgresql",
@@ -276,7 +280,11 @@
         },
         "document_id": {
           "name": "document_id",
+<<<<<<< HEAD
           "type": "jsonb",
+=======
+          "type": "uuid",
+>>>>>>> d259376ca4ff183e1ebb902a12c065a5ec675775
           "primaryKey": false,
           "notNull": false
         },
@@ -408,6 +416,22 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+<<<<<<< HEAD
+=======
+        },
+        "chat_sessions_document_id_documents_id_fk": {
+          "name": "chat_sessions_document_id_documents_id_fk",
+          "tableFrom": "chat_sessions",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+>>>>>>> d259376ca4ff183e1ebb902a12c065a5ec675775
         }
       },
       "compositePrimaryKeys": {},

@@ -1,7 +1,7 @@
 const { StatusCodes } = require("http-status-codes");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse, paginatedSuccessResponse } = require("../helpers/generalResponse");
-const medicationService = require("../services/medicationService");
+const medicationService = require("../services/medication.service");
 
 //create medication
 async function createMedication(req, res) {

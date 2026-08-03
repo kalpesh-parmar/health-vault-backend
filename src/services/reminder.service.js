@@ -10,7 +10,7 @@ const {
   afterReminderTime,
   isSameMinute,
 } = require("../utils/reminderOccurrenceGenerator");
-const reminderNotificationService = require("./reminderNotificationService");
+const reminderNotificationService = require("./reminderNotification.service");
 const { reminderTypes } = require("../enums/reminderTypes");
 
 class ReminderService {

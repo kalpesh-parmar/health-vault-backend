@@ -1,7 +1,7 @@
 const { notificationType } = require("../enums/notificationType");
 const Mustache = require("mustache");
 const { reminderTypes } = require("../enums/reminderTypes");
-const notificationService = require("./notificationService");
+const notificationService = require("./notification.service");
 const { convertToUserTimeZone } = require("../utils/reminderOccurrenceGenerator");
 const { notificationConstant } = require("../constants/notificationConstants");
 

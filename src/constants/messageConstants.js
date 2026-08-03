@@ -67,6 +67,11 @@ const messageConstants = Object.freeze({
   MEDICATION_OCCURRENCE_UPDATED: "Medication occurrence updated successfully",
   MEDICTION_SUMMARY: "Medication summary fetched successfully",
   MEDICATION_REFILLED: "Medication refilled successfully",
+
+  //OCR Message
+  NO_FILE_UPLOAD: "No file uploaded",
+  UNAUTHORIZED_ACCESS: "Unauthorized access",
+  UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
 });
 
 module.exports = { messageConstants };

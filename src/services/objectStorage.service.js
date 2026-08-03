@@ -1,11 +1,12 @@
 const { env } = require("../configs/env");
-const gcpStorageService = require("./gcpStorageService");
-const s3service = require("./fileservice");
+const gcpStorageService = require("./gcpStorage.service");
+const fileService = require("./file.service");
+const { messageConstants } = require("../constants/messageConstants");
 
 const providers = Object.freeze({
   gcp: gcpStorageService,
-  s3: s3service,
-  aws: s3service,
+  s3: fileService,
+  aws: fileService,
 });
 
 class ObjectStorageService {
@@ -13,7 +14,7 @@ class ObjectStorageService {
     this.providerName = providerName;
     this.provider = providers[providerName];
     if (!this.provider) {
-      throw new Error(`Unsupported storage provider '${providerName}'`);
+      throw new Error(messageConstants.UNSUPPORTED_STORAGE_PROVIDER_ERROR(providerName));
     }
   }
 
