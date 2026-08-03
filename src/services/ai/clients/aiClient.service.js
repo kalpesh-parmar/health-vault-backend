@@ -145,12 +145,15 @@ class AiServiceClient {
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
     console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
 
-    return postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
+    const response = await postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
       bucket,
       fileKey,
       mimeType,
       mode,
     });
+
+    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500)); // Log first 500 chars to avoid huge logs
+    return response;
   }
 
   async normalizeStructuredOcr(structuredOcr) {
@@ -186,17 +189,28 @@ class AiServiceClient {
   }
 
   async runOcrFromBuffer({ buffer, filename, mimeType, mode = "concise" }) {
+    console.log(
+      `[AiClientService] runOcrFromBuffer started for ${filename}, size: ${buffer?.length}`,
+    );
     const form = new FormData();
     form.append("file", buffer, { contentType: mimeType, filename });
     form.append("mode", mode);
 
-    const response = await axios.post(`${this.baseUrl}/v1/run-ocr`, form, {
-      headers: form.getHeaders(),
-      maxBodyLength: Infinity,
-      maxContentLength: Infinity,
-      timeout: DEFAULT_TIMEOUT,
-    });
-    return response.data;
+    try {
+      const response = await axios.post(`${this.baseUrl}/v1/run-ocr`, form, {
+        headers: form.getHeaders(),
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: DEFAULT_TIMEOUT,
+      });
+      console.log(
+        `[AiClientService] runOcrFromBuffer success for ${filename}. Response keys: ${Object.keys(response.data).join(",")}. Has fullText: ${!!response.data.fullText}`,
+      );
+      return response.data;
+    } catch (err) {
+      console.error(`[AiClientService] runOcrFromBuffer failed for ${filename}:`, err.message);
+      throw err;
+    }
   }
 }
 

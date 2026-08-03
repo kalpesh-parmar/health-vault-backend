@@ -537,9 +537,9 @@ class PatientService {
           fullName:
             decodedToken.name ||
             (firstName && lastName ? `${firstName} ${lastName}` : firstName || null),
-          isActive: true,
+          // isActive: true,
           status: USER_STATUS.ACTIVE,
-          isVerified: true,
+          // isVerified: true,
           isMobileVerified: isMobileVerified,
           isEmailVerified: isEmailVerified,
           onboardingCompleted: false,
@@ -581,12 +581,12 @@ class PatientService {
 
     const tokens = await persistSession(patientUser, deviceToken);
 
+    const onboardingState = await userOnboardingRepository.findByUserId(patientUser.id);
+
     const isOnboardingCompleted = !!(
-      patientUser.firstName &&
-      patientUser.firstName !== "User" &&
-      patientUser.lastName &&
-      patientUser.gender &&
-      patientUser.dateOfBirth
+      patientUser.onboardingCompleted ||
+      onboardingState?.isCompleted ||
+      onboardingState?.data?.isOnboardingCompleted
     );
 
     if (isOnboardingCompleted !== patientUser.onboardingCompleted) {
@@ -596,11 +596,6 @@ class PatientService {
 
       patientUser.onboardingCompleted = isOnboardingCompleted;
     }
-
-    // Get onboarding state for resumption
-    const onboardingState = isOnboardingCompleted
-      ? null
-      : await userOnboardingRepository.findByUserId(patientUser.id);
 
     const result = {
       success: true,

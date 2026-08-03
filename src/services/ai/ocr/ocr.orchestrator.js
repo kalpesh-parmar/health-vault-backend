@@ -1,5 +1,6 @@
 const { env } = require("../../../configs/env");
 const objectStorageService = require("../../objectStorage.service");
+const { AppError, NonMedicalDocumentException } = require("../../../exceptions/appError");
 const {
   OcrEmptyResultError,
   OcrInvalidResponseError,
@@ -226,16 +227,23 @@ class OcrOrchestrator {
         stack: error.stack,
       });
 
-      if (error instanceof OcrInvalidResponseError) {
+      if (
+        error instanceof OcrInvalidResponseError ||
+        error instanceof NonMedicalDocumentException ||
+        error instanceof AppError
+      ) {
         throw error;
       }
 
-      throw new OcrEmptyResultError("OCR model failed and processing was stopped", {
-        filename,
-        model: env.aiModel,
-        cause: error.message,
-        stack: error.stack,
-      });
+      throw new OcrEmptyResultError(
+        error.message || "OCR model failed and processing was stopped",
+        {
+          filename,
+          model: env.aiModel,
+          cause: error.message,
+          stack: error.stack,
+        },
+      );
     }
 
     const quality = evaluateQuality(result);

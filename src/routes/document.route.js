@@ -4,6 +4,7 @@ const documentController = require("../controllers/document.controller");
 const documentFlowController = require("../controllers/documentFlow.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
+// const { idParamSchema } = require("../validations/commonValidation");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
 
 const router = express.Router();
@@ -39,6 +40,7 @@ router.get("/summary", verifyToken, documentController.getDocumentSummaryList);
 router.get("/list", verifyToken, documentController.getDocumentList);
 router.get("/:id", verifyToken, documentController.getDocumentById);
 router.delete("/:id", verifyToken, documentController.deleteDocument);
+router.put("/update/:id", verifyToken, documentController.updateDocument);
 
 // Legacy filter endpoints kept for backwards compatibility.
 router.post("/list", verifyToken, documentController.listDocuments);

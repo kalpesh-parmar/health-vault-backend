@@ -17,6 +17,7 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { fileTypeValue } = require("../../../enums/fileType");
+const { normalizeDocumentType } = require("../../../enums/documentType");
 const uploadFileService = require("../../uploadFile.service");
 const {
   medicalDocumentClassifierService,
@@ -328,7 +329,7 @@ class OcrService {
     fs.writeFileSync(tempPdfPath, pdfBuffer);
 
     try {
-      const popplerPath = env.popplerPath || "D:/Release-26.02.0-0/poppler-26.02.0/Library/bin";
+      const popplerPath = env.popplerPath || "C:/Users/hp/Downloads/poppler-26.02.0/Library/bin";
       const pdftoppmExe = path.join(popplerPath, "pdftoppm.exe");
       let cmd = `"${pdftoppmExe}" -jpeg -r 100`;
       if (options.firstPageOnly) {
@@ -1039,60 +1040,80 @@ Return STRICT JSON only:
         throw new Error("OCR produced no usable text");
       }
 
-      for (let i = 0; i < base64Images.length; i++) {
-        const pageNum = i + 1;
-        console.time(
-          `[OcrService] Processing Page ${pageNum}/${base64Images.length} with ${visionModel}...`,
-        );
+      console.time(
+        `[OcrService] Processing ${base64Images.length} page(s) in parallel with ${visionModel}...`,
+      );
 
-        try {
-          const pageResponse = await ollamaClient.chat(
-            [
+      const pageResults = await Promise.all(
+        base64Images.map(async (base64Img, index) => {
+          const pageNum = index + 1;
+          try {
+            const pageResponse = await ollamaClient.chat(
+              [
+                {
+                  role: "user",
+                  content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
+                  images: [base64Img],
+                },
+              ],
+              visionModel,
               {
-                role: "user",
-                content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
-                images: [base64Images[i]],
+                temperature: 0,
+                maxTokens: 8192,
+                format: "json",
+                rawOptions: { num_ctx: 8192 },
               },
-            ],
-            visionModel,
-            {
-              temperature: 0,
-              maxTokens: 8192,
-              format: "json",
-              rawOptions: { num_ctx: 8192 },
-            },
-          );
+            );
 
-          const pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
-          if (pageParsed && pageParsed.status !== "FAILED") {
-            const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
-            if (pageType === "MEDICAL") {
-              hasMedicalPage = true;
-              pageTexts.push(`--- Page ${pageNum} ---\n${cleanOcrText(pageParsed.rawText || "")}`);
+            const pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
+            if (pageParsed && pageParsed.status !== "FAILED") {
+              const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
+              return { pageNum, pageType, rawText: pageParsed.rawText || "", status: "SUCCESS" };
             } else {
-              skippedPages.push({ page: pageNum, reason: pageType });
-              console.warn(`[OcrService] Page ${pageNum} skipped (Type: ${pageType})`);
+              return { pageNum, pageType: "UNKNOWN", rawText: "", status: "FAILED" };
             }
-          } else {
-            ocrIncomplete = true;
-            failedPages.push(pageNum);
-            pageTexts.push(`--- Page ${pageNum} ---\n[OCR_FAILED]`);
+          } catch (err) {
+            console.error(`[OcrService] Vision OCR failed on Page ${pageNum}:`, err.message);
+            return {
+              pageNum,
+              pageType: "UNKNOWN",
+              rawText: "",
+              status: "FAILED",
+              error: err.message,
+            };
           }
-        } catch (err) {
-          console.error(`[OcrService] Vision OCR failed on Page ${pageNum}:`, err.message);
-          ocrIncomplete = true;
-          failedPages.push(pageNum);
-          pageTexts.push(`--- Page ${pageNum} ---\n[OCR_FAILED]`);
-        }
+        }),
+      );
 
-        console.timeEnd(
-          `[OcrService] Processing Page ${pageNum}/${base64Images.length} with ${visionModel}...`,
-        );
+      console.timeEnd(
+        `[OcrService] Processing ${base64Images.length} page(s) in parallel with ${visionModel}...`,
+      );
+
+      for (const res of pageResults) {
+        if (res.status === "SUCCESS") {
+          if (res.pageType === "MEDICAL") {
+            hasMedicalPage = true;
+            pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
+          } else {
+            skippedPages.push({ page: res.pageNum, reason: res.pageType });
+            console.warn(`[OcrService] Page ${res.pageNum} skipped (Type: ${res.pageType})`);
+          }
+        } else {
+          ocrIncomplete = true;
+          failedPages.push(res.pageNum);
+          pageTexts.push(`--- Page ${res.pageNum} ---\n[OCR_FAILED]`);
+        }
       }
 
       // Document-Level Medical Check: Reject only if NO page in the document was medical
       if (!hasMedicalPage) {
-        throw new NonMedicalDocumentException("The uploaded file is not a medical document.");
+        const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
+        const uniqueCategories = [...new Set(detectedCategories)];
+        const categoryStr =
+          uniqueCategories.length > 0 ? ` (detected category: ${uniqueCategories.join(", ")})` : "";
+        throw new NonMedicalDocumentException(
+          `The uploaded file is not a medical document${categoryStr}.`,
+        );
       }
     }
 
@@ -1183,7 +1204,13 @@ Return STRICT JSON only:
       rawParsedCandidate.remarks ||
       (rawParsedCandidate.rawText ? rawParsedCandidate.rawText.slice(0, 200) : "");
 
+    const analyzedDocType = normalizeDocumentType(
+      rawParsedCandidate.documentType || rawParsedCandidate.reportType,
+    );
+
     const mapped = {
+      documentType: analyzedDocType,
+      reportType: analyzedDocType,
       pages: [
         {
           page: 1,
@@ -1191,6 +1218,8 @@ Return STRICT JSON only:
         },
       ],
       medicalExtraction: {
+        documentType: analyzedDocType,
+        reportType: analyzedDocType,
         validationPassed: isSchemaValidated,
         validationError: isSchemaValidated ? null : zodValidationError,
         ocrIncomplete,
@@ -1407,9 +1436,15 @@ ${rawText}
         : "No summary available.";
     }
 
+    const detectedDocumentType = normalizeDocumentType(
+      ocrPayload?.documentType ||
+        ocrPayload?.medicalExtraction?.reportType ||
+        ocrPayload?.reportType,
+    );
+
     const summary = {
       summary: summaryText,
-      documentType: ocrPayload?.documentType || null,
+      documentType: detectedDocumentType,
       diagnosis: normalized.diagnosis,
       medications,
       keyFindings: normalized.diagnosis,
@@ -1478,12 +1513,15 @@ ${rawText}
       patientName,
       reportDate: normalized.reportDate || pickReportDate(normalized),
       visitDate: normalized.visitDate || null,
-      reportType: summary?.documentType || normalized?.documentType || null,
+      documentType: detectedDocumentType,
+      reportType: detectedDocumentType,
       testResults: labResults,
     };
 
     const rawOcrData = {
       blocks: ocrPayload?.paragraphs || [],
+      // confidence:typeof existingConfidence === "number"?
+      //   existingConfidence: extractedText.trim().length > 0? 0.95 : null,
       confidence: ocrPayload?.confidence ?? rawOcr?.metadata?.confidence ?? null,
       engine: rawOcr?.metrics?.engine || "pymupdf",
       fullText: ocrPayload?.fullText || ocrPayload?.text || rawOcr?.ocr_text || "",
@@ -1547,6 +1585,7 @@ ${rawText}
           remoteResult.text ||
           remoteResult.rawText ||
           remoteResult.ocr_text ||
+          remoteResult.fullText ||
           (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
       }
     } else {
@@ -1559,10 +1598,13 @@ ${rawText}
         mode: "detailed",
       });
       rawText =
-        remoteResult.text ||
-        remoteResult.rawText ||
-        remoteResult.ocr_text ||
-        (typeof remoteResult === "string" ? remoteResult : JSON.stringify(remoteResult));
+        typeof remoteResult === "string"
+          ? remoteResult
+          : remoteResult.ocr_text ||
+            remoteResult.text ||
+            remoteResult.rawText ||
+            remoteResult.fullText ||
+            "";
     }
 
     // 2. Summarize & Structure Data (Qwen3-VL via Remote Service)
@@ -1694,10 +1736,6 @@ ${rawText}
     const bucketName =
       uploadResult.data.s3Bucket ||
       (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-    const filePath =
-      env.storageProvider === "gcp"
-        ? `gs://${bucketName}/${fileKey}`
-        : `https://${bucketName}.s3.amazonaws.com/${fileKey}`;
 
     const [documentRow] = await db
       .insert(document)
@@ -1705,7 +1743,6 @@ ${rawText}
         userId,
         documentType: "medical_document",
         fileName: uploadResult.data.originalFileName,
-        filePath,
         s3Bucket: bucketName,
         s3Key: fileKey,
         fileType: inferFileType(uploadResult.data.mimeType),
@@ -1837,7 +1874,12 @@ ${rawText}
         `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated.`,
       );
 
-      // Ensure data contains both summaries
+      // Ensure data contains both summaries & normalized documentType
+      const analyzedDocumentType = normalizeDocumentType(
+        structuredData?.documentType || structuredData?.reportType || uploadResult?.documentType,
+      );
+      structuredData.documentType = analyzedDocumentType;
+      structuredData.reportType = analyzedDocumentType;
       structuredData.summaryEnglish = summaryEnglish;
       structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
 
@@ -1846,6 +1888,7 @@ ${rawText}
       await db
         .update(document)
         .set({
+          documentType: analyzedDocumentType,
           ocrStatus: ocrStatus.COMPLETED,
           ocrExtractedText: ocrResult.rawText,
           structuredExtractedData: structuredData,

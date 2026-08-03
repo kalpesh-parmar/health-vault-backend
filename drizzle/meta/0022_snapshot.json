@@ -1,11 +1,6 @@
 {
-<<<<<<< HEAD
-  "id": "8a53e9d8-4a16-4985-ac4f-f56859da20ea",
-  "prevId": "40127670-43a4-48b9-b7f4-7517ad5bf48b",
-=======
-  "id": "fd36e5f0-579a-4b6b-a1c0-8188b00045f7",
-  "prevId": "4d31d84f-2815-4250-bcef-5fb8bd04717f",
->>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
+  "id": "8c2cdbb3-6f83-46fa-b4d8-f86dc26a98f9",
+  "prevId": "95dae44f-6cf0-436d-928f-7986de63573c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -279,15 +274,12 @@
           "primaryKey": false,
           "notNull": true
         },
-<<<<<<< HEAD
-=======
         "document_id": {
           "name": "document_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
->>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         "title": {
           "name": "title",
           "type": "varchar(255)",
@@ -351,8 +343,6 @@
           "method": "btree",
           "with": {}
         },
-<<<<<<< HEAD
-=======
         "chat_sessions_document_id_idx": {
           "name": "chat_sessions_document_id_idx",
           "columns": [
@@ -368,7 +358,6 @@
           "method": "btree",
           "with": {}
         },
->>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         "chat_sessions_last_message_at_idx": {
           "name": "chat_sessions_last_message_at_idx",
           "columns": [
@@ -419,8 +408,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-<<<<<<< HEAD
-=======
         },
         "chat_sessions_document_id_documents_id_fk": {
           "name": "chat_sessions_document_id_documents_id_fk",
@@ -434,7 +421,6 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
->>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         }
       },
       "compositePrimaryKeys": {},
@@ -473,12 +459,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "file_path": {
-          "name": "file_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "s3_bucket": {
           "name": "s3_bucket",
           "type": "varchar(255)",
@@ -489,7 +469,7 @@
           "name": "s3_key",
           "type": "varchar(500)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "file_type": {
           "name": "file_type",
@@ -554,24 +534,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "summary_in_preferred_language": {
-          "name": "summary_in_preferred_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "soft_delete": {
           "name": "soft_delete",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -3363,52 +3331,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.otp_verifications": {
-      "name": "otp_verifications",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "mobile": {
-          "name": "mobile",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "otp": {
-          "name": "otp",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_verified": {
-          "name": "is_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.patients": {
       "name": "patients",
       "schema": "",
@@ -3464,13 +3386,6 @@
           "notNull": true,
           "default": "'ACTIVE'"
         },
-        "is_verified": {
-          "name": "is_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "gender": {
           "name": "gender",
           "type": "gender",
@@ -3495,13 +3410,6 @@
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "last_login_at": {
           "name": "last_login_at",
@@ -3552,12 +3460,6 @@
         "blood_group": {
           "name": "blood_group",
           "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "blood_type": {
-          "name": "blood_type",
-          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
         },
@@ -4102,9 +4004,6 @@
         "medical_document",
         "medication",
         "insurance",
-<<<<<<< HEAD
-        "other"
-=======
         "prescription",
         "lab report",
         "imaging report",
@@ -4114,7 +4013,6 @@
         "vaccination record",
         "medical certificate",
         "other medical document"
->>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
       ]
     },
     "public.file_type": {

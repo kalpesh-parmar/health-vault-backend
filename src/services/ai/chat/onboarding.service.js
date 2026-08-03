@@ -1145,9 +1145,28 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (payload.selected) {
         const selectedIds = payload.selected;
+
+        // Optionally update medicines if FE sends updated list in payload
+        if (Array.isArray(payload.medicines)) {
+          payload.medicines.forEach((updatedMed) => {
+            const medId = updatedMed.id || updatedMed.client_med_id;
+            if (medId) {
+              const idx = (state.medicinesToAdd || []).findIndex(
+                (m) => (m.id && m.id === medId) || (m.client_med_id && m.client_med_id === medId),
+              );
+              if (idx >= 0) {
+                state.medicinesToAdd[idx] = {
+                  ...state.medicinesToAdd[idx],
+                  ...updatedMed,
+                };
+              }
+            }
+          });
+        }
+
         state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
           ...m,
-          selected: selectedIds.includes(m.id),
+          selected: selectedIds.includes(m.id || m.client_med_id),
         }));
 
         let nextIncompleteIndex = -1;
@@ -1167,9 +1186,36 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.currentMedicineIndex = nextIncompleteIndex;
           state.currentStep = "ADD_MEDICINE";
         } else {
-          state.validMedsToBulkCreate = state.medicinesToAdd.filter((m) => m.selected);
-          state.confirmMode = "BULK";
-          state.currentStep = "CONFIRM_MEDICINE";
+          // Filter selected medicines that have NOT been saved in DB yet (preventing duplicate insertion)
+          const unsavedMeds = state.medicinesToAdd.filter((m) => m.selected && !m.isSaved);
+          if (unsavedMeds.length > 0) {
+            const bulkCreated = await medicationService.bulkCreate(userId, unsavedMeds);
+
+            for (let i = 0; i < unsavedMeds.length; i++) {
+              const created = bulkCreated[i];
+              const unsaved = unsavedMeds[i];
+              const matchIdx = state.medicinesToAdd.findIndex(
+                (m) =>
+                  (m.client_med_id && m.client_med_id === unsaved.client_med_id) ||
+                  (m.id && m.id === unsaved.id),
+              );
+              if (matchIdx >= 0 && created) {
+                state.medicinesToAdd[matchIdx].isSaved = true;
+                state.medicinesToAdd[matchIdx].dbId = created.id;
+                try {
+                  await medicationReminderService.createReminder(userId, {
+                    medicationId: created.id,
+                  });
+                } catch (err) {
+                  console.error(
+                    `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
+                    err,
+                  );
+                }
+              }
+            }
+          }
+          state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (payload.addNew) {
         state.currentStep = "ADD_MEDICINE";
@@ -1207,7 +1253,9 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         let existingIdx = -1;
         if (
+          state.currentStep === "EDIT_MEDICINE" &&
           state.currentMedicineIndex !== undefined &&
+          state.currentMedicineIndex !== null &&
           state.currentMedicineIndex >= 0 &&
           state.currentMedicineIndex < state.medicinesToAdd.length
         ) {
@@ -1216,9 +1264,11 @@ async function updateStateFromMessage(state, message, userId = null) {
             newMed.client_med_id = state.medicinesToAdd[existingIdx].client_med_id;
             newMed.id = state.medicinesToAdd[existingIdx].id;
           }
-        } else {
+        } else if (newMed.client_med_id) {
           existingIdx = state.medicinesToAdd.findIndex(
-            (m) => m.client_med_id && m.client_med_id === newMed.client_med_id,
+            (m) =>
+              (m.client_med_id && m.client_med_id === newMed.client_med_id) ||
+              (m.id && m.id === newMed.client_med_id),
           );
         }
 
@@ -1235,16 +1285,18 @@ async function updateStateFromMessage(state, message, userId = null) {
             newMed.client_med_id = newId;
             newMed.id = newId;
           }
-          state.medicinesToAdd.push({ ...newMed, selected: true });
+          state.medicinesToAdd.push({ ...newMed, selected: true, isSaved: false });
         }
 
         state.activeMedicine = newMed;
-        state.confirmMode = "SINGLE";
-        state.currentStep = "CONFIRM_MEDICINE";
+        // Bypassing CONFIRM_MEDICINE step -> return directly to REVIEW_MEDICINES_LIST with updated list
+        state.currentStep = "REVIEW_MEDICINES_LIST";
       }
       break;
     }
 
+    /*
+    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step logic (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
     case "CONFIRM_MEDICINE": {
       let payload;
       try {
@@ -1333,6 +1385,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       }
       break;
     }
+    */
 
     case "MEDICINE_OPTIONS": {
       let payload;
@@ -1352,6 +1405,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.currentMedicineIndex = undefined;
       } else if (key === "DASHBOARD" || key === "ASK_REPORT") {
         state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -1886,6 +1940,8 @@ async function getLocalizedResponse(step, state) {
       };
     }
 
+    /*
+    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step response builder (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
     case "CONFIRM_MEDICINE": {
       let title = "";
       let lines = [];
@@ -2001,6 +2057,7 @@ async function getLocalizedResponse(step, state) {
         summary: { title, lines },
       };
     }
+    */
 
     case "MEDICINE_OPTIONS":
       return {
@@ -2088,8 +2145,7 @@ class OnboardingService {
       state.medicinesFlowStarted = false;
     if (state.medicinesConfirmed === undefined || state.medicinesConfirmed === null)
       state.medicinesConfirmed = false;
-    if (state.currentMedicineIndex === undefined || state.currentMedicineIndex === null)
-      state.currentMedicineIndex = 0;
+    if (state.currentMedicineIndex === undefined) state.currentMedicineIndex = null;
     if (state.medicinesSavedToDb === undefined || state.medicinesSavedToDb === null)
       state.medicinesSavedToDb = false;
     if (state.activeMedicine === undefined) state.activeMedicine = null;
@@ -2613,7 +2669,7 @@ class OnboardingService {
 
       if (state.isOnboardingCompleted) {
         updateData.status = "ACTIVE";
-        updateData.isVerified = true;
+        // updateData.isVerified = true;
         updateData.onboardingCompleted = true;
       }
 
@@ -2686,8 +2742,9 @@ class OnboardingService {
     const nextStep = getNextStep(state);
     const response = await createResponse(nextStep, state);
 
+    let assistantMsgCreatedAt = new Date().toISOString();
     if (state.chatSessionId) {
-      await chatService.appendChatMessage({
+      const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
         role: "assistant",
@@ -2709,6 +2766,12 @@ class OnboardingService {
           medicines: response.medicines || null,
         },
       });
+      if (savedMsg && savedMsg.createdAt) {
+        assistantMsgCreatedAt =
+          typeof savedMsg.createdAt.toISOString === "function"
+            ? savedMsg.createdAt.toISOString()
+            : new Date(savedMsg.createdAt).toISOString();
+      }
     }
     // Response is already localized via getLocalizedResponse static key lookup.
     // Double translation block removed to prevent corruption of translated templates.
@@ -2722,17 +2785,10 @@ class OnboardingService {
       fieldsLength: response.fields?.length,
     });
 
-    console.log("[INSTRUMENTATION] FINAL outgoing onboarding assistant payload:", {
-      action: response.action,
-      mode: response.mode,
-      title: response.title,
-      subtitle: response.subtitle,
-      hasFields: !!response.fields,
-      fieldsLength: response.fields?.length,
-    });
-
     return {
       ...response,
+      createdAt: assistantMsgCreatedAt,
+      timestamp: new Date(assistantMsgCreatedAt).getTime(),
       state: state,
     };
   }

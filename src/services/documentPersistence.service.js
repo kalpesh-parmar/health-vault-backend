@@ -1,6 +1,6 @@
 const { db } = require("../configs/db");
 const { env } = require("../configs/env");
-const { documentTypeValue } = require("../enums/documentType");
+const { normalizeDocumentType } = require("../enums/documentType");
 const { fileTypeValue } = require("../enums/fileType");
 const { messageConstants } = require("../constants/messageConstants");
 const { ocrStatus } = require("../enums/ocrStatus");
@@ -12,12 +12,6 @@ const medicationMapper = require("./ai/helpers/medicationMapper");
 const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
 const { embeddingService } = require("./ai/chat/embedding.service");
-
-function inferDocumentType(rawType) {
-  const allowed = new Set(documentTypeValue);
-  if (rawType && allowed.has(rawType)) return rawType;
-  return documentTypeValue[0];
-}
 
 function inferFileType(mimeType) {
   if (!mimeType) return fileTypeValue[0];
@@ -100,18 +94,17 @@ class DocumentPersistenceService {
       const bucketName =
         payload.s3bucket ||
         (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-      const filePath =
-        env.storageProvider === "gcp"
-          ? `gs://${bucketName}/${s3Key}`
-          : `https://${bucketName}.s3.amazonaws.com/${s3Key}`;
 
       const [documentRow] = await tx
         .insert(document)
         .values({
-          documentType: inferDocumentType(payload.documentType),
+          documentType: normalizeDocumentType(
+            payload.documentType ||
+              extractedStructuredData?.documentType ||
+              extractedStructuredData?.reportType,
+          ),
           doctorName: extractedStructuredData?.doctorName || null,
           fileName,
-          filePath,
           fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
           fileType: inferFileType(mimeType),
           hospitalName: extractedStructuredData?.hospitalName || null,

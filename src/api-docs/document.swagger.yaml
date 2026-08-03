@@ -124,7 +124,17 @@ components:
           $ref: "#/components/schemas/DocumentFilter"
         sort:
           $ref: "#/components/schemas/DocumentSort"
-
+    UpdateDocumentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        documentType: { type: string }
+        fileName: { type: string }
+        doctorName: { type: string, nullable: true }
+        hospitalName: { type: string, nullable: true }
+        reportDate: { type: string, format: date, nullable: true }
+        remarks: { type: string, nullable: true }
+        structuredExtractedData: { type: object, nullable: true }
     ListDocumentsPaginatedRequest:
       type: object
       additionalProperties: false
@@ -292,3 +302,31 @@ paths:
                   data:
                     type: array
                     items: { type: object }
+  /documents/update/{id}:
+    put:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      summary: Update document by ID
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocumentRequest"
+            examples:
+              updateDocument:
+                value:
+                  documentType: "medical_document"
+                  fileName: "updated report name"
+                  # doctorName: "Dr. Smith"
+                  # hospitalName: "City Hospital"
+      responses:
+        "200":
+          description: Document updated successfully
+        "400":
+          description: Invalid request
+        "404":
+          description: Document not found
