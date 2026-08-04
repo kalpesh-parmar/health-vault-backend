@@ -1,5 +1,11 @@
 const axios = require("axios");
+const http = require("http");
+
 const { env } = require("../../../configs/env");
+
+const axiosInstance = axios.create({
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
+});
 
 class OllamaClient {
   constructor() {
@@ -8,7 +14,7 @@ class OllamaClient {
 
   async listTags() {
     try {
-      const response = await axios.get(`${this.baseUrl}/api/tags`, {
+      const response = await axiosInstance.get(`${this.baseUrl}/api/tags`, {
         timeout: 5000,
       });
       const models = response.data?.models || [];
@@ -23,7 +29,7 @@ class OllamaClient {
     let attempt = 0;
     while (true) {
       try {
-        return await axios(requestConfig);
+        return await axiosInstance(requestConfig);
       } catch (error) {
         attempt++;
         const isNetworkOrTimeout = !error.response || error.response.status >= 500;

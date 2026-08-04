@@ -8,7 +8,6 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 // const { chatSession } = require("../../../models/chatSession");
 const { eq, desc } = require("drizzle-orm");
-
 // const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
 // const { ocrService } = require("../ocr/ocr.service");
 // const documentPersistenceService = require("../../documentPersistenceService");
@@ -17,7 +16,6 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
-const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
@@ -121,23 +119,23 @@ const AGE_KEYWORDS = [
 //   return Math.max(0, Math.min(1, 1 - Number(distance)));
 // }
 
-// function isTextInLanguage(text, language) {
-//   if (!text || !language) return false;
-//   const lang = language.toLowerCase();
-//   if (lang === "gujarati") {
-//     return /[\u0A80-\u0AFF]/.test(text);
-//   }
-//   if (lang === "hindi" || lang === "marathi") {
-//     return /[\u0900-\u097F]/.test(text);
-//   }
-//   if (lang === "tamil") {
-//     return /[\u0B80-\u0BFF]/.test(text);
-//   }
-//   if (lang === "english") {
-//     return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
-//   }
-//   return false;
-// }
+function isTextInLanguage(text, language) {
+  if (!text || !language) return false;
+  const lang = language.toLowerCase();
+  if (lang === "gujarati") {
+    return /[\u0A80-\u0AFF]/.test(text);
+  }
+  if (lang === "hindi" || lang === "marathi") {
+    return /[\u0900-\u097F]/.test(text);
+  }
+  if (lang === "tamil") {
+    return /[\u0B80-\u0BFF]/.test(text);
+  }
+  if (lang === "english") {
+    return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
+  }
+  return false;
+}
 
 const processingSessions = new Set();
 
@@ -194,13 +192,18 @@ class ChatService {
           content:
             "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
         });
+      } else {
+        formattedMessages.push({
+          role: "system",
+          content: `CRITICAL INSTRUCTION: You MUST generate your ENTIRE response in ${normLang.toUpperCase()} ONLY. Do NOT output any English sentences.`,
+        });
       }
 
       console.log(`[ChatService] Running local RAG chat in ${normLang} using ${env.chatModel}...`);
       const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
-        maxTokens: 2048,
-        rawOptions: { num_ctx: 16384 },
+        maxTokens: 400,
+        rawOptions: { num_ctx: 3000 },
       });
       return {
         answer,
@@ -221,6 +224,11 @@ class ChatService {
         role: "system",
         content:
           "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+      });
+    } else {
+      formattedMessages.push({
+        role: "system",
+        content: `CRITICAL INSTRUCTION: You MUST generate your ENTIRE response in ${normLang.toUpperCase()} ONLY. Do NOT output any English sentences.`,
       });
     }
 
@@ -274,6 +282,11 @@ class ChatService {
     }
 
     try {
+      // Normalize documentId to array to prevent Drizzle inArray crash when passing single strings
+      if (documentId && !Array.isArray(documentId)) {
+        documentId = [documentId];
+      }
+
       const _reqStartTime = Date.now();
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
@@ -312,18 +325,27 @@ class ChatService {
       let interceptedReply = null;
 
       let englishQuestion = question;
-      // if (preferredLanguage !== "english" && !isTextInLanguage(question, "english")) {
-      //   try {
-      //     debugLogger.info("sendMessage: [LLM TRACKING] [1] Translating incoming question (IndicTrans2)");
-      //     const inTransStartTime = Date.now();
-      //     englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
-      //     const inTransDuration = Date.now() - inTransStartTime;
-      //     debugLogger.info(`sendMessage: [PERFORMANCE] Input IndicTrans2 Translation took ${inTransDuration}ms`);
-      //     debugLogger.info("sendMessage: Translated question to English for internal processing", { original: question, english: englishQuestion });
-      //   } catch (err) {
-      //     debugLogger.error("sendMessage: Failed to translate question to English", { error: err.message });
-      //   }
-      // }
+      if (preferredLanguage !== "english" && !isTextInLanguage(question, "english")) {
+        try {
+          debugLogger.info(
+            "sendMessage: [LLM TRACKING] [1] Translating incoming question (IndicTrans2)",
+          );
+          const inTransStartTime = Date.now();
+          englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
+          const inTransDuration = Date.now() - inTransStartTime;
+          debugLogger.info(
+            `sendMessage: [PERFORMANCE] Input IndicTrans2 Translation took ${inTransDuration}ms`,
+          );
+          debugLogger.info("sendMessage: Translated question to English for internal processing", {
+            original: question,
+            english: englishQuestion,
+          });
+        } catch (err) {
+          debugLogger.error("sendMessage: Failed to translate question to English", {
+            error: err.message,
+          });
+        }
+      }
 
       if (AGE_KEYWORDS.includes(cleanQuestion)) {
         debugLogger.info("sendMessage: Intercepted age-related question", { question });
@@ -399,20 +421,6 @@ class ChatService {
         const lowerQuestion = englishQuestion.toLowerCase();
 
         // Fast deterministic rule-matching
-        const generalKeywords = [
-          "hi ",
-          "hello",
-          "hey ",
-          "how are you",
-          "tips",
-          "diet",
-          "advice",
-          "fever",
-          "cough",
-          "headache",
-          "general",
-          "who are you",
-        ];
         const compareKeywords = [
           "all",
           "compare",
@@ -424,6 +432,10 @@ class ChatService {
           "highest",
           "lowest",
           "across",
+          "સરખામણી",
+          "તુલના",
+          "तुलना",
+          "ஒப்பிடுக",
         ];
         const documentKeywords = [
           "report",
@@ -446,6 +458,11 @@ class ChatService {
           "sugar",
           "blood",
           "vitamin",
+          "અહેવાલ",
+          "રિપોર્ટ",
+          "रिपोर्ट",
+          "अहवाल",
+          "அறிக்கை",
         ];
 
         const hasCompare = compareKeywords.some((kw) => lowerQuestion.includes(kw));
@@ -455,6 +472,9 @@ class ChatService {
           intent = "COMPARE";
         } else if (hasCompare && lowerQuestion.includes("report")) {
           intent = "COMPARE";
+        } else if (hasCompare) {
+          // If they ask to compare something (e.g. hemoglobin), it's highly likely they mean their reports
+          intent = "COMPARE";
         } else if (hasDocument) {
           if (lowerQuestion.includes("reports")) {
             intent = "COMPARE";
@@ -462,29 +482,8 @@ class ChatService {
             intent = "DOCUMENT";
           }
         } else {
-          const isGeneral = generalKeywords.some((kw) => lowerQuestion.includes(kw));
-          if (!isGeneral) {
-            // Fallback to LLM if ambiguous
-            const analyzerPrompt = `Analyze the user's question: "${englishQuestion}"
-Classify the intent strictly into one of these three categories:
-1. GENERAL: User is asking about their general health, profile, age, symptoms, general advice WITHOUT mentioning their reports.
-2. DOCUMENT: User is asking about a specific medical report, lab result, recent upload, or specific remedies/advice based on a specific report.
-3. COMPARE: User is asking to compare multiple reports, find trends, asks for an overview/summary of ALL reports, asks to find specific values (high/low/abnormal) across reports, or asks for remedies/advice based on all reports.
-Return ONLY the exact word GENERAL, DOCUMENT, or COMPARE. No other text.`;
-            try {
-              debugLogger.info("sendMessage: [LLM TRACKING] [2] Calling Request Analyzer (Qwen)");
-              const analyzerRes = await ollamaClient.generate(analyzerPrompt, env.chatModel, {
-                temperature: 0,
-                maxTokens: 10,
-              });
-              const resClean = analyzerRes.toUpperCase().trim();
-              if (resClean.includes("COMPARE")) intent = "COMPARE";
-              else if (resClean.includes("DOCUMENT")) intent = "DOCUMENT";
-              else intent = "GENERAL";
-            } catch (err) {
-              debugLogger.error("sendMessage: Request Analyzer failed", { error: err.message });
-            }
-          }
+          // Rule-based fallback: strictly treat as GENERAL if no document/compare keywords exist
+          intent = "GENERAL";
         }
         debugLogger.info(
           `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
@@ -573,6 +572,47 @@ Return ONLY the exact word GENERAL, DOCUMENT, or COMPARE. No other text.`;
               }
             }
 
+            if (!resolvedIds && intent === "COMPARE") {
+              debugLogger.info(
+                "sendMessage: Document Resolver found COMPARE query ambiguous (rules), returning requireSelection",
+                { availableReportsCount: recentDocs.length },
+              );
+
+              const userMsg = await chatSessionRepository.appendMessage({
+                content: question.trim(),
+                role: "user",
+                sessionId,
+                userId,
+              });
+
+              const replyText =
+                REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
+
+              const aiMsg = await chatSessionRepository.appendMessage({
+                citations: [],
+                content: replyText,
+                metadata: {
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                  requireSelection: true,
+                  documentId: [],
+                },
+                role: "assistant",
+                sessionId,
+                userId,
+              });
+
+              return {
+                ai: aiMsg,
+                user: userMsg,
+                reply: replyText,
+                requireSelection: true,
+                reports: recentDocs,
+                mode: "DOCUMENT_RAG",
+                emergency: false,
+              };
+            }
+
             if (resolvedIds) {
               finalDocumentIds = resolvedIds;
               debugLogger.info(
@@ -580,106 +620,47 @@ Return ONLY the exact word GENERAL, DOCUMENT, or COMPARE. No other text.`;
                 { finalDocumentIds },
               );
             } else {
-              debugLogger.info(
-                "sendMessage: Multiple recent documents found, invoking Document Resolver LLM",
-              );
-              const docsListStr = recentDocs
-                .map(
-                  (d, i) =>
-                    `${i + 1}. ID: ${d.id} | Name: ${d.fileName} | Type: ${d.documentType} | Date: ${d.createdAt.toISOString().split("T")[0]}`,
-                )
-                .join("\n");
-
-              const resolvePrompt = `User asks: "${englishQuestion}"
-Available documents:
-${docsListStr}
-
-Which document IDs match this request?
-- If the user asks for "all" reports, an overview of all reports, or a summary of all reports, return a JSON array with ALL the available document IDs.
-- If the user asks a question that requires searching for a particular value, remedies, or searching across multiple/all reports (e.g., "which report has high sugar", "what is low", "remedies for my condition"), return a JSON array with ALL the available document IDs so the AI can search them.
-- If the user asks for a sequence:
-  - "first" or "oldest" means the chronologically OLDEST report (the one with the oldest Date, usually at the bottom of the list).
-  - "last", "latest", or "recent" means the chronologically NEWEST report (the one with the most recent Date, usually #1).
-  - For "second", "third", etc., map it logically based on the Dates.
-  Return a JSON array with the exact matched ID.
-- If the user explicitly names a file (e.g., matching the Name like "blood_test.pdf") or document type (e.g., "X-Ray", "MRI", "Prescription"), return a JSON array with those specific IDs.
-- CRITICAL: If the user simply asks to "compare reports" without naming exactly WHICH reports to compare, and does not mention "all", you MUST output the exact word "AMBIGUOUS" and nothing else.
-- If the request is too vague to definitively pick specific documents and doesn't fall into the above, output "AMBIGUOUS".
-Return ONLY a valid JSON array of IDs like ["id1", "id2"], OR the exact string "AMBIGUOUS".`;
-
-              try {
-                const resolveRes = await ollamaClient.generate(resolvePrompt, env.chatModel, {
-                  temperature: 0,
-                  maxTokens: 150,
+              if (intent === "COMPARE") {
+                debugLogger.info(
+                  "sendMessage: COMPARE intent without specific documents. Requesting selection.",
+                );
+                const userMsg = await chatSessionRepository.appendMessage({
+                  content: question.trim(),
+                  role: "user",
+                  sessionId,
+                  userId,
                 });
-                const resClean = resolveRes.trim();
-                if (resClean.includes("AMBIGUOUS")) {
-                  debugLogger.info(
-                    "sendMessage: Document Resolver found query ambiguous, returning requireSelection",
-                    { availableReportsCount: recentDocs.length },
-                  );
-
-                  const userMsg = await chatSessionRepository.appendMessage({
-                    content: question.trim(),
-                    role: "user",
-                    sessionId,
-                    userId,
-                  });
-
-                  const replyText =
-                    REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-
-                  const aiMsg = await chatSessionRepository.appendMessage({
-                    citations: [],
-                    content: replyText,
-                    metadata: {
-                      mode: "DOCUMENT_RAG",
-                      emergency: false,
-                      requireSelection: true,
-                      documentId: [],
-                    },
-                    role: "assistant",
-                    sessionId,
-                    userId,
-                  });
-
-                  return {
-                    ai: aiMsg,
-                    user: userMsg,
-                    reply: replyText,
-                    requireSelection: true,
-                    reports: recentDocs,
+                const replyText =
+                  REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
+                const aiMsg = await chatSessionRepository.appendMessage({
+                  citations: [],
+                  content: replyText,
+                  metadata: {
                     mode: "DOCUMENT_RAG",
                     emergency: false,
-                  };
-                } else {
-                  const jsonMatch = resClean.match(/\[.*\]/s);
-                  if (jsonMatch) {
-                    const parsedIds = JSON.parse(jsonMatch[0]);
-                    finalDocumentIds = parsedIds.filter((id) =>
-                      recentDocs.some((rd) => rd.id === id),
-                    );
-                    debugLogger.info(
-                      "sendMessage: Document Resolver selected documents based on query",
-                      { finalDocumentIds },
-                    );
-                  }
-                  if (finalDocumentIds.length === 0) {
-                    finalDocumentIds = [recentDocs[0].id]; // fallback to latest
-                    debugLogger.info(
-                      "sendMessage: Document Resolver returned no matches, falling back to latest document",
-                      { finalDocumentIds },
-                    );
-                  }
-                }
+                    requireSelection: true,
+                    documentId: [],
+                  },
+                  role: "assistant",
+                  sessionId,
+                  userId,
+                });
+                return {
+                  ai: aiMsg,
+                  user: userMsg,
+                  reply: replyText,
+                  requireSelection: true,
+                  reports: recentDocs,
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                };
+              } else {
+                // If it's DOCUMENT intent and no specific report was identified, search across ALL recent reports.
+                // This eliminates the 8s LLM bottleneck by directly falling back to the fast Vector DB search.
+                finalDocumentIds = recentDocs.map((d) => d.id);
                 debugLogger.info(
-                  `sendMessage: [PERFORMANCE] Document Resolver (LLM) took ${Date.now() - resolverStartTime}ms`,
-                );
-              } catch (e) {
-                finalDocumentIds = [recentDocs[0].id]; // fallback to latest on error
-                debugLogger.info(
-                  "sendMessage: Document Resolver failed, falling back to latest document",
-                  { finalDocumentIds, error: e.message },
+                  "sendMessage: Document Resolver bypassed LLM, falling back to vector search across all recent documents",
+                  { finalDocumentIds },
                 );
               }
             }
@@ -764,7 +745,6 @@ Return ONLY a valid JSON array of IDs like ["id1", "id2"], OR the exact string "
 
           const lowerQ = englishQuestion.toLowerCase();
           let detectedSectionType = null;
-          let detectedKeyword = null;
 
           if (
             lowerQ.includes("medicine") ||
@@ -795,17 +775,61 @@ Return ONLY a valid JSON array of IDs like ["id1", "id2"], OR the exact string "
             detectedSectionType = "summary";
           }
 
+          // get embedding for the question
           const queryEmbedding = await embeddingService.embedText(englishQuestion);
+          // retrieve similar chunks from the documents
           const relevantChunks = await intelligenceRepository.searchSimilarChunks({
             userId,
             queryEmbedding,
-            limit: 8,
+            limit: 40,
             documentIds: finalDocumentIds,
-            sectionType: detectedSectionType,
-            keyword: detectedKeyword,
           });
 
-          summaryChunks = relevantChunks.map((c, index) => {
+          const filterStartTime = Date.now();
+
+          // 1. Deduplicate by content
+          const uniqueChunks = [];
+          const seenContent = new Set();
+          for (const c of relevantChunks) {
+            const cleanText = (c.content || "").trim().toLowerCase();
+            if (!seenContent.has(cleanText)) {
+              seenContent.add(cleanText);
+              uniqueChunks.push(c);
+            }
+          }
+
+          // 2. AI Summary Preference
+          let filteredChunks = uniqueChunks;
+          if (detectedSectionType === "summary") {
+            const docsWithSummary = new Set(
+              uniqueChunks
+                .filter((c) => c.sourceType === "summary")
+                .map((c) => String(c.documentId)),
+            );
+            filteredChunks = uniqueChunks.filter((c) => {
+              if (c.sourceType === "ocr" && docsWithSummary.has(String(c.documentId))) {
+                return false; // Drop OCR only if user specifically asked for an overview
+              }
+              return true;
+            });
+          }
+
+          // 3. Document Diversity (Ensure we don't just fill context with chunks from 1 document)
+          const chunksPerDoc = new Map();
+          const diverseChunks = [];
+
+          for (const c of filteredChunks) {
+            const docIdStr = String(c.documentId);
+            const count = chunksPerDoc.get(docIdStr) || 0;
+            if (count < 3) {
+              // Max 3 chunks per document to allow other documents to be included
+              diverseChunks.push(c);
+              chunksPerDoc.set(docIdStr, count + 1);
+            }
+            if (diverseChunks.length >= 10) break; // Overall max 10 chunks
+          }
+
+          summaryChunks = diverseChunks.map((c, index) => {
             return {
               chunkId: c.chunkId || `chunk-${index}`,
               documentId: c.documentId,
@@ -815,6 +839,10 @@ Return ONLY a valid JSON array of IDs like ["id1", "id2"], OR the exact string "
               sourceType: c.sourceType || "document",
             };
           });
+
+          debugLogger.info(
+            `sendMessage: [PERFORMANCE] Chunk Filtering took ${Date.now() - filterStartTime}ms`,
+          );
 
           debugLogger.info(
             `sendMessage: [PERFORMANCE] Vector Search Retrieval took ${Date.now() - retrieveStartTime}ms. Retrieved ${summaryChunks.length} chunks.`,
@@ -847,13 +875,17 @@ Return ONLY a valid JSON array of IDs like ["id1", "id2"], OR the exact string "
             );
 
             let rawAns = aiResponse.answer;
-            // if (preferredLanguage !== "english" && !isTextInLanguage(rawAns, preferredLanguage)) {
-            //   debugLogger.info("sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)");
-            //   const transStartTime = Date.now();
-            //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-            //   const transDuration = Date.now() - transStartTime;
-            //   debugLogger.info(`sendMessage: [PERFORMANCE] IndicTrans2 Translation took ${transDuration}ms`);
-            // }
+            if (preferredLanguage !== "english" && !isTextInLanguage(rawAns, preferredLanguage)) {
+              debugLogger.info(
+                "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
+              );
+              const transStartTime = Date.now();
+              rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+              const transDuration = Date.now() - transStartTime;
+              debugLogger.info(
+                `sendMessage: [PERFORMANCE] IndicTrans2 Translation took ${transDuration}ms`,
+              );
+            }
             assistantText = rawAns;
             isEmergency = !!aiResponse.emergency;
           } catch {
