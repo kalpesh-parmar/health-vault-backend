@@ -9,6 +9,7 @@ const messageConstants = Object.freeze({
   DOCUMENT_FILTERED_LIST_FETCHED: "fetch data successfully",
   DOCUMENT_LIST_FETCHED: "Document list fetched successfully",
   DOCUMENT_TYPE_IS_REQUIRED: "Document type is required",
+  DOCUMENT_SELECTION_REQUIRED: "Document selection required",
   HEALTH_CHECK_SUCCESS: "Health check passed",
   NOTIFICATION_BADGE_COUNT_FETCHED: "fetch data successfully",
   NOTIFICATION_DELETED: "Notification deleted successfully",

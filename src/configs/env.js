@@ -180,17 +180,20 @@ function validateEnv(config) {
   }
 
   if (!process.env.CHAT_MODEL) {
+    // eslint-disable-next-line no-console
     console.warn(
       "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen3.5:9b'.",
     );
   }
   if (!process.env.AI_EMBEDDING_MODEL) {
+    // eslint-disable-next-line no-console
     console.warn(
       "[EnvValidation] AI_EMBEDDING_MODEL is missing in environment. Using default 'bge-m3:latest'.",
     );
   }
 
   if (missing.length) {
+    // eslint-disable-next-line no-console
     console.warn(`[EnvValidation] Missing configuration variables: ${missing.join(", ")}`);
   }
   if (config.aiTimeoutMs <= 0) throw new Error("AI_TIMEOUT_MS must be greater than zero");

@@ -1,6 +1,11 @@
 {
+<<<<<<< HEAD
+  "id": "8a53e9d8-4a16-4985-ac4f-f56859da20ea",
+  "prevId": "40127670-43a4-48b9-b7f4-7517ad5bf48b",
+=======
   "id": "fd36e5f0-579a-4b6b-a1c0-8188b00045f7",
   "prevId": "4d31d84f-2815-4250-bcef-5fb8bd04717f",
+>>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -274,12 +279,15 @@
           "primaryKey": false,
           "notNull": true
         },
+<<<<<<< HEAD
+=======
         "document_id": {
           "name": "document_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
+>>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         "title": {
           "name": "title",
           "type": "varchar(255)",
@@ -343,6 +351,8 @@
           "method": "btree",
           "with": {}
         },
+<<<<<<< HEAD
+=======
         "chat_sessions_document_id_idx": {
           "name": "chat_sessions_document_id_idx",
           "columns": [
@@ -358,6 +368,7 @@
           "method": "btree",
           "with": {}
         },
+>>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         "chat_sessions_last_message_at_idx": {
           "name": "chat_sessions_last_message_at_idx",
           "columns": [
@@ -408,6 +419,8 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+<<<<<<< HEAD
+=======
         },
         "chat_sessions_document_id_documents_id_fk": {
           "name": "chat_sessions_document_id_documents_id_fk",
@@ -421,6 +434,7 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+>>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
         }
       },
       "compositePrimaryKeys": {},
@@ -4088,6 +4102,9 @@
         "medical_document",
         "medication",
         "insurance",
+<<<<<<< HEAD
+        "other"
+=======
         "prescription",
         "lab report",
         "imaging report",
@@ -4097,6 +4114,7 @@
         "vaccination record",
         "medical certificate",
         "other medical document"
+>>>>>>> 708e8e9e44925c7c4c461eb2c45ce0a9207a1c41
       ]
     },
     "public.file_type": {

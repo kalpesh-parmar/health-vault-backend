@@ -1,19 +1,15 @@
 const { z } = require("zod");
-
 const { documentTypeValue } = require("../enums/documentType");
-
 const fileKeySchema = z
   .object({
     fileKey: z.string().trim().min(3).max(500),
   })
   .strict();
-
 const batchFileKeySchema = z
   .object({
     fileKeys: z.array(z.string().trim().min(3).max(500)).min(1).max(50),
   })
   .strict();
-
 const runOcrSchema = z
   .object({
     // fileKey: z.string().trim().max(500).optional(),
@@ -32,6 +28,7 @@ const runOcrSchema = z
             const parsed = JSON.parse(val);
             if (Array.isArray(parsed)) return parsed;
           } catch (e) {
+            // eslint-disable-next-line no-console
             console.log(e);
           }
           return [val];
@@ -69,16 +66,17 @@ const addDocumentSchema = z
 const createChatSessionSchema = z
   .object({
     title: z.string().trim().max(255).optional(),
-    documentId: z.string().uuid().optional(),
+    documentId: z.array(z.string().uuid()).optional(),
     sessionId: z.string().uuid().optional().nullable(),
   })
   .strict();
 
 const sendChatMessageSchema = z
   .object({
-    documentId: z.string().trim().min(3).max(500).optional().nullable(),
+    documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
     question: z.string().trim().min(1).max(4000),
     sessionId: z.string().uuid().optional().nullable(),
+    preferredLanguage: z.string().optional(),
   })
   .strict();
 

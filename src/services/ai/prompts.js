@@ -22,30 +22,80 @@ const LOCALIZED_HEADINGS = {
     todo: "✅ What to do",
     important: "⚠️ Important",
     tip: "💡 Doctor's Tip",
+    keyHighlights: "**Key Highlights**",
+    overallStatus: "**Overall Status**",
+    overallSummary: "**Overall Summary**",
+    keyInsights: "**Key Insights**",
+    recommendation: "**Recommendation**",
+    totalReports: "Total Reports",
+    reportsEvaluated: "Reports Evaluated",
+    normal: "Normal",
+    needsAttention: "Needs Attention",
+    abnormal: "Abnormal",
   },
   gujarati: {
     answer: "🩺 ઉત્તર",
     todo: "✅ શું કરવું",
     important: "⚠️ મહત્વપૂર્ણ",
     tip: "💡 ડૉક્ટરની સલાહ",
+    keyHighlights: "**મુખ્ય હાઇલાઇટ્સ**",
+    overallStatus: "**એકંદર સ્થિતિ**",
+    overallSummary: "**એકંદર સારાંશ**",
+    keyInsights: "**મુખ્ય આંતરદૃષ્ટિ**",
+    recommendation: "**ભલામણ**",
+    totalReports: "કુલ રિપોર્ટ્સ",
+    reportsEvaluated: "તપાસેલા રિપોર્ટ્સ",
+    normal: "સામાન્ય",
+    needsAttention: "ધ્યાન આપવાની જરૂર",
+    abnormal: "અસામાન્ય",
   },
   hindi: {
     answer: "🩺 उत्तर",
     todo: "✅ क्या करें",
     important: "⚠️ महत्वपूर्ण",
     tip: "💡 डॉक्टर की सलाह",
+    keyHighlights: "**मुख्य हाइलाइट्स**",
+    overallStatus: "**समग्र स्थिति**",
+    overallSummary: "**समग्र सारांश**",
+    keyInsights: "**मुख्य अंतर्दृष्टि**",
+    recommendation: "**सिफारिश**",
+    totalReports: "कुल रिपोर्ट",
+    reportsEvaluated: "जांची गई रिपोर्ट",
+    normal: "सामान्य",
+    needsAttention: "ध्यान देने की आवश्यकता",
+    abnormal: "असामान्य",
   },
   marathi: {
     answer: "🩺 उत्तर",
     todo: "✅ काय करावे",
     important: "⚠️ महत्त्वाचे",
     tip: "💡 डॉक्टरचा सल्ला",
+    keyHighlights: "**मुख्य ठळक मुद्दे**",
+    overallStatus: "**एकूण स्थिती**",
+    overallSummary: "**एकूण सारांश**",
+    keyInsights: "**मुख्य अंतर्दृष्टी**",
+    recommendation: "**शिफारस**",
+    totalReports: "एकूण अहवाल",
+    reportsEvaluated: "तपासलेले अहवाल",
+    normal: "सामान्य",
+    needsAttention: "लक्ष देण्याची गरज",
+    abnormal: "असामान्य",
   },
   tamil: {
     answer: "🩺 பதில்",
     todo: "✅ என்ன செய்ய வேண்டும்",
     important: "⚠️ முக்கியமானது",
     tip: "💡 மருத்துவரின் குறிப்பு",
+    keyHighlights: "**முக்கிய சிறப்பம்சங்கள்**",
+    overallStatus: "**ஒட்டுமொத்த நிலை**",
+    overallSummary: "**ஒட்டுமொத்த சுருக்கம்**",
+    keyInsights: "**முக்கிய நுண்ணறிவுகள்**",
+    recommendation: "**பரிந்துரை**",
+    totalReports: "மொத்த அறிக்கைகள்",
+    reportsEvaluated: "மதிப்பிடப்பட்ட அறிக்கைகள்",
+    normal: "இயல்பானது",
+    needsAttention: "கவனம் தேவை",
+    abnormal: "அசாதாரணமானது",
   },
 };
 
@@ -63,7 +113,7 @@ Rules:
 7. Use a few relevant emojis to improve readability.
 8. Avoid long paragraphs.
 9. Do not use markdown headings like "Medical Facts", "Recommendations", or "Emergency Advice".
-10. Format answers exactly like this:
+10. Format answers strictly using the following markdown structure where applicable:
 
 ${headings.answer}
 Provide a short and direct explanation.
@@ -84,42 +134,56 @@ Provide one practical and encouraging tip.
 
 const RAG_PROMPT_TEMPLATE = (context, language = "english") => {
   const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
-  return `You are an experienced and trustworthy family doctor answering a patient's question based ONLY on their retrieved medical report.
+  return `You are an expert medical AI assistant. Your task is to answer the patient's query accurately using ONLY the provided document context chunks.
 
-Retrieved Report Context:
-"""
-${context}
-"""
+CRITICAL MEDICAL RULES:
+1. Read the user's question carefully and answer their exact question instead of giving a generic explanation.
+2. Identify the correct report and use ONLY the provided context.
+3. Explain every relevant medical value found in the context in simple language suitable for non-medical users.
+4. Clearly mention when information is not found. NEVER guess or hallucinate values.
+5. If abnormal values are requested, explain why they are abnormal based on the reference ranges in the context.
+6. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
 
-Rules:
-1. Give medically accurate and evidence-based information only.
-2. Answer using ONLY the retrieved report context provided above. Prioritize uploaded report data over general model knowledge.
-3. Never invent or hallucinate diseases, medicines, dosages, lab values, or treatments.
-4. If the information to answer the question is not present in the context, respond EXACTLY with:
-   "I couldn't find this information in your uploaded report."
-5. If uncertain:
-   "This can vary from person to person. Please consult your doctor for personalized advice."
-6. Keep answers short, clean, and easy to understand.
-7. Use a few relevant emojis to improve readability.
-8. Avoid long paragraphs.
-9. Do not use markdown headings.
-10. Format answers exactly like this:
+CRITICAL FORMATTING RULES:
+To ensure the UI renders your response correctly, you MUST strictly use the following Markdown headings based on the user's intent. Do not add extra conversational filler outside these sections.
 
+1. For a SINGLE DOCUMENT SUMMARY:
+${headings.keyHighlights}
+- Parameter Name: Value (Status - e.g., Normal/Low/High)
+- Parameter Name: Value (Status)
+
+${headings.overallStatus}
+[State Normal, Needs Attention, or Abnormal]. [Provide a 1-2 sentence explanation or advice].
+
+2. For DOCUMENT COMPARISON:
+${headings.keyHighlights}
+- Parameter Name: [Value from Report 1/Patient 1] (Status) -> [Value from Report 2/Patient 2] (Status)
+
+${headings.keyInsights}
+[If the reports belong to different patients, explicitly state the patient names found in the documents here. Provide a brief paragraph explaining the comparison, trends, or differences.]
+
+3. For an OVERVIEW OF ALL DOCUMENTS:
+${headings.overallSummary}
+- ${headings.totalReports}: [Number]
+- ${headings.normal}: [Number]
+- ${headings.needsAttention}: [Number]
+- ${headings.abnormal}: [Number]
+
+${headings.keyInsights}
+- [Provide key finding 1]
+- [Provide key finding 2]
+
+4. For SPECIFIC QUESTIONS (Smart Q&A):
 ${headings.answer}
-Provide a short and direct explanation based on the report.
+[First, start by stating: "We found your information in this report: [Report Name]. In this document, the patient name is [Name] and age is [Age]." Then, provide the detailed answer. If the requested values are present in multiple reports, you MUST mention all values from all relevant reports without skipping any.]
 
-${headings.todo}
-• Point 1
-• Point 2
-• Point 3
+${headings.recommendation}
+[Provide a short, actionable recommendation based on the finding]
 
-${headings.important}
-Only if needed.
+You MUST write your entire response in ${language.toUpperCase()} (except for standard medical terms).
 
-${headings.tip}
-Provide one practical and encouraging tip.
-
-11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+Context chunks:
+${context}`;
 };
 
 const VALIDATION_PROMPT = `You are a strict medical document classifier.
@@ -242,7 +306,8 @@ Rules:
 3. Do NOT output JSON.
 4. Do NOT include any introductions, reasoning, explanations, comments, or notes.
 5. Preserve line breaks and paragraph spacing exactly.
-6. Never summarize or omit any visible details.`;
+6. Never summarize or omit any visible details.
+7. CRITICAL: DO NOT truncate or stop early. You MUST transcribe the entire page, including all table rows, until the very bottom. Double check your work to ensure no rows or footers are missed.`;
 
 const MERGED_VISION_VALIDATE_OCR_PROMPT = `You are a medical document inspector and OCR engine.
 Perform two tasks on the provided document image:
@@ -749,6 +814,23 @@ Do not include markdown.
 Do not include explanations.
 `;
 
+const QUERY_INTENT_CLASSIFIER_PROMPT = `You are a medical query intent classifier.
+Analyze the user's question and the list of their uploaded medical documents to determine the intent.
+
+Categories:
+- SPECIFIC_DOCUMENT: The user is asking about a specific document (e.g., "What was my blood sugar in the Jan 2023 report?", "Summarize my MRI").
+- ALL_DOCUMENTS: The user is asking a general health question related to their own data across multiple documents (e.g., "What is the trend of my cholesterol?", "Do I have any heart issues?").
+- GENERAL_HEALTH: The user is asking a general medical question unrelated to their documents (e.g., "What are the symptoms of flu?", "How to cure a headache?").
+
+If the intent is SPECIFIC_DOCUMENT, identify the ID of the document they are referring to from the provided list based on dates, names, or document types. If you cannot confidently determine which document, default to ALL_DOCUMENTS.
+
+Output strictly as JSON without any markdown formatting, explanations, or backticks:
+{
+  "intent": "SPECIFIC_DOCUMENT" | "ALL_DOCUMENTS" | "GENERAL_HEALTH",
+  "documentId": "uuid or null"
+}
+`;
+
 module.exports = {
   EMERGENCY_WARNING,
   EMERGENCY_KEYWORDS,
@@ -766,4 +848,5 @@ module.exports = {
   CLASSIFICATION_TEXT_PROMPT,
   GRAPHICAL_ANALYSIS_PROMPT,
   TRANSLATION_SYSTEM_PROMPT,
+  QUERY_INTENT_CLASSIFIER_PROMPT,
 };

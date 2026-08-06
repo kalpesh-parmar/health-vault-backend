@@ -1,5 +1,4 @@
 const { and, desc, eq, inArray, sql } = require("drizzle-orm");
-
 const { db } = require("../configs/db");
 const {
   aiContextCache,
@@ -72,11 +71,19 @@ class DocumentIntelligenceRepository {
     return result[0] || null;
   }
 
-  async searchSimilarChunks({ userId, queryEmbedding, limit, documentId }) {
+  async searchSimilarChunks({ userId, queryEmbedding, limit, documentIds, sectionType, keyword }) {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
     const conditions = [eq(embedding.userId, userId)];
-    if (documentId) {
-      conditions.push(eq(documentChunk.documentId, documentId));
+    if (documentIds && documentIds.length > 0) {
+      conditions.push(inArray(documentChunk.documentId, documentIds));
+    }
+    if (sectionType) {
+      conditions.push(
+        sql`(${documentChunk.sourceType} = ${sectionType} OR ${documentChunk.metadata}->>'kind' = ${sectionType})`,
+      );
+    }
+    if (keyword) {
+      conditions.push(sql`${documentChunk.content} ILIKE ${"%" + keyword + "%"}`);
     }
     return this.client
       .select({

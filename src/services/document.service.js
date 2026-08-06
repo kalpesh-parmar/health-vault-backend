@@ -125,6 +125,10 @@ class DocumentService {
       throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
     }
 
+    // Also remove the document from any chat sessions where it's referenced
+    const chatSessionRepository = require("../repositories/chatSessionRepository");
+    await chatSessionRepository.removeDocumentFromSessions(params.id, userId);
+
     return deletedDocument;
   }
 
@@ -255,11 +259,13 @@ class DocumentService {
         fileUrl: documentRecords[idx]?._signedUrl || null,
       }));
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("Error in file upload: ", error);
       for (const key of uploadedFileKeys) {
         try {
           await objectStorageService.deleteFile(key);
         } catch (cleanupErr) {
+          // eslint-disable-next-line no-console
           console.warn(`[DocumentService] Cleanup failed for file key ${key}:`, cleanupErr.message);
         }
       }
