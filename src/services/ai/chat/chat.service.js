@@ -7,7 +7,7 @@ const intelligenceRepository = new DocumentIntelligenceRepository();
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 // const { chatSession } = require("../../../models/chatSession");
-const { eq, desc } = require("drizzle-orm");
+const { eq, desc, inArray } = require("drizzle-orm");
 // const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
 // const { ocrService } = require("../ocr/ocr.service");
 // const documentPersistenceService = require("../../documentPersistenceService");
@@ -16,13 +16,16 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
+
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 
 // Debug logger
 const debugLogger = {
+  // eslint-disable-next-line no-console
   info: (msg, data) => console.log(`[DEBUG] ${msg}`, JSON.stringify(data, null, 2)),
+  // eslint-disable-next-line no-console
   error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
 };
 
@@ -177,33 +180,37 @@ class ChatService {
       }
 
       const contextText = contextChunks
-        .map((c) => `[${c.sectionTitle || "Report Content"}]\nContent: ${c.content}`)
+        .map((c) => {
+          return `---
+Report Name: ${c.docData?.fileName || "Unknown"}
+Report Date: ${c.docData?.reportDate ? new Date(c.docData.reportDate).toISOString().split("T")[0] : "Unknown"}
+Report Type: ${c.docData?.documentType || "Unknown"}
+Section: ${c.sectionTitle || "General"}
+Content: ${c.content}
+---`;
+        })
         .join("\n\n");
 
-      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang);
+      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, "english");
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
-      systemPrompt += `\n\nCRITICAL INSTRUCTION: Keep your answer highly concise (under 200 tokens).`;
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-      if (normLang === "english") {
-        formattedMessages.push({
-          role: "system",
-          content:
-            "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
-        });
-      } else {
-        formattedMessages.push({
-          role: "system",
-          content: `CRITICAL INSTRUCTION: You MUST generate your ENTIRE response in ${normLang.toUpperCase()} ONLY. Do NOT output any English sentences.`,
-        });
-      }
+      // Force Qwen to ALWAYS generate in English first
+      formattedMessages.push({
+        role: "system",
+        content:
+          "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+      });
 
-      console.log(`[ChatService] Running local RAG chat in ${normLang} using ${env.chatModel}...`);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ChatService] Running local RAG chat (generation in English) using ${env.chatModel}...`,
+      );
       const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
-        maxTokens: 400,
-        rawOptions: { num_ctx: 3000 },
+        maxTokens: 1024,
+        rawOptions: { num_ctx: 8192 },
       });
       return {
         answer,
@@ -213,27 +220,22 @@ class ChatService {
       };
     }
 
-    let systemPrompt = prompts.GENERAL_HEALTH_PROMPT(normLang);
+    let systemPrompt = prompts.GENERAL_HEALTH_PROMPT("english");
     if (patientContextStr) {
       systemPrompt += `\n\n${patientContextStr}`;
     }
 
     const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-    if (normLang === "english") {
-      formattedMessages.push({
-        role: "system",
-        content:
-          "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
-      });
-    } else {
-      formattedMessages.push({
-        role: "system",
-        content: `CRITICAL INSTRUCTION: You MUST generate your ENTIRE response in ${normLang.toUpperCase()} ONLY. Do NOT output any English sentences.`,
-      });
-    }
+    // Force Qwen to ALWAYS generate in English first
+    formattedMessages.push({
+      role: "system",
+      content:
+        "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+    });
 
+    // eslint-disable-next-line no-console
     console.log(
-      `[ChatService] Running local general chat in ${normLang} using ${env.chatModel}...`,
+      `[ChatService] Running local general chat (generation in English) using ${env.chatModel}...`,
     );
     const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
       temperature: 0.2,
@@ -333,8 +335,9 @@ class ChatService {
           const inTransStartTime = Date.now();
           englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
           const inTransDuration = Date.now() - inTransStartTime;
-          debugLogger.info(
-            `sendMessage: [PERFORMANCE] Input IndicTrans2 Translation took ${inTransDuration}ms`,
+          // eslint-disable-next-line no-console
+          console.log(
+            `\n⏱️ [TRANSLATION TIME] Question (${preferredLanguage.toUpperCase()} -> ENGLISH) took ${inTransDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
           );
           debugLogger.info("sendMessage: Translated question to English for internal processing", {
             original: question,
@@ -421,6 +424,7 @@ class ChatService {
         const lowerQuestion = englishQuestion.toLowerCase();
 
         // Fast deterministic rule-matching
+
         const compareKeywords = [
           "all",
           "compare",
@@ -596,6 +600,7 @@ class ChatService {
                   emergency: false,
                   requireSelection: true,
                   documentId: [],
+                  reports: recentDocs,
                 },
                 role: "assistant",
                 sessionId,
@@ -640,6 +645,7 @@ class ChatService {
                     emergency: false,
                     requireSelection: true,
                     documentId: [],
+                    reports: recentDocs,
                   },
                   role: "assistant",
                   sessionId,
@@ -668,6 +674,22 @@ class ChatService {
         }
       }
 
+      const docNameMap = {};
+      if (finalDocumentIds && finalDocumentIds.length > 0) {
+        const finalDocsMetadata = await db
+          .select({
+            id: document.id,
+            fileName: document.fileName,
+            reportDate: document.reportDate,
+            documentType: document.documentType,
+          })
+          .from(document)
+          .where(inArray(document.id, finalDocumentIds));
+        finalDocsMetadata.forEach((d) => {
+          docNameMap[d.id] = d;
+        });
+      }
+
       const userMessage = await chatSessionRepository.appendMessage({
         content: question.trim(),
         role: "user",
@@ -683,6 +705,16 @@ class ChatService {
       });
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
+
+      // Override the most recent user query with the English translation so Qwen stays in English
+      if (preferredLanguage !== "english") {
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === "user") {
+            history[i].content = englishQuestion;
+            break;
+          }
+        }
+      }
 
       let assistantText = NO_CONTEXT_REPLY;
       let isEmergency = false;
@@ -715,16 +747,23 @@ class ChatService {
             preferredLanguage,
           );
           const qwenDuration = Date.now() - qwenStartTime;
-          debugLogger.info(`sendMessage: [PERFORMANCE] Qwen LLM Generation took ${qwenDuration}ms`);
+          debugLogger.info(
+            `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${qwenDuration}ms`,
+          );
 
           let rawAns = aiResponse.answer;
-          // if (preferredLanguage !== "english" && !isTextInLanguage(rawAns, preferredLanguage)) {
-          //   debugLogger.info("sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)");
-          //   const transStartTime = Date.now();
-          //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-          //   const transDuration = Date.now() - transStartTime;
-          //   debugLogger.info(`sendMessage: [PERFORMANCE] IndicTrans2 Translation took ${transDuration}ms`);
-          // }
+          if (preferredLanguage !== "english") {
+            debugLogger.info(
+              "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
+            );
+            const transStartTime = Date.now();
+            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+            const transDuration = Date.now() - transStartTime;
+            // eslint-disable-next-line no-console
+            console.log(
+              `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
+            );
+          }
           assistantText = rawAns;
           isEmergency = !!aiResponse.emergency;
         } catch {
@@ -821,22 +860,24 @@ class ChatService {
           for (const c of filteredChunks) {
             const docIdStr = String(c.documentId);
             const count = chunksPerDoc.get(docIdStr) || 0;
-            if (count < 3) {
-              // Max 3 chunks per document to allow other documents to be included
+            if (count < 8) {
+              // Max 8 chunks per document to allow other documents to be included
               diverseChunks.push(c);
               chunksPerDoc.set(docIdStr, count + 1);
             }
-            if (diverseChunks.length >= 10) break; // Overall max 10 chunks
+            if (diverseChunks.length >= 20) break; // Overall max 20 chunks
           }
 
           summaryChunks = diverseChunks.map((c, index) => {
+            const docData = docNameMap[c.documentId] || {};
             return {
               chunkId: c.chunkId || `chunk-${index}`,
               documentId: c.documentId,
-              sectionTitle: c.sectionTitle || `[Report Chunk ${index + 1}]`,
+              sectionTitle: c.sectionTitle,
               content: c.content,
               score: 1.0,
               sourceType: c.sourceType || "document",
+              docData: docData,
             };
           });
 
@@ -871,19 +912,20 @@ class ChatService {
             );
             const qwenDuration = Date.now() - qwenStartTime;
             debugLogger.info(
-              `sendMessage: [PERFORMANCE] Qwen LLM Generation took ${qwenDuration}ms`,
+              `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${qwenDuration}ms`,
             );
 
             let rawAns = aiResponse.answer;
-            if (preferredLanguage !== "english" && !isTextInLanguage(rawAns, preferredLanguage)) {
+            if (preferredLanguage !== "english") {
               debugLogger.info(
                 "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
               );
               const transStartTime = Date.now();
               rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
               const transDuration = Date.now() - transStartTime;
-              debugLogger.info(
-                `sendMessage: [PERFORMANCE] IndicTrans2 Translation took ${transDuration}ms`,
+              // eslint-disable-next-line no-console
+              console.log(
+                `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
               );
             }
             assistantText = rawAns;
