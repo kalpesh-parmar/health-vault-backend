@@ -283,14 +283,21 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
       needsReview.dose = true;
     }
 
-    const matchUnit = rawDosageLower.match(/(ml|tsp|tbsp|drops|puff|iu)/i);
-    unit = matchUnit
-      ? matchUnit[1].toLowerCase()
-      : derivedType === medictationType.SYRUP
-        ? "ml"
-        : derivedType === medictationType.DROPS || derivedType === medictationType.DROP
-          ? "drops"
-          : "puff";
+    const matchUnit = rawDosageLower.match(/(ml|tsp|tbsp|drops?|puff|iu)/i);
+    if (matchUnit) {
+      const matched = matchUnit[1].toLowerCase();
+      unit = matched === "iu" ? "IU" : matched.startsWith("drop") ? "drops" : matched;
+    } else {
+      if (derivedType === medictationType.SYRUP || derivedType === medictationType.INJECTION) {
+        unit = "ml";
+      } else if (derivedType === medictationType.DROPS || derivedType === medictationType.DROP) {
+        unit = "drops";
+      } else if (derivedType === medictationType.SPRAY || derivedType === medictationType.INHALER) {
+        unit = "puff";
+      } else {
+        unit = "ml";
+      }
+    }
   }
 
   // 4. Resolve Food Context / foodFrequency
