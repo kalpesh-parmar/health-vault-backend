@@ -392,7 +392,7 @@ const medicationOnboardingSchema = z
       } else {
         const allowedUnits = {
           SYRUP: ["ml", "tsp", "tbsp"],
-          INJECTION: ["ml", "IU"],
+          INJECTION: ["ml", "IU", "iu"],
           DROPS: ["drops", "ml"],
           SPRAY: ["puff"],
           INHALER: ["puff"],

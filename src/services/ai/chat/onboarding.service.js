@@ -1264,7 +1264,13 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         } else {
           if (!newMed.dose || typeof newMed.dose !== "object") {
-            newMed.dose = { value: 1, unit: newMed.type.toLowerCase() };
+            const defaultUnit =
+              rawType === "INJECTION" || rawType === "SYRUP"
+                ? "ml"
+                : rawType === "DROPS"
+                  ? "drops"
+                  : "puff";
+            newMed.dose = { value: 1, unit: defaultUnit };
           }
         }
 
