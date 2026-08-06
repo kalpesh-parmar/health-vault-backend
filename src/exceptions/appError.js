@@ -50,12 +50,43 @@ class InternalServerException extends AppError {
   }
 }
 
+class NonMedicalDocumentException extends AppError {
+  constructor(message = "The uploaded file is not a medical document.", classification = null) {
+    super(StatusCodes.BAD_REQUEST, message, "NON_MEDICAL_DOCUMENT");
+    this.reason = message;
+    this.classification = classification;
+  }
+}
+
+class SessionExpiredException extends AppError {
+  constructor(message = "Session expired. Please login again.") {
+    super(StatusCodes.UNAUTHORIZED, message, "SESSION_EXPIRED");
+    this.forceLogout = true;
+  }
+}
+
+class ConflictException extends AppError {
+  constructor(message = "Resource conflict") {
+    super(StatusCodes.CONFLICT, message, "CONFLICT");
+  }
+}
+
+class ClassifierUnavailableException extends AppError {
+  constructor(message = "Document classification service is temporarily unavailable.") {
+    super(StatusCodes.SERVICE_UNAVAILABLE, message, "CLASSIFIER_UNAVAILABLE");
+  }
+}
+
 module.exports = {
   AccessDeniedException,
   AlreadyExistsException,
   AppError,
+  ClassifierUnavailableException,
+  ConflictException,
   InternalServerException,
   InvalidRequestException,
   NotFoundException,
   UnauthorizedException,
+  NonMedicalDocumentException,
+  SessionExpiredException,
 };

@@ -50,7 +50,11 @@ class JwtUtils {
 
   static verifyAccessToken(token) {
     try {
-      return jwt.verify(token, getSecret(), getBaseOptions());
+      const payload = jwt.verify(token, getSecret(), getBaseOptions());
+      if (payload.tokenType !== "access") {
+        throw new UnauthorizedException(errorConstants.INVALID_TOKEN);
+      }
+      return payload;
     } catch {
       throw new UnauthorizedException(errorConstants.INVALID_TOKEN);
     }

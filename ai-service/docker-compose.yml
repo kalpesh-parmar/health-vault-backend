@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ai_service_db
+    environment:
+      POSTGRES_DB: health_vault
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d health_vault"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_service_api
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/health_vault
+      - NODE_ENV=production
+      - LOG_LEVEL=INFO
+      - AI_MODEL=qwen3-vl:latest
+      - AI_BASE_URL=http://host.docker.internal:11434/v1
+      - STORAGE_PROVIDER=s3
+      - PATIENT_DOCUMENTS_BUCKET=patient-documents
+      - AWS_REGION=us-east-1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+volumes:
+  postgres_data:

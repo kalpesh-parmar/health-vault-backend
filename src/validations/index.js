@@ -7,15 +7,14 @@ const {
   listDocumentsPaginatedSchema,
   listDocumentsQuerySchema,
 } = require("./documentValidation");
+const { listRefillQuerySchema } = require("./refillValidation");
 const {
   createPatientSchema,
-  emailOnlySchema,
+  firebaseLoginSchema,
   listPatientsQuerySchema,
-  loginPatientSchema,
   refreshTokenSchema,
-  resetPasswordSchema,
   updatePatientSchema,
-  verifyOtpSchema,
+  socialLogin,
 } = require("./patientValidation");
 const {
   listNotificationsPaginatedSchema,
@@ -24,7 +23,29 @@ const {
   testSendNotificationSchema,
   userIdBodySchema,
 } = require("./notificationValidation");
+const {
+  createMedicationSchema,
+  updateMedicationSchema,
+  listMedicationQuerySchema,
+  refillMedicationSchema,
+  medicationOnboardingSchema,
+} = require("./medicationValidation");
+const {
+  createReminderSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
+} = require("./reminderValidation");
 const { createSessionSchema } = require("./sessionValidation");
+const {
+  patientIdParamSchema,
+  profileUploadSchema,
+  documentUploadSchema,
+  profileUploadMulter,
+  documentUploadMulter,
+  validateProfileUpload,
+  validateDocumentUpload,
+} = require("./uploadValidation");
+const { jobIdParamSchema, validateJobIdParam } = require("./ocrJobValidation");
 
 function formatZodIssues(error) {
   return error.issues.map((issue) => ({
@@ -50,7 +71,7 @@ module.exports = {
   createDocumentSchema,
   createPatientSchema,
   createSessionSchema,
-  emailOnlySchema,
+  firebaseLoginSchema,
   emptySchema,
   formatZodIssues,
   idParamSchema,
@@ -60,14 +81,30 @@ module.exports = {
   listPatientsQuerySchema,
   listNotificationsPaginatedSchema,
   listNotificationsSchema,
-  loginPatientSchema,
   notificationIdParamSchema,
   paginationQuerySchema,
   refreshTokenSchema,
-  resetPasswordSchema,
   testSendNotificationSchema,
   updatePatientSchema,
   userIdBodySchema,
   validateSchema,
-  verifyOtpSchema,
+  socialLogin,
+  listRefillQuerySchema,
+  createMedicationSchema,
+  updateMedicationSchema,
+  listMedicationQuerySchema,
+  createReminderSchema,
+  updateOccurrenceSchema,
+  listOccurrencesQuerySchema,
+  refillMedicationSchema,
+  medicationOnboardingSchema,
+  patientIdParamSchema,
+  profileUploadSchema,
+  documentUploadSchema,
+  profileUploadMulter,
+  documentUploadMulter,
+  validateProfileUpload,
+  validateDocumentUpload,
+  jobIdParamSchema,
+  validateJobIdParam,
 };

@@ -27,13 +27,59 @@ components:
   schemas:
     CreateDocumentRequest:
       type: object
-      required: [documentType, fileName, fileStoragePath, s3Bucket, s3Key]
+      required:
+        - documentType
+        - s3Key
+        - fileName
+        - fileType
+        - fileSize
+        - s3Bucket
+        - rawOcrData
+        - extractedStructuredData
+        - graphs
+        - embeddingsGenerated
       properties:
-        documentType: { type: string }
-        fileName: { type: string }
-        fileStoragePath: { type: string }
-        s3Bucket: { type: string }
-        s3Key: { type: string }
+        documentType:
+          type: string
+          enum:
+            - family
+            - medical_document
+            - medication
+            - insurance
+            - other
+        s3Key:
+          type: string
+          example: uploads/17123-report.pdf
+
+        fileName:
+          type: string
+          example: blood-report.pdf
+        fileSize:
+          type: number
+          example: 45678
+        fileType:
+          type: string
+          example: application/pdf
+
+        s3bucket:
+          type: string
+          example: patient-documents
+        # fileStoragePath:
+        #   type: string
+        #   example: https://${bucket}.s3.amazonaws.com/${uploads/17123-report.pdf}
+        rawOcrData:
+          type: object
+          example: {}
+        extractedStructuredData:
+          type: object
+          example: {}
+        graphs:
+          type: array
+          items: { type: object }
+          example: []
+        embeddingsGenerated:
+          type: boolean
+          example: true
     DocumentFilter:
       type: object
       additionalProperties: false
@@ -78,9 +124,21 @@ components:
           $ref: "#/components/schemas/DocumentFilter"
         sort:
           $ref: "#/components/schemas/DocumentSort"
+    UpdateDocumentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        documentType: { type: string }
+        fileName: { type: string }
+        doctorName: { type: string, nullable: true }
+        hospitalName: { type: string, nullable: true }
+        reportDate: { type: string, format: date, nullable: true }
+        remarks: { type: string, nullable: true }
+        structuredExtractedData: { type: object, nullable: true }
     ListDocumentsPaginatedRequest:
       type: object
       additionalProperties: false
+
       required: [page]
       properties:
         filter:
@@ -111,24 +169,9 @@ paths:
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
-              type: object
-              required:
-                - file
-                - documentType
-              properties:
-                file:
-                  type: string
-                  format: binary
-                documentType:
-                  type: string
-                  enum:
-                    - family
-                    - medical_document
-                    - medication
-                    - insurance
-                    - other
+              $ref: "#/components/schemas/CreateDocumentRequest"
       responses:
         200:
           description: File uploaded successfully
@@ -239,3 +282,51 @@ paths:
       responses:
         "200":
           description: File deleted successfully
+
+  /documents/summary:
+    get:
+      tags: [Document]
+      summary: Get document summary list for logged-in user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Document summaries fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "SUCCESS" }
+                  message: { type: string, example: "Document summaries fetched successfully" }
+                  data:
+                    type: array
+                    items: { type: object }
+  /documents/update/{id}:
+    put:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      summary: Update document by ID
+      parameters:
+        - $ref: "#/components/parameters/UuidParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDocumentRequest"
+            examples:
+              updateDocument:
+                value:
+                  documentType: "medical_document"
+                  fileName: "updated report name"
+                  # doctorName: "Dr. Smith"
+                  # hospitalName: "City Hospital"
+      responses:
+        "200":
+          description: Document updated successfully
+        "400":
+          description: Invalid request
+        "404":
+          description: Document not found

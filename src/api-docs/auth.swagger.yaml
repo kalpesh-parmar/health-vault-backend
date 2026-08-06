@@ -11,131 +11,277 @@ components:
       bearerFormat: JWT
 
   schemas:
-    LoginRequest:
+    SocialLoginRequest:
       type: object
-      required: [email, password]
+      required:
+        - provider
+        - loginType
       properties:
-        email:
+        provider:
           type: string
-          format: email
-        password:
+          enum:
+            - google
+            - facebook
+            - apple
+            - microsoft
+            - mobile
+        providerType:
+          type: string
+        providerToken:
+          type: string
+        firebaseIdToken:
           type: string
         deviceToken:
           type: string
           nullable: true
+        loginType:
+          type: string
+          enum:
+            - mobile
+            - social
+
+    AuthFailureRequest:
+      type: object
+      required:
+        - provider
+        - loginType
+      properties:
+        identifier:
+          type: string
+          example: user@gmail.com
+        provider:
+          type: string
+          enum:
+            - google
+            - facebook
+            - apple
+            - microsoft
+            - mobile
+        loginType:
+          type: string
+          enum:
+            - mobile
+            - social
 
     RefreshTokenRequest:
       type: object
-      required: [refreshToken]
+      required:
+        - refreshToken
       properties:
         refreshToken:
           type: string
 
-    EmailRequest:
+    OnboardingData:
       type: object
-      required: [email]
+      description: Onboarding state for resumption
       properties:
-        email:
+        preferredLanguage:
           type: string
-          format: email
+          enum: [english, gujarati]
+        flowMode:
+          type: string
+          enum: [UPLOAD, MANUAL]
+        currentStep:
+          type: string
+          description: Current step in the onboarding process
+        existingUserData:
+          type: object
+          properties:
+            firstName:
+              type: string
+            lastName:
+              type: string
+            dateOfBirth:
+              type: string
+              format: date
+            gender:
+              type: string
+              enum: [male, female]
+            email:
+              type: string
+            bloodGroup:
+              type: string
+            allergies:
+              type: array
+              items:
+                type: string
 
-    VerifyOtpRequest:
+    AuthResponse:
       type: object
-      required: [email, otp]
       properties:
-        email:
+        success:
+          type: boolean
+        token:
           type: string
-        otp:
+          description: JWT access token (alias)
+        accessToken:
           type: string
-
-    ResetPasswordRequest:
-      type: object
-      required: [email, password]
-      properties:
-        email:
+          description: JWT access token
+        refreshToken:
           type: string
-        password:
+          description: JWT refresh token
+        firebaseCustomToken:
           type: string
+          description: Custom token for Firebase auth, returned when provider is Microsoft
+        sessionId:
+          type: string
+        isNewUser:
+          type: boolean
+          description: Indicates if this is a newly registered user
+        isOnboardingCompleted:
+          type: boolean
+          description: Indicates if onboarding is already completed
+        onboardingStep:
+          type: string
+          nullable: true
+          description: Current step in onboarding (e.g., ASK_LANGUAGE, ASK_FIRST_NAME). Null if onboarding is completed
+        onboardingData:
+          $ref: "#/components/schemas/OnboardingData"
+          nullable: true
+          description: Saved onboarding state for resumption. Contains the user's progress and answers
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            mobile:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
 
 paths:
-  /auth/login:
+  /auth/social-login:
     post:
       tags: [Auth]
-      summary: Login
+      summary: Social Login (Google, Facebook, Microsoft) & mobile Login (Mobile Number + OTP)
+      description: |
+        Login using social providers or mobileNumber + OTP:
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LoginRequest"
+              $ref: "#/components/schemas/SocialLoginRequest"
+            examples:
+              google:
+                value:
+                  loginType: social
+                  provider: google
+                  providerToken: "google-id-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  firebaseIdToken: "firebase-token"
+              facebook:
+                value:
+                  loginType: social
+                  provider: facebook
+                  providerToken: "facebook-access-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  firebaseIdToken: "firebase-token"
+              microsoft:
+                value:
+                  loginType: social
+                  provider: microsoft
+                  providerToken: "microsoft-id-token"
+                  deviceToken: "DEVICE_TOKEN"
+                  firebaseIdToken: "firebase-token"
+              mobile:
+                value:
+                  loginType: mobile
+                  provider: mobile
+                  deviceToken: "DEVICE_TOKEN"
+                  firebaseIdToken: "firebase-token"
       responses:
-        "200": { description: Success }
+        "200":
+          description: Login successful with onboarding status and resumable state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: SUCCESS
+                  data:
+                    $ref: "#/components/schemas/AuthResponse"
+                    example:
+                      success: true
+                      accessToken: "eyJhbGc..."
+                      refreshToken: "eyJhbGc..."
+                      sessionId: "uuid-session-id"
+                      isNewUser: true
+                      isOnboardingCompleted: false
+                      onboardingStep: "ASK_LANGUAGE"
+                      onboardingData:
+                        preferredLanguage: null
+                        flowMode: null
+                        currentStep: "ASK_LANGUAGE"
+                        existingUserData:
+                          firstName: null
+                          lastName: null
+                          dateOfBirth: null
+                          gender: null
+                      user:
+                        id: "user-uuid"
+                        name: "User Email"
+                        mobile: ""
+                        email: "user@example.com"
+                        role: "patient"
+
+  /auth/auth-failure:
+    post:
+      tags:
+        - Auth
+      summary: Report Failed Authentication Attempt
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthFailureRequest"
+            examples:
+              mobileFailure:
+                value:
+                  identifier: "mock-firebase-uid-mobile"
+                  provider: "mobile"
+                  loginType: "mobile"
+              googleFailure:
+                value:
+                  identifier: "mock-firebase-uid-google"
+                  provider: "google"
+                  loginType: "social"
+      responses:
+        "200":
+          description: Failed attempt recorded
+        "401":
+          description: Account blocked after max attempts
 
   /auth/refresh-token:
     post:
-      tags: [Auth]
+      tags:
+        - Auth
       security: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/RefreshTokenRequest"
       responses:
-        "200": { description: Success }
-
-  /auth/request-otp:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmailRequest"
-      responses:
-        "200": { description: OTP sent }
-
-  /auth/forgot-password:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmailRequest"
-      responses:
-        "200": { description: OTP sent }
-
-  /auth/verify-otp:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VerifyOtpRequest"
-      responses:
-        "200": { description: Verified }
-
-  /auth/reset-password:
-    post:
-      tags: [Auth]
-      security: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResetPasswordRequest"
-      responses:
-        "200": { description: Reset done }
+        "200":
+          description: Token refreshed
 
   /auth/logout:
     post:
-      tags: [Auth]
+      tags:
+        - Auth
       security:
         - bearerAuth: []
       responses:
-        "200": { description: Logout success }
+        "200":
+          description: Logout success

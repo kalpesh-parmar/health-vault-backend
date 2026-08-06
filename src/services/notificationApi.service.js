@@ -1,0 +1,63 @@
+const { errorConstants } = require("../constants/errorConstants");
+const { NotFoundException } = require("../exceptions/appError");
+const notificationRepository = require("../repositories/notificationRepository");
+const {
+  listNotificationsPaginatedSchema,
+  listNotificationsSchema,
+  notificationIdParamSchema,
+  testSendNotificationSchema,
+  validateSchema,
+  userIdBodySchema,
+} = require("../validations");
+const notificationService = require("./notification.service");
+
+class NotificationApiService {
+  async testSend(userId, payload) {
+    const data = await validateSchema(testSendNotificationSchema, payload);
+    return notificationService.sendToUser(userId, data);
+  }
+
+  async list(userId, payload) {
+    const data = await validateSchema(listNotificationsSchema, payload || {});
+    return notificationRepository.list({ userId, ...data });
+  }
+
+  async listPaginated(userId, payload) {
+    const data = await validateSchema(listNotificationsPaginatedSchema, payload);
+    return notificationRepository.listPaginated({ userId, ...data });
+  }
+
+  async markRead(params) {
+    const data = await validateSchema(notificationIdParamSchema, params);
+    const existingNotification = await notificationRepository.findById(data.id);
+
+    if (!existingNotification) {
+      throw new NotFoundException(errorConstants.NOTIFICATION_NOT_FOUND);
+    }
+    return notificationRepository.markRead(data.id);
+  }
+
+  async markAllRead(userId) {
+    return notificationRepository.markAllRead(userId);
+  }
+
+  async delete(params) {
+    const data = await validateSchema(notificationIdParamSchema, params);
+    const deletedNotification = await notificationRepository.deleteById(data.id);
+
+    if (!deletedNotification) {
+      throw new NotFoundException(errorConstants.NOTIFICATION_NOT_FOUND);
+    }
+
+    return deletedNotification;
+  }
+
+  async badgeCount(userId) {
+    const data = await validateSchema(userIdBodySchema, { userId });
+    const count = await notificationRepository.getUnreadCount(data.userId);
+
+    return { count };
+  }
+}
+
+module.exports = new NotificationApiService();
