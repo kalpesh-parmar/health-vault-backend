@@ -144,6 +144,16 @@ class DocumentAiService:
             "engine": metrics.get("engine"),
         }
 
+        doc_type = (summary.get("type") if isinstance(summary, dict) else None) or "general_document"
+        sum_eng = ""
+        if isinstance(summary, dict) and summary.get("summary"):
+            sum_list = summary.get("summary")
+            if isinstance(sum_list, list) and len(sum_list) > 0:
+                sum_eng = str(sum_list[0])
+            elif isinstance(sum_list, str):
+                sum_eng = sum_list
+        sum_guj = (summary.get("summaryGujarati") if isinstance(summary, dict) else "") or ""
+
         if slim:
             # Minimal page objects: page number + text only. No `lines`, no
             # `paragraphs`, no duplicated full-text copies. This removes the
@@ -154,6 +164,9 @@ class DocumentAiService:
             ]
             return {
                 "success": True,
+                "documentType": doc_type,
+                "summaryEnglish": sum_eng,
+                "summaryGujarati": sum_guj,
                 "metadata": metadata,
                 "pages": slim_pages,
                 "fullText": extracted_text,
@@ -165,6 +178,9 @@ class DocumentAiService:
         # ── Backward-compatible (verbose) shape ──────────────────────────────
         return {
             "success": True,
+            "documentType": doc_type,
+            "summaryEnglish": sum_eng,
+            "summaryGujarati": sum_guj,
             "ocr": {"pages": pages, "text": extracted_text},
             "summary": summary,
             "metadata": metadata,

@@ -319,38 +319,40 @@ class DocumentOcrJobService {
         console.warn("[ocr-job] failed to fetch preferred language", err);
       }
 
-      let summaryEnglish = structured?.medicalExtraction?.summary || structured?.summary || "";
-      let summaryPreferredLanguage = "";
       const rawTextToSummarize = rawOcrData.fullText || "";
-      if (rawTextToSummarize) {
+      let summaryEnglish =
+        ocrResponse?.summaryEnglish ||
+        structured?.summaryEnglish ||
+        structured?.medicalExtraction?.summary ||
+        structured?.summary ||
+        "";
+      let summaryPreferredLanguage =
+        ocrResponse?.summaryGujarati || structured?.summaryInPreferredLanguage || "";
+
+      if (rawTextToSummarize && (!summaryEnglish || !summaryPreferredLanguage)) {
         if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
           if (!summaryEnglish) {
             summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
-          } else {
-            console.log(
-              "[OCR] => Reusing structured extraction summary for English (0ms extra latency)",
-            );
           }
           summaryPreferredLanguage = summaryEnglish;
         } else {
-          if (!summaryEnglish) {
+          if (!summaryEnglish && !summaryPreferredLanguage) {
             const [sumEng, sumPref] = await Promise.all([
               ocrService.generateSummary(rawTextToSummarize, "english"),
               ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
             ]);
             summaryEnglish = sumEng;
             summaryPreferredLanguage = sumPref;
-          } else {
+          } else if (!summaryPreferredLanguage) {
             summaryPreferredLanguage = await ocrService.generateSummary(
               rawTextToSummarize,
               preferredLanguage,
             );
-            console.log("[SC]>>>> pref summary", summaryPreferredLanguage);
-            console.log("[SC]>>>>>language", preferredLanguage);
           }
         }
       }
 
+      structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
 
@@ -387,7 +389,7 @@ class DocumentOcrJobService {
         rawOcrData,
       });
       const analyzedDocumentType = normalizeDocumentType(
-        structured?.documentType || structured?.reportType,
+        ocrResponse?.documentType || structured?.documentType || structured?.reportType,
       );
       console.time("[OCR]: updateOcrStatusByFileKey");
       const updatedDoc = await documentRepository

@@ -3,7 +3,7 @@ const { env } = require("../../../configs/env");
 
 class OllamaClient {
   constructor() {
-    this.baseUrl = env.ollamaUrl || "http://122.174.67.117:11434";
+    this.baseUrl = env.ollamaUrl || "http://122.174.67.117:11434/";
   }
 
   async listTags() {

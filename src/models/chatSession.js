@@ -62,7 +62,7 @@ const chatMessage = pgTable(
     content: text("content").notNull(),
     citations: jsonb("citations").default([]).notNull(),
     metadata: jsonb("metadata").default({}).notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     seq: integer("seq").default(0).notNull(),
   },
   (table) => [

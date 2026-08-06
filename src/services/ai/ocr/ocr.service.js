@@ -1324,7 +1324,7 @@ ${rawText}
   }
 
   getModelConfig() {
-    const visionModel = env.aiModel || "qwen2.5-vl:7b";
+    const visionModel = env.aiModel || "qwen3-vl:latest";
     const isSingleModelMode = process.env.AI_SINGLE_MODEL_MODE !== "false";
     const structuringModel = isSingleModelMode ? visionModel : env.chatModel || visionModel;
 

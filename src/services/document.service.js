@@ -167,9 +167,14 @@ class DocumentService {
 
     if (updateData.fileName) {
       const existingExt = path.extname(existingDocument.fileName || "");
-      const newExt = path.extname(updateData.fileName);
-      if (!newExt && existingExt) {
-        updateData.fileName = `${updateData.fileName}${existingExt}`;
+      if (existingExt) {
+        const inputExt = path.extname(updateData.fileName);
+        const baseName = inputExt
+          ? path.basename(updateData.fileName, inputExt).trim()
+          : updateData.fileName.trim();
+        updateData.fileName = `${baseName}${existingExt}`;
+      } else {
+        updateData.fileName = updateData.fileName.trim();
       }
     }
 

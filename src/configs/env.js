@@ -137,9 +137,10 @@ const env = Object.freeze({
 
   ollamaUrl: stringFromEnv("AI_BASE_URL"),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen2.5:14b",
+  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
   codeModel: process.env.CODE_MODEL,
-  visionModel: process.env.VISION_MODEL,
+  visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
+  qwenVlModel: stringFromEnv("QWEN_VL_MODEL") || process.env.VISION_MODEL || "qwen3-vl:latest",
   popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
@@ -180,7 +181,7 @@ function validateEnv(config) {
 
   if (!process.env.CHAT_MODEL) {
     console.warn(
-      "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen2.5:14b'.",
+      "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen3.5:9b'.",
     );
   }
   if (!process.env.AI_EMBEDDING_MODEL) {

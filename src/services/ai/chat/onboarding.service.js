@@ -1023,6 +1023,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "ASK_FIRST_NAME": {
       const nameVal = await extractFieldFromMessage("firstName", msg, state.preferredLanguage);
+      console.log("[SC]====> Extracted first name:", nameVal);
       if (nameVal) {
         const { firstName, lastName } = splitName(nameVal);
         state.existingUserData.firstName = firstName || null;
@@ -1174,7 +1175,8 @@ async function updateStateFromMessage(state, message, userId = null) {
           const m = state.medicinesToAdd[i];
           if (m.selected) {
             try {
-              await medicationService.validate(m);
+              const { onboardingMed } = normalizeMedicine(m, i);
+              await medicationService.validate(onboardingMed);
             } catch {
               nextIncompleteIndex = i;
               break;
@@ -1237,17 +1239,40 @@ async function updateStateFromMessage(state, message, userId = null) {
       }
 
       if (payload.medicine) {
-        try {
-          await medicationService.validate(payload.medicine);
-        } catch {
-          break;
-        }
+        const clientMedId =
+          payload.clientMedId ||
+          payload.medicine.client_med_id ||
+          payload.medicine.id ||
+          `med_${Date.now()}`;
+
+        const rawType = String(payload.medicine.type || "TABLET").toUpperCase();
+        const rawFreq = String(payload.medicine.frequency || "ONCE").toUpperCase();
 
         let newMed = {
           ...payload.medicine,
-          client_med_id: payload.clientMedId || payload.medicine.client_med_id,
-          id: payload.clientMedId || payload.medicine.client_med_id,
+          client_med_id: clientMedId,
+          id: clientMedId,
+          type: rawType,
+          frequency: rawFreq,
         };
+
+        if (newMed.type === "TABLET" || newMed.type === "CAPSULE") {
+          if (!newMed.dose || typeof newMed.dose !== "object") {
+            newMed.dose = { count: 1 };
+          } else if (newMed.dose.count === undefined && newMed.dose.value !== undefined) {
+            newMed.dose.count = Number(newMed.dose.value) || 1;
+          }
+        } else {
+          if (!newMed.dose || typeof newMed.dose !== "object") {
+            newMed.dose = { value: 1, unit: newMed.type.toLowerCase() };
+          }
+        }
+
+        try {
+          await medicationService.validate(newMed);
+        } catch (valErr) {
+          console.warn("[OnboardingService] Medicine validation issue:", valErr.message);
+        }
 
         if (!state.medicinesToAdd) state.medicinesToAdd = [];
 
@@ -1260,10 +1285,6 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.currentMedicineIndex < state.medicinesToAdd.length
         ) {
           existingIdx = state.currentMedicineIndex;
-          if (!newMed.client_med_id) {
-            newMed.client_med_id = state.medicinesToAdd[existingIdx].client_med_id;
-            newMed.id = state.medicinesToAdd[existingIdx].id;
-          }
         } else if (newMed.client_med_id) {
           existingIdx = state.medicinesToAdd.findIndex(
             (m) =>
@@ -1280,16 +1301,11 @@ async function updateStateFromMessage(state, message, userId = null) {
           };
           newMed = state.medicinesToAdd[existingIdx];
         } else {
-          if (!newMed.client_med_id) {
-            const newId = `med_${Date.now()}`;
-            newMed.client_med_id = newId;
-            newMed.id = newId;
-          }
           state.medicinesToAdd.push({ ...newMed, selected: true, isSaved: false });
         }
 
         state.activeMedicine = newMed;
-        // Bypassing CONFIRM_MEDICINE step -> return directly to REVIEW_MEDICINES_LIST with updated list
+        // Direct transition to REVIEW_MEDICINES_LIST with updated list
         state.currentStep = "REVIEW_MEDICINES_LIST";
       }
       break;
@@ -2484,12 +2500,7 @@ class OnboardingService {
             rawLastName = parts.lastName;
           }
 
-          const rawDob =
-            patientInfo.dateOfBirth ||
-            extracted.dateOfBirth ||
-            patientInfo.reportDate ||
-            extracted.reportDate ||
-            "";
+          const rawDob = patientInfo.dateOfBirth || extracted.dateOfBirth || "";
           const rawGender = patientInfo.gender || extracted.gender || "";
           const rawEmail = patientInfo.email || extracted.email || "";
           const rawPhone =
