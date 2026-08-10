@@ -154,6 +154,7 @@ class TranslationService:
             "mr": "mar_Deva",
             "tamil": "tam_Taml",
             "ta": "tam_Taml",
+            "tn": "tam_Taml",
         }
         return mapping.get(l_clean, "eng_Latn")
 

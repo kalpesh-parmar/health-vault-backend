@@ -519,6 +519,104 @@ Content: ${c.content}
               "sendMessage: No recent documents found, falling back to GENERAL intent",
             );
             intent = "GENERAL"; // fallback
+          } else if (
+            intent === "COMPARE" &&
+            !englishQuestion
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, " ")
+              .split(/\s+/)
+              .filter((w) => w.length > 0)
+              .some(
+                (w) =>
+                  ![
+                    "compare",
+                    "my",
+                    "reports",
+                    "report",
+                    "all",
+                    "the",
+                    "documents",
+                    "document",
+                    "files",
+                    "file",
+                    "can",
+                    "you",
+                    "please",
+                    "and",
+                    "or",
+                    "show",
+                    "give",
+                    "me",
+                    "between",
+                    "these",
+                    "those",
+                    "results",
+                    "result",
+                    "lab",
+                    "test",
+                    "tests",
+                    "records",
+                    "record",
+                    "of",
+                    "in",
+                    "from",
+                    "for",
+                    "with",
+                    "a",
+                    "an",
+                    "is",
+                    "are",
+                    "was",
+                    "were",
+                    "to",
+                    "do",
+                    "does",
+                    "did",
+                    "have",
+                    "has",
+                    "had",
+                  ].includes(w),
+              )
+          ) {
+            debugLogger.info(
+              "sendMessage: COMPARE intent without specific documents. Requesting selection.",
+              { availableReportsCount: recentDocs.length },
+            );
+
+            const userMsg = await chatSessionRepository.appendMessage({
+              content: question.trim(),
+              role: "user",
+              sessionId,
+              userId,
+            });
+
+            const replyText =
+              REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
+
+            const aiMsg = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: replyText,
+              metadata: {
+                mode: "DOCUMENT_RAG",
+                emergency: false,
+                requireSelection: true,
+                documentId: [],
+                reports: recentDocs,
+              },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+
+            return {
+              ai: aiMsg,
+              user: userMsg,
+              reply: replyText,
+              requireSelection: true,
+              reports: recentDocs,
+              mode: "DOCUMENT_RAG",
+              emergency: false,
+            };
           } else if (recentDocs.length === 1) {
             debugLogger.info(
               "sendMessage: Only one recent document available, selecting it automatically",
@@ -541,13 +639,30 @@ Content: ${c.content}
             ) {
               resolvedIds = [recentDocs[0].id];
             } else {
-              const matchedDocs = recentDocs.filter(
-                (d) =>
-                  (d.fileName &&
-                    lowerQuestion.includes(d.fileName.toLowerCase().replace(".pdf", "").trim())) ||
-                  (d.documentType &&
-                    lowerQuestion.includes(d.documentType.toLowerCase().replace("_", " "))),
-              );
+              const matchedDocs = recentDocs.filter((d) => {
+                if (d.fileName) {
+                  const cleanName = d.fileName.toLowerCase().replace(".pdf", "").trim();
+                  // Skip matching if the clean name is a very common/generic word
+                  if (
+                    !["report", "reports", "document", "documents", "file", "files"].includes(
+                      cleanName,
+                    )
+                  ) {
+                    const escapedName = cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    const regex = new RegExp(`\\b${escapedName}\\b`, "i");
+                    if (regex.test(lowerQuestion)) return true;
+                  }
+                }
+                if (d.documentType) {
+                  const cleanType = d.documentType.toLowerCase().replace("_", " ");
+                  if (!["report", "document", "file"].includes(cleanType)) {
+                    const escapedType = cleanType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    const regex = new RegExp(`\\b${escapedType}\\b`, "i");
+                    if (regex.test(lowerQuestion)) return true;
+                  }
+                }
+                return false;
+              });
               if (matchedDocs.length > 0) {
                 resolvedIds = matchedDocs.map((d) => d.id);
               } else if (
@@ -576,48 +691,6 @@ Content: ${c.content}
               }
             }
 
-            if (!resolvedIds && intent === "COMPARE") {
-              debugLogger.info(
-                "sendMessage: Document Resolver found COMPARE query ambiguous (rules), returning requireSelection",
-                { availableReportsCount: recentDocs.length },
-              );
-
-              const userMsg = await chatSessionRepository.appendMessage({
-                content: question.trim(),
-                role: "user",
-                sessionId,
-                userId,
-              });
-
-              const replyText =
-                REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-
-              const aiMsg = await chatSessionRepository.appendMessage({
-                citations: [],
-                content: replyText,
-                metadata: {
-                  mode: "DOCUMENT_RAG",
-                  emergency: false,
-                  requireSelection: true,
-                  documentId: [],
-                  reports: recentDocs,
-                },
-                role: "assistant",
-                sessionId,
-                userId,
-              });
-
-              return {
-                ai: aiMsg,
-                user: userMsg,
-                reply: replyText,
-                requireSelection: true,
-                reports: recentDocs,
-                mode: "DOCUMENT_RAG",
-                emergency: false,
-              };
-            }
-
             if (resolvedIds) {
               finalDocumentIds = resolvedIds;
               debugLogger.info(
@@ -625,50 +698,13 @@ Content: ${c.content}
                 { finalDocumentIds },
               );
             } else {
-              if (intent === "COMPARE") {
-                debugLogger.info(
-                  "sendMessage: COMPARE intent without specific documents. Requesting selection.",
-                );
-                const userMsg = await chatSessionRepository.appendMessage({
-                  content: question.trim(),
-                  role: "user",
-                  sessionId,
-                  userId,
-                });
-                const replyText =
-                  REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-                const aiMsg = await chatSessionRepository.appendMessage({
-                  citations: [],
-                  content: replyText,
-                  metadata: {
-                    mode: "DOCUMENT_RAG",
-                    emergency: false,
-                    requireSelection: true,
-                    documentId: [],
-                    reports: recentDocs,
-                  },
-                  role: "assistant",
-                  sessionId,
-                  userId,
-                });
-                return {
-                  ai: aiMsg,
-                  user: userMsg,
-                  reply: replyText,
-                  requireSelection: true,
-                  reports: recentDocs,
-                  mode: "DOCUMENT_RAG",
-                  emergency: false,
-                };
-              } else {
-                // If it's DOCUMENT intent and no specific report was identified, search across ALL recent reports.
-                // This eliminates the 8s LLM bottleneck by directly falling back to the fast Vector DB search.
-                finalDocumentIds = recentDocs.map((d) => d.id);
-                debugLogger.info(
-                  "sendMessage: Document Resolver bypassed LLM, falling back to vector search across all recent documents",
-                  { finalDocumentIds },
-                );
-              }
+              // If it's DOCUMENT intent and no specific report was identified, search across ALL recent reports.
+              // This eliminates the 8s LLM bottleneck by directly falling back to the fast Vector DB search.
+              finalDocumentIds = recentDocs.map((d) => d.id);
+              debugLogger.info(
+                "sendMessage: Document Resolver bypassed LLM, falling back to vector search across all recent documents",
+                { finalDocumentIds },
+              );
             }
           }
         }

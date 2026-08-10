@@ -73,7 +73,7 @@ const createChatSessionSchema = z
 const sendChatMessageSchema = z
   .object({
     documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
-    question: z.string().trim().min(1).max(4000),
+    question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
     preferredLanguage: z.string().optional(),
   })
