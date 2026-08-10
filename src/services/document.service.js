@@ -30,6 +30,7 @@ const {
 } = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
+const chatSessionRepository = require("../repositories/chatSessionRepository");
 const objectStorageService = require("./objectStorage.service");
 const documentOcrJobService = require("./documentOcrJob.service");
 const {
@@ -126,7 +127,6 @@ class DocumentService {
     }
 
     // Also remove the document from any chat sessions where it's referenced
-    const chatSessionRepository = require("../repositories/chatSessionRepository");
     await chatSessionRepository.removeDocumentFromSessions(params.id, userId);
 
     return deletedDocument;
