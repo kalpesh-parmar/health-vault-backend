@@ -368,7 +368,78 @@ components:
         page:
           $ref: "#/components/schemas/MedicationPagination"
 
+    CheckDuplicateMedicationRequest:
+      type: object
+      required:
+        - medicationName
+      properties:
+        medicationName:
+          type: string
+          example: Paracetamol 500mg
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+    CheckDuplicateMedicationResponse:
+      type: object
+      properties:
+        hasDuplicate:
+          type: boolean
+          example: true
+        conflictType:
+          type: string
+          enum:
+            - EXACT_DUPLICATE
+            - SIMILAR_NAME
+          nullable: true
+          example: EXACT_DUPLICATE
+        matchedMedication:
+          $ref: "#/components/schemas/Medication"
+        matchedMedications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Medication"
+        suggestedActions:
+          type: array
+          items:
+            type: object
+            properties:
+              action:
+                type: string
+                example: REFILL_EXISTING
+              label:
+                type: string
+                example: Refill current active medication schedule
+
 paths:
+  /medications/check-duplicate:
+    post:
+      tags:
+        - Medication
+      summary: Check for duplicate active medications
+      description: >
+        Checks if an incoming medication name or type duplicates an existing active medication for the logged-in user.
+        Returns conflict type and suggested actions.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckDuplicateMedicationRequest"
+            examples:
+              checkParacetamol:
+                value:
+                  medicationName: Tab. Paracetamol 500mg
+                  medicationType: TABLET
+      responses:
+        "200":
+          description: Duplicate check completed successfully
+        "400":
+          description: Invalid request payload
+        "401":
+          description: Unauthorized
+
   /medications/create:
     post:
       tags:

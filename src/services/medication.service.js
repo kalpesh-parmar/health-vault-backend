@@ -10,6 +10,7 @@ const {
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
@@ -497,6 +498,95 @@ class MedicationService {
 
     return await medicationRepository.bulkInsert(mappedList);
   }
+
+  // CHECK DUPLICATE MEDICATION
+  async checkDuplicateMedication(userId, payload) {
+    const validData = await validateSchema(checkDuplicateMedicationSchema, payload);
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const activeMedications = await medicationRepository.findAll(userId);
+
+    const incomingRaw = validData.medicationName;
+    const incomingNorm = normalizeMedicationName(incomingRaw);
+
+    const exactMatches = [];
+    const similarMatches = [];
+
+    for (const med of activeMedications) {
+      const existingRaw = med.medicationName || "";
+      const existingNorm = normalizeMedicationName(existingRaw);
+
+      if (!existingNorm && !existingRaw) continue;
+
+      if (
+        incomingNorm === existingNorm ||
+        incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
+      ) {
+        exactMatches.push(med);
+      } else if (
+        incomingNorm.length >= 3 &&
+        existingNorm.length >= 3 &&
+        (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
+      ) {
+        similarMatches.push(med);
+      }
+    }
+
+    const hasDuplicate = exactMatches.length > 0 || similarMatches.length > 0;
+    let conflictType = null;
+    let matchedMedications = [];
+
+    if (exactMatches.length > 0) {
+      conflictType = "EXACT_DUPLICATE";
+      matchedMedications = exactMatches;
+    } else if (similarMatches.length > 0) {
+      conflictType = "SIMILAR_NAME";
+      matchedMedications = similarMatches;
+    }
+
+    const suggestedActions = hasDuplicate
+      ? [
+          {
+            action: "REFILL_EXISTING",
+            label: "Refill current active medication schedule",
+          },
+          {
+            action: "UPDATE_SCHEDULE",
+            label: "Update existing medication timings or dosage",
+          },
+          {
+            action: "CREATE_NEW_ANYWAY",
+            label: "Add as a new separate medication course",
+          },
+        ]
+      : [];
+
+    return {
+      hasDuplicate,
+      conflictType,
+      matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
+      matchedMedications,
+      suggestedActions,
+    };
+  }
+}
+
+function normalizeMedicationName(name) {
+  if (!name || typeof name !== "string") return "";
+  let clean = name.toLowerCase().trim();
+  clean = clean.replace(
+    /^(?:tab\.|tablet|tab|cap\.|capsule|caps|cap|syp\.|syrup|syp|inj\.|injection|inj|drops?|drop|spray|inhaler|inh\.|inh)\s+/i,
+    "",
+  );
+  clean = clean.replace(/\b\d+(\.\d+)?\s*(mg|g|mcg|ml|iu|puffs?)?\b/gi, "");
+  clean = clean
+    .replace(/[^a-z0-9\s]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean;
 }
 
 module.exports = new MedicationService();

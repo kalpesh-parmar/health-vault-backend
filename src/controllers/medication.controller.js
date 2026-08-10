@@ -65,6 +65,13 @@ async function refillMedication(req, res) {
   return successResponse(res, result, messageConstants.MEDICATION_REFILLED);
 }
 
+// check duplicate medication
+async function checkDuplicateMedication(req, res) {
+  const result = await medicationService.checkDuplicateMedication(req.auth.userId, req.body);
+
+  return successResponse(res, result, messageConstants.MEDICATION_DUPLICATE_CHECKED);
+}
+
 module.exports = {
   createMedication,
   updateMedication,
@@ -74,4 +81,5 @@ module.exports = {
   listMedications,
   listMedicationsPaginated,
   refillMedication,
+  checkDuplicateMedication,
 };
