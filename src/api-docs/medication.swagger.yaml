@@ -405,8 +405,11 @@ components:
             properties:
               action:
                 type: string
-                example: REFILL_EXISTING
+                example: KEEP EXISTING
               label:
+                type: string
+                example: Keep existing medication schedule
+              description:
                 type: string
                 example: Refill current active medication schedule
 

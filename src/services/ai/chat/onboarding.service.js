@@ -1,8 +1,7 @@
 /* eslint-disable no-console */
-const fs = require("fs");
-const path = require("path");
+// const fs = require("fs");
+// const path = require("path");
 const { ollamaClient } = require("../clients/ollamaClient");
-const aiClient = require("../clients/aiClient.service");
 const { env } = require("../../../configs/env");
 // const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
@@ -20,282 +19,25 @@ const medicationReminderService = require("../../medicationReminder.service");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
-const { normalizeMedicine } = require("../helpers/medicineNormalize");
+const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 
-function cleanAndParseJson(text) {
-  if (text && typeof text === "object") {
-    text = text.text || JSON.stringify(text);
-  }
-
-  if (!text || typeof text !== "string") {
-    throw new Error(`Empty or invalid response type from AI model. Raw response: "${text}"`);
-  }
-
-  let cleaned = text.trim();
-  // Strip reasoning/think blocks emitted by Ollama reasoning models
-  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  cleaned = cleaned.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
-  cleaned = cleaned
-    .replace(/^```[a-zA-Z]*/, "")
-    .replace(/```$/, "")
-    .trim();
-
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error("Parsed result is not a JSON object");
-    }
-    return parsed;
-  } catch {
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const matchText = jsonMatch[0].trim();
-      try {
-        const parsed = JSON.parse(matchText);
-        if (typeof parsed === "object" && parsed !== null) {
-          return parsed;
-        }
-      } catch (err) {
-        console.error("[OnboardingService] Failed parsing matching JSON block:", matchText, err);
-      }
-    }
-    console.error("[OnboardingService] JSON parse failed. Raw AI text was:", text);
-    throw new Error(`AI did not return a valid JSON object. Raw AI Response: "${text}"`);
-  }
-}
-
-function normalizeGenderLocally(rawText) {
-  if (!rawText || typeof rawText !== "string") return null;
-  const cleaned = rawText
-    .trim()
-    .replace(/^['"“`’\s.,!?-]+|['"“`’\s.,!?-]+$/g, "")
-    .toLowerCase();
-  if (!cleaned) return null;
-
-  const maleSet = new Set(["male", "m", "man", "boy", "guy", "पुरुष", "ஆண்"]);
-
-  const femaleSet = new Set(["female", "f", "woman", "girl", "lady", "महिला", "स्त्री", "பெண்"]);
-
-  const otherSet = new Set([
-    "other",
-    "non-binary",
-    "nonbinary",
-    "nb",
-    "prefer not to say",
-    "अन्य",
-    "மற்றவை",
-  ]);
-
-  // Dynamically pull localized tokens from existing i18n dictionaries
-  for (const lang of ["gu", "hi", "mr", "ta", "en"]) {
-    const mVal = getLocalizedTranslation("onboarding.fieldValue.male", lang);
-    if (mVal) maleSet.add(mVal.trim().toLowerCase());
-
-    const fVal = getLocalizedTranslation("onboarding.fieldValue.female", lang);
-    if (fVal) femaleSet.add(fVal.trim().toLowerCase());
-
-    const oVal = getLocalizedTranslation("onboarding.fieldValue.other", lang);
-    if (oVal) otherSet.add(oVal.trim().toLowerCase());
-  }
-
-  if (maleSet.has(cleaned)) return "male";
-  if (femaleSet.has(cleaned)) return "female";
-  if (otherSet.has(cleaned)) return "other";
-
-  return null;
-}
-
-function isValidGender(genderStr) {
-  if (!genderStr || typeof genderStr !== "string") return false;
-  const lower = genderStr.trim().toLowerCase();
-  return lower === "male" || lower === "female" || lower === "other";
-}
-
-function isValidFirstName(name) {
-  if (!name || typeof name !== "string") return false;
-  const cleaned = name.trim();
-  return cleaned.length >= 1 && /^[\p{L}\s.'-]+$/u.test(cleaned);
-}
-
-function isValidLastName(name) {
-  if (!name || typeof name !== "string") return false;
-  const cleaned = name.trim();
-  return cleaned.length >= 1 && /^[\p{L}\s.'-]+$/u.test(cleaned);
-}
-
-function validateEditedFields(editedData) {
-  if (!editedData || typeof editedData !== "object") return false;
-
-  if (
-    editedData.firstName !== undefined &&
-    editedData.firstName !== null &&
-    editedData.firstName !== ""
-  ) {
-    if (!isValidFirstName(editedData.firstName)) return false;
-  }
-  if (
-    editedData.lastName !== undefined &&
-    editedData.lastName !== null &&
-    editedData.lastName !== ""
-  ) {
-    if (!isValidLastName(editedData.lastName)) return false;
-  }
-  if (editedData.gender !== undefined && editedData.gender !== null && editedData.gender !== "") {
-    const normGen = normalizeGenderLocally(String(editedData.gender));
-    if (!normGen || !isValidGender(normGen)) return false;
-  }
-  if (
-    editedData.dateOfBirth !== undefined &&
-    editedData.dateOfBirth !== null &&
-    editedData.dateOfBirth !== ""
-  ) {
-    const normDob = normalizeDOB(String(editedData.dateOfBirth));
-    if (!normDob) return false;
-  }
-  if (
-    editedData.phoneNumber !== undefined &&
-    editedData.phoneNumber !== null &&
-    editedData.phoneNumber !== ""
-  ) {
-    const normPhone = normalizePhone(String(editedData.phoneNumber));
-    if (!normPhone) return false;
-  }
-
-  return true;
-}
-
-function normalizeFlowModeLocally(rawText) {
-  if (!rawText || typeof rawText !== "string") return null;
-  const cleaned = rawText.trim().toUpperCase();
-  const uploadSet = new Set(["UPLOAD", "DOCUMENT_UPLOADED", "DOC_UPLOAD"]);
-  const manualSet = new Set(["MANUAL", "MANUAL_ENTRY", "SKIP", "SKIP_QUESTION"]);
-  if (uploadSet.has(cleaned)) return "UPLOAD";
-  if (manualSet.has(cleaned)) return "MANUAL";
-  return null;
-}
-
-function splitName(fullName) {
-  if (!fullName || typeof fullName !== "string") {
-    return { firstName: "", lastName: "" };
-  }
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
-  return {
-    firstName: parts[0],
-    lastName: parts.slice(1).join(" "),
-  };
-}
-
-function normalizeName(name) {
-  if (!name) return null;
-  const cleaned = String(name).trim().replace(/\s+/g, " ");
-  if (!cleaned) return null;
-  return cleaned;
-}
-
-function normalizePhone(phoneStr) {
-  if (!phoneStr) return null;
-  const cleaned = String(phoneStr)
-    .trim()
-    .replace(/[^\d+]/g, "");
-  return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
-}
-
-function isSamePhone(p1, p2) {
-  if (!p1 || !p2) return false;
-  const digits1 = String(p1).replace(/\D/g, "");
-  const digits2 = String(p2).replace(/\D/g, "");
-
-  if (digits1.length === 0 || digits2.length === 0) return false;
-
-  const last10_1 = digits1.slice(-10);
-  const last10_2 = digits2.slice(-10);
-
-  if (last10_1 !== last10_2) return false;
-
-  if (digits1.length > 10 && digits2.length > 10) {
-    const cc1 = digits1.slice(0, digits1.length - 10);
-    const cc2 = digits2.slice(0, digits2.length - 10);
-    return cc1 === cc2;
-  }
-
-  return true;
-}
-
-function getLocalizedTranslation(key, language) {
-  try {
-    let langCode = "en";
-    if (language === "hindi" || language === "hi") langCode = "hi";
-    else if (language === "marathi" || language === "mr") langCode = "mr";
-    else if (language === "gujarati" || language === "gu") langCode = "gu";
-    else if (language === "tamil" || language === "ta") langCode = "ta";
-
-    const filePath = path.resolve(__dirname, `../../../i18n/onboarding/${langCode}.json`);
-    if (fs.existsSync(filePath)) {
-      const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      if (content && content[key]) {
-        return content[key];
-      }
-    }
-
-    // Strict fallback: if missing in target, resolve from en.json
-    if (langCode !== "en") {
-      const enFilePath = path.resolve(__dirname, "../../../i18n/onboarding/en.json");
-      if (fs.existsSync(enFilePath)) {
-        const enContent = JSON.parse(fs.readFileSync(enFilePath, "utf8"));
-        if (enContent && enContent[key]) {
-          return enContent[key];
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(
-      `[OnboardingService] Failed to load local i18n file for ${language}:`,
-      err.message,
-    );
-  }
-  return null;
-}
-
-async function getLocalizedText(key, defaultEnglish, language, variables = {}) {
-  let text = getLocalizedTranslation(key, language);
-  if (!text) {
-    text = await translateMessage(defaultEnglish, language);
-  }
-  if (text && typeof text === "string") {
-    for (const [varName, varVal] of Object.entries(variables)) {
-      text = text.replace(new RegExp(`\\{${varName}\\}`, "g"), String(varVal));
-    }
-  }
-  return text;
-}
-
-function normalizeDOB(dobStr) {
-  if (!dobStr || typeof dobStr !== "string") return "";
-  let cleaned = dobStr.trim();
-
-  // Translate Gujarati (૦-૯) and Devanagari (०-९) digits to ASCII (0-9)
-  const gujDigits = "૦૧૨૩૪૫૬૭૮૯";
-  const devDigits = "०१२३४५६७८९";
-  cleaned = cleaned
-    .replace(/[૦-૯]/g, (d) => gujDigits.indexOf(d))
-    .replace(/[०-९]/g, (d) => devDigits.indexOf(d));
-
-  // Regex to check YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    return cleaned;
-  }
-  // Check DD.MM.YYYY, DD/MM/YYYY or DD-MM-YYYY
-  const matchDmy = cleaned.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (matchDmy) {
-    const day = matchDmy[1].padStart(2, "0");
-    const month = matchDmy[2].padStart(2, "0");
-    const year = matchDmy[3];
-    return `${year}-${month}-${day}`;
-  }
-  return "";
-}
+const {
+  cleanAndParseJson,
+  // getLocalizedTranslation,
+  normalizeGenderLocally,
+  isValidGender,
+  isValidFirstName,
+  isValidLastName,
+  normalizeDOB,
+  normalizePhone,
+  validateEditedFields,
+  normalizeFlowModeLocally,
+  splitName,
+  normalizeName,
+  isSamePhone,
+  normalizeFieldVal,
+  getLocalizedText,
+} = require("../../../helpers/onboarding.helper");
 
 async function extractFieldFromMessage(fieldType, text, _lang) {
   // Direct check for language independent skip patterns
@@ -599,22 +341,6 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   return "REGISTER_USER";
-}
-
-function normalizeFieldVal(val, type) {
-  if (val === undefined || val === null) return "";
-  const str = String(val).trim();
-  const lower = str.toLowerCase();
-  if (lower === "" || lower === "null" || lower === "undefined" || lower === "nan") {
-    return "";
-  }
-  if (type === "name") {
-    return lower.replace(/\s+/g, " ");
-  }
-  if (type === "gender") {
-    return lower;
-  }
-  return str;
 }
 
 function getProfileMismatches(state) {
@@ -1456,35 +1182,6 @@ async function updateStateFromMessage(state, message, userId = null) {
   }
 }
 
-// const staticTranslations = {
-//   Yes: { gujarati: "હા", hindi: "हाँ", marathi: "हो", tamil: "ஆம்" },
-//   No: { gujarati: "ના", hindi: "नहीं", marathi: "नाही", tamil: "இல்லை" },
-//   Skip: { gujarati: "છોડી દો", hindi: "छोड़ें", marathi: "वगळा", tamil: "தவிர்க்கவும்" },
-//   Confirm: {
-//     gujarati: "પુષ્ટિ કરો",
-//     hindi: "पुष्टि करें",
-//     marathi: "पुष्टी करा",
-//     tamil: "உறுதிப்படுத்துக",
-//   },
-//   Edit: {
-//     gujarati: "ફેરફાર કરો",
-//     hindi: "संपादित करें",
-//     marathi: "संपादित करा",
-//     tamil: "திருத்து",
-//   },
-// };
-
-async function translateMessage(text, language) {
-  if (!text || language === "english") return text;
-
-  try {
-    return await aiClient.translate(text, "english", language);
-  } catch (err) {
-    console.error(`[OnboardingService] Failed to translate text to ${language}:`, err);
-    return text; // Fallback to English
-  }
-}
-
 function getNextStep(state) {
   return state.currentStep || computeCurrentStep(state);
 }
@@ -1768,7 +1465,7 @@ async function getLocalizedResponse(step, state) {
       );
       const failedMsg = await getLocalizedText(
         "onboarding.upload.failed",
-        "❌ Document processing failed. Please try again or enter details manually.",
+        "Document processing failed. Please try again or enter details manually.",
         state.preferredLanguage,
       );
 
@@ -2814,7 +2511,6 @@ class OnboardingService {
 const onboardingService = new OnboardingService();
 
 module.exports = {
-  OnboardingService,
   onboardingService,
   splitName,
   normalizeDOB,

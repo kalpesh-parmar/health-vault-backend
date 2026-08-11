@@ -1,6 +1,6 @@
-const { medictationType } = require("../../../enums/medicationType");
-const { frequencyType } = require("../../../enums/frequencyType");
-const { foodType } = require("../../../enums/foodType");
+const { medictationType } = require("../enums/medicationType");
+const { frequencyType } = require("../enums/frequencyType");
+const { foodType } = require("../enums/foodType");
 
 // Type prefix rules for deriving medicationType from name prefixes
 const TYPE_PREFIXES = [
@@ -427,5 +427,8 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
 module.exports = {
   parseIndianDosing,
   deriveTypeFromName,
+  parseDurationDays,
+  matchTypeHint,
+  matchFrequencyHint,
   normalizeMedicine,
 };

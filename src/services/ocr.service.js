@@ -2,7 +2,7 @@ const { eq, and } = require("drizzle-orm");
 
 const { env } = require("../configs/env");
 const { db } = require("../configs/db");
-const { fileTypeValue } = require("../enums/fileType");
+// const { fileTypeValue } = require("../enums/fileType");
 const { ocrStatus } = require("../enums/ocrStatus");
 const {
   InvalidRequestException,
@@ -19,15 +19,7 @@ const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
-
-function inferFileType(mimeType) {
-  if (!mimeType) return null;
-
-  const lower = mimeType.toLowerCase().trim();
-  const supportedTypes = new Set(fileTypeValue.map((type) => type.toLowerCase()));
-
-  return supportedTypes.has(lower) ? lower : null;
-}
+const { inferFileType } = require("../helpers/document.helper");
 
 class V1Service {
   async ocrExtract(userId, file) {

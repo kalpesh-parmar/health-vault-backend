@@ -17,7 +17,8 @@ const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
-const { normalizeMedicine } = require("./ai/helpers/medicineNormalize");
+const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
+const { normalizeMedicationName } = require("../helpers/medication.helper");
 
 class MedicationService {
   // CREATE MEDICATION
@@ -550,16 +551,20 @@ class MedicationService {
     const suggestedActions = hasDuplicate
       ? [
           {
-            action: "REFILL_EXISTING",
-            label: "Refill current active medication schedule",
+            action: "KEEP EXISTING",
+            label: "keep previous medication",
           },
           {
-            action: "UPDATE_SCHEDULE",
-            label: "Update existing medication timings or dosage",
+            action: "REPLACE",
+            label: "replace previous medication",
           },
           {
-            action: "CREATE_NEW_ANYWAY",
-            label: "Add as a new separate medication course",
+            action: "EDIT",
+            label: "edit previous medication",
+          },
+          {
+            action: "REMOVE NEW",
+            label: "remove incoming new medication",
           },
         ]
       : [];
@@ -572,21 +577,6 @@ class MedicationService {
       suggestedActions,
     };
   }
-}
-
-function normalizeMedicationName(name) {
-  if (!name || typeof name !== "string") return "";
-  let clean = name.toLowerCase().trim();
-  clean = clean.replace(
-    /^(?:tab\.|tablet|tab|cap\.|capsule|caps|cap|syp\.|syrup|syp|inj\.|injection|inj|drops?|drop|spray|inhaler|inh\.|inh)\s+/i,
-    "",
-  );
-  clean = clean.replace(/\b\d+(\.\d+)?\s*(mg|g|mcg|ml|iu|puffs?)?\b/gi, "");
-  clean = clean
-    .replace(/[^a-z0-9\s]/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return clean;
 }
 
 module.exports = new MedicationService();

@@ -49,29 +49,9 @@ const userOnboardingRepository = require("../repositories/userOnboardingReposito
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
+const { inferMimeType } = require("../helpers/document.helper");
 
 const RUNNING_LOCKS = new Set();
-const MIME_BY_EXTENSION = new Map([
-  [".pdf", "application/pdf"],
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".tif", "image/tiff"],
-  [".tiff", "image/tiff"],
-  [".webp", "image/webp"],
-]);
-
-function inferMimeType(fileKey, explicitMimeType) {
-  if (explicitMimeType) return explicitMimeType;
-  const cleanKey = String(fileKey || "")
-    .split("?")[0]
-    .toLowerCase();
-  const dot = cleanKey.lastIndexOf(".");
-  if (dot >= 0) {
-    return MIME_BY_EXTENSION.get(cleanKey.slice(dot)) || "application/pdf";
-  }
-  return "application/pdf";
-}
 
 async function ensureFileExists(fileKey) {
   try {
