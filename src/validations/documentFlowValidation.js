@@ -95,6 +95,23 @@ const sessionListQuerySchema = z
   })
   .strict();
 
+const unifiedChatSchema = z.object({
+  actionType: z.string().trim().optional().nullable(),
+  actionData: z.record(z.any()).optional().nullable(),
+  message: z.string().trim().max(4000).optional().nullable(),
+  question: z.string().trim().max(4000).optional().nullable(),
+  sessionId: z.string().uuid().optional().nullable(),
+  documentId: z
+    .union([z.string().trim(), z.array(z.string().trim())])
+    .optional()
+    .nullable(),
+  state: z.record(z.any()).optional().nullable(),
+  history: z.array(z.record(z.any())).optional().default([]),
+  displayLabel: z.string().optional().nullable(),
+  preferredLanguage: z.string().optional().nullable(),
+});
+
+/* Backup of original module.exports:
 module.exports = {
   addDocumentSchema,
   batchFileKeySchema,
@@ -104,4 +121,17 @@ module.exports = {
   sendChatMessageSchema,
   sessionListQuerySchema,
   sessionMessagesQuerySchema,
+};
+*/
+
+module.exports = {
+  addDocumentSchema,
+  batchFileKeySchema,
+  createChatSessionSchema,
+  fileKeySchema,
+  runOcrSchema,
+  sendChatMessageSchema,
+  sessionListQuerySchema,
+  sessionMessagesQuerySchema,
+  unifiedChatSchema,
 };

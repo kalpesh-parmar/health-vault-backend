@@ -296,6 +296,7 @@ Content: ${c.content}
       const p = await patientRepository.findById(userId);
       if (p) {
         preferredLanguage = p.preferredLanguage || "english";
+        console.log("[SC]=====Language===", preferredLanguage);
       }
       if (!preferredLanguage || preferredLanguage === "english") {
         try {

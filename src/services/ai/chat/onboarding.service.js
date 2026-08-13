@@ -830,6 +830,11 @@ async function updateStateFromMessage(state, message, userId = null) {
         );
         if (Array.isArray(allergiesVal)) {
           state.existingUserData.allergies = allergiesVal;
+        } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
+          state.existingUserData.allergies = allergiesVal
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);

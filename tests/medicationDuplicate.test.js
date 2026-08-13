@@ -38,7 +38,7 @@ describe("MedicationService - checkDuplicateMedication", () => {
     expect(result.hasDuplicate).toBe(true);
     expect(result.conflictType).toBe("EXACT_DUPLICATE");
     expect(result.matchedMedication.id).toBe("med-1");
-    expect(result.suggestedActions).toHaveLength(3);
+    expect(result.suggestedActions).toHaveLength(4);
   });
 
   test("should return hasDuplicate = true with SIMILAR_NAME when similar match found", async () => {

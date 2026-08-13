@@ -23,6 +23,12 @@ const { normalizeMedicationName } = require("../helpers/medication.helper");
 class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload) {
+    /*
+    // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
+    const normalizedInput = normalizeCreateMedicationInput(payload);
+    const validData = await validateSchema(createMedicationSchema, normalizedInput);
+    */
+
     const validData = await validateSchema(createMedicationSchema, payload);
     const patient = await patientRepository.findById(userId);
     if (!patient) {

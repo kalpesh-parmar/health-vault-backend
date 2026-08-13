@@ -20,6 +20,17 @@ const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const { inferFileType } = require("../helpers/document.helper");
+const documentPersistenceService = require("./documentPersistence.service");
+const documentOcrJobService = require("./documentOcrJob.service");
+const medicationService = require("./medication.service");
+const medicationReminderService = require("./medicationReminder.service");
+const { chatService } = require("./ai/chat/chat.service");
+const {
+  buildUnifiedResponse,
+  detectActionIntent,
+  executeAddDocumentAction,
+  normalizeUnifiedChatInput,
+} = require("../helpers/unifiedChat.helper");
 
 class V1Service {
   async ocrExtract(userId, file) {
@@ -165,6 +176,7 @@ class V1Service {
     return { message: "Job cancelled successfully" };
   }
 
+  /* BACKUP OF PREVIOUS onboardingChat IMPLEMENTATION:
   async onboardingChat(userId, body) {
     const requestReceivedTime = Date.now();
     console.log(
@@ -194,8 +206,6 @@ class V1Service {
           console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
         }
       } else {
-        // Deep merge incoming state into dbState so we don't lose preferredLanguage etc.
-        // Clean up null/undefined from top level to prevent overwriting valid db values
         const incomingStateCleaned = Object.fromEntries(
           Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
         );
@@ -212,16 +222,11 @@ class V1Service {
           state.existingUserData = { ...dbState.existingUserData, ...incomingUserDataCleaned };
         }
 
-        // Safeguard: explicitly restore crucial routing state if it somehow still got wiped out
         if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
         if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
         if (!state.preferredLanguage && dbState.preferredLanguage)
           state.preferredLanguage = dbState.preferredLanguage;
       }
-
-      console.log(
-        `[OnboardingController] [userId=${userId}] Before Ollama API call at ${new Date().toISOString()}`,
-      );
 
       const beforeOllamaTime = Date.now();
       const result = await onboardingService.chat(
@@ -232,26 +237,224 @@ class V1Service {
         null,
         displayLabel,
       );
-      const ollamaResponseTime = Date.now();
-
-      console.log(
-        `[OnboardingController] [userId=${userId}] Ollama response received at ${new Date(ollamaResponseTime).toISOString()}`,
-      );
-      console.log(
-        `[OnboardingController] [userId=${userId}] Ollama latency: ${ollamaResponseTime - beforeOllamaTime}ms`,
-      );
-
-      const totalTime = Date.now() - requestReceivedTime;
-      console.log(`[OnboardingController] [userId=${userId}] Total execution time: ${totalTime}ms`);
-
       return result;
     } catch (error) {
-      const errorTime = Date.now();
-      const totalTime = errorTime - requestReceivedTime;
-      console.error(`[OnboardingController] Onboarding chat failed after ${totalTime}ms:`);
-      console.error(`Error Code: ${error.code || "N/A"}`);
-      console.error(`Error Message: ${error.message}`);
-      console.error(`Error Stack: ${error.stack}`);
+      throw error;
+    }
+  }
+  */
+
+  async onboardingChat(userId, body) {
+    const requestReceivedTime = Date.now();
+    console.log(
+      `[UnifiedChat] Request received at ${new Date(requestReceivedTime).toISOString()} for userId=${userId}`,
+    );
+
+    try {
+      if (!userId) {
+        throw new UnauthorizedException("Unauthorized access");
+      }
+
+      const normalizedInput = normalizeUnifiedChatInput(body);
+      const {
+        actionType,
+        actionData,
+        message,
+        sessionId,
+        documentId,
+        state: inputState,
+        history,
+        displayLabel,
+        preferredLanguage,
+      } = normalizedInput;
+
+      // Fetch user profile and existing onboarding state
+      const patient = await patientRepository.findById(userId);
+      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+      const dbState = onboardingRecord?.data || {};
+      const isOnboardingCompleted =
+        patient?.onboardingCompleted ||
+        dbState?.isOnboardingCompleted === true ||
+        dbState?.currentStep === "COMPLETE" ||
+        inputState?.isOnboardingCompleted === true ||
+        inputState?.currentStep === "COMPLETE";
+
+      // CASE 1: ADD_DOCUMENT ACTION
+      if (actionType === "ADD_DOCUMENT") {
+        console.log(`[UnifiedChat] Executing ADD_DOCUMENT action for userId=${userId}`);
+        /*
+        // PREVIOUS IMPLEMENTATION BACKUP OPTION:
+        const docResult = await documentPersistenceService.addDocument({
+          userId,
+          payload: actionData,
+        });
+
+        const replyText = docResult?.document?.fileName
+          ? `Document '${docResult.document.fileName}' has been added to your Health Vault.`
+          : "Document added successfully.";
+
+        let activeSessionId = sessionId;
+        if (!activeSessionId && isOnboardingCompleted) {
+          const newSession = await chatService.createSession({
+            userId,
+            title: docResult?.document?.fileName || "Document Chat",
+          });
+          activeSessionId = newSession?.id || null;
+        }
+
+        if (activeSessionId) {
+          await chatSessionRepository.appendMessage({
+            sessionId: activeSessionId,
+            userId,
+            role: "assistant",
+            content: replyText,
+            metadata: { actionType: "ADD_DOCUMENT", documentId: docResult?.document?.id },
+          });
+        }
+
+        return buildUnifiedResponse({
+          mode: "ACTION",
+          actionType: "ADD_DOCUMENT",
+          reply: replyText,
+          sessionId: activeSessionId,
+          document: docResult.document,
+        });
+        */
+
+        return executeAddDocumentAction({
+          userId,
+          actionData,
+          sessionId,
+          isOnboardingCompleted,
+          documentPersistenceService,
+          documentOcrJobService,
+          chatService,
+          chatSessionRepository,
+          ocrStatusEnum: ocrStatus,
+        });
+      }
+
+      // CASE 2: ADD_MEDICINE / SHOW_EXTRACTED_MEDICINES ACTION
+      if (actionType === "ADD_MEDICINE" || actionType === "SHOW_EXTRACTED_MEDICINES") {
+        console.log(`[UnifiedChat] Executing ADD_MEDICINE action for userId=${userId}`);
+        const createdMed = await medicationService.createMedication(userId, actionData);
+        if (createdMed && createdMed.id) {
+          try {
+            await medicationReminderService.createReminder(userId, {
+              medicationId: createdMed.id,
+            });
+          } catch (e) {
+            console.error("[UnifiedChat] Error creating reminder:", e);
+          }
+        }
+
+        const replyText = createdMed?.name
+          ? `Medication '${createdMed.name}' has been added to your active medications.`
+          : "Medication added successfully.";
+
+        let activeSessionId = sessionId;
+        if (!activeSessionId && isOnboardingCompleted) {
+          const newSession = await chatService.createSession({ userId, title: "Medication Chat" });
+          activeSessionId = newSession?.id || null;
+        }
+
+        if (activeSessionId) {
+          await chatSessionRepository.appendMessage({
+            sessionId: activeSessionId,
+            userId,
+            role: "assistant",
+            content: replyText,
+            metadata: { actionType: "ADD_MEDICINE", medicationId: createdMed?.id },
+          });
+        }
+
+        return buildUnifiedResponse({
+          mode: "ACTION",
+          actionType: "ADD_MEDICINE",
+          reply: replyText,
+          sessionId: activeSessionId,
+          medication: createdMed,
+        });
+      }
+
+      // Determine if request should route to Normal Post-Onboarding Chat vs Onboarding State Machine
+      const isNormalChat =
+        actionType === "NORMAL_CHAT" || (isOnboardingCompleted && actionType !== "OTHER_ACTIONS");
+
+      // CASE 3: ONBOARDING STATE MACHINE FLOW
+      if (!isNormalChat) {
+        console.log(`[UnifiedChat] Executing Onboarding State Machine for userId=${userId}`);
+        let state = inputState;
+        if (!state || Object.keys(state).length === 0) {
+          state = dbState;
+        } else {
+          const incomingStateCleaned = Object.fromEntries(
+            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
+          );
+
+          const incomingExistingUserData = incomingStateCleaned.existingUserData;
+          state = { ...dbState, ...incomingStateCleaned };
+
+          if (incomingExistingUserData && dbState.existingUserData) {
+            const incomingUserDataCleaned = Object.fromEntries(
+              Object.entries(incomingExistingUserData).filter(
+                ([_, v]) => v !== null && v !== undefined,
+              ),
+            );
+            state.existingUserData = { ...dbState.existingUserData, ...incomingUserDataCleaned };
+          }
+
+          if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
+          if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
+          if (!state.preferredLanguage && dbState.preferredLanguage)
+            state.preferredLanguage = dbState.preferredLanguage;
+        }
+
+        const onboardingResult = await onboardingService.chat(
+          message,
+          history,
+          state,
+          userId,
+          null,
+          displayLabel,
+        );
+
+        return buildUnifiedResponse({
+          mode: "ONBOARDING",
+          actionType: onboardingResult?.action || "ONBOARDING_STEP",
+          reply: onboardingResult?.message || onboardingResult?.reply || "",
+          onboardingState: onboardingResult?.state || state,
+          options: onboardingResult?.options || [],
+          medicines: onboardingResult?.medicines || [],
+        });
+      }
+
+      // CASE 4: NORMAL_CHAT (Post-onboarding RAG Chat)
+      console.log(`[UnifiedChat] Executing Normal Chat / RAG query for userId=${userId}`);
+      const userLang = preferredLanguage || patient?.preferredLanguage || "english";
+      const promptText = message && message.trim().length > 0 ? message.trim() : "Hello";
+
+      const intentResult = detectActionIntent(promptText, userLang);
+
+      const chatResult = await chatService.sendMessage({
+        userId,
+        question: promptText,
+        sessionId,
+        documentId,
+        preferredLanguage: userLang,
+      });
+
+      return buildUnifiedResponse({
+        mode: "NORMAL_CHAT",
+        actionType: "NORMAL_CHAT",
+        reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
+        sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || sessionId,
+        citations: chatResult?.citations || [],
+        suggestedAction: intentResult.suggestedAction,
+        options: intentResult.options.length > 0 ? intentResult.options : chatResult?.options || [],
+      });
+    } catch (error) {
+      console.error(`[UnifiedChat] Unified chat processing error for userId=${userId}:`, error);
       throw error;
     }
   }
