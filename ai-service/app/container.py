@@ -16,6 +16,7 @@ from app.modules.summary.service import SummaryService
 from app.modules.vision.vision_service import VisionModelService
 from app.modules.voice.service import VoiceService
 from app.services.llm import LLMService, build_llm_service
+from app.services.language_detection_service import LanguageDetectionService
 from app.settings import Settings
 
 
@@ -97,6 +98,7 @@ class Container:
         self.chat = ChatService(self.llm, self.rag, settings.ai_model)
         from app.services.translation_service import TranslationService
         self.translation = TranslationService(settings)
+        self.language_detection = LanguageDetectionService()
 
     @property
     def vision(self):
@@ -105,6 +107,7 @@ class Container:
     async def start(self) -> None:
         await self.vision.warm_up()
         await self.translation.warm_up()
+        await self.language_detection.warm_up()
 
     async def stop(self) -> None:
         await self.llm.close()

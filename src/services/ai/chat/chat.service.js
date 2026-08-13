@@ -112,23 +112,23 @@ const AGE_KEYWORDS = [
   "என் வயது எவ்வளவு",
 ];
 
-function isTextInLanguage(text, language) {
-  if (!text || !language) return false;
-  const lang = language.toLowerCase();
-  if (lang === "gujarati") {
-    return /[\u0A80-\u0AFF]/.test(text);
-  }
-  if (lang === "hindi" || lang === "marathi") {
-    return /[\u0900-\u097F]/.test(text);
-  }
-  if (lang === "tamil") {
-    return /[\u0B80-\u0BFF]/.test(text);
-  }
-  if (lang === "english") {
-    return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
-  }
-  return false;
-}
+// function isTextInLanguage(text, language) {
+//   if (!text || !language) return false;
+//   const lang = language.toLowerCase();
+//   if (lang === "gujarati") {
+//     return /[\u0A80-\u0AFF]/.test(text);
+//   }
+//   if (lang === "hindi" || lang === "marathi") {
+//     return /[\u0900-\u097F]/.test(text);
+//   }
+//   if (lang === "tamil") {
+//     return /[\u0B80-\u0BFF]/.test(text);
+//   }
+//   if (lang === "english") {
+//     return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
+//   }
+//   return false;
+// }
 
 const processingSessions = new Set();
 
@@ -186,16 +186,15 @@ Content: ${c.content}
         systemPrompt += `\n\n${patientContextStr}`;
       }
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-      // Force Qwen to ALWAYS generate in English first
+      // Force Qwen to ALWAYS generate in the detected language
       formattedMessages.push({
         role: "system",
-        content:
-          "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+        content: `CRITICAL INSTRUCTION: Understand the user's question, read the retrieved context chunks, and generate your final response natively in ${normLang.toUpperCase()} ONLY. Do NOT translate.`,
       });
 
       // eslint-disable-next-line no-console
       console.log(
-        `[ChatService] Running local RAG chat (generation in English) using ${env.chatModel}...`,
+        `[ChatService] Running local RAG chat (generation in ${normLang}) using ${env.chatModel}...`,
       );
       const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
@@ -216,16 +215,15 @@ Content: ${c.content}
     }
 
     const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-    // Force Qwen to ALWAYS generate in English first
+    // Force Qwen to ALWAYS generate in the detected language
     formattedMessages.push({
       role: "system",
-      content:
-        "CRITICAL INSTRUCTION: You MUST generate your entire response in English ONLY. Do NOT use the language of the previous messages.",
+      content: `CRITICAL INSTRUCTION: Understand the user's question and generate your final response natively in ${normLang.toUpperCase()} ONLY. Do NOT translate.`,
     });
 
     // eslint-disable-next-line no-console
     console.log(
-      `[ChatService] Running local general chat (generation in English) using ${env.chatModel}...`,
+      `[ChatService] Running local general chat (generation in ${normLang}) using ${env.chatModel}...`,
     );
     const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
       temperature: 0.2,
@@ -313,33 +311,58 @@ Content: ${c.content}
       }
       preferredLanguage = normalizeLanguage(preferredLanguage);
 
+      // --- ML LANGUAGE DETECTION ---
+      try {
+        const detectStartTime = Date.now();
+        const detectedLang = await aiClient.detectLanguage(question);
+        const detectDuration = Date.now() - detectStartTime;
+        if (detectedLang) {
+          const normDetected = normalizeLanguage(detectedLang);
+          debugLogger.info(`sendMessage: [LANGUAGE DETECTION] took ${detectDuration}ms`, {
+            detected: normDetected,
+            previous: preferredLanguage,
+          });
+          if (normDetected && normDetected !== "english") {
+            preferredLanguage = normDetected;
+          } else if (normDetected === "english") {
+            // If ML says english, trust it over profile
+            preferredLanguage = "english";
+          }
+        }
+      } catch (err) {
+        debugLogger.error("sendMessage: Failed to detect language via ML model", {
+          error: err.message,
+        });
+      }
+      //end
+
       // Intercept specific questions
       const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
       let interceptedReply = null;
 
       let englishQuestion = question;
-      if (preferredLanguage !== "english" && !isTextInLanguage(question, "english")) {
-        try {
-          debugLogger.info(
-            "sendMessage: [LLM TRACKING] [1] Translating incoming question (IndicTrans2)",
-          );
-          const inTransStartTime = Date.now();
-          englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
-          const inTransDuration = Date.now() - inTransStartTime;
-          // eslint-disable-next-line no-console
-          console.log(
-            `\n⏱️ [TRANSLATION TIME] Question (${preferredLanguage.toUpperCase()} -> ENGLISH) took ${inTransDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-          );
-          debugLogger.info("sendMessage: Translated question to English for internal processing", {
-            original: question,
-            english: englishQuestion,
-          });
-        } catch (err) {
-          debugLogger.error("sendMessage: Failed to translate question to English", {
-            error: err.message,
-          });
-        }
-      }
+      // if (preferredLanguage !== "english" && !isTextInLanguage(question, "english")) {
+      //   try {
+      //     debugLogger.info(
+      //       "sendMessage: [LLM TRACKING] [1] Translating incoming question (IndicTrans2)",
+      //     );
+      //     const inTransStartTime = Date.now();
+      //     englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
+      //     const inTransDuration = Date.now() - inTransStartTime;
+      //     // eslint-disable-next-line no-console
+      //     console.log(
+      //       `\n⏱️ [TRANSLATION TIME] Question (${preferredLanguage.toUpperCase()} -> ENGLISH) took ${inTransDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
+      //     );
+      //     debugLogger.info("sendMessage: Translated question to English for internal processing", {
+      //       original: question,
+      //       english: englishQuestion,
+      //     });
+      //   } catch (err) {
+      //     debugLogger.error("sendMessage: Failed to translate question to English", {
+      //       error: err.message,
+      //     });
+      //   }
+      // }
 
       if (AGE_KEYWORDS.includes(cleanQuestion)) {
         debugLogger.info("sendMessage: Intercepted age-related question", { question });
@@ -780,18 +803,18 @@ Content: ${c.content}
           );
 
           let rawAns = aiResponse.answer;
-          if (preferredLanguage !== "english") {
-            debugLogger.info(
-              "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
-            );
-            const transStartTime = Date.now();
-            rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-            const transDuration = Date.now() - transStartTime;
-            // eslint-disable-next-line no-console
-            console.log(
-              `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-            );
-          }
+          // if (preferredLanguage !== "english") {
+          //   debugLogger.info(
+          //     "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
+          //   );
+          //   const transStartTime = Date.now();
+          //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+          //   const transDuration = Date.now() - transStartTime;
+          //   // eslint-disable-next-line no-console
+          //   console.log(
+          //     `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
+          //   );
+          // }
           assistantText = rawAns;
           isEmergency = !!aiResponse.emergency;
         } catch {
@@ -944,18 +967,18 @@ Content: ${c.content}
             );
 
             let rawAns = aiResponse.answer;
-            if (preferredLanguage !== "english") {
-              debugLogger.info(
-                "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
-              );
-              const transStartTime = Date.now();
-              rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-              const transDuration = Date.now() - transStartTime;
-              // eslint-disable-next-line no-console
-              console.log(
-                `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-              );
-            }
+            // if (preferredLanguage !== "english") {
+            //   debugLogger.info(
+            //     "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
+            //   );
+            //   const transStartTime = Date.now();
+            //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
+            //   const transDuration = Date.now() - transStartTime;
+            //   // eslint-disable-next-line no-console
+            //   console.log(
+            //     `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
+            //   );
+            // }
             assistantText = rawAns;
             isEmergency = !!aiResponse.emergency;
           } catch {

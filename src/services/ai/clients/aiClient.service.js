@@ -220,6 +220,22 @@ class AiServiceClient {
       throw err;
     }
   }
+
+  async detectLanguage(text) {
+    if (!text || !text.trim()) return "english";
+    try {
+      const response = await postWithRetry(
+        `${this.baseUrl}/api/v1/language/detect`,
+        { text },
+        { timeout: 5000, retries: 1 },
+      );
+      return response?.language || "english";
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[AiClientService] Language detection failed:`, err.message);
+      return "english";
+    }
+  }
 }
 
 module.exports = new AiServiceClient();
