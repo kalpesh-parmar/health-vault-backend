@@ -49,29 +49,9 @@ const userOnboardingRepository = require("../repositories/userOnboardingReposito
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
+const { inferMimeType } = require("../helpers/document.helper");
 
 const RUNNING_LOCKS = new Set();
-const MIME_BY_EXTENSION = new Map([
-  [".pdf", "application/pdf"],
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".tif", "image/tiff"],
-  [".tiff", "image/tiff"],
-  [".webp", "image/webp"],
-]);
-
-function inferMimeType(fileKey, explicitMimeType) {
-  if (explicitMimeType) return explicitMimeType;
-  const cleanKey = String(fileKey || "")
-    .split("?")[0]
-    .toLowerCase();
-  const dot = cleanKey.lastIndexOf(".");
-  if (dot >= 0) {
-    return MIME_BY_EXTENSION.get(cleanKey.slice(dot)) || "application/pdf";
-  }
-  return "application/pdf";
-}
 
 async function ensureFileExists(fileKey) {
   try {
@@ -333,10 +313,17 @@ class DocumentOcrJobService {
         console.warn("[ocr-job] failed to fetch preferred language", err);
       }
 
-      let summaryEnglish = structured?.medicalExtraction?.summary || structured?.summary || "";
-      let summaryPreferredLanguage = "";
       const rawTextToSummarize = rawOcrData.fullText || "";
-      if (rawTextToSummarize) {
+      let summaryEnglish =
+        ocrResponse?.summaryEnglish ||
+        structured?.summaryEnglish ||
+        structured?.medicalExtraction?.summary ||
+        structured?.summary ||
+        "";
+      let summaryPreferredLanguage =
+        ocrResponse?.summaryGujarati || structured?.summaryInPreferredLanguage || "";
+
+      if (rawTextToSummarize && (!summaryEnglish || !summaryPreferredLanguage)) {
         if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
           if (!summaryEnglish) {
             summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
@@ -348,14 +335,14 @@ class DocumentOcrJobService {
           }
           summaryPreferredLanguage = summaryEnglish;
         } else {
-          if (!summaryEnglish) {
+          if (!summaryEnglish && !summaryPreferredLanguage) {
             const [sumEng, sumPref] = await Promise.all([
               ocrService.generateSummary(rawTextToSummarize, "english"),
               ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
             ]);
             summaryEnglish = sumEng;
             summaryPreferredLanguage = sumPref;
-          } else {
+          } else if (!summaryPreferredLanguage) {
             summaryPreferredLanguage = await ocrService.generateSummary(
               rawTextToSummarize,
               preferredLanguage,
@@ -368,6 +355,7 @@ class DocumentOcrJobService {
         }
       }
 
+      structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
 
@@ -405,7 +393,7 @@ class DocumentOcrJobService {
         rawOcrData,
       });
       const analyzedDocumentType = normalizeDocumentType(
-        structured?.documentType || structured?.reportType,
+        ocrResponse?.documentType || structured?.documentType || structured?.reportType,
       );
       // eslint-disable-next-line no-console
       console.time("[OCR]: updateOcrStatusByFileKey");

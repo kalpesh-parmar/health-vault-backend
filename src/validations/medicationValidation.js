@@ -392,7 +392,7 @@ const medicationOnboardingSchema = z
       } else {
         const allowedUnits = {
           SYRUP: ["ml", "tsp", "tbsp"],
-          INJECTION: ["ml", "IU"],
+          INJECTION: ["ml", "IU", "iu"],
           DROPS: ["drops", "ml"],
           SPRAY: ["puff"],
           INHALER: ["puff"],
@@ -409,10 +409,23 @@ const medicationOnboardingSchema = z
     }
   });
 
+const checkDuplicateMedicationSchema = z.object({
+  medicationName: medicationNameField,
+  medicationType: z
+    .string()
+    .trim()
+    .refine((val) => medicationTypeValues.includes(val), {
+      message: errorConstants.INVALID_MEDICATION_TYPE,
+    })
+    .optional()
+    .nullable(),
+});
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
 };

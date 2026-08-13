@@ -6,13 +6,8 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
-// const { chatSession } = require("../../../models/chatSession");
 const { eq, desc, inArray } = require("drizzle-orm");
-// const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
-// const { ocrService } = require("../ocr/ocr.service");
-// const documentPersistenceService = require("../../documentPersistenceService");
 const { ollamaClient } = require("../clients/ollamaClient");
-// const aiClient = require("../clients/aiClient.service");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
@@ -116,11 +111,6 @@ const AGE_KEYWORDS = [
   "எனக்கு என்ன வயது",
   "என் வயது எவ்வளவு",
 ];
-
-// function relevance(distance) {
-//   if (distance == null) return null;
-//   return Math.max(0, Math.min(1, 1 - Number(distance)));
-// }
 
 function isTextInLanguage(text, language) {
   if (!text || !language) return false;
@@ -306,6 +296,7 @@ Content: ${c.content}
       const p = await patientRepository.findById(userId);
       if (p) {
         preferredLanguage = p.preferredLanguage || "english";
+        console.log("[SC]=====Language===", preferredLanguage);
       }
       if (!preferredLanguage || preferredLanguage === "english") {
         try {
@@ -721,6 +712,7 @@ Content: ${c.content}
           })
           .from(document)
           .where(inArray(document.id, finalDocumentIds));
+        console.log("documentId received[SC======>] :", documentId);
         finalDocsMetadata.forEach((d) => {
           docNameMap[d.id] = d;
         });
@@ -1044,6 +1036,5 @@ Content: ${c.content}
 const chatService = new ChatService();
 
 module.exports = {
-  ChatService,
   chatService,
 };

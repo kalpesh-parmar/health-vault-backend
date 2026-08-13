@@ -76,6 +76,7 @@ class AiServiceClient {
     const cached = this.translationCache.get(cacheKey);
     if (cached) return cached;
 
+    // eslint-disable-next-line no-console
     console.log(
       `[AiServiceClient] Calling IndicTrans2 model to translate chunk (${text.length} chars) from ${srcLang} to ${tgtLang}...`,
     );
@@ -91,12 +92,14 @@ class AiServiceClient {
         { timeout: 300000, retries: 0 },
       );
       const endTime = Date.now();
+      // eslint-disable-next-line no-console
       console.log(`[AiServiceClient] Translation API call took ${endTime - startTime}ms`);
 
       const translatedText = response?.translated_text || text;
       this.translationCache.set(cacheKey, translatedText);
       return translatedText;
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(
         `[AiServiceClient] Translation failed from ${srcLang} to ${tgtLang}:`,
         err.message,
@@ -143,6 +146,7 @@ class AiServiceClient {
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
+    // eslint-disable-next-line no-console
     console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
 
     const response = await postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
@@ -152,6 +156,7 @@ class AiServiceClient {
       mode,
     });
 
+    // eslint-disable-next-line no-console
     console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500)); // Log first 500 chars to avoid huge logs
     return response;
   }
@@ -189,6 +194,7 @@ class AiServiceClient {
   }
 
   async runOcrFromBuffer({ buffer, filename, mimeType, mode = "concise" }) {
+    // eslint-disable-next-line no-console
     console.log(
       `[AiClientService] runOcrFromBuffer started for ${filename}, size: ${buffer?.length}`,
     );
@@ -203,11 +209,13 @@ class AiServiceClient {
         maxContentLength: Infinity,
         timeout: DEFAULT_TIMEOUT,
       });
+      // eslint-disable-next-line no-console
       console.log(
         `[AiClientService] runOcrFromBuffer success for ${filename}. Response keys: ${Object.keys(response.data).join(",")}. Has fullText: ${!!response.data.fullText}`,
       );
       return response.data;
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(`[AiClientService] runOcrFromBuffer failed for ${filename}:`, err.message);
       throw err;
     }

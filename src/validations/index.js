@@ -29,6 +29,7 @@ const {
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
 } = require("./medicationValidation");
 const {
   createReminderSchema,
@@ -98,6 +99,7 @@ module.exports = {
   listOccurrencesQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
   patientIdParamSchema,
   profileUploadSchema,
   documentUploadSchema,

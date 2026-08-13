@@ -161,12 +161,11 @@ paths:
   /v1/onboarding/chat:
     post:
       tags: [Intelligent Onboarding]
-      summary: Intelligent onboarding chat interaction with state persistence
+      summary: Unified Chatbot endpoint for onboarding steps, actions (ADD_DOCUMENT, ADD_MEDICINE), and post-onboarding RAG chat
       description: |
-        Interact with the onboarding AI chat assistant to complete missing details.
-        The flow supports Social Merge, Optional Details (Email, Blood Group, Allergies, Medical Conditions), and Medication Review/Confirmation directly via REVIEW_MEDICINES_LIST.
-        **State is automatically saved to the database after each interaction**,
-        allowing users to resume onboarding if they close and reopen the app.
+        Unified single entry point for all chatbot interactions before and after onboarding.
+        Supports structured actions (`ADD_DOCUMENT`, `ADD_MEDICINE`, `SHOW_EXTRACTED_MEDICINES`, `OTHER_ACTIONS`),
+        deterministic onboarding state machine transitions, and post-onboarding conversational RAG chat queries.
       security:
         - bearerAuth: []
       requestBody:
@@ -175,12 +174,30 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message, state]
               properties:
+                actionType:
+                  type: string
+                  description: Optional action type (e.g. ADD_DOCUMENT, ADD_MEDICINE, NORMAL_CHAT, OTHER_ACTIONS)
+                  example: "ADD_MEDICINE"
+                actionData:
+                  type: object
+                  description: Payload parameters for the specified actionType
                 message:
                   type: string
-                  description: User message/response to the AI question
-                  example: "English"
+                  description: User message or text prompt
+                  example: "How do I add a new report?"
+                question:
+                  type: string
+                  description: Alias for message parameter
+                sessionId:
+                  type: string
+                  format: uuid
+                  description: Optional chat session ID for post-onboarding chat
+                documentId:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional list of document IDs to constrain RAG query
                 history:
                   type: array
                   items:
@@ -194,8 +211,6 @@ paths:
                 state:
                   type: object
                   description: Onboarding state dictionary to track missing fields
-                  example:
-                    { "firstName": null, "lastName": null, "gender": null, "dateOfBirth": null }
       responses:
         "200":
           description: AI response and updated state

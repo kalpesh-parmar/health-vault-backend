@@ -191,5 +191,36 @@ class ChatSessionRepository {
   }
 
   // attachDocument and removeDocumentFromSessions removed as documentId is no longer tracked at session level
+  /**
+   * Removes a specific documentId from active_document_ids inside chat_sessions metadata when a document is deleted.
+   * @param {string} documentId - ID of the document being deleted
+   * @param {string} userId - ID of the owning patient
+   */
+  async removeDocumentFromSessions(documentId, userId) {
+    if (!documentId || !userId) return;
+
+    const sessions = await this.client
+      .select()
+      .from(chatSession)
+      .where(and(eq(chatSession.userId, userId), eq(chatSession.softDelete, false)));
+
+    for (const session of sessions) {
+      const activeIds = session.metadata?.active_document_ids;
+      if (Array.isArray(activeIds) && activeIds.includes(documentId)) {
+        const updatedIds = activeIds.filter((id) => id !== documentId);
+
+        await this.client
+          .update(chatSession)
+          .set({
+            metadata: {
+              ...session.metadata,
+              active_document_ids: updatedIds,
+            },
+            updatedAt: new Date(),
+          })
+          .where(eq(chatSession.id, session.id));
+      }
+    }
+  }
 }
 module.exports = new ChatSessionRepository();

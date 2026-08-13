@@ -9,7 +9,7 @@ const {
 const aiClient = require("./clients/aiClient.service");
 const { ollamaClient } = require("./clients/ollamaClient");
 const aiModelFactory = require("./factories/aiModelFactory");
-const medicationMapper = require("./helpers/medicationMapper");
+const medicationMapper = require("../../helpers/medicationMapper.helper");
 
 module.exports = {
   ocrService,

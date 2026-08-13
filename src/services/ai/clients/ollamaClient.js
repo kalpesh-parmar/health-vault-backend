@@ -9,7 +9,7 @@ const axiosInstance = axios.create({
 
 class OllamaClient {
   constructor() {
-    this.baseUrl = env.ollamaUrl || "http://122.174.67.117:11434";
+    this.baseUrl = env.ollamaUrl || "http://122.174.67.117:11434/";
   }
 
   async listTags() {
@@ -20,6 +20,7 @@ class OllamaClient {
       const models = response.data?.models || [];
       return models.map((m) => m.name);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.warn("[OllamaClient] Failed to list tags:", error.message);
       return [];
     }
@@ -37,6 +38,7 @@ class OllamaClient {
           throw error;
         }
         const delay = initialDelay * Math.pow(2, attempt - 1);
+        // eslint-disable-next-line no-console
         console.warn(
           `[OllamaClient] Request failed (attempt ${attempt}/${retries + 1}). Retrying in ${delay}ms... Error: ${error.message}`,
         );
@@ -67,6 +69,7 @@ class OllamaClient {
       typeof thinkingText === "string" &&
       thinkingText.trim()
     ) {
+      // eslint-disable-next-line no-console
       console.warn(
         `[OllamaClient] Primary response field ('${apiType === "chat" ? "message.content" : "response"}') was empty. ` +
           `Falling back to 'thinking' field (length: ${thinkingText.length}).`,
@@ -133,16 +136,25 @@ class OllamaClient {
         const thinkingLen = message.thinking?.length || 0;
         const totalDurationMs = raw.total_duration ? (raw.total_duration / 1e6).toFixed(2) : "N/A";
 
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Chat Model: ${model}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Chat Done Reason: ${doneReason}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Prompt eval (input) tokens: ${promptEvalCount}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Eval (output) tokens: ${evalCount}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Content length: ${contentLen}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Thinking length: ${thinkingLen}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Total Ollama duration: ${totalDurationMs}ms`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Attempt: ${attempt}`);
 
         if (raw.load_duration)
+          // eslint-disable-next-line no-console
           console.log(
             `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
           );
@@ -153,6 +165,7 @@ class OllamaClient {
         // - first attempt failed
         const contentIsEmpty = !message.content || !message.content.trim();
         if (doneReason === "length" && contentIsEmpty && attempt === 1) {
+          // eslint-disable-next-line no-console
           console.warn(
             `[OllamaClient] Response truncated (done_reason=length with empty content). Retrying with larger output budget (attempt 2)...`,
           );
@@ -164,6 +177,7 @@ class OllamaClient {
 
         break;
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error(`[OllamaClient] Chat attempt ${attempt} failed:`, error.message);
         throw error;
       }
@@ -236,6 +250,7 @@ class OllamaClient {
         response.data.on("end", () => resolve({ done: true }));
       });
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] ChatStream failed:", error.message);
       throw error;
     }
@@ -289,7 +304,9 @@ class OllamaClient {
 
       return text;
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] Generate failed:", error.message);
+      // eslint-disable-next-line no-console
       console.log("[Ollama error]:==", error.response);
 
       throw error;
@@ -320,6 +337,7 @@ class OllamaClient {
       }
       return vector;
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] Embeddings failed:", error.message);
       throw error;
     }
@@ -327,6 +345,7 @@ class OllamaClient {
 
   async warmUp(model, numCtx = 8192) {
     if (!model) return;
+    // eslint-disable-next-line no-console
     console.log(`[OllamaClient] Pre-warming GPU VRAM for model '${model}' (num_ctx: ${numCtx})...`);
     try {
       await this.generate("", model, {
@@ -334,8 +353,10 @@ class OllamaClient {
         rawOptions: { num_ctx: numCtx },
         timeout: 10000,
       });
+      // eslint-disable-next-line no-console
       console.log(`[OllamaClient] Warm-up completed successfully for model '${model}'.`);
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.warn(
         `[OllamaClient] Warm-up ping failed (model will load on first request):`,
         err.message,

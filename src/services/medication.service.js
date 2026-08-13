@@ -10,17 +10,25 @@ const {
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
-const { normalizeMedicine } = require("./ai/helpers/medicineNormalize");
+const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
+const { normalizeMedicationName } = require("../helpers/medication.helper");
 
 class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload) {
+    /*
+    // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
+    const normalizedInput = normalizeCreateMedicationInput(payload);
+    const validData = await validateSchema(createMedicationSchema, normalizedInput);
+    */
+
     const validData = await validateSchema(createMedicationSchema, payload);
     const patient = await patientRepository.findById(userId);
     if (!patient) {
@@ -496,6 +504,84 @@ class MedicationService {
     });
 
     return await medicationRepository.bulkInsert(mappedList);
+  }
+
+  // CHECK DUPLICATE MEDICATION
+  async checkDuplicateMedication(userId, payload) {
+    const validData = await validateSchema(checkDuplicateMedicationSchema, payload);
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const activeMedications = await medicationRepository.findAll(userId);
+
+    const incomingRaw = validData.medicationName;
+    const incomingNorm = normalizeMedicationName(incomingRaw);
+
+    const exactMatches = [];
+    const similarMatches = [];
+
+    for (const med of activeMedications) {
+      const existingRaw = med.medicationName || "";
+      const existingNorm = normalizeMedicationName(existingRaw);
+
+      if (!existingNorm && !existingRaw) continue;
+
+      if (
+        incomingNorm === existingNorm ||
+        incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
+      ) {
+        exactMatches.push(med);
+      } else if (
+        incomingNorm.length >= 3 &&
+        existingNorm.length >= 3 &&
+        (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
+      ) {
+        similarMatches.push(med);
+      }
+    }
+
+    const hasDuplicate = exactMatches.length > 0 || similarMatches.length > 0;
+    let conflictType = null;
+    let matchedMedications = [];
+
+    if (exactMatches.length > 0) {
+      conflictType = "EXACT_DUPLICATE";
+      matchedMedications = exactMatches;
+    } else if (similarMatches.length > 0) {
+      conflictType = "SIMILAR_NAME";
+      matchedMedications = similarMatches;
+    }
+
+    const suggestedActions = hasDuplicate
+      ? [
+          {
+            action: "KEEP EXISTING",
+            label: "keep previous medication",
+          },
+          {
+            action: "REPLACE",
+            label: "replace previous medication",
+          },
+          {
+            action: "EDIT",
+            label: "edit previous medication",
+          },
+          {
+            action: "REMOVE NEW",
+            label: "remove incoming new medication",
+          },
+        ]
+      : [];
+
+    return {
+      hasDuplicate,
+      conflictType,
+      matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
+      matchedMedications,
+      suggestedActions,
+    };
   }
 }
 
