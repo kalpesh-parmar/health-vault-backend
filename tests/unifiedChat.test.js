@@ -136,4 +136,57 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(response.document.ocrStatus).toBe("completed");
     expect(response.reply).toContain("already been processed");
   });
+
+  test("onboardingService should mark isOnboardingCompleted = true upon reaching MEDICINE_OPTIONS step", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    // Simulate state where basic profile info is provided
+    const state = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: "John",
+        lastName: "Doe",
+        dateOfBirth: "1990-01-01",
+        gender: "male",
+        bloodGroup: "O+",
+        allergies: ["None"],
+      },
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      medicationFlowDone: false,
+    };
+
+    const res = await onboardingService.chat("", [], state, null, null, null);
+
+    expect(res.state.isOnboardingCompleted).toBe(true);
+    expect(res.action).toBe("MEDICINE_OPTIONS");
+  });
+
+  test("onboardingService should maintain isOnboardingCompleted = true when user clicks ADD on MEDICINE_OPTIONS", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: "John",
+        lastName: "Doe",
+        dateOfBirth: "1990-01-01",
+        gender: "male",
+      },
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      medicationFlowDone: false,
+      currentStep: "MEDICINE_OPTIONS",
+      isOnboardingCompleted: true,
+    };
+
+    const res = await onboardingService.chat("ADD", [], state, null, null, null);
+
+    expect(res.state.isOnboardingCompleted).toBe(true);
+    expect(res.state.currentStep).toBe("ADD_MEDICINE");
+  });
 });

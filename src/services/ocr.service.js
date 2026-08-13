@@ -377,9 +377,22 @@ class V1Service {
         });
       }
 
+      const effectiveState =
+        inputState && Object.keys(inputState).length > 0 ? inputState : dbState;
+      const currentOnboardingStep = effectiveState?.currentStep || null;
+      const isActiveOnboardingStep =
+        currentOnboardingStep &&
+        currentOnboardingStep !== "COMPLETE" &&
+        currentOnboardingStep !== "POST_ONBOARDING" &&
+        effectiveState?.medicationFlowDone !== true;
+
       // Determine if request should route to Normal Post-Onboarding Chat vs Onboarding State Machine
       const isNormalChat =
-        actionType === "NORMAL_CHAT" || (isOnboardingCompleted && actionType !== "OTHER_ACTIONS");
+        actionType === "NORMAL_CHAT" ||
+        (isOnboardingCompleted &&
+          !isActiveOnboardingStep &&
+          actionType !== "ONBOARDING" &&
+          actionType !== "OTHER_ACTIONS");
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
@@ -392,17 +405,37 @@ class V1Service {
             Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
           );
 
-          const incomingExistingUserData = incomingStateCleaned.existingUserData;
-          state = { ...dbState, ...incomingStateCleaned };
+          const dbExistingUserData = dbState?.existingUserData || {};
+          const incomingExistingUserData = incomingStateCleaned.existingUserData || {};
+          const incomingUserDataCleaned = Object.fromEntries(
+            Object.entries(incomingExistingUserData).filter(
+              ([_, v]) => v !== null && v !== undefined,
+            ),
+          );
 
-          if (incomingExistingUserData && dbState.existingUserData) {
-            const incomingUserDataCleaned = Object.fromEntries(
-              Object.entries(incomingExistingUserData).filter(
-                ([_, v]) => v !== null && v !== undefined,
-              ),
-            );
-            state.existingUserData = { ...dbState.existingUserData, ...incomingUserDataCleaned };
-          }
+          const bloodGroupSkipped =
+            dbState?.bloodGroupSkipped === true || incomingStateCleaned.bloodGroupSkipped === true;
+          const allergiesSkipped =
+            dbState?.allergiesSkipped === true || incomingStateCleaned.allergiesSkipped === true;
+
+          const mergedUserData = {
+            ...dbExistingUserData,
+            ...incomingUserDataCleaned,
+            bloodGroup: incomingUserDataCleaned.bloodGroup || dbExistingUserData.bloodGroup || null,
+            allergies:
+              Array.isArray(incomingUserDataCleaned.allergies) &&
+              incomingUserDataCleaned.allergies.length > 0
+                ? incomingUserDataCleaned.allergies
+                : dbExistingUserData.allergies || [],
+          };
+
+          state = {
+            ...dbState,
+            ...incomingStateCleaned,
+            bloodGroupSkipped,
+            allergiesSkipped,
+            existingUserData: mergedUserData,
+          };
 
           if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;

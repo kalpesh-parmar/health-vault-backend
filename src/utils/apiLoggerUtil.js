@@ -116,7 +116,7 @@ function maskSensitiveData(data) {
  * @param {number} maxLength
  * @returns {any}
  */
-function truncatePayload(payload, maxLength = 1000) {
+function truncatePayload(payload, maxLength = 2500) {
   if (!payload) return payload;
 
   if (typeof payload === "string") {

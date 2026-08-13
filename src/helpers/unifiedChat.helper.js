@@ -20,9 +20,13 @@ function normalizeUnifiedChatInput(body = {}) {
 
   const normalizedMessage =
     message !== undefined && message !== null
-      ? String(message).trim()
+      ? typeof message === "object"
+        ? JSON.stringify(message)
+        : String(message).trim()
       : question !== undefined && question !== null
-        ? String(question).trim()
+        ? typeof question === "object"
+          ? JSON.stringify(question)
+          : String(question).trim()
         : "";
 
   return {
@@ -105,6 +109,8 @@ function detectActionIntent(text = "", language = "english") {
     "દવાઓ ઉમેરો",
     "दवा जोड़ें",
     "दवाई जोड़ें",
+    "ADD",
+    "Add Another Medicine",
   ];
 
   if (documentKeywords.some((kw) => lower.includes(kw))) {

@@ -97,6 +97,38 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     if (["BEFORE_FOOD", "AFTER_FOOD"].includes(cleaned)) {
       return cleaned;
     }
+  } else if (fieldType === "allergies") {
+    const trimmed = text.trim().toLowerCase();
+    const negativeSet = [
+      "no",
+      "none",
+      "no allergies",
+      "no allergy",
+      "nil",
+      "n/a",
+      "nothing",
+      "na",
+      "ના",
+      "નથી",
+      "કોઈ એલર્જી નથી",
+      "नहीं",
+      "कोई एलर्जी नहीं",
+    ];
+    if (negativeSet.includes(trimmed)) {
+      return [];
+    }
+    if (trimmed && trimmed.length < 60 && !/[?!=]/.test(trimmed)) {
+      const items = text
+        .split(",")
+        .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+        .filter(Boolean);
+      if (
+        items.length > 0 &&
+        items.every((i) => i.length < 30 && (!i.includes(" ") || i.split(" ").length <= 3))
+      ) {
+        return items;
+      }
+    }
   }
 
   let contextPrompt = "";
@@ -325,6 +357,9 @@ function getNextRequiredOrOptionalStep(state) {
       state.flowMode === "UPLOAD" &&
       state.documentConfirmed !== false;
 
+    // Once basic profile setup is complete and user reaches medicine step, mark onboarding completed as true
+    state.isOnboardingCompleted = true;
+
     if (!state.medicationFlowStarted) {
       state.medicationFlowStarted = true;
       if (useDoc && state.foundMedicines && state.foundMedicines.length > 0) {
@@ -466,7 +501,7 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
         state.existingUserData[key] = existingVal || shownValue;
       }
     } else if (isMismatch && sourceChoice) {
-      const chosenVal = sourceChoice === "DOCUMENT" ? rawDoc : rawLogin;
+      const chosenVal = sourceChoice === "DOCUMENT" ? rawDoc || rawLogin : rawLogin || rawDoc;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
       state.existingUserData[key] = existingVal || rawLogin || rawDoc || null;
@@ -511,7 +546,7 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
 }
 
 function computeCurrentStep(state) {
-  if (state.isOnboardingCompleted) {
+  if (state.isOnboardingCompleted && state.medicationFlowDone) {
     return state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
   }
   if (!state.preferredLanguage) return "ASK_LANGUAGE";
@@ -533,7 +568,26 @@ function computeCurrentStep(state) {
 }
 
 async function updateStateFromMessage(state, message, userId = null) {
-  const msg = (message || "").trim();
+  let rawText = "";
+  if (typeof message === "object" && message !== null) {
+    rawText = JSON.stringify(message);
+  } else {
+    rawText = (message || "").trim();
+  }
+
+  let extractedVal = rawText;
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === "object") {
+      extractedVal = String(
+        parsed.value || parsed.key || parsed.label || parsed.option || rawText,
+      ).trim();
+    }
+  } catch {
+    // Plain string
+  }
+
+  const msg = extractedVal;
   const lower = msg.toLowerCase();
   const isSkip = [
     "skip",
@@ -793,17 +847,32 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_BLOOD_GROUP": {
-      if (isSkip || msg.toUpperCase() === "SKIP") {
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(
+            parsed.value || parsed.key || parsed.label || parsed.option || msg,
+          ).trim();
+        }
+      } catch {
+        // Not a JSON string payload
+      }
+
+      const upperVal = rawVal.trim().toUpperCase();
+      const isSkipVal = isSkip || upperVal === "SKIP" || upperVal === "SKIP_QUESTION";
+
+      if (isSkipVal) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const norm = msg.trim().toUpperCase().replace(/\s+/g, "");
+        const norm = upperVal.replace(/\s+/g, "");
         if (bloodGroupTypeValues.includes(norm)) {
           state.existingUserData.bloodGroup = norm;
         } else {
           const extractedBg = await extractFieldFromMessage(
             "bloodGroup",
-            msg,
+            rawVal,
             state.preferredLanguage,
           );
           if (extractedBg && typeof extractedBg === "string") {
@@ -819,7 +888,27 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_ALLERGIES": {
-      if (isSkip || msg.toUpperCase() === "SKIP") {
+      const negativePatterns = [
+        "no",
+        "none",
+        "no allergies",
+        "no allergy",
+        "nil",
+        "n/a",
+        "nothing",
+        "na",
+        "ના",
+        "નથી",
+        "કોઈ એલર્જી નથી",
+        "नहीं",
+        "कोई एलर्जी नहीं",
+      ];
+      const isNegative =
+        isSkip ||
+        msg.toUpperCase() === "SKIP" ||
+        negativePatterns.includes(msg.trim().toLowerCase());
+
+      if (isNegative) {
         state.allergiesSkipped = true;
         state.existingUserData.allergies = [];
       } else {
@@ -830,11 +919,18 @@ async function updateStateFromMessage(state, message, userId = null) {
         );
         if (Array.isArray(allergiesVal)) {
           state.existingUserData.allergies = allergiesVal;
+          state.allergiesSkipped = true;
         } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
-          state.existingUserData.allergies = allergiesVal
+          const parsed = allergiesVal
+            .replace(/^\[|\]$/g, "")
             .split(",")
-            .map((s) => s.trim())
+            .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
             .filter(Boolean);
+          state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
+          state.allergiesSkipped = true;
+        } else if (msg.trim()) {
+          state.existingUserData.allergies = [msg.trim()];
+          state.allergiesSkipped = true;
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -1047,98 +1143,6 @@ async function updateStateFromMessage(state, message, userId = null) {
       }
       break;
     }
-
-    /*
-    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step logic (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
-    case "CONFIRM_MEDICINE": {
-      let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        payload = {};
-      }
-
-      if (payload.confirmed) {
-        if (state.confirmMode === "SINGLE") {
-          if (!state.activeMedicine?.client_med_id) {
-            throw new Error("client_med_id is missing");
-          }
-
-          const createdMedication = await medicationService.create(userId, state.activeMedicine);
-
-          try {
-            await medicationReminderService.createReminder(userId, {
-              medicationId: createdMedication.id,
-            });
-          } catch (err) {
-            console.error(
-              "[OnboardingService] Failed to create reminder for single medicine:",
-              err,
-            );
-          }
-
-          let nextIncompleteIndex = -1;
-          for (let i = 0; i < state.medicinesToAdd.length; i++) {
-            const m = state.medicinesToAdd[i];
-            if (m.selected && m.client_med_id !== state.activeMedicine.client_med_id) {
-              try {
-                await medicationService.validate(m);
-              } catch {
-                nextIncompleteIndex = i;
-                break;
-              }
-            }
-          }
-
-          if (nextIncompleteIndex >= 0) {
-            state.currentMedicineIndex = nextIncompleteIndex;
-            state.currentStep = "EDIT_MEDICINE";
-          } else {
-            const savedClientMedIds = [state.activeMedicine.client_med_id];
-            const otherValidMeds = (state.medicinesToAdd || []).filter(
-              (m) => m.selected && !savedClientMedIds.includes(m.client_med_id),
-            );
-
-            if (otherValidMeds.length > 0) {
-              state.validMedsToBulkCreate = otherValidMeds;
-              state.confirmMode = "BULK";
-              state.currentStep = "CONFIRM_MEDICINE";
-            } else {
-              state.currentStep = "MEDICINE_OPTIONS";
-            }
-          }
-        } else if (state.confirmMode === "BULK") {
-          if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
-            const bulkCreated = await medicationService.bulkCreate(
-              userId,
-              state.validMedsToBulkCreate,
-            );
-
-            for (const med of bulkCreated) {
-              try {
-                await medicationReminderService.createReminder(userId, { medicationId: med.id });
-              } catch (err) {
-                console.error(
-                  `[OnboardingService] Failed to create reminder for bulk medicine ${med.id}:`,
-                  err,
-                );
-              }
-            }
-          }
-          state.currentStep = "MEDICINE_OPTIONS";
-        }
-      } else if (payload.edit) {
-        state.currentStep = "EDIT_MEDICINE";
-        if (state.confirmMode === "SINGLE") {
-          const idx = state.medicinesToAdd.findIndex(
-            (m) => m.client_med_id === state.activeMedicine.client_med_id,
-          );
-          if (idx >= 0) state.currentMedicineIndex = idx;
-        }
-      }
-      break;
-    }
-    */
 
     case "MEDICINE_OPTIONS": {
       let payload;
@@ -1663,126 +1667,6 @@ async function getLocalizedResponse(step, state) {
         medicine: med,
       };
     }
-
-    /*
-    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step response builder (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
-    case "CONFIRM_MEDICINE": {
-      let title = "";
-      let lines = [];
-      const lang = state.preferredLanguage;
-
-      if (state.confirmMode === "SINGLE" && state.activeMedicine) {
-        const med = state.activeMedicine;
-        title =
-          med.name ||
-          (await getLocalizedText("onboarding.confirmMedicine.title", "Medicine Summary", lang));
-
-        // Localize type:
-        const typeLabel = await getLocalizedText(
-          `onboarding.medicationType.${med.type}`,
-          med.type,
-          lang,
-        );
-
-        // Localize dose:
-        const typeLower = med.type.toLowerCase();
-        const doseTypeKey =
-          med.type === "TABLET"
-            ? "onboarding.dose.tablets"
-            : med.type === "CAPSULE"
-              ? "onboarding.dose.capsules"
-              : "";
-        const doseUnitText = doseTypeKey
-          ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
-          : med.dose.unit;
-        const doseStr =
-          med.type === "TABLET" || med.type === "CAPSULE"
-            ? `${med.dose.count} ${doseUnitText}`
-            : `${med.dose.value} ${doseUnitText}`;
-
-        // Localize frequency:
-        const freqText = await getLocalizedText(
-          `onboarding.medicationFrequency.${med.frequency}`,
-          med.frequency,
-          lang,
-        );
-
-        // Localize times:
-        let timesVal = [];
-        if (med.medicationSchedule) {
-          if (Array.isArray(med.medicationSchedule.times)) {
-            timesVal = med.medicationSchedule.times;
-          } else {
-            const sch = med.medicationSchedule;
-            if (sch.Morning) timesVal.push(sch.Morning);
-            if (sch.Noon) timesVal.push(sch.Noon);
-            if (sch.Night) timesVal.push(sch.Night);
-            if (Array.isArray(sch.Custom)) timesVal.push(...sch.Custom);
-          }
-        }
-        const noneText = await getLocalizedText("common.none", "None", lang);
-        const timesStr = timesVal.length > 0 ? timesVal.join(", ") : noneText;
-
-        // Localize prescribed by and notes:
-        const prescribedByStr = med.prescribed_by || noneText;
-        const notesStr = med.notes || noneText;
-
-        lines = [
-          `Type: ${typeLabel}`,
-          `Dose: ${doseStr}`,
-          `Frequency: ${freqText}`,
-          `Times: ${timesStr}`,
-          `Prescribed By: ${prescribedByStr}`,
-          `Notes: ${notesStr}`,
-        ];
-      } else if (state.confirmMode === "BULK" && state.validMedsToBulkCreate) {
-        title = await getLocalizedText(
-          "onboarding.confirmMedicine.titleBulk",
-          "Confirm all medications",
-          lang,
-        );
-        lines = await Promise.all(
-          state.validMedsToBulkCreate.map(async (m) => {
-            const typeLower = m.type.toLowerCase();
-            const doseTypeKey =
-              m.type === "TABLET"
-                ? "onboarding.dose.tablets"
-                : m.type === "CAPSULE"
-                  ? "onboarding.dose.capsules"
-                  : "";
-            const doseUnitText = doseTypeKey
-              ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
-              : m.dose.unit;
-            const doseStr =
-              m.type === "TABLET" || m.type === "CAPSULE"
-                ? `${m.dose.count} ${doseUnitText}`
-                : `${m.dose.value} ${doseUnitText}`;
-            const freqText = await getLocalizedText(
-              `onboarding.medicationFrequency.${m.frequency}`,
-              m.frequency,
-              lang,
-            );
-            const timesVal =
-              m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
-            const timesStr =
-              Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
-            return `${m.name} (${doseStr}, ${freqText}${timesStr})`;
-          }),
-        );
-      }
-
-      return {
-        action: "CONFIRM_MEDICINE",
-        message: await getLocalizedText(
-          "onboarding.confirmMedicine.message",
-          "Please verify if these details are correct before saving:",
-          lang,
-        ),
-        summary: { title, lines },
-      };
-    }
-    */
-
     case "MEDICINE_OPTIONS":
       return {
         action: "MEDICINE_OPTIONS",
@@ -2085,6 +1969,32 @@ class OnboardingService {
       if (uData.bloodGroup === "") uData.bloodGroup = null;
       if (uData.phoneNumber === "") uData.phoneNumber = null;
       if (uData.address === "") uData.address = null;
+
+      if (userId) {
+        try {
+          const patientRec = await patientRepository.findById(userId);
+          if (patientRec) {
+            if (patientRec.bloodGroup && !uData.bloodGroup) {
+              uData.bloodGroup = patientRec.bloodGroup;
+              state.bloodGroupSkipped = true;
+            }
+            if (
+              patientRec.allergies &&
+              Array.isArray(patientRec.allergies) &&
+              patientRec.allergies.length > 0 &&
+              (!uData.allergies || uData.allergies.length === 0)
+            ) {
+              uData.allergies = patientRec.allergies;
+              state.allergiesSkipped = true;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to backfill existingUserData from patients table:",
+            err.message,
+          );
+        }
+      }
     }
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
@@ -2100,8 +2010,8 @@ class OnboardingService {
     if (state.currentStep === "ASK_USE_SOCIAL_LOGIN_INFO") {
       state.currentStep = "RESOLVE_PROFILE_SOURCE";
     }
-    // 1. If onboarding is completed, return completed status immediately
-    if (state.isOnboardingCompleted) {
+    // 1. If onboarding is completed and medication flow is done, return completed status immediately
+    if (state.isOnboardingCompleted && state.medicationFlowDone) {
       if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
         // Let it pass through to updateStateFromMessage
       } else {
@@ -2383,7 +2293,7 @@ class OnboardingService {
       }
       if (state.existingUserData.bloodGroup)
         updateData.bloodGroup = state.existingUserData.bloodGroup;
-      if (state.existingUserData.allergies && state.existingUserData.allergies.length > 0)
+      if (Array.isArray(state.existingUserData.allergies))
         updateData.allergies = state.existingUserData.allergies;
 
       if (state.isOnboardingCompleted) {

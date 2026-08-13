@@ -137,7 +137,7 @@ const env = Object.freeze({
 
   ollamaUrl: stringFromEnv("AI_BASE_URL"),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
+  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
   qwenVlModel: stringFromEnv("QWEN_VL_MODEL") || process.env.VISION_MODEL || "qwen3-vl:latest",
