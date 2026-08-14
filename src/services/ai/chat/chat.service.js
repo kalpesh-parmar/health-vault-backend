@@ -283,6 +283,16 @@ Content: ${c.content}
         documentId = [documentId];
       }
 
+      // Filter out invalid UUIDs (like "string" from Swagger) to prevent PostgreSQL 22P02 errors
+      if (documentId && Array.isArray(documentId)) {
+        documentId = documentId.filter((id) =>
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id),
+        );
+        if (documentId.length === 0) {
+          documentId = null; // Fallback to normal behavior if no valid UUIDs remain
+        }
+      }
+
       const _reqStartTime = Date.now();
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
