@@ -334,20 +334,100 @@ class V1Service {
         });
       }
 
+      const effectiveState =
+        inputState && Object.keys(inputState).length > 0 ? inputState : dbState;
+      const currentOnboardingStep = effectiveState?.currentStep || null;
+      const isActiveOnboardingStep =
+        Boolean(currentOnboardingStep) &&
+        currentOnboardingStep !== "COMPLETE" &&
+        currentOnboardingStep !== "POST_ONBOARDING" &&
+        effectiveState?.medicationFlowDone !== true;
+
       // CASE 2: ADD_MEDICINE / SHOW_EXTRACTED_MEDICINES ACTION
-      if (actionType === "ADD_MEDICINE" || actionType === "SHOW_EXTRACTED_MEDICINES") {
-        console.log(`[UnifiedChat] Executing ADD_MEDICINE action for userId=${userId}`);
-        const createdMed = await medicationService.createMedication(userId, actionData);
-        if (createdMed && createdMed.id) {
-          try {
-            await medicationReminderService.createReminder(userId, {
-              medicationId: createdMed.id,
-            });
-          } catch (e) {
-            console.error("[UnifiedChat] Error creating reminder:", e);
+      const hasMedicineActionData =
+        actionData &&
+        typeof actionData === "object" &&
+        (actionData.medicationName || actionData.name || actionData.medicine);
+
+      if (
+        actionType === "ADD_MEDICINE" ||
+        actionType === "SHOW_EXTRACTED_MEDICINES" ||
+        hasMedicineActionData ||
+        (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0)
+      ) {
+        console.log(
+          `[UnifiedChat] Executing ADD_MEDICINE action for userId=${userId} (isActiveOnboardingStep=${isActiveOnboardingStep})`,
+        );
+
+        let createdMeds = [];
+        if (Array.isArray(actionData?.medicines) && actionData.medicines.length > 0) {
+          for (const medData of actionData.medicines) {
+            try {
+              const med = await medicationService.createMedication(userId, medData);
+              if (med && med.id) {
+                createdMeds.push(med);
+                try {
+                  await medicationReminderService.createReminder(userId, { medicationId: med.id });
+                } catch (rErr) {
+                  console.error("[UnifiedChat] Error creating reminder for bulk medicine:", rErr);
+                }
+              }
+            } catch (mErr) {
+              console.error("[UnifiedChat] Error creating individual medicine from list:", mErr);
+            }
+          }
+        } else {
+          const createdMed = await medicationService.createMedication(userId, actionData);
+          if (createdMed && createdMed.id) {
+            createdMeds.push(createdMed);
+            try {
+              await medicationReminderService.createReminder(userId, {
+                medicationId: createdMed.id,
+              });
+            } catch (e) {
+              console.error("[UnifiedChat] Error creating reminder:", e);
+            }
           }
         }
+        const createdMed = createdMeds[0] || null;
 
+        // If patient is in active Onboarding medicine loop, redirect to MEDICINE_OPTIONS step
+        if (isActiveOnboardingStep) {
+          const stateToUpdate = { ...effectiveState };
+          if (!stateToUpdate.medicinesToAdd) stateToUpdate.medicinesToAdd = [];
+          if (createdMed) {
+            const clientMedId = createdMed.id || actionData?.clientMedId || `med_${Date.now()}`;
+            stateToUpdate.medicinesToAdd.push({
+              ...actionData,
+              id: createdMed.id,
+              client_med_id: clientMedId,
+              selected: true,
+              isSaved: true,
+              dbId: createdMed.id,
+            });
+          }
+          stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+
+          const onboardingResult = await onboardingService.chat(
+            "",
+            history,
+            stateToUpdate,
+            userId,
+            null,
+            displayLabel,
+          );
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING",
+            actionType: onboardingResult?.action || "MEDICINE_OPTIONS",
+            reply: onboardingResult?.message || onboardingResult?.reply || "",
+            onboardingState: onboardingResult?.state || stateToUpdate,
+            options: onboardingResult?.options || [],
+            medicines: onboardingResult?.medicines || [],
+          });
+        }
+
+        // Post-Onboarding (Dashboard Chat Stream): return simple action completion payload without MEDICINE_OPTIONS
         const replyText = createdMed?.name
           ? `Medication '${createdMed.name}' has been added to your active medications.`
           : "Medication added successfully.";
@@ -376,15 +456,6 @@ class V1Service {
           medication: createdMed,
         });
       }
-
-      const effectiveState =
-        inputState && Object.keys(inputState).length > 0 ? inputState : dbState;
-      const currentOnboardingStep = effectiveState?.currentStep || null;
-      const isActiveOnboardingStep =
-        currentOnboardingStep &&
-        currentOnboardingStep !== "COMPLETE" &&
-        currentOnboardingStep !== "POST_ONBOARDING" &&
-        effectiveState?.medicationFlowDone !== true;
 
       // Determine if request should route to Normal Post-Onboarding Chat vs Onboarding State Machine
       const isNormalChat =

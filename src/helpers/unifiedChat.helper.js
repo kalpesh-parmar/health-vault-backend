@@ -255,6 +255,28 @@ async function executeAddDocumentAction({
       : "Document added successfully.";
   }
 
+  let extractedMedicines = [];
+  const rawMeds =
+    docResult?.job?.extractedStructuredData?.medications ||
+    docResult?.document?.structuredExtractedData?.medications ||
+    actionData?.rawOcrData?.extractedStructuredData?.medications ||
+    [];
+
+  if (Array.isArray(rawMeds) && rawMeds.length > 0) {
+    extractedMedicines = rawMeds.map((m, idx) => ({
+      id: m.id || m.client_med_id || `extracted_med_${idx + 1}`,
+      medicationName: m.name || m.medicationName || "Unknown Medicine",
+      medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+      dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
+      frequency: m.frequency || "ONCE",
+      duration: m.duration || null,
+      instructions: m.instructions || m.timing || null,
+    }));
+    if (extractedMedicines.length > 0) {
+      replyText = `Document '${actionData?.fileName || "prescription"}' has been processed. Found ${extractedMedicines.length} medications in your document.`;
+    }
+  }
+
   let activeSessionId = sessionId;
   if (!activeSessionId && isOnboardingCompleted) {
     const newSession = await chatService.createSession({
@@ -274,12 +296,27 @@ async function executeAddDocumentAction({
     });
   }
 
+  const suggestedAction = extractedMedicines.length > 0 ? "SHOW_EXTRACTED_MEDICINES" : null;
+  const options =
+    extractedMedicines.length > 0
+      ? [
+          {
+            label: `Add ${extractedMedicines.length} Extracted Medicines`,
+            value: "SHOW_EXTRACTED_MEDICINES",
+            actionType: "ADD_MEDICINE",
+          },
+        ]
+      : [];
+
   return buildUnifiedResponse({
     mode: "ACTION",
     actionType: "ADD_DOCUMENT",
     reply: replyText,
     sessionId: activeSessionId,
     document: docResult.document,
+    medicines: extractedMedicines,
+    suggestedAction,
+    options,
   });
 }
 
