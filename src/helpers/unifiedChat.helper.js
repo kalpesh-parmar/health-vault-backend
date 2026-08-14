@@ -57,6 +57,10 @@ function buildUnifiedResponse({
   medication = null,
   suggestedAction = null,
   options = [],
+  requireSelection = false,
+  reports = [],
+  allowMultiSelect = false,
+  selectionType = null,
 }) {
   return {
     mode,
@@ -70,6 +74,10 @@ function buildUnifiedResponse({
     medication,
     suggestedAction,
     options,
+    requireSelection,
+    reports,
+    allowMultiSelect,
+    selectionType,
   };
 }
 

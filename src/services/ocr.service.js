@@ -176,74 +176,6 @@ class V1Service {
     return { message: "Job cancelled successfully" };
   }
 
-  /* BACKUP OF PREVIOUS onboardingChat IMPLEMENTATION:
-  async onboardingChat(userId, body) {
-    const requestReceivedTime = Date.now();
-    console.log(
-      `[OnboardingController] Request received at ${new Date(requestReceivedTime).toISOString()}`,
-    );
-
-    try {
-      if (!userId) {
-        throw new UnauthorizedException("Unauthorized access");
-      }
-
-      let { message, history = [], state, displayLabel } = body || {};
-      if (message === undefined) {
-        throw new InvalidRequestException("message is required");
-      }
-
-      // Always fetch existing state from the database to merge with incoming state
-      const existingRecord = await userOnboardingRepository.findByUserId(userId);
-      let dbState = {};
-      if (existingRecord && existingRecord.data) {
-        dbState = existingRecord.data;
-      }
-
-      if (!state || Object.keys(state).length === 0) {
-        state = dbState;
-        if (Object.keys(state).length > 0) {
-          console.log(`[OnboardingController] [userId=${userId}] Restored state from database.`);
-        }
-      } else {
-        const incomingStateCleaned = Object.fromEntries(
-          Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
-        );
-
-        const incomingExistingUserData = incomingStateCleaned.existingUserData;
-        state = { ...dbState, ...incomingStateCleaned };
-
-        if (incomingExistingUserData && dbState.existingUserData) {
-          const incomingUserDataCleaned = Object.fromEntries(
-            Object.entries(incomingExistingUserData).filter(
-              ([_, v]) => v !== null && v !== undefined,
-            ),
-          );
-          state.existingUserData = { ...dbState.existingUserData, ...incomingUserDataCleaned };
-        }
-
-        if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
-        if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
-        if (!state.preferredLanguage && dbState.preferredLanguage)
-          state.preferredLanguage = dbState.preferredLanguage;
-      }
-
-      const beforeOllamaTime = Date.now();
-      const result = await onboardingService.chat(
-        message,
-        history,
-        state,
-        userId,
-        null,
-        displayLabel,
-      );
-      return result;
-    } catch (error) {
-      throw error;
-    }
-  }
-  */
-
   async onboardingChat(userId, body) {
     const requestReceivedTime = Date.now();
     console.log(
@@ -282,45 +214,6 @@ class V1Service {
       // CASE 1: ADD_DOCUMENT ACTION
       if (actionType === "ADD_DOCUMENT") {
         console.log(`[UnifiedChat] Executing ADD_DOCUMENT action for userId=${userId}`);
-        /*
-        // PREVIOUS IMPLEMENTATION BACKUP OPTION:
-        const docResult = await documentPersistenceService.addDocument({
-          userId,
-          payload: actionData,
-        });
-
-        const replyText = docResult?.document?.fileName
-          ? `Document '${docResult.document.fileName}' has been added to your Health Vault.`
-          : "Document added successfully.";
-
-        let activeSessionId = sessionId;
-        if (!activeSessionId && isOnboardingCompleted) {
-          const newSession = await chatService.createSession({
-            userId,
-            title: docResult?.document?.fileName || "Document Chat",
-          });
-          activeSessionId = newSession?.id || null;
-        }
-
-        if (activeSessionId) {
-          await chatSessionRepository.appendMessage({
-            sessionId: activeSessionId,
-            userId,
-            role: "assistant",
-            content: replyText,
-            metadata: { actionType: "ADD_DOCUMENT", documentId: docResult?.document?.id },
-          });
-        }
-
-        return buildUnifiedResponse({
-          mode: "ACTION",
-          actionType: "ADD_DOCUMENT",
-          reply: replyText,
-          sessionId: activeSessionId,
-          document: docResult.document,
-        });
-        */
-
         return executeAddDocumentAction({
           userId,
           actionData,
@@ -334,8 +227,7 @@ class V1Service {
         });
       }
 
-      const effectiveState =
-        inputState && Object.keys(inputState).length > 0 ? inputState : dbState;
+      const effectiveState = { ...(dbState || {}), ...(inputState || {}) };
       const currentOnboardingStep = effectiveState?.currentStep || null;
       const isActiveOnboardingStep =
         Boolean(currentOnboardingStep) &&
@@ -550,12 +442,18 @@ class V1Service {
 
       return buildUnifiedResponse({
         mode: "NORMAL_CHAT",
-        actionType: "NORMAL_CHAT",
+        actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
         sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || sessionId,
         citations: chatResult?.citations || [],
-        suggestedAction: intentResult.suggestedAction,
+        suggestedAction: chatResult?.requireSelection
+          ? "REQUIRE_DOCUMENT_SELECTION"
+          : intentResult.suggestedAction,
         options: intentResult.options.length > 0 ? intentResult.options : chatResult?.options || [],
+        requireSelection: chatResult?.requireSelection || false,
+        reports: chatResult?.reports || [],
+        allowMultiSelect: chatResult?.allowMultiSelect || false,
+        selectionType: chatResult?.selectionType || null,
       });
     } catch (error) {
       console.error(`[UnifiedChat] Unified chat processing error for userId=${userId}:`, error);

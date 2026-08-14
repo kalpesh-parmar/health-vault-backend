@@ -2,7 +2,7 @@ const { and, desc, eq, inArray, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const {
   aiContextCache,
-  chatHistory,
+  // chatHistory,
   documentChunk,
   embedding,
   medicalEntity,
@@ -102,23 +102,23 @@ class DocumentIntelligenceRepository {
       .limit(limit);
   }
 
-  async createChatHistory(data) {
-    const result = await this.client.insert(chatHistory).values(data).returning();
-    return result[0] || null;
-  }
+  // async createChatHistory(data) {
+  //   const result = await this.client.insert(chatHistory).values(data).returning();
+  //   return result[0] || null;
+  // }
 
-  async getRecentChatHistory({ userId, sessionId, limit = 8 }) {
-    const conditions = [eq(chatHistory.userId, userId)];
-    if (sessionId) {
-      conditions.push(eq(chatHistory.sessionId, sessionId));
-    }
-    return this.client
-      .select()
-      .from(chatHistory)
-      .where(and(...conditions))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(limit);
-  }
+  // async getRecentChatHistory({ userId, sessionId, limit = 8 }) {
+  //   const conditions = [eq(chatHistory.userId, userId)];
+  //   if (sessionId) {
+  //     conditions.push(eq(chatHistory.sessionId, sessionId));
+  //   }
+  //   return this.client
+  //     .select()
+  //     .from(chatHistory)
+  //     .where(and(...conditions))
+  //     .orderBy(desc(chatHistory.createdAt))
+  //     .limit(limit);
+  // }
 
   async getPatientContext(userId) {
     const result = await this.client

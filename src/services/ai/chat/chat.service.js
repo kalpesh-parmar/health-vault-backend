@@ -36,11 +36,16 @@ const NO_CONTEXT_REPLY_I18N = {
 };
 
 const REQUIRE_SELECTION_I18N = {
-  english: "Sure, please select your document that you have to compare.",
-  gujarati: "ચોક્કસ, કૃપા કરીને તમારો દસ્તાવેજ પસંદ કરો જેની તમારે સરખામણી કરવી છે.",
-  hindi: "ज़रूर, कृपया अपने उस दस्तावेज़ का चयन करें जिसकी आपको तुलना करनी है।",
-  marathi: "नक्की, कृपया तुमचा दस्तऐवज निवडा ज्याची तुम्हाला तुलना करायची आहे.",
-  tamil: "நிச்சயமாக, தயவுசெய்து நீங்கள் ஒப்பிட வேண்டிய உங்கள் ஆவணத்தைத் தேர்ந்தெடுக்கவும்.",
+  english:
+    "Sure, please select the document(s) from your uploaded reports that you would like me to analyze or compare.",
+  gujarati:
+    "ચોક્કસ, કૃપા કરીને તમારા અપલોડ કરેલા રિપોર્ટ્સમાંથી દસ્તાવેજો પસંદ કરો જેનું વિશ્લેષણ અથવા સરખામણી કરવી છે.",
+  hindi:
+    "ज़रूर, कृपया अपनी अपलोड की गई रिपोर्टों में से उन दस्तावेज़ों का चयन करें जिनका आप विश्लेषण या तुलना करना चाहते हैं।",
+  marathi:
+    "नक्की, कृपया तुमच्या अपलोड केलेल्या अहवालांमधून ते दस्तऐवज निवडा ज्यांचे तुम्हाला विश्लेषण किंवा तुलना करायची आहे.",
+  tamil:
+    "நிச்சயமாக, நீங்கள் பகுப்பாய்வு செய்ய அல்லது ஒப்பிட விரும்பும் உங்கள் பதிવેற்றப்பட்ட அறிக்கைகளிலிருந்து ஆவணங்களைத் தேர்ந்தெடுக்கவும்.",
 };
 
 const EMERGENCY_WARNING_I18N = {
@@ -567,22 +572,25 @@ Content: ${c.content}
               }
             }
 
-            if (!resolvedIds && intent === "COMPARE") {
+            if (resolvedIds) {
+              finalDocumentIds = resolvedIds;
               debugLogger.info(
-                "sendMessage: Document Resolver found COMPARE query ambiguous (rules), returning requireSelection",
+                `sendMessage: [PERFORMANCE] Document Resolver (Rules) took ${Date.now() - resolverStartTime}ms`,
+                { finalDocumentIds },
+              );
+            } else {
+              debugLogger.info(
+                "sendMessage: Document query without specific resolved document. Requesting selection.",
                 { availableReportsCount: recentDocs.length },
               );
-
               const userMsg = await chatSessionRepository.appendMessage({
                 content: question.trim(),
                 role: "user",
                 sessionId,
                 userId,
               });
-
               const replyText =
                 REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-
               const aiMsg = await chatSessionRepository.appendMessage({
                 citations: [],
                 content: replyText,
@@ -592,74 +600,24 @@ Content: ${c.content}
                   requireSelection: true,
                   documentId: [],
                   reports: recentDocs,
+                  allowMultiSelect: true,
+                  selectionType: "MULTIPLE",
                 },
                 role: "assistant",
                 sessionId,
                 userId,
               });
-
               return {
                 ai: aiMsg,
                 user: userMsg,
                 reply: replyText,
                 requireSelection: true,
                 reports: recentDocs,
+                allowMultiSelect: true,
+                selectionType: "MULTIPLE",
                 mode: "DOCUMENT_RAG",
                 emergency: false,
               };
-            }
-
-            if (resolvedIds) {
-              finalDocumentIds = resolvedIds;
-              debugLogger.info(
-                `sendMessage: [PERFORMANCE] Document Resolver (Rules) took ${Date.now() - resolverStartTime}ms`,
-                { finalDocumentIds },
-              );
-            } else {
-              if (intent === "COMPARE") {
-                debugLogger.info(
-                  "sendMessage: COMPARE intent without specific documents. Requesting selection.",
-                );
-                const userMsg = await chatSessionRepository.appendMessage({
-                  content: question.trim(),
-                  role: "user",
-                  sessionId,
-                  userId,
-                });
-                const replyText =
-                  REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-                const aiMsg = await chatSessionRepository.appendMessage({
-                  citations: [],
-                  content: replyText,
-                  metadata: {
-                    mode: "DOCUMENT_RAG",
-                    emergency: false,
-                    requireSelection: true,
-                    documentId: [],
-                    reports: recentDocs,
-                  },
-                  role: "assistant",
-                  sessionId,
-                  userId,
-                });
-                return {
-                  ai: aiMsg,
-                  user: userMsg,
-                  reply: replyText,
-                  requireSelection: true,
-                  reports: recentDocs,
-                  mode: "DOCUMENT_RAG",
-                  emergency: false,
-                };
-              } else {
-                // If it's DOCUMENT intent and no specific report was identified, search across ALL recent reports.
-                // This eliminates the 8s LLM bottleneck by directly falling back to the fast Vector DB search.
-                finalDocumentIds = recentDocs.map((d) => d.id);
-                debugLogger.info(
-                  "sendMessage: Document Resolver bypassed LLM, falling back to vector search across all recent documents",
-                  { finalDocumentIds },
-                );
-              }
             }
           }
         }

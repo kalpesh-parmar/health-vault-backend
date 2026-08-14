@@ -109,16 +109,18 @@ class DocumentOcrJobService {
       }
 
       setImmediate(() => {
-        this._runPipeline({
-          fileKey: claimedJob.fileKey,
-          jobId: claimedJob.id,
-          mimeType,
-          patientContext,
-          userId,
-        }).catch((error) => {
+        Promise.resolve(
+          this._runPipeline({
+            fileKey: claimedJob.fileKey,
+            jobId: claimedJob.id,
+            mimeType,
+            patientContext,
+            userId,
+          }),
+        ).catch((error) => {
           // eslint-disable-next-line no-console
           console.error("[ocr-job] uncaught pipeline error", {
-            error: error.message,
+            error: error?.message || String(error),
             fileKey: claimedJob.fileKey,
             jobId: claimedJob.id,
           });
@@ -182,6 +184,127 @@ class DocumentOcrJobService {
       },
       graphs: job.graphs || [],
     };
+  }
+
+  async startBatchJobs(jobIds, userId) {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      throw new InvalidRequestException("jobIds array is required");
+    }
+
+    const uniqueJobIds = [...new Set(jobIds)];
+    const started = [];
+    const failed = [];
+
+    let patientContext = null;
+    try {
+      patientContext = await intelligenceRepository.getPatientContext(userId);
+    } catch {
+      patientContext = null;
+    }
+
+    for (const jobId of uniqueJobIds) {
+      try {
+        const claimedJob = await documentProcessingJobRepository.claimQueuedJob(jobId, userId);
+        if (claimedJob) {
+          const mimeType = claimedJob.metadata?.mimeType || null;
+          setImmediate(() => {
+            Promise.resolve(
+              this._runPipeline({
+                fileKey: claimedJob.fileKey,
+                jobId: claimedJob.id,
+                mimeType,
+                patientContext,
+                userId,
+              }),
+            ).catch((error) => {
+              // eslint-disable-next-line no-console
+              console.error("[ocr-job] uncaught pipeline error", {
+                error: error?.message || String(error),
+                fileKey: claimedJob.fileKey,
+                jobId: claimedJob.id,
+              });
+            });
+          });
+          started.push({
+            jobId: claimedJob.id,
+            fileKey: claimedJob.fileKey,
+            status: "OCR_STARTED",
+            stage: claimedJob.stage,
+          });
+        } else {
+          const existingJob = await documentProcessingJobRepository.findByIdAndUserId(
+            jobId,
+            userId,
+          );
+          if (!existingJob) {
+            failed.push({ jobId, reason: "OCR job not found" });
+          } else {
+            failed.push({
+              jobId,
+              status: existingJob.status,
+              reason: `Job cannot be started because its current status is '${existingJob.status}'.`,
+            });
+          }
+        }
+      } catch (err) {
+        failed.push({ jobId, reason: err.message || "Failed to start job" });
+      }
+    }
+
+    return { started, failed };
+  }
+
+  async getBatchJobStatuses(jobIds, userId) {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      throw new InvalidRequestException("jobIds array is required");
+    }
+
+    const uniqueJobIds = [...new Set(jobIds)];
+    const jobs = await documentProcessingJobRepository.findManyByIdsAndUserId(uniqueJobIds, userId);
+
+    const jobsMap = new Map();
+    for (const job of jobs) {
+      jobsMap.set(job.id, job);
+    }
+
+    return uniqueJobIds.map((jobId) => {
+      const job = jobsMap.get(jobId);
+      if (!job) {
+        return {
+          jobId,
+          found: false,
+          status: "NOT_FOUND",
+          message: "OCR job not found",
+        };
+      }
+
+      const item = {
+        jobId: job.id,
+        found: true,
+        fileKey: job.fileKey,
+        status: job.status,
+        stage: job.stage,
+        percentage: job.percentage,
+        currentStep: job.currentStep,
+        completedSteps: job.completedSteps,
+        pendingSteps: job.pendingSteps,
+        message: job.message,
+        error: job.error,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+      };
+
+      if (job.status === "COMPLETED") {
+        item.extractedStructuredData = job.extractedStructuredData;
+        item.summaries = {
+          summaryEnglish: job.extractedStructuredData?.summaryEnglish || "",
+          summaryInPreferredLanguage: job.extractedStructuredData?.summaryInPreferredLanguage || "",
+        };
+        item.graphs = job.graphs || [];
+      }
+
+      return item;
+    });
   }
 
   /**

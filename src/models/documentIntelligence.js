@@ -183,33 +183,33 @@ const aiContextCache = pgTable(
   ],
 );
 
-const chatHistory = pgTable(
-  "chat_history",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => patient.id, { onDelete: "cascade" }),
-    documentId: uuid("document_id").references(() => document.id, { onDelete: "set null" }),
-    sessionId: varchar("session_id", { length: 128 }),
-    userMessage: text("user_message").notNull(),
-    aiResponse: jsonb("ai_response").notNull(),
-    citations: jsonb("citations").default([]).notNull(),
-    metadata: jsonb("metadata").default({}).notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table) => [
-    index("chat_history_user_id_idx").on(table.userId),
-    index("chat_history_document_id_idx").on(table.documentId),
-    index("chat_history_session_id_idx").on(table.sessionId),
-    index("chat_history_created_at_idx").on(table.createdAt),
-  ],
-);
+// const chatHistory = pgTable(
+//   "chat_history",
+//   {
+//     id: uuid("id").defaultRandom().primaryKey(),
+//     userId: uuid("user_id")
+//       .notNull()
+//       .references(() => patient.id, { onDelete: "cascade" }),
+//     documentId: uuid("document_id").references(() => document.id, { onDelete: "set null" }),
+//     sessionId: varchar("session_id", { length: 128 }),
+//     userMessage: text("user_message").notNull(),
+//     aiResponse: jsonb("ai_response").notNull(),
+//     citations: jsonb("citations").default([]).notNull(),
+//     metadata: jsonb("metadata").default({}).notNull(),
+//     createdAt: timestamp("created_at").defaultNow().notNull(),
+//   },
+//   (table) => [
+//     index("chat_history_user_id_idx").on(table.userId),
+//     index("chat_history_document_id_idx").on(table.documentId),
+//     index("chat_history_session_id_idx").on(table.sessionId),
+//     index("chat_history_created_at_idx").on(table.createdAt),
+//   ],
+// );
 
 module.exports = {
   aiContextCache,
   aiSourceTypeEnum,
-  chatHistory,
+  // chatHistory,
   documentChunk,
   embedding,
   medicalEntity,

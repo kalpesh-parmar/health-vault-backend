@@ -73,6 +73,8 @@ const messageConstants = Object.freeze({
   NO_FILE_UPLOAD: "No file uploaded",
   UNAUTHORIZED_ACCESS: "Unauthorized access",
   UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
+  BATCH_OCR_JOBS_STARTED: "Batch OCR jobs started successfully",
+  BATCH_OCR_JOBS_STATUS_FETCHED: "Batch OCR job statuses fetched successfully",
 });
 
 module.exports = { messageConstants };

@@ -42,12 +42,20 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       actionType: "ADD_MEDICINE",
       reply: "Medicine added",
       sessionId: "session-123",
+      requireSelection: true,
+      reports: [{ id: "doc-1", fileName: "lab_report.pdf" }],
+      allowMultiSelect: true,
+      selectionType: "MULTIPLE",
     });
 
     expect(payload.mode).toBe("ACTION");
     expect(payload.actionType).toBe("ADD_MEDICINE");
     expect(payload.reply).toBe("Medicine added");
     expect(payload.sessionId).toBe("session-123");
+    expect(payload.requireSelection).toBe(true);
+    expect(payload.allowMultiSelect).toBe(true);
+    expect(payload.selectionType).toBe("MULTIPLE");
+    expect(payload.reports).toHaveLength(1);
   });
 
   test("normalizeCreateMedicationInput should map shorthand fields to createMedicationSchema shape", () => {
@@ -188,5 +196,24 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     expect(res.state.isOnboardingCompleted).toBe(true);
     expect(res.state.currentStep).toBe("ADD_MEDICINE");
+  });
+
+  test("onboardingService should advance CONFIRM_DOCUMENT_OWNERSHIP step when user sends YES", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "UPLOAD",
+      currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+      documentExtracted: true,
+      documentOwnershipConfirmed: null,
+      documentUploaded: true,
+      uploadedMedicalDocument: true,
+      preferredLanguage: "english",
+    };
+
+    const res = await onboardingService.chat("YES", [], state, null, null, null);
+
+    expect(res.state.documentOwnershipConfirmed).toBe(true);
+    expect(res.state.currentStep).not.toBe("CONFIRM_DOCUMENT_OWNERSHIP");
   });
 });

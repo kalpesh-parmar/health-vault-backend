@@ -352,22 +352,21 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
-    const useDoc =
-      state.useDocumentData !== false &&
-      state.flowMode === "UPLOAD" &&
-      state.documentConfirmed !== false;
+    const hasExtractedMedicines =
+      Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0;
 
     // Once basic profile setup is complete and user reaches medicine step, mark onboarding completed as true
     state.isOnboardingCompleted = true;
 
+    if (!state.medicinesConfirmed && hasExtractedMedicines) {
+      state.medicationFlowStarted = true;
+      state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
+      return "REVIEW_MEDICINES_LIST";
+    }
+
     if (!state.medicationFlowStarted) {
       state.medicationFlowStarted = true;
-      if (useDoc && state.foundMedicines && state.foundMedicines.length > 0) {
-        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
-        return "REVIEW_MEDICINES_LIST";
-      } else {
-        return "MEDICINE_OPTIONS";
-      }
+      return "MEDICINE_OPTIONS";
     }
     if (state.currentStep) {
       return state.currentStep;
@@ -720,12 +719,6 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
-      if (
-        state.documentOwnershipConfirmed !== undefined &&
-        state.documentOwnershipConfirmed !== null
-      ) {
-        break;
-      }
       let answer = null;
       try {
         const payload = JSON.parse(msg);
@@ -968,11 +961,25 @@ async function updateStateFromMessage(state, message, userId = null) {
       try {
         payload = JSON.parse(msg);
       } catch {
-        payload = {};
+        const upper = String(msg || "")
+          .trim()
+          .toUpperCase();
+        payload = { value: upper };
       }
 
-      if (payload.selected) {
-        const selectedIds = payload.selected;
+      const val = String(payload.value || payload.action || payload.key || msg || "")
+        .trim()
+        .toUpperCase();
+      const isConfirm =
+        val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
+      const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
+      const isSkip = val === "SKIP" || val === "SKIP_ALL" || payload.skipAll;
+
+      if (isConfirm) {
+        state.medicinesConfirmed = true;
+        const selectedIds =
+          payload.selected ||
+          (state.medicinesToAdd || []).map((m) => m.id || m.client_med_id).filter(Boolean);
 
         // Optionally update medicines if FE sends updated list in payload
         if (Array.isArray(payload.medicines)) {
@@ -994,7 +1001,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
           ...m,
-          selected: selectedIds.includes(m.id || m.client_med_id),
+          selected: selectedIds.length > 0 ? selectedIds.includes(m.id || m.client_med_id) : true,
         }));
 
         let nextIncompleteIndex = -1;
@@ -1017,7 +1024,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         } else {
           // Filter selected medicines that have NOT been saved in DB yet (preventing duplicate insertion)
           const unsavedMeds = state.medicinesToAdd.filter((m) => m.selected && !m.isSaved);
-          if (unsavedMeds.length > 0) {
+          if (unsavedMeds.length > 0 && userId) {
             const bulkCreated = await medicationService.bulkCreate(userId, unsavedMeds);
 
             for (let i = 0; i < unsavedMeds.length; i++) {
@@ -1046,11 +1053,12 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
           state.currentStep = "MEDICINE_OPTIONS";
         }
-      } else if (payload.addNew) {
+      } else if (isAdd) {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
-      } else if (payload.skipAll) {
+      } else if (isSkip) {
         state.medicationFlowDone = true;
+        state.medicinesConfirmed = true;
         state.currentStep = "MEDICINE_OPTIONS";
       }
       break;
@@ -1797,7 +1805,7 @@ class OnboardingService {
       state.documentUploaded = state.uploadedMedicalDocument || false;
     if (state.documentConfirmed === undefined) state.documentConfirmed = false;
     if (state.documentOwnershipConfirmed === undefined) {
-      state.documentOwnershipConfirmed = state.documentConfirmed ? true : null;
+      state.documentOwnershipConfirmed = null;
     }
     if (state.bloodGroupSkipped === undefined) state.bloodGroupSkipped = false;
     if (state.allergiesSkipped === undefined) state.allergiesSkipped = false;

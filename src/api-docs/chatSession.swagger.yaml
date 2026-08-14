@@ -178,6 +178,29 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/SendChatMessageRequest" }
       responses:
+        "200":
+          description: Document Selection Required (when user must select from uploaded reports)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/ChatMessage" }
+                  ai: { $ref: "#/components/schemas/ChatMessage" }
+                  reply: { type: string }
+                  requireSelection: { type: boolean, example: true }
+                  allowMultiSelect: { type: boolean, example: true }
+                  selectionType: { type: string, example: "MULTIPLE" }
+                  reports:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        fileName: { type: string }
+                        documentType: { type: string }
+                        reportDate: { type: string }
+                        createdAt: { type: string }
         "201":
           description: Answer
           content:
