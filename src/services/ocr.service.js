@@ -256,7 +256,7 @@ class V1Service {
       }
 
       const normalizedInput = normalizeUnifiedChatInput(body);
-      const {
+      let {
         actionType,
         actionData,
         message,
@@ -272,6 +272,10 @@ class V1Service {
       const patient = await patientRepository.findById(userId);
       const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
       const dbState = onboardingRecord?.data || {};
+
+      if (!sessionId && dbState?.chatSessionId) {
+        sessionId = dbState.chatSessionId;
+      }
       const isOnboardingCompleted =
         patient?.onboardingCompleted ||
         dbState?.isOnboardingCompleted === true ||
