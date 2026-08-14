@@ -181,15 +181,18 @@ Content: ${c.content}
         })
         .join("\n\n");
 
-      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, "english");
+      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang);
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
       // Force Qwen to ALWAYS generate in the detected language
+      const instructionContent =
+        prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
+        prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
       formattedMessages.push({
         role: "system",
-        content: `CRITICAL INSTRUCTION: Understand the user's question, read the retrieved context chunks, and generate your final response natively in ${normLang.toUpperCase()} ONLY. Do NOT translate.`,
+        content: instructionContent,
       });
 
       // eslint-disable-next-line no-console
@@ -209,16 +212,19 @@ Content: ${c.content}
       };
     }
 
-    let systemPrompt = prompts.GENERAL_HEALTH_PROMPT("english");
+    let systemPrompt = prompts.GENERAL_HEALTH_PROMPT(normLang);
     if (patientContextStr) {
       systemPrompt += `\n\n${patientContextStr}`;
     }
 
     const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
     // Force Qwen to ALWAYS generate in the detected language
+    const instructionContent =
+      prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
+      prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
     formattedMessages.push({
       role: "system",
-      content: `CRITICAL INSTRUCTION: Understand the user's question and generate your final response natively in ${normLang.toUpperCase()} ONLY. Do NOT translate.`,
+      content: instructionContent,
     });
 
     // eslint-disable-next-line no-console

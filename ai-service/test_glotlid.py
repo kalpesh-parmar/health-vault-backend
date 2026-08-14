@@ -20,7 +20,7 @@ print("GlotLID model loaded successfully!")
 
 
 # 3. Detect language
-text = "mane diabetes vishe janavo"
+text = "mujhe ye report samjhao"
 
 start_time = time.perf_counter()
 labels, probabilities = model.predict(text, k=1)

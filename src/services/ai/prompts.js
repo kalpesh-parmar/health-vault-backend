@@ -32,6 +32,8 @@ const LOCALIZED_HEADINGS = {
     normal: "Normal",
     needsAttention: "Needs Attention",
     abnormal: "Abnormal",
+    smartQAPrefix:
+      'First, start by stating: "We found your information in this report: [Report Name]. In this document, the patient name is [Name] and age is [Age]." Then, provide the detailed answer.',
   },
   gujarati: {
     answer: "🩺 ઉત્તર",
@@ -48,6 +50,8 @@ const LOCALIZED_HEADINGS = {
     normal: "સામાન્ય",
     needsAttention: "ધ્યાન આપવાની જરૂર",
     abnormal: "અસામાન્ય",
+    smartQAPrefix:
+      'પ્રથમ, આ મુજબ શરૂઆત કરો: "અમને આ રિપોર્ટમાં તમારી માહિતી મળી છે: [Report Name]. આ દસ્તાવેજમાં, દર્દીનું નામ [Name] છે અને ઉંમર [Age] વર્ષ છે." ત્યારબાદ, વિગતવાર જવાબ આપો.',
   },
   hindi: {
     answer: "🩺 उत्तर",
@@ -64,6 +68,8 @@ const LOCALIZED_HEADINGS = {
     normal: "सामान्य",
     needsAttention: "ध्यान देने की आवश्यकता",
     abnormal: "असामान्य",
+    smartQAPrefix:
+      'सबसे पहले, इस प्रकार शुरुआत करें: "हमें इस रिपोर्ट में आपकी जानकारी मिली है: [Report Name]। इस दस्तावेज़ में, मरीज़ का नाम [Name] है और उम्र [Age] वर्ष है।" उसके बाद, विस्तृत उत्तर दें।',
   },
   marathi: {
     answer: "🩺 उत्तर",
@@ -80,6 +86,8 @@ const LOCALIZED_HEADINGS = {
     normal: "सामान्य",
     needsAttention: "लक्ष देण्याची गरज",
     abnormal: "असामान्य",
+    smartQAPrefix:
+      'प्रथम, अशी सुरुवात करा: "आम्हाला या अहवालात तुमची माहिती मिळाली आहे: [Report Name]. या दस्तऐवजात, रुग्णाचे नाव [Name] आहे आणि वय [Age] वर्षे आहे." त्यानंतर, सविस्तर उत्तर द्या.',
   },
   tamil: {
     answer: "🩺 பதில்",
@@ -96,6 +104,8 @@ const LOCALIZED_HEADINGS = {
     normal: "இயல்பானது",
     needsAttention: "கவனம் தேவை",
     abnormal: "அசாதாரணமானது",
+    smartQAPrefix:
+      'முதலில், இவ்வாறு தொடங்கவும்: "இந்த அறிக்கையில் உங்கள் தகவலைக் கண்டறிந்துள்ளோம்: [Report Name]. இந்த ஆவணத்தில், நோயாளியின் பெயர் [Name] மற்றும் வயது [Age] ஆண்டுகள்." பின்னர், விரிவான பதிலை வழங்கவும்.',
   },
 };
 
@@ -129,7 +139,7 @@ Only if needed.
 ${headings.tip}
 Provide one practical and encouraging tip.
 
-11. You MUST write your response entirely in ${language}. Do not use English except for medical terms or abbreviations that do not have a standard translation in ${language}.`;
+11. You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages. DO NOT include Hindi or English sentences. If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.`;
 };
 
 const RAG_PROMPT_TEMPLATE = (context, language = "english") => {
@@ -175,12 +185,12 @@ ${headings.keyInsights}
 
 4. For SPECIFIC QUESTIONS (Smart Q&A):
 ${headings.answer}
-[First, start by stating: "We found your information in this report: [Report Name]. In this document, the patient name is [Name] and age is [Age]." Then, provide the detailed answer. If the requested values are present in multiple reports, you MUST mention all values from all relevant reports without skipping any.]
+[${headings.smartQAPrefix} If the requested values are present in multiple reports, you MUST mention all values from all relevant reports without skipping any.]
 
 ${headings.recommendation}
 [Provide a short, actionable recommendation based on the finding]
 
-You MUST write your entire response in ${language.toUpperCase()} (except for standard medical terms).
+You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages. DO NOT include Hindi or English sentences. If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.
 
 Context chunks:
 ${context}`;
@@ -814,6 +824,19 @@ Do not include markdown.
 Do not include explanations.
 `;
 
+const STRICT_LANGUAGE_INSTRUCTIONS = {
+  english:
+    "CRITICAL INSTRUCTION: You MUST generate your ENTIRE final response natively in ENGLISH ONLY. Do NOT mix languages. Do NOT output Hindi or any other sentences. If you find information in another language, translate it completely into ENGLISH. Failure to respond strictly in ENGLISH is unacceptable.",
+  gujarati:
+    "મહત્વપૂર્ણ સૂચના: તમારે તમારો સંપૂર્ણ અંતિમ જવાબ ફક્ત ગુજરાતીમાં જ આપવાનો છે. ભાષાઓનું મિશ્રણ કરશો નહીં. હિન્દી અથવા અંગ્રેજી વાક્યોનો ઉપયોગ કરશો નહીં. જો તમને અન્ય ભાષામાં માહિતી મળે, તો તેનો સંપૂર્ણપણે ગુજરાતીમાં અનુવાદ કરો.",
+  hindi:
+    "महत्वपूर्ण निर्देश: आपको अपना पूरा अंतिम उत्तर केवल हिंदी में ही देना है। भाषाओं को न मिलाएं। अंग्रेजी वाक्यों का उपयोग न करें। यदि आपको किसी अन्य भाषा में जानकारी मिलती है, तो उसका पूरी तरह से हिंदी में अनुवाद करें।",
+  marathi:
+    "महत्त्वाची सूचना: तुम्ही तुमचे संपूर्ण अंतिम उत्तर फक्त मराठीतच दिले पाहिजे. भाषांचे मिश्रण करू नका. हिंदी किंवा इंग्रजी वाक्यांचा वापर करू नका. तुम्हाला दुसऱ्या भाषेत माहिती आढळल्यास, तिचे संपूर्णपणे मराठीत भाषांतर करा.",
+  tamil:
+    "முக்கியமான அறிவுறுத்தல்: உங்கள் முழு இறுதிப் பதிலையும் தமிழில் மட்டுமே வழங்க வேண்டும். மொழிகளைக் கலக்காதீர்கள். இந்தி அல்லது ஆங்கில வாக்கியங்களைப் பயன்படுத்த வேண்டாம். வேறு மொழியில் தகவல் கிடைத்தால், அதை முழுமையாக தமிழில் மொழிபெயர்க்கவும்.",
+};
+
 const QUERY_INTENT_CLASSIFIER_PROMPT = `You are a medical query intent classifier.
 Analyze the user's question and the list of their uploaded medical documents to determine the intent.
 
@@ -849,4 +872,5 @@ module.exports = {
   GRAPHICAL_ANALYSIS_PROMPT,
   TRANSLATION_SYSTEM_PROMPT,
   QUERY_INTENT_CLASSIFIER_PROMPT,
+  STRICT_LANGUAGE_INSTRUCTIONS,
 };
