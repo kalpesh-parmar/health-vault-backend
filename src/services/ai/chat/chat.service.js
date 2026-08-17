@@ -112,25 +112,29 @@ const AGE_KEYWORDS = [
   "என் வயது எவ்வளவு",
 ];
 
-// function isTextInLanguage(text, language) {
-//   if (!text || !language) return false;
-//   const lang = language.toLowerCase();
-//   if (lang === "gujarati") {
-//     return /[\u0A80-\u0AFF]/.test(text);
-//   }
-//   if (lang === "hindi" || lang === "marathi") {
-//     return /[\u0900-\u097F]/.test(text);
-//   }
-//   if (lang === "tamil") {
-//     return /[\u0B80-\u0BFF]/.test(text);
-//   }
-//   if (lang === "english") {
-//     return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
-//   }
-//   return false;
-// }
-
 const processingSessions = new Set();
+
+function getMedicalEntityKeywords(question) {
+  if (!question) return [];
+  const entities = [
+    { key: "hemoglobin", regex: /hemoglobin|haemoglobin|hb|hgb/i },
+    { key: "glucose", regex: /glucose|blood sugar|sugar|hba1c/i },
+    { key: "rbc", regex: /rbc|red blood cell/i },
+    { key: "wbc", regex: /wbc|white blood cell/i },
+    { key: "platelets", regex: /platelets?/i },
+    { key: "creatinine", regex: /creatinine/i },
+    { key: "cholesterol", regex: /cholesterol|lipid/i },
+    { key: "vitamin d", regex: /vitamin d|vit d/i },
+    { key: "tsh", regex: /tsh|thyroid/i },
+  ];
+  const found = [];
+  for (const entity of entities) {
+    if (entity.regex.test(question)) {
+      found.push(entity.key);
+    }
+  }
+  return found;
+}
 
 class ChatService {
   detectEmergency(text) {
@@ -144,6 +148,8 @@ class ChatService {
     contextChunks = [],
     patientContextStr = "",
     preferredLanguage = "english",
+    coverageStr = "",
+    onChunk = null,
   ) {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     const userQuery = lastUserMessage?.content || "";
@@ -171,39 +177,51 @@ class ChatService {
 
       const contextText = contextChunks
         .map((c) => {
-          return `---
-Report Name: ${c.docData?.fileName || "Unknown"}
-Report Date: ${c.docData?.reportDate ? new Date(c.docData.reportDate).toISOString().split("T")[0] : "Unknown"}
-Report Type: ${c.docData?.documentType || "Unknown"}
+          return `--- REPORT: ${c.docData?.fileName || "Unknown"} ---
+Date: ${c.docData?.reportDate ? new Date(c.docData.reportDate).toISOString().split("T")[0] : "Unknown"}
 Section: ${c.sectionTitle || "General"}
-Content: ${c.content}
----`;
+Content: ${c.content}`;
         })
         .join("\n\n");
 
-      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang);
+      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang, coverageStr);
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
-      const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-      // Force Qwen to ALWAYS generate in the detected language
       const instructionContent =
         prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
         prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
-      formattedMessages.push({
-        role: "system",
-        content: instructionContent,
-      });
+      systemPrompt += `\n\n${instructionContent}`;
+      const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
       // eslint-disable-next-line no-console
       console.log(
         `[ChatService] Running local RAG chat (generation in ${normLang}) using ${env.chatModel}...`,
       );
-      const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-        temperature: 0.2,
-        maxTokens: 1024,
-        rawOptions: { num_ctx: 8192 },
-      });
+
+      let answer = "";
+      if (onChunk) {
+        await ollamaClient.chatStream(
+          formattedMessages,
+          env.chatModel,
+          (chunk) => {
+            answer += chunk;
+            onChunk(chunk);
+          },
+          {
+            temperature: 0.2,
+            maxTokens: 1024,
+            rawOptions: { num_ctx: 8192 },
+          },
+        );
+      } else {
+        answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
+          temperature: 0.2,
+          maxTokens: 1024,
+          rawOptions: { num_ctx: 8192 },
+        });
+      }
+
       return {
         answer,
         mode,
@@ -217,25 +235,40 @@ Content: ${c.content}
       systemPrompt += `\n\n${patientContextStr}`;
     }
 
-    const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
-    // Force Qwen to ALWAYS generate in the detected language
     const instructionContent =
       prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
       prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
-    formattedMessages.push({
-      role: "system",
-      content: instructionContent,
-    });
+    systemPrompt += `\n\n${instructionContent}`;
+    const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
     // eslint-disable-next-line no-console
     console.log(
       `[ChatService] Running local general chat (generation in ${normLang}) using ${env.chatModel}...`,
     );
-    const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-      temperature: 0.2,
-      maxTokens: 2048,
-      rawOptions: { num_ctx: 16384 },
-    });
+
+    let answer = "";
+    if (onChunk) {
+      await ollamaClient.chatStream(
+        formattedMessages,
+        env.chatModel,
+        (chunk) => {
+          answer += chunk;
+          onChunk(chunk);
+        },
+        {
+          temperature: 0.2,
+          maxTokens: 2048,
+          rawOptions: { num_ctx: 16384 },
+        },
+      );
+    } else {
+      answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
+        temperature: 0.2,
+        maxTokens: 2048,
+        rawOptions: { num_ctx: 16384 },
+      });
+    }
+
     return {
       answer,
       mode,
@@ -267,7 +300,7 @@ Content: ${c.content}
     return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
   }
 
-  async sendMessage({ userId, documentId, question, sessionId: reqSessionId }) {
+  async sendMessage({ userId, documentId, question, sessionId: reqSessionId, onChunk }) {
     if (reqSessionId) {
       if (processingSessions.has(reqSessionId)) {
         throw new InvalidRequestException(
@@ -278,7 +311,7 @@ Content: ${c.content}
     }
 
     try {
-      // Normalize documentId to array to prevent Drizzle inArray crash when passing single strings
+      // Normalize documentId to array
       if (documentId && !Array.isArray(documentId)) {
         documentId = [documentId];
       }
@@ -292,6 +325,33 @@ Content: ${c.content}
       });
 
       if (!question?.trim()) {
+        if (documentId && documentId.length > 0) {
+          let lookupSessionId = reqSessionId;
+          if (!lookupSessionId) {
+            const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
+            if (existingSessions?.items?.length > 0) {
+              lookupSessionId = existingSessions.items[0].id;
+            }
+          }
+          if (lookupSessionId) {
+            const recentMsgs = await chatSessionRepository.listMessages({
+              direction: "before",
+              limit: 10,
+              sessionId: lookupSessionId,
+              userId,
+            });
+            const lastUserMsg = (recentMsgs?.items || []).find((m) => m.role === "user");
+            if (lastUserMsg && lastUserMsg.content) {
+              question = lastUserMsg.content;
+              debugLogger.info("sendMessage: Re-using previous question from session", {
+                question,
+              });
+            }
+          }
+        }
+      }
+
+      if (!question?.trim()) {
         throw new InvalidRequestException("Question is required");
       }
 
@@ -300,7 +360,6 @@ Content: ${c.content}
       const p = await patientRepository.findById(userId);
       if (p) {
         preferredLanguage = p.preferredLanguage || "english";
-        console.log("[SC]=====Language===", preferredLanguage);
       }
       if (!preferredLanguage || preferredLanguage === "english") {
         try {
@@ -310,7 +369,7 @@ Content: ${c.content}
             preferredLanguage = onboardingRecord.data.preferredLanguage;
           }
         } catch (err) {
-          debugLogger.error("sendMessage: Failed to read onboarding fallback language", {
+          debugLogger.error("sendMessage: Failed to get onboarding preferredLanguage", {
             error: err.message,
           });
         }
@@ -318,6 +377,7 @@ Content: ${c.content}
       preferredLanguage = normalizeLanguage(preferredLanguage);
 
       // --- ML LANGUAGE DETECTION ---
+      let detectedLanguage = preferredLanguage;
       try {
         const detectStartTime = Date.now();
         const detectedLang = await aiClient.detectLanguage(question);
@@ -328,58 +388,28 @@ Content: ${c.content}
             detected: normDetected,
             previous: preferredLanguage,
           });
-          if (normDetected && normDetected !== "english") {
-            preferredLanguage = normDetected;
-          } else if (normDetected === "english") {
-            // If ML says english, trust it over profile
-            preferredLanguage = "english";
-          }
+          detectedLanguage = normDetected;
         }
       } catch (err) {
         debugLogger.error("sendMessage: Failed to detect language via ML model", {
           error: err.message,
         });
       }
-      //end
+      // Force everything to use detectedLanguage
+      preferredLanguage = detectedLanguage;
+      const retrievalQuery = question;
 
       // Intercept specific questions
       const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
       let interceptedReply = null;
 
-      let englishQuestion = question;
-      // if (preferredLanguage !== "english" && !isTextInLanguage(question, "english")) {
-      //   try {
-      //     debugLogger.info(
-      //       "sendMessage: [LLM TRACKING] [1] Translating incoming question (IndicTrans2)",
-      //     );
-      //     const inTransStartTime = Date.now();
-      //     englishQuestion = await aiClient.translate(question, preferredLanguage, "english");
-      //     const inTransDuration = Date.now() - inTransStartTime;
-      //     // eslint-disable-next-line no-console
-      //     console.log(
-      //       `\n⏱️ [TRANSLATION TIME] Question (${preferredLanguage.toUpperCase()} -> ENGLISH) took ${inTransDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-      //     );
-      //     debugLogger.info("sendMessage: Translated question to English for internal processing", {
-      //       original: question,
-      //       english: englishQuestion,
-      //     });
-      //   } catch (err) {
-      //     debugLogger.error("sendMessage: Failed to translate question to English", {
-      //       error: err.message,
-      //     });
-      //   }
-      // }
-
       if (AGE_KEYWORDS.includes(cleanQuestion)) {
-        debugLogger.info("sendMessage: Intercepted age-related question", { question });
-        const ageTemplates = AGE_REPLY_I18N[preferredLanguage] || AGE_REPLY_I18N.english;
+        const ageTemplates = AGE_REPLY_I18N[detectedLanguage] || AGE_REPLY_I18N.english;
         if (p && p.dateOfBirth) {
-          let dobStr = p.dateOfBirth;
-          if (p.dateOfBirth instanceof Date) {
-            dobStr = p.dateOfBirth.toISOString().split("T")[0];
-          } else if (typeof p.dateOfBirth === "string") {
-            dobStr = p.dateOfBirth.split("T")[0];
-          }
+          let dobStr =
+            p.dateOfBirth instanceof Date
+              ? p.dateOfBirth.toISOString().split("T")[0]
+              : String(p.dateOfBirth).split("T")[0];
           const calculatedAge = getAgeFromDateOfBirth(p.dateOfBirth);
           interceptedReply = ageTemplates.success(dobStr, calculatedAge);
         } else {
@@ -392,11 +422,16 @@ Content: ${c.content}
         session = await chatSessionRepository.findSessionById(reqSessionId, userId);
         if (!session) throw new NotFoundException("Chat session not found");
       } else {
-        session = await chatSessionRepository.createSession({
-          userId,
-          title: "Health Chat",
-          metadata: { active_document_ids: documentId || [] },
-        });
+        const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
+        if (existingSessions && existingSessions.items && existingSessions.items.length > 0) {
+          session = existingSessions.items[0];
+        } else {
+          session = await chatSessionRepository.createSession({
+            userId,
+            title: "Health Chat",
+            metadata: { active_document_ids: documentId || [] },
+          });
+        }
       }
       const sessionId = session.id;
 
@@ -407,21 +442,14 @@ Content: ${c.content}
           sessionId,
           userId,
         });
-
         const aiMsg = await chatSessionRepository.appendMessage({
           citations: [],
           content: interceptedReply,
-          metadata: {
-            mode: "GENERAL_HEALTH",
-            emergency: false,
-            intercepted: true,
-            documentId: [],
-          },
+          metadata: { mode: "GENERAL_HEALTH", emergency: false, intercepted: true, documentId: [] },
           role: "assistant",
           sessionId,
           userId,
         });
-
         return {
           ai: aiMsg,
           citations: [],
@@ -434,94 +462,102 @@ Content: ${c.content}
 
       // REQUEST ANALYZER
       let intent = "GENERAL";
+      let documentScope = "NONE";
       const intentStartTime = Date.now();
+
+      const lowerQuestion = retrievalQuery.toLowerCase();
+      const compareKeywords = [
+        "all",
+        "compare",
+        "trends",
+        "both",
+        "multiple",
+        "every",
+        "which",
+        "highest",
+        "lowest",
+        "across",
+        "સરખામણી",
+        "તુલના",
+        "तुलना",
+        "ஒப்பிடுக",
+      ];
+      const documentKeywords = [
+        "report",
+        "lab",
+        "result",
+        "upload",
+        "scan",
+        "test",
+        "mri",
+        "x-ray",
+        "prescription",
+        "summary",
+        "અહેવાલ",
+        "રિપોર્ટ",
+        "रिपोर्ट",
+        "अहवाल",
+        "அறிக்கை",
+      ];
+      const fullDocKeywords = [
+        "full",
+        "entire",
+        "complete",
+        "everything",
+        "detail",
+        "details",
+        "all details",
+        "બધી વિગતો",
+        "સંપૂર્ણ",
+        "पूरी",
+        "विस्तार",
+      ];
+
+      const hasCompare = compareKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasDocument = documentKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasFullDoc = fullDocKeywords.some((kw) => lowerQuestion.includes(kw));
+
       if (documentId && documentId.length > 0) {
         intent = documentId.length > 1 ? "COMPARE" : "DOCUMENT";
-        debugLogger.info(
-          `sendMessage: [PERFORMANCE] Intent Analyzer (Pre-selected) took ${Date.now() - intentStartTime}ms`,
-        );
+        documentScope = documentId.length > 1 ? "SELECTED_MULTI_DOCUMENT" : "SINGLE_DOCUMENT";
+        if (hasFullDoc) documentScope = "FULL_DOCUMENT";
       } else {
-        const lowerQuestion = englishQuestion.toLowerCase();
-
-        // Fast deterministic rule-matching
-
-        const compareKeywords = [
-          "all",
-          "compare",
-          "trends",
-          "both",
-          "multiple",
-          "every",
-          "which",
-          "highest",
-          "lowest",
-          "across",
-          "સરખામણી",
-          "તુલના",
-          "तुलना",
-          "ஒப்பிடுக",
-        ];
-        const documentKeywords = [
-          "report",
-          "lab",
-          "result",
-          "upload",
-          "scan",
-          "test",
-          "mri",
-          "x-ray",
-          "prescription",
-          "summary",
-          "this",
-          "my",
-          "first",
-          "second",
-          "last",
-          "latest",
-          "recent",
-          "sugar",
-          "blood",
-          "vitamin",
-          "અહેવાલ",
-          "રિપોર્ટ",
-          "रिपोर्ट",
-          "अहवाल",
-          "அறிக்கை",
-        ];
-
-        const hasCompare = compareKeywords.some((kw) => lowerQuestion.includes(kw));
-        const hasDocument = documentKeywords.some((kw) => lowerQuestion.includes(kw));
-
         if (hasCompare && hasDocument) {
           intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
         } else if (hasCompare && lowerQuestion.includes("report")) {
           intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
         } else if (hasCompare) {
-          // If they ask to compare something (e.g. hemoglobin), it's highly likely they mean their reports
           intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
         } else if (hasDocument) {
           if (lowerQuestion.includes("reports")) {
             intent = "COMPARE";
+            documentScope = "ALL_DOCUMENTS";
           } else {
             intent = "DOCUMENT";
+            documentScope = "ALL_DOCUMENTS"; // Needs resolution to pick latest
           }
         } else {
-          // Rule-based fallback: strictly treat as GENERAL if no document/compare keywords exist
           intent = "GENERAL";
+          documentScope = "NONE";
         }
-        debugLogger.info(
-          `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
-          { intent },
-        );
+        if (hasFullDoc && intent !== "GENERAL") {
+          documentScope = "FULL_DOCUMENT";
+        }
       }
+
+      debugLogger.info(
+        `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
+        { intent, documentScope, detectedLanguage },
+      );
 
       let finalDocumentIds = [];
       if (intent === "DOCUMENT" || intent === "COMPARE") {
         if (documentId && documentId.length > 0) {
-          debugLogger.info("sendMessage: Document(s) explicitly passed by user", { documentId });
           finalDocumentIds = documentId;
         } else {
-          // Resolve documents using uploads
           const recentDocs = await db
             .select({
               id: document.id,
@@ -535,196 +571,126 @@ Content: ${c.content}
             .orderBy(desc(document.createdAt));
 
           if (recentDocs.length === 0) {
-            debugLogger.info(
-              "sendMessage: No recent documents found, falling back to GENERAL intent",
-            );
-            intent = "GENERAL"; // fallback
+            intent = "GENERAL";
+            documentScope = "NONE";
           } else if (
-            intent === "COMPARE" &&
-            !englishQuestion
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, " ")
-              .split(/\s+/)
-              .filter((w) => w.length > 0)
-              .some(
-                (w) =>
-                  ![
-                    "compare",
-                    "my",
-                    "reports",
-                    "report",
-                    "all",
-                    "the",
-                    "documents",
-                    "document",
-                    "files",
-                    "file",
-                    "can",
-                    "you",
-                    "please",
-                    "and",
-                    "or",
-                    "show",
-                    "give",
-                    "me",
-                    "between",
-                    "these",
-                    "those",
-                    "results",
-                    "result",
-                    "lab",
-                    "test",
-                    "tests",
-                    "records",
-                    "record",
-                    "of",
-                    "in",
-                    "from",
-                    "for",
-                    "with",
-                    "a",
-                    "an",
-                    "is",
-                    "are",
-                    "was",
-                    "were",
-                    "to",
-                    "do",
-                    "does",
-                    "did",
-                    "have",
-                    "has",
-                    "had",
-                  ].includes(w),
-              )
+            documentScope === "ALL_DOCUMENTS" ||
+            documentScope === "FULL_DOCUMENT" ||
+            documentScope === "COMPARE"
           ) {
-            debugLogger.info(
-              "sendMessage: COMPARE intent without specific documents. Requesting selection.",
-              { availableReportsCount: recentDocs.length },
-            );
-
-            const userMsg = await chatSessionRepository.appendMessage({
-              content: question.trim(),
-              role: "user",
-              sessionId,
-              userId,
-            });
-
-            const replyText =
-              REQUIRE_SELECTION_I18N[preferredLanguage] || REQUIRE_SELECTION_I18N.english;
-
-            const aiMsg = await chatSessionRepository.appendMessage({
-              citations: [],
-              content: replyText,
-              metadata: {
+            // Check if user is asking for selection vs specific reports
+            if (
+              intent === "COMPARE" &&
+              !retrievalQuery
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, " ")
+                .split(/\\s+/)
+                .filter((w) => w.length > 0)
+                .some(
+                  (w) =>
+                    !compareKeywords.includes(w) &&
+                    !documentKeywords.includes(w) &&
+                    ![
+                      "can",
+                      "you",
+                      "please",
+                      "and",
+                      "or",
+                      "show",
+                      "give",
+                      "me",
+                      "between",
+                      "these",
+                      "those",
+                      "results",
+                      "result",
+                      "of",
+                      "in",
+                      "from",
+                      "for",
+                      "with",
+                      "a",
+                      "an",
+                      "is",
+                      "are",
+                      "was",
+                      "were",
+                      "to",
+                      "do",
+                      "does",
+                      "did",
+                      "have",
+                      "has",
+                      "had",
+                    ].includes(w),
+                )
+            ) {
+              const userMsg = await chatSessionRepository.appendMessage({
+                content: question.trim(),
+                role: "user",
+                sessionId,
+                userId,
+              });
+              const replyText =
+                REQUIRE_SELECTION_I18N[detectedLanguage] || REQUIRE_SELECTION_I18N.english;
+              const aiMsg = await chatSessionRepository.appendMessage({
+                citations: [],
+                content: replyText,
+                metadata: {
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                  requireSelection: true,
+                  documentId: [],
+                  reports: recentDocs,
+                },
+                role: "assistant",
+                sessionId,
+                userId,
+              });
+              return {
+                ai: aiMsg,
+                user: userMsg,
+                reply: replyText,
+                requireSelection: true,
+                reports: recentDocs,
                 mode: "DOCUMENT_RAG",
                 emergency: false,
-                requireSelection: true,
-                documentId: [],
-                reports: recentDocs,
-              },
-              role: "assistant",
-              sessionId,
-              userId,
-            });
-
-            return {
-              ai: aiMsg,
-              user: userMsg,
-              reply: replyText,
-              requireSelection: true,
-              reports: recentDocs,
-              mode: "DOCUMENT_RAG",
-              emergency: false,
-            };
+              };
+            }
+            finalDocumentIds = recentDocs.map((d) => d.id);
           } else if (recentDocs.length === 1) {
-            debugLogger.info(
-              "sendMessage: Only one recent document available, selecting it automatically",
-              { documentId: recentDocs[0].id },
-            );
             finalDocumentIds = [recentDocs[0].id];
+            documentScope = "SINGLE_DOCUMENT";
           } else {
-            const resolverStartTime = Date.now();
-            const lowerQuestion = englishQuestion.toLowerCase();
-            let resolvedIds = null;
-
-            if (lowerQuestion.includes("all") || lowerQuestion.includes("every")) {
-              resolvedIds = recentDocs.map((d) => d.id);
-            } else if (lowerQuestion.includes("first") || lowerQuestion.includes("oldest")) {
-              resolvedIds = [recentDocs[recentDocs.length - 1].id];
+            // Intent is DOCUMENT, trying to find which one
+            if (lowerQuestion.includes("first") || lowerQuestion.includes("oldest")) {
+              finalDocumentIds = [recentDocs[recentDocs.length - 1].id];
             } else if (
               lowerQuestion.includes("last") ||
               lowerQuestion.includes("latest") ||
               lowerQuestion.includes("recent")
             ) {
-              resolvedIds = [recentDocs[0].id];
+              finalDocumentIds = [recentDocs[0].id];
             } else {
               const matchedDocs = recentDocs.filter((d) => {
                 if (d.fileName) {
                   const cleanName = d.fileName.toLowerCase().replace(".pdf", "").trim();
-                  // Skip matching if the clean name is a very common/generic word
                   if (
                     !["report", "reports", "document", "documents", "file", "files"].includes(
                       cleanName,
                     )
                   ) {
-                    const escapedName = cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                    const regex = new RegExp(`\\b${escapedName}\\b`, "i");
-                    if (regex.test(lowerQuestion)) return true;
-                  }
-                }
-                if (d.documentType) {
-                  const cleanType = d.documentType.toLowerCase().replace("_", " ");
-                  if (!["report", "document", "file"].includes(cleanType)) {
-                    const escapedType = cleanType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                    const regex = new RegExp(`\\b${escapedType}\\b`, "i");
-                    if (regex.test(lowerQuestion)) return true;
+                    if (lowerQuestion.includes(cleanName)) return true;
                   }
                 }
                 return false;
               });
               if (matchedDocs.length > 0) {
-                resolvedIds = matchedDocs.map((d) => d.id);
-              } else if (
-                intent === "COMPARE" ||
-                lowerQuestion.includes("medicine") ||
-                lowerQuestion.includes("medication") ||
-                lowerQuestion.includes("pill") ||
-                lowerQuestion.includes("dosage") ||
-                lowerQuestion.includes("prescribe")
-              ) {
-                if (
-                  lowerQuestion.includes("high") ||
-                  lowerQuestion.includes("low") ||
-                  lowerQuestion.includes("abnormal") ||
-                  lowerQuestion.includes("value") ||
-                  lowerQuestion.includes("which") ||
-                  lowerQuestion.includes("medication") ||
-                  lowerQuestion.includes("medicine") ||
-                  lowerQuestion.includes("pill") ||
-                  lowerQuestion.includes("dosage") ||
-                  lowerQuestion.includes("prescribe") ||
-                  lowerQuestion.includes("drug")
-                ) {
-                  resolvedIds = recentDocs.map((d) => d.id);
-                }
+                finalDocumentIds = matchedDocs.map((d) => d.id);
+              } else {
+                finalDocumentIds = recentDocs.map((d) => d.id);
+                documentScope = "ALL_DOCUMENTS";
               }
-            }
-
-            if (resolvedIds) {
-              finalDocumentIds = resolvedIds;
-              debugLogger.info(
-                `sendMessage: [PERFORMANCE] Document Resolver (Rules) took ${Date.now() - resolverStartTime}ms`,
-                { finalDocumentIds },
-              );
-            } else {
-              // If it's DOCUMENT intent and no specific report was identified, search across ALL recent reports.
-              // This eliminates the 8s LLM bottleneck by directly falling back to the fast Vector DB search.
-              finalDocumentIds = recentDocs.map((d) => d.id);
-              debugLogger.info(
-                "sendMessage: Document Resolver bypassed LLM, falling back to vector search across all recent documents",
-                { finalDocumentIds },
-              );
             }
           }
         }
@@ -741,7 +707,6 @@ Content: ${c.content}
           })
           .from(document)
           .where(inArray(document.id, finalDocumentIds));
-        console.log("documentId received[SC======>] :", documentId);
         finalDocsMetadata.forEach((d) => {
           docNameMap[d.id] = d;
         });
@@ -754,6 +719,7 @@ Content: ${c.content}
         userId,
       });
 
+      // HISTORY: Keep recent history even if documentId is passed to support follow-up questions
       const recent = await chatSessionRepository.listMessages({
         direction: "before",
         limit: 4,
@@ -762,16 +728,6 @@ Content: ${c.content}
       });
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
-
-      // Override the most recent user query with the English translation so Qwen stays in English
-      if (preferredLanguage !== "english") {
-        for (let i = history.length - 1; i >= 0; i--) {
-          if (history[i].role === "user") {
-            history[i].content = englishQuestion;
-            break;
-          }
-        }
-      }
 
       let assistantText = NO_CONTEXT_REPLY;
       let isEmergency = false;
@@ -801,150 +757,215 @@ Content: ${c.content}
             "GENERAL_HEALTH",
             [],
             patientContextStr,
-            preferredLanguage,
+            detectedLanguage,
+            "",
+            onChunk,
           );
-          const qwenDuration = Date.now() - qwenStartTime;
           debugLogger.info(
-            `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${qwenDuration}ms`,
+            `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${Date.now() - qwenStartTime}ms`,
           );
-
-          let rawAns = aiResponse.answer;
-          // if (preferredLanguage !== "english") {
-          //   debugLogger.info(
-          //     "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
-          //   );
-          //   const transStartTime = Date.now();
-          //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-          //   const transDuration = Date.now() - transStartTime;
-          //   // eslint-disable-next-line no-console
-          //   console.log(
-          //     `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-          //   );
-          // }
-          assistantText = rawAns;
+          assistantText = aiResponse.answer;
           isEmergency = !!aiResponse.emergency;
         } catch {
           assistantText =
-            preferredLanguage === "english"
+            detectedLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
               : "Sorry, error occurred.";
         }
       } else {
         // DATA RETRIEVER (Vector Search)
-        debugLogger.info(
-          "sendMessage: Data Retriever fetching relevant chunks for selected documents",
-          { finalDocumentIds },
-        );
         let summaryChunks = [];
+        let coverageStr = "";
         try {
           const retrieveStartTime = Date.now();
+          const lowerQ = retrievalQuery.toLowerCase();
 
-          const lowerQ = englishQuestion.toLowerCase();
           let detectedSectionType = null;
-
           if (
-            lowerQ.includes("medicine") ||
-            lowerQ.includes("medication") ||
-            lowerQ.includes("pill") ||
-            lowerQ.includes("tablet") ||
-            lowerQ.includes("dosage") ||
-            lowerQ.includes("prescribe") ||
-            lowerQ.includes("drug")
+            lowerQ.includes("summary") ||
+            lowerQ.includes("overview") ||
+            documentScope === "FULL_DOCUMENT"
           ) {
-            detectedSectionType = "medication";
-          } else if (
-            lowerQ.includes("sugar") ||
-            lowerQ.includes("blood") ||
-            lowerQ.includes("level") ||
-            lowerQ.includes("test") ||
-            lowerQ.includes("lab") ||
-            lowerQ.includes("vitamin")
-          ) {
-            detectedSectionType = "lab_test";
-          } else if (
-            lowerQ.includes("diagnosis") ||
-            lowerQ.includes("disease") ||
-            lowerQ.includes("condition")
-          ) {
-            detectedSectionType = "observation";
-          } else if (lowerQ.includes("summary") || lowerQ.includes("overview")) {
             detectedSectionType = "summary";
           }
 
-          // get embedding for the question
-          const queryEmbedding = await embeddingService.embedText(englishQuestion);
-          // retrieve similar chunks from the documents
-          const relevantChunks = await intelligenceRepository.searchSimilarChunks({
-            userId,
-            queryEmbedding,
-            limit: 40,
-            documentIds: finalDocumentIds,
-          });
+          const medicalEntities = getMedicalEntityKeywords(lowerQ);
+          const queryEmbedding = await embeddingService.embedText(retrievalQuery);
 
-          const filterStartTime = Date.now();
+          let relevantChunks = [];
+          const entitiesFoundPerDoc = new Map();
 
-          // 1. Deduplicate by content
-          const uniqueChunks = [];
-          const seenContent = new Set();
-          for (const c of relevantChunks) {
-            const cleanText = (c.content || "").trim().toLowerCase();
-            if (!seenContent.has(cleanText)) {
-              seenContent.add(cleanText);
-              uniqueChunks.push(c);
-            }
-          }
+          if (finalDocumentIds && finalDocumentIds.length > 0) {
+            finalDocumentIds.forEach((id) => entitiesFoundPerDoc.set(String(id), new Set()));
 
-          // 2. AI Summary Preference
-          let filteredChunks = uniqueChunks;
-          if (detectedSectionType === "summary") {
-            const docsWithSummary = new Set(
-              uniqueChunks
-                .filter((c) => c.sourceType === "summary")
-                .map((c) => String(c.documentId)),
-            );
-            filteredChunks = uniqueChunks.filter((c) => {
-              if (c.sourceType === "ocr" && docsWithSummary.has(String(c.documentId))) {
-                return false; // Drop OCR only if user specifically asked for an overview
+            if (documentScope === "FULL_DOCUMENT" && finalDocumentIds.length === 1) {
+              const structuredDoc = await intelligenceRepository.findStructuredDocumentByDocumentId(
+                finalDocumentIds[0],
+                userId,
+              );
+              if (structuredDoc && structuredDoc.rawText) {
+                summaryChunks = [
+                  {
+                    chunkId: "full-doc",
+                    documentId: finalDocumentIds[0],
+                    sectionTitle: "Complete Document",
+                    content: structuredDoc.rawText.substring(0, 40000),
+                    sourceType: "rawText",
+                    docData: docNameMap[finalDocumentIds[0]] || {},
+                  },
+                ];
+                debugLogger.info(
+                  `sendMessage: [SCOPE] ${JSON.stringify({ detectedLanguage, intent, documentScope, requestedDocumentCount: 1 })}`,
+                );
+                debugLogger.info(
+                  `sendMessage: [RETRIEVAL] Fetched full document raw text directly.`,
+                );
               }
-              return true;
-            });
-          }
-
-          // 3. Document Diversity (Ensure we don't just fill context with chunks from 1 document)
-          const chunksPerDoc = new Map();
-          const diverseChunks = [];
-
-          for (const c of filteredChunks) {
-            const docIdStr = String(c.documentId);
-            const count = chunksPerDoc.get(docIdStr) || 0;
-            if (count < 8) {
-              // Max 8 chunks per document to allow other documents to be included
-              diverseChunks.push(c);
-              chunksPerDoc.set(docIdStr, count + 1);
             }
-            if (diverseChunks.length >= 20) break; // Overall max 20 chunks
+
+            if (summaryChunks.length === 0) {
+              // PARALLEL RETRIEVAL
+              const chunkPromises = finalDocumentIds.map((dId) =>
+                intelligenceRepository.searchSimilarChunks({
+                  userId,
+                  queryEmbedding,
+                  limit: documentScope === "FULL_DOCUMENT" ? 40 : 20,
+                  documentIds: [dId],
+                  keywords: medicalEntities,
+                }),
+              );
+              const results = await Promise.all(chunkPromises);
+
+              // Check coverage
+              let retrievedCount = 0;
+              results.forEach((docChunks, index) => {
+                if (docChunks && docChunks.length > 0) {
+                  retrievedCount++;
+                  relevantChunks.push(...docChunks);
+                } else {
+                  debugLogger.warn(
+                    `sendMessage: [COVERAGE] No chunks found for document ${finalDocumentIds[index]}`,
+                  );
+                }
+              });
+
+              // 1. Deduplicate by chunkId + documentId to preserve same-text chunks across different docs
+              const uniqueChunks = [];
+              const seenChunks = new Set();
+              for (const c of relevantChunks) {
+                const chunkKey = `${c.documentId}_${c.chunkId}`;
+                if (!seenChunks.has(chunkKey)) {
+                  seenChunks.add(chunkKey);
+                  uniqueChunks.push(c);
+                }
+              }
+
+              // 2. Summary Preference
+              let filteredChunks = uniqueChunks;
+              if (detectedSectionType === "summary") {
+                const docsWithSummary = new Set(
+                  uniqueChunks
+                    .filter((c) => c.sourceType === "summary")
+                    .map((c) => String(c.documentId)),
+                );
+                filteredChunks = uniqueChunks.filter((c) => {
+                  if (c.sourceType === "ocr" && docsWithSummary.has(String(c.documentId)))
+                    return false;
+                  return true;
+                });
+              }
+
+              // 3. Selection Algorithm (Coverage-Aware)
+              const chunksPerDoc = new Map();
+              const finalSelection = [];
+
+              // Sort globally first
+              filteredChunks.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+
+              // Pass 1: Prioritize exact medical entity matches
+              for (const c of filteredChunks) {
+                const docIdStr = String(c.documentId);
+                let hasEntity = false;
+
+                for (const entity of medicalEntities) {
+                  if (c.content.toLowerCase().includes(entity)) {
+                    entitiesFoundPerDoc.get(docIdStr).add(entity);
+                    hasEntity = true;
+                  }
+                }
+
+                const count = chunksPerDoc.get(docIdStr) || 0;
+                if (hasEntity && count < 4) {
+                  if (!finalSelection.includes(c)) {
+                    finalSelection.push(c);
+                    chunksPerDoc.set(docIdStr, count + 1);
+                  }
+                }
+              }
+
+              // Pass 2: Fill remaining up to MAX_CONTEXT_CHUNKS (25)
+              const MAX_CONTEXT_CHUNKS = 25;
+              for (const c of filteredChunks) {
+                if (finalSelection.length >= MAX_CONTEXT_CHUNKS) break;
+                const docIdStr = String(c.documentId);
+                const count = chunksPerDoc.get(docIdStr) || 0;
+
+                if (count < 6 && !finalSelection.includes(c)) {
+                  finalSelection.push(c);
+                  chunksPerDoc.set(docIdStr, count + 1);
+                }
+              }
+
+              summaryChunks = finalSelection.map((c, index) => {
+                const docData = docNameMap[c.documentId] || {};
+                return {
+                  chunkId: c.chunkId || `chunk-${index}`,
+                  documentId: c.documentId,
+                  sectionTitle: c.sectionTitle,
+                  content: c.content,
+                  score: 1.0,
+                  sourceType: c.sourceType || "document",
+                  docData: docData,
+                };
+              });
+
+              // Structured Logging
+              const coverageObj = {};
+              finalDocumentIds.forEach((id) => {
+                coverageObj[id] = Array.from(entitiesFoundPerDoc.get(String(id)) || []);
+              });
+              const chunksPerDocLog = Object.fromEntries(chunksPerDoc);
+
+              debugLogger.info(
+                `sendMessage: [SCOPE] ${JSON.stringify({ detectedLanguage, intent, documentScope, requestedDocumentCount: finalDocumentIds.length })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [RETRIEVAL] ${JSON.stringify({ query: retrievalQuery, entities: medicalEntities, retrievedChunkCount: relevantChunks.length, duration: Date.now() - retrieveStartTime })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [COVERAGE] ${JSON.stringify({ requestedDocuments: finalDocumentIds.length, retrievedDocuments: retrievedCount, missingDocuments: finalDocumentIds.length - retrievedCount, entitiesFound: coverageObj })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [SELECTION] ${JSON.stringify({ selectedChunks: summaryChunks.length, chunksPerDocument: chunksPerDocLog })}`,
+              );
+
+              // Build coverage string for Qwen
+              if (medicalEntities.length > 0) {
+                coverageStr = finalDocumentIds
+                  .map((id) => {
+                    const found = entitiesFoundPerDoc.get(String(id));
+                    const missing = medicalEntities.filter((e) => !found.has(e));
+                    let docLabel = `Document ${id}`;
+                    if (docNameMap[id]) docLabel = docNameMap[id].fileName || docLabel;
+                    let report = `${docLabel}: `;
+                    if (found.size > 0) report += `FOUND [${Array.from(found).join(", ")}]. `;
+                    if (missing.length > 0) report += `MISSING [${missing.join(", ")}].`;
+                    return report.trim();
+                  })
+                  .join("\n");
+              }
+            }
           }
-
-          summaryChunks = diverseChunks.map((c, index) => {
-            const docData = docNameMap[c.documentId] || {};
-            return {
-              chunkId: c.chunkId || `chunk-${index}`,
-              documentId: c.documentId,
-              sectionTitle: c.sectionTitle,
-              content: c.content,
-              score: 1.0,
-              sourceType: c.sourceType || "document",
-              docData: docData,
-            };
-          });
-
-          debugLogger.info(
-            `sendMessage: [PERFORMANCE] Chunk Filtering took ${Date.now() - filterStartTime}ms`,
-          );
-
-          debugLogger.info(
-            `sendMessage: [PERFORMANCE] Vector Search Retrieval took ${Date.now() - retrieveStartTime}ms. Retrieved ${summaryChunks.length} chunks.`,
-          );
         } catch (err) {
           debugLogger.error("sendMessage: Failed to fetch chunks via vector search", {
             error: err.message,
@@ -952,10 +973,9 @@ Content: ${c.content}
         }
 
         if (!summaryChunks.length) {
-          assistantText = NO_CONTEXT_REPLY_I18N[preferredLanguage] || NO_CONTEXT_REPLY_I18N.english;
+          assistantText = NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
         } else {
           try {
-            // One Call
             debugLogger.info(
               "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
             );
@@ -965,31 +985,18 @@ Content: ${c.content}
               "DOCUMENT_RAG",
               summaryChunks,
               patientContextStr,
-              preferredLanguage,
+              detectedLanguage,
+              coverageStr,
+              onChunk,
             );
-            const qwenDuration = Date.now() - qwenStartTime;
             debugLogger.info(
-              `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${qwenDuration}ms`,
+              `sendMessage: [QWEN] ${JSON.stringify({ model: env.chatModel, language: detectedLanguage, contextChunks: summaryChunks.length, generationDuration: Date.now() - qwenStartTime })}`,
             );
-
-            let rawAns = aiResponse.answer;
-            // if (preferredLanguage !== "english") {
-            //   debugLogger.info(
-            //     "sendMessage: [LLM TRACKING] [5] Translating final answer (IndicTrans2)",
-            //   );
-            //   const transStartTime = Date.now();
-            //   rawAns = await aiClient.translate(rawAns, "english", preferredLanguage);
-            //   const transDuration = Date.now() - transStartTime;
-            //   // eslint-disable-next-line no-console
-            //   console.log(
-            //     `\n⏱️ [TRANSLATION TIME] Response (ENGLISH -> ${preferredLanguage.toUpperCase()}) took ${transDuration}ms using ai4bharat/indictrans2-en-indic-dist-200M\n`,
-            //   );
-            // }
-            assistantText = rawAns;
+            assistantText = aiResponse.answer;
             isEmergency = !!aiResponse.emergency;
           } catch {
             assistantText =
-              NO_CONTEXT_REPLY_I18N[preferredLanguage] || NO_CONTEXT_REPLY_I18N.english;
+              NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
           }
         }
       }
@@ -1000,7 +1007,7 @@ Content: ${c.content}
         metadata: {
           mode,
           emergency: isEmergency,
-          documentId: finalDocumentIds || [], // Store exactly which docs were used in message
+          documentId: finalDocumentIds || [],
           task: intent,
         },
         role: "assistant",
@@ -1008,9 +1015,8 @@ Content: ${c.content}
         userId,
       });
 
-      const _reqEndTime = Date.now();
       debugLogger.info("sendMessage: Total request execution time", {
-        durationSec: ((_reqEndTime - _reqStartTime) / 1000).toFixed(2),
+        durationSec: ((Date.now() - _reqStartTime) / 1000).toFixed(2),
       });
 
       return {
@@ -1022,9 +1028,7 @@ Content: ${c.content}
         emergency: isEmergency,
       };
     } finally {
-      if (reqSessionId) {
-        processingSessions.delete(reqSessionId);
-      }
+      if (reqSessionId) processingSessions.delete(reqSessionId);
     }
   }
 
@@ -1056,6 +1060,7 @@ Content: ${c.content}
       metadata,
     });
   }
+
   //update document id
   async attachDocumentToSession({ sessionId, userId, documentId }) {
     return chatSessionRepository.attachDocument(sessionId, userId, documentId);

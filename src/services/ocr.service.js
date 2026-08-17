@@ -244,7 +244,7 @@ class V1Service {
   }
   */
 
-  async onboardingChat(userId, body) {
+  async onboardingChat(userId, body, onChunk) {
     const requestReceivedTime = Date.now();
     console.log(
       `[UnifiedChat] Request received at ${new Date(requestReceivedTime).toISOString()} for userId=${userId}`,
@@ -446,6 +446,7 @@ class V1Service {
         sessionId,
         documentId,
         preferredLanguage: userLang,
+        onChunk,
       });
 
       return buildUnifiedResponse({

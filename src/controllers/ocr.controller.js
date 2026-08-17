@@ -19,8 +19,35 @@ async function cancelOcr(req, res) {
 }
 
 async function onboardingChat(req, res) {
-  const result = await ocrService.onboardingChat(req.auth?.userId, req.body);
-  return successResponse(res, result);
+  if (req.body?.stream === true || req.body?.stream === "true") {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    // Optionally flush headers if a middleware like compression is used
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+    const onChunk = (chunk) => {
+      res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`);
+      if (typeof res.flush === "function") res.flush();
+    };
+
+    try {
+      const result = await ocrService.onboardingChat(req.auth?.userId, req.body, onChunk);
+      res.write(`data: ${JSON.stringify({ type: "final", data: result })}\n\n`);
+      return res.end();
+    } catch (error) {
+      if (!res.headersSent) {
+        throw error;
+      }
+      res.write(
+        `data: ${JSON.stringify({ type: "error", message: error.message || "Internal Server Error" })}\n\n`,
+      );
+      return res.end();
+    }
+  } else {
+    const result = await ocrService.onboardingChat(req.auth?.userId, req.body);
+    return successResponse(res, result);
+  }
 }
 
 async function getOnboardingStatus(req, res) {

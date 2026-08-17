@@ -71,7 +71,7 @@ class DocumentIntelligenceRepository {
     return result[0] || null;
   }
 
-  async searchSimilarChunks({ userId, queryEmbedding, limit, documentIds, sectionType, keyword }) {
+  async searchSimilarChunks({ userId, queryEmbedding, limit, documentIds, sectionType, keywords }) {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
     const conditions = [eq(embedding.userId, userId)];
     if (documentIds && documentIds.length > 0) {
@@ -82,8 +82,11 @@ class DocumentIntelligenceRepository {
         sql`(${documentChunk.sourceType} = ${sectionType} OR ${documentChunk.metadata}->>'kind' = ${sectionType})`,
       );
     }
-    if (keyword) {
-      conditions.push(sql`${documentChunk.content} ILIKE ${"%" + keyword + "%"}`);
+    if (keywords && keywords.length > 0) {
+      const keywordConditions = keywords.map(
+        (kw) => sql`${documentChunk.content} ILIKE ${"%" + kw + "%"}`,
+      );
+      conditions.push(sql`(${sql.join(keywordConditions, sql` OR `)})`);
     }
     return this.client
       .select({

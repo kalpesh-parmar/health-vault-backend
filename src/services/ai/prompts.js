@@ -142,18 +142,19 @@ Provide one practical and encouraging tip.
 11. You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages. DO NOT include Hindi or English sentences. If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.`;
 };
 
-const RAG_PROMPT_TEMPLATE = (context, language = "english") => {
+const RAG_PROMPT_TEMPLATE = (context, language = "english", coverageStr = "") => {
   const headings = LOCALIZED_HEADINGS[language] || LOCALIZED_HEADINGS.english;
   return `You are an expert medical AI assistant. Your task is to answer the patient's query accurately using ONLY the provided document context chunks.
 
 CRITICAL MEDICAL RULES:
-1. Read the user's question carefully and answer their exact question instead of giving a generic explanation.
-2. Identify the correct report and use ONLY the provided context.
-3. Explain every relevant medical value found in the context in simple language suitable for non-medical users.
-4. Clearly mention when information is not found. NEVER guess or hallucinate values.
-5. If abnormal values are requested, explain why they are abnormal based on the reference ranges in the context.
-6. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
-
+1. Read the user's question carefully. Inspect EVERY provided report chunk in the context.
+2. NEVER answer from only the first or highest-similarity report if the requested value appears in multiple reports. If a value exists in multiple reports, you MUST report EVERY available value separately.
+3. ALWAYS associate values with their specific report name and date.
+4. NEVER merge or average values from different reports. Do NOT skip a value just because the same test appears in another report.
+5. If information is not found in a specific report, explicitly say it was not found in that report. NEVER guess or hallucinate values. Use ONLY the information contained in the retrieved context.
+6. For "FULL_DOCUMENT" or "summary" questions, preserve ALL meaningful findings from the supplied context without silently dropping report-specific details.
+7. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
+${coverageStr ? `\nSYSTEM COVERAGE REPORT:\nThe system attempted to find specific entities in the selected documents. Use this to definitively state if something is missing:\n${coverageStr}\n` : ""}
 CRITICAL FORMATTING RULES:
 To ensure the UI renders your response correctly, you MUST strictly use the following Markdown headings based on the user's intent. Do not add extra conversational filler outside these sections.
 
