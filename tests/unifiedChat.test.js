@@ -145,6 +145,100 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(response.reply).toContain("already been processed");
   });
 
+  test("executeAddDocumentAction should return REVIEW_MEDICINES_LIST action post-onboarding when medications are extracted", async () => {
+    const mockDocumentOcrJobService = { enqueue: jest.fn() };
+    const mockDocumentPersistenceService = {
+      addDocument: jest.fn().mockResolvedValue({
+        document: { id: "doc-101", fileName: "prescription.pdf" },
+      }),
+    };
+    const mockChatService = { createSession: jest.fn() };
+    const mockChatSessionRepository = { appendMessage: jest.fn() };
+
+    const actionData = {
+      s3Key: "documents/prescription.pdf",
+      fileName: "prescription.pdf",
+      rawOcrData: {
+        extractedStructuredData: {
+          medications: [
+            { name: "Metformin 500mg", type: "TABLET", dosage: "1", frequency: "TWICE" },
+          ],
+        },
+      },
+    };
+
+    const response = await executeAddDocumentAction({
+      userId: "user-123",
+      actionData,
+      sessionId: "session-123",
+      isOnboardingCompleted: true,
+      documentPersistenceService: mockDocumentPersistenceService,
+      documentOcrJobService: mockDocumentOcrJobService,
+      chatService: mockChatService,
+      chatSessionRepository: mockChatSessionRepository,
+    });
+
+    expect(response.mode).toBe("ACTION");
+    expect(response.actionType).toBe("REVIEW_MEDICINES_LIST");
+    expect(response.medicines).toHaveLength(1);
+    expect(response.medicines[0].medicationName).toBe("Metformin 500mg");
+    expect(response.suggestedAction).toBe("REVIEW_MEDICINES_LIST");
+    expect(response.options).toEqual([
+      { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+      { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+      { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+    ]);
+  });
+
+  test("executeAddDocumentAction should aggregate medications across multiple files in batch upload", async () => {
+    const mockDocumentOcrJobService = {
+      getStatus: jest.fn().mockImplementation(({ fileKey }) => {
+        if (fileKey.includes("doc1")) {
+          return Promise.resolve({
+            id: "job-1",
+            status: "COMPLETED",
+            extractedStructuredData: {
+              medications: [{ name: "Aspirin", type: "TABLET", dosage: "1" }],
+            },
+          });
+        }
+        return Promise.resolve({
+          id: "job-2",
+          status: "COMPLETED",
+          extractedStructuredData: {
+            medications: [{ name: "Lipitor", type: "TABLET", dosage: "2" }],
+          },
+        });
+      }),
+    };
+    const mockDocumentPersistenceService = { addDocument: jest.fn() };
+    const mockChatService = { createSession: jest.fn() };
+    const mockChatSessionRepository = { appendMessage: jest.fn() };
+
+    const actionData = {
+      files: [
+        { fileKey: "documents/doc1.png", fileName: "doc1.png" },
+        { fileKey: "documents/doc2.png", fileName: "doc2.png" },
+      ],
+    };
+
+    const response = await executeAddDocumentAction({
+      userId: "user-123",
+      actionData,
+      sessionId: "session-123",
+      isOnboardingCompleted: true,
+      documentPersistenceService: mockDocumentPersistenceService,
+      documentOcrJobService: mockDocumentOcrJobService,
+      chatService: mockChatService,
+      chatSessionRepository: mockChatSessionRepository,
+    });
+
+    expect(response.mode).toBe("ACTION");
+    expect(response.actionType).toBe("REVIEW_MEDICINES_LIST");
+    expect(response.medicines).toHaveLength(2);
+    expect(response.medicines.map((m) => m.medicationName)).toEqual(["Aspirin", "Lipitor"]);
+  });
+
   test("onboardingService should mark isOnboardingCompleted = true upon reaching MEDICINE_OPTIONS step", async () => {
     const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
 
@@ -168,11 +262,11 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     const res = await onboardingService.chat("", [], state, null, null, null);
 
-    expect(res.state.isOnboardingCompleted).toBe(true);
     expect(res.action).toBe("MEDICINE_OPTIONS");
+    expect(res.state.isOnboardingCompleted).toBe(false);
   });
 
-  test("onboardingService should maintain isOnboardingCompleted = true when user clicks ADD on MEDICINE_OPTIONS", async () => {
+  test("onboardingService should mark isOnboardingCompleted = true when user clicks DASHBOARD on MEDICINE_OPTIONS", async () => {
     const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
 
     const state = {
@@ -189,13 +283,13 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       allergiesSkipped: true,
       medicationFlowDone: false,
       currentStep: "MEDICINE_OPTIONS",
-      isOnboardingCompleted: true,
+      isOnboardingCompleted: false,
     };
 
-    const res = await onboardingService.chat("ADD", [], state, null, null, null);
+    const res = await onboardingService.chat("DASHBOARD", [], state, null, null, null);
 
     expect(res.state.isOnboardingCompleted).toBe(true);
-    expect(res.state.currentStep).toBe("ADD_MEDICINE");
+    expect(res.state.medicationFlowDone).toBe(true);
   });
 
   test("onboardingService should advance CONFIRM_DOCUMENT_OWNERSHIP step when user sends YES", async () => {
@@ -215,5 +309,309 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     expect(res.state.documentOwnershipConfirmed).toBe(true);
     expect(res.state.currentStep).not.toBe("CONFIRM_DOCUMENT_OWNERSHIP");
+  });
+
+  test("onboardingService should process selected medicines payload when currentStep is null and transition to MEDICINE_OPTIONS", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      currentStep: null,
+      isOnboardingCompleted: false,
+      flowMode: "UPLOAD",
+      documentUploaded: true,
+      uploadedMedicalDocument: true,
+      profileConfirmed: true,
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      preferredLanguage: "english",
+      medicinesConfirmed: false,
+      medicationFlowDone: false,
+      foundMedicines: [],
+      medicinesToAdd: [
+        {
+          id: "doc_med_0",
+          client_med_id: "doc_med_0",
+          name: "Omnacortil",
+          type: "TABLET",
+          dose: { count: 21 },
+          frequency: "Once Daily",
+          duration: "for 2 weeks",
+          selected: true,
+          isSaved: true,
+        },
+      ],
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "2026-08-16",
+        gender: "female",
+      },
+    };
+
+    const messagePayload = JSON.stringify({ selected: ["doc_med_0"] });
+    const res = await onboardingService.chat(messagePayload, [], state, null, null, null);
+
+    expect(res.action).toBe("MEDICINE_OPTIONS");
+    expect(res.state.medicinesConfirmed).toBe(true);
+    expect(res.state.currentStep).toBe("MEDICINE_OPTIONS");
+  });
+
+  test("onboardingService should return ADD_MEDICINE form when user selects ADD on MEDICINE_OPTIONS and then REVIEW_MEDICINES_LIST when new medicine is submitted", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      currentStep: "MEDICINE_OPTIONS",
+      isOnboardingCompleted: true,
+      flowMode: "UPLOAD",
+      documentUploaded: true,
+      uploadedMedicalDocument: true,
+      profileConfirmed: true,
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      preferredLanguage: "english",
+      medicinesConfirmed: true,
+      medicationFlowDone: false,
+      foundMedicines: [],
+      medicinesToAdd: [
+        {
+          id: "doc_med_0",
+          client_med_id: "doc_med_0",
+          name: "Omnacortil",
+          type: "TABLET",
+          selected: true,
+          isSaved: true,
+        },
+      ],
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "2026-08-16",
+        gender: "female",
+      },
+    };
+
+    // 1. User clicks "Add Another Medicine" (key: "ADD")
+    const resAddOption = await onboardingService.chat("ADD", [], state, null, null, null);
+
+    expect(resAddOption.action).toBe("ADD_MEDICINE");
+    expect(resAddOption.renderType).toBe("MEDICINE_FORM");
+    expect(resAddOption.medicine).toBeDefined();
+    expect(resAddOption.medicine.type).toBe("TABLET");
+    expect(resAddOption.state.currentStep).toBe("ADD_MEDICINE");
+
+    // 2. User submits new medicine form
+    const newMedPayload = JSON.stringify({
+      medicine: {
+        name: "Paracetamol",
+        type: "TABLET",
+        dose: { count: 1 },
+        frequency: "ONCE",
+      },
+    });
+
+    const resSubmitForm = await onboardingService.chat(
+      newMedPayload,
+      [],
+      resAddOption.state,
+      null,
+      null,
+      null,
+    );
+
+    expect(resSubmitForm.action).toBe("REVIEW_MEDICINES_LIST");
+    expect(resSubmitForm.medicines).toHaveLength(2);
+    expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Omnacortil");
+    expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Paracetamol");
+  });
+
+  test("onboardingService should resolve profile source with social login choice and persist selectedProfileSource='SOCIAL'", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "UPLOAD",
+      currentStep: "RESOLVE_PROFILE_SOURCE",
+      profileConfirmed: false,
+      loginData: {
+        firstName: { value: "Shraddha", verified: false },
+        lastName: { value: "Chauhan", verified: false },
+      },
+      socialData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+      },
+      documentData: {
+        firstName: "Sonal",
+        lastName: "Chauhan",
+      },
+      preferredLanguage: "english",
+    };
+
+    const res = await onboardingService.chat(
+      JSON.stringify({ source: "LOGIN" }),
+      [],
+      state,
+      null,
+      null,
+      null,
+    );
+
+    expect(res.state.profileConfirmed).toBe(true);
+    expect(res.state.selectedProfileSource).toBe("SOCIAL");
+    expect(res.state.useSocialData).toBe(true);
+    expect(res.state.existingUserData.firstName).toBe("Shraddha");
+    expect(res.state.currentStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+  });
+
+  test("onboardingService should resolve profile source with document choice and persist selectedProfileSource='DOCUMENT'", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "UPLOAD",
+      currentStep: "RESOLVE_PROFILE_SOURCE",
+      profileConfirmed: false,
+      loginData: {
+        firstName: { value: "Shraddha", verified: false },
+        lastName: { value: "Chauhan", verified: false },
+      },
+      socialData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+      },
+      documentData: {
+        firstName: "Sonal",
+        lastName: "Chauhan",
+      },
+      preferredLanguage: "english",
+    };
+
+    const res = await onboardingService.chat(
+      JSON.stringify({ source: "DOCUMENT" }),
+      [],
+      state,
+      null,
+      null,
+      null,
+    );
+
+    expect(res.state.profileConfirmed).toBe(true);
+    expect(res.state.selectedProfileSource).toBe("DOCUMENT");
+    expect(res.state.useDocumentData).toBe(true);
+    expect(res.state.existingUserData.firstName).toBe("Sonal");
+    expect(res.state.currentStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+  });
+
+  test("onboardingService should resolve profile source with manual edit choice, set profileConfirmed=true, set selectedProfileSource='MANUAL', and advance step", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "UPLOAD",
+      currentStep: "RESOLVE_PROFILE_SOURCE",
+      profileConfirmed: false,
+      loginData: {
+        firstName: { value: "Shraddha", verified: false },
+        lastName: { value: "Chauhan", verified: false },
+      },
+      socialData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+      },
+      documentData: {
+        firstName: "Sonal",
+        lastName: "Chauhan",
+      },
+      preferredLanguage: "english",
+    };
+
+    const payload = JSON.stringify({
+      edited: {
+        firstName: "Anjali",
+        lastName: "Chauhan",
+        gender: "female",
+        dateOfBirth: "1995-05-15",
+      },
+    });
+
+    const res = await onboardingService.chat(payload, [], state, null, null, null);
+
+    expect(res.state.profileConfirmed).toBe(true);
+    expect(res.state.profileManuallyEdited).toBe(true);
+    expect(res.state.selectedProfileSource).toBe("MANUAL");
+    expect(res.state.existingUserData.firstName).toBe("Anjali");
+    expect(res.state.existingUserData.lastName).toBe("Chauhan");
+    expect(res.state.currentStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+  });
+
+  test("onboardingService should retain previously answered DOB/Gender when selecting document source lacking DOB/Gender", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "UPLOAD",
+      currentStep: "RESOLVE_PROFILE_SOURCE",
+      profileConfirmed: false,
+      loginData: {
+        firstName: { value: "Shraddha", verified: false },
+        lastName: { value: "Chauhan", verified: false },
+      },
+      socialData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+      },
+      documentData: {
+        firstName: "Sonal",
+        lastName: "Chauhan",
+        dateOfBirth: null,
+        gender: null,
+      },
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "1995-05-15",
+        gender: "female",
+      },
+      preferredLanguage: "english",
+    };
+
+    const res = await onboardingService.chat(
+      JSON.stringify({ source: "DOCUMENT" }),
+      [],
+      state,
+      null,
+      null,
+      null,
+    );
+
+    expect(res.state.profileConfirmed).toBe(true);
+    expect(res.state.selectedProfileSource).toBe("DOCUMENT");
+    expect(res.state.existingUserData.firstName).toBe("Sonal");
+    expect(res.state.existingUserData.dateOfBirth).toBe("1995-05-15");
+    expect(res.state.existingUserData.gender).toBe("female");
+    expect(res.state.currentStep).not.toBe("ASK_DOB");
+    expect(res.state.currentStep).not.toBe("ASK_GENDER");
+  });
+
+  test("onboardingService should set isOnboardingCompleted=true and medicationFlowDone=true when reaching COMPLETE step", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      flowMode: "MANUAL",
+      currentStep: "REGISTER_USER",
+      profileConfirmed: true,
+      bloodGroupSkipped: true,
+      allergiesSkipped: true,
+      medicationFlowDone: true,
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "1995-05-15",
+        gender: "female",
+      },
+      preferredLanguage: "english",
+    };
+
+    const res = await onboardingService.chat("DASHBOARD", [], state, null, null, null);
+
+    expect(res.state.isOnboardingCompleted).toBe(true);
+    expect(res.state.medicationFlowDone).toBe(true);
+    expect(res.state.currentStep).toBe("COMPLETE");
   });
 });

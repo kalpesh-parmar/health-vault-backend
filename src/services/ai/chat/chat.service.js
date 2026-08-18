@@ -634,7 +634,6 @@ Content: ${c.content}
           })
           .from(document)
           .where(inArray(document.id, finalDocumentIds));
-        console.log("documentId received[SC======>] :", documentId);
         finalDocsMetadata.forEach((d) => {
           docNameMap[d.id] = d;
         });

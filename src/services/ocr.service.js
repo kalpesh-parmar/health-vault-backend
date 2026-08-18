@@ -208,8 +208,14 @@ class V1Service {
         patient?.onboardingCompleted ||
         dbState?.isOnboardingCompleted === true ||
         dbState?.currentStep === "COMPLETE" ||
+        dbState?.currentStep === "POST_ONBOARDING" ||
         inputState?.isOnboardingCompleted === true ||
-        inputState?.currentStep === "COMPLETE";
+        inputState?.currentStep === "COMPLETE" ||
+        inputState?.currentStep === "POST_ONBOARDING";
+
+      console.log(
+        `[ONBOARDING PROFILE LOG] User ID: ${userId} | Patient DB Record: firstName="${patient?.firstName || ""}", lastName="${patient?.lastName || ""}", email="${patient?.email || ""}"`,
+      );
 
       // CASE 1: ADD_DOCUMENT ACTION
       if (actionType === "ADD_DOCUMENT") {
@@ -227,33 +233,161 @@ class V1Service {
         });
       }
 
-      const effectiveState = { ...(dbState || {}), ...(inputState || {}) };
-      const currentOnboardingStep = effectiveState?.currentStep || null;
-      const isActiveOnboardingStep =
-        Boolean(currentOnboardingStep) &&
-        currentOnboardingStep !== "COMPLETE" &&
-        currentOnboardingStep !== "POST_ONBOARDING" &&
-        effectiveState?.medicationFlowDone !== true;
+      const cleanedInputState =
+        inputState && typeof inputState === "object"
+          ? Object.fromEntries(
+              Object.entries(inputState).filter(([_, v]) => v !== null && v !== undefined),
+            )
+          : {};
+      const effectiveState = { ...(dbState || {}), ...cleanedInputState };
 
-      // CASE 2: ADD_MEDICINE / SHOW_EXTRACTED_MEDICINES ACTION
+      let isMedicineSelectionMsg = false;
+      if (message) {
+        try {
+          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
+          if (
+            parsedMsg &&
+            (parsedMsg.selected !== undefined ||
+              parsedMsg.action === "CONFIRM" ||
+              parsedMsg.value === "CONFIRM" ||
+              parsedMsg.value === "CONFIRM_SELECTED")
+          ) {
+            isMedicineSelectionMsg = true;
+          }
+        } catch {
+          const upper = String(message).trim().toUpperCase();
+          if (upper === "CONFIRM" || upper === "CONFIRM_SELECTED") {
+            isMedicineSelectionMsg = true;
+          }
+        }
+      }
+
+      let isAddMedicineMsg = false;
+      if (message || actionType === "ADD_MEDICINE") {
+        try {
+          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
+          if (
+            parsedMsg &&
+            (parsedMsg.key === "ADD" ||
+              parsedMsg.value === "ADD" ||
+              parsedMsg.action === "ADD" ||
+              parsedMsg.actionType === "ADD_MEDICINE" ||
+              parsedMsg.addNew === true)
+          ) {
+            isAddMedicineMsg = true;
+          }
+        } catch {
+          // Ignore JSON parse error
+        }
+
+        const msgStr = String(message || "")
+          .trim()
+          .toUpperCase();
+        const actStr = String(actionType || "")
+          .trim()
+          .toUpperCase();
+
+        if (
+          actStr === "ADD_MEDICINE" ||
+          msgStr === "ADD" ||
+          msgStr === "ADD_NEW" ||
+          msgStr.includes("ADD ANOTHER MEDICINE") ||
+          msgStr.includes("ADD MEDICINE") ||
+          msgStr.includes("ADD NEW")
+        ) {
+          isAddMedicineMsg = true;
+        }
+      }
+
+      let currentOnboardingStep = effectiveState?.currentStep || null;
+      const hasUnconfirmedMedicines =
+        !isOnboardingCompleted &&
+        Array.isArray(effectiveState?.medicinesToAdd) &&
+        effectiveState.medicinesToAdd.length > 0 &&
+        effectiveState?.medicinesConfirmed !== true;
+
+      if (isAddMedicineMsg) {
+        currentOnboardingStep = "ADD_MEDICINE";
+        effectiveState.currentStep = "ADD_MEDICINE";
+      } else if (!currentOnboardingStep && (isMedicineSelectionMsg || hasUnconfirmedMedicines)) {
+        currentOnboardingStep = "REVIEW_MEDICINES_LIST";
+        effectiveState.currentStep = "REVIEW_MEDICINES_LIST";
+      }
+
+      const isActiveOnboardingStep =
+        !isOnboardingCompleted &&
+        ((Boolean(currentOnboardingStep) &&
+          currentOnboardingStep !== "COMPLETE" &&
+          currentOnboardingStep !== "POST_ONBOARDING" &&
+          effectiveState?.medicationFlowDone !== true) ||
+          isMedicineSelectionMsg ||
+          isAddMedicineMsg ||
+          hasUnconfirmedMedicines);
+
+      // CASE 2: MEDICINE ACTIONS (ADD_MEDICINE, CONFIRM_MEDICINES, SKIP_MEDICINES, REVIEW_MEDICINES_LIST, SHOW_EXTRACTED_MEDICINES)
       const hasMedicineActionData =
         actionData &&
         typeof actionData === "object" &&
         (actionData.medicationName || actionData.name || actionData.medicine);
 
-      if (
-        actionType === "ADD_MEDICINE" ||
+      const isMedicineAction =
+        actionType === "CONFIRM_MEDICINES" ||
+        actionType === "SKIP_MEDICINES" ||
+        actionType === "REVIEW_MEDICINES_LIST" ||
         actionType === "SHOW_EXTRACTED_MEDICINES" ||
         hasMedicineActionData ||
-        (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0)
-      ) {
+        (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0);
+
+      if (isMedicineAction) {
         console.log(
-          `[UnifiedChat] Executing ADD_MEDICINE action for userId=${userId} (isActiveOnboardingStep=${isActiveOnboardingStep})`,
+          `[UnifiedChat] Executing medicine action '${actionType}' for userId=${userId} (isActiveOnboardingStep=${isActiveOnboardingStep})`,
         );
 
+        const isSkipAction =
+          actionType === "SKIP_MEDICINES" ||
+          String(message || "").toUpperCase() === "SKIP" ||
+          actionData?.skipAll === true;
+
+        if (isSkipAction && !isActiveOnboardingStep) {
+          const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED;
+          let activeSessionId = sessionId;
+          if (!activeSessionId && isOnboardingCompleted) {
+            const newSession = await chatService.createSession({
+              userId,
+              title: "Medication Chat",
+            });
+            activeSessionId = newSession?.id || null;
+          }
+
+          if (activeSessionId) {
+            await chatSessionRepository.appendMessage({
+              sessionId: activeSessionId,
+              userId,
+              role: "assistant",
+              content: replyText,
+              metadata: { actionType: "SKIP_MEDICINES" },
+            });
+          }
+
+          return buildUnifiedResponse({
+            mode: "ACTION",
+            actionType: "SKIP_MEDICINES",
+            reply: replyText,
+            sessionId: activeSessionId,
+          });
+        }
+
         let createdMeds = [];
-        if (Array.isArray(actionData?.medicines) && actionData.medicines.length > 0) {
-          for (const medData of actionData.medicines) {
+        const medsToProcess =
+          Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
+            ? actionData.medicines
+            : Array.isArray(body?.medicines) && body.medicines.length > 0
+              ? body.medicines
+              : null;
+
+        if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
+          for (const medData of medsToProcess) {
+            if (medData.selected === false) continue;
             try {
               const med = await medicationService.createMedication(userId, medData);
               if (med && med.id) {
@@ -268,7 +402,7 @@ class V1Service {
               console.error("[UnifiedChat] Error creating individual medicine from list:", mErr);
             }
           }
-        } else {
+        } else if (hasMedicineActionData) {
           const createdMed = await medicationService.createMedication(userId, actionData);
           if (createdMed && createdMed.id) {
             createdMeds.push(createdMed);
@@ -319,10 +453,13 @@ class V1Service {
           });
         }
 
-        // Post-Onboarding (Dashboard Chat Stream): return simple action completion payload without MEDICINE_OPTIONS
-        const replyText = createdMed?.name
-          ? `Medication '${createdMed.name}' has been added to your active medications.`
-          : "Medication added successfully.";
+        // Post-Onboarding (Dashboard Chat Stream): return confirmation response
+        const replyText =
+          createdMeds.length > 0
+            ? messageConstants.MEDICATIONS_CONFIRMED_SUCCESS
+            : createdMed?.name
+              ? `Medication '${createdMed.name}' has been added to your active medications.`
+              : "Medication processed successfully.";
 
         let activeSessionId = sessionId;
         if (!activeSessionId && isOnboardingCompleted) {
@@ -336,25 +473,32 @@ class V1Service {
             userId,
             role: "assistant",
             content: replyText,
-            metadata: { actionType: "ADD_MEDICINE", medicationId: createdMed?.id },
+            metadata: {
+              actionType: "CONFIRM_MEDICINES",
+              medicationIds: createdMeds.map((m) => m.id),
+            },
           });
         }
 
         return buildUnifiedResponse({
           mode: "ACTION",
-          actionType: "ADD_MEDICINE",
+          actionType: "CONFIRM_MEDICINES",
           reply: replyText,
           sessionId: activeSessionId,
           medication: createdMed,
+          medicines: createdMeds,
         });
       }
 
       // Determine if request should route to Normal Post-Onboarding Chat vs Onboarding State Machine
+      const isCompletedStep =
+        effectiveState?.currentStep === "COMPLETE" ||
+        effectiveState?.currentStep === "POST_ONBOARDING";
       const isNormalChat =
         actionType === "NORMAL_CHAT" ||
-        (isOnboardingCompleted &&
+        ((isOnboardingCompleted || isCompletedStep) &&
           !isActiveOnboardingStep &&
-          actionType !== "ONBOARDING" &&
+          (actionType !== "ONBOARDING" || isCompletedStep) &&
           actionType !== "OTHER_ACTIONS");
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
@@ -381,6 +525,21 @@ class V1Service {
           const allergiesSkipped =
             dbState?.allergiesSkipped === true || incomingStateCleaned.allergiesSkipped === true;
 
+          const documentConfirmed =
+            dbState?.documentConfirmed === true ||
+            dbState?.documentOwnershipConfirmed === true ||
+            incomingStateCleaned.documentConfirmed === true ||
+            incomingStateCleaned.documentOwnershipConfirmed === true;
+
+          const documentOwnershipConfirmed =
+            dbState?.documentOwnershipConfirmed === true ||
+            incomingStateCleaned.documentOwnershipConfirmed === true;
+
+          const useDocumentData =
+            dbState?.useDocumentData === true ||
+            incomingStateCleaned.useDocumentData === true ||
+            (documentConfirmed && dbState?.useDocumentData !== false);
+
           const mergedUserData = {
             ...dbExistingUserData,
             ...incomingUserDataCleaned,
@@ -397,6 +556,9 @@ class V1Service {
             ...incomingStateCleaned,
             bloodGroupSkipped,
             allergiesSkipped,
+            ...(documentConfirmed ? { documentConfirmed: true } : {}),
+            ...(documentOwnershipConfirmed ? { documentOwnershipConfirmed: true } : {}),
+            ...(useDocumentData ? { useDocumentData: true } : {}),
             existingUserData: mergedUserData,
           };
 

@@ -1,4 +1,8 @@
+const { eq, and } = require("drizzle-orm");
+const { db } = require("../configs/db");
+const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
+const { messageConstants } = require("../constants/messageConstants");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -101,9 +105,16 @@ function detectActionIntent(text = "", language = "english") {
     "upload prescription",
     "add prescription",
     "upload lab test",
+    "new report",
+    "new document",
     "અહેવાલ અપલોડ",
     "દસ્તાવેજ ઉમેરો",
+    "રિપોર્ટ ઉમેરો",
+    "કોઈ દસ્તાવેજ ઉમેરો",
     "रिपोर्ट अपलोड",
+    "दस्तावेज़ जोड़ें",
+    "कागदपत्रे जोडा",
+    "ஆவணத்தைப் பதிવેற்று",
   ];
 
   // Medicine addition intent keywords
@@ -113,10 +124,16 @@ function detectActionIntent(text = "", language = "english") {
     "new medicine",
     "add drug",
     "create medicine",
+    "add new medicine",
     "દવા ઉમેરો",
     "દવાઓ ઉમેરો",
+    "નવી દવા",
+    "દવા જોડો",
+    "દવા લખો",
     "दवा जोड़ें",
     "दवाई जोड़ें",
+    "नवीन औषध",
+    "மருந்தைச் சேர்",
     "ADD",
     "Add Another Medicine",
   ];
@@ -157,6 +174,24 @@ function detectActionIntent(text = "", language = "english") {
  * If rawOcrData is present, persists document synchronously.
  * If only s3Key is present, enqueues background OCR job and pipeline.
  */
+function extractFileKey(item) {
+  if (!item) return null;
+  if (typeof item === "string") return item.trim() || null;
+  if (typeof item === "object") {
+    return (
+      item.fileKey ||
+      item.s3Key ||
+      item.key ||
+      item.file_key ||
+      item.s3_key ||
+      item.filePath ||
+      item.path ||
+      null
+    );
+  }
+  return null;
+}
+
 async function executeAddDocumentAction({
   userId,
   actionData,
@@ -168,90 +203,115 @@ async function executeAddDocumentAction({
   chatSessionRepository,
   ocrStatusEnum,
 }) {
-  const s3Key = actionData?.s3Key || actionData?.fileKey;
+  let filesList = [];
+  if (Array.isArray(actionData?.files) && actionData.files.length > 0) {
+    filesList = actionData.files;
+  } else if (actionData && typeof actionData === "object") {
+    const singleKey = extractFileKey(actionData);
+    if (singleKey) {
+      filesList = [actionData];
+    }
+  }
+
   const hasOcrData = Boolean(actionData?.rawOcrData || actionData?.extractedStructuredData);
 
   let docResult;
   let replyText;
+  const fileNames = [];
 
-  if (!hasOcrData && s3Key) {
-    const fileName = actionData?.fileName || s3Key.split("/").pop();
+  if (!hasOcrData && filesList.length > 0) {
+    const createdDocs = [];
+    const createdJobs = [];
 
-    // Check if an existing OCR job already exists for this fileKey
-    let existingJob = null;
-    if (documentOcrJobService?.getStatus) {
-      try {
-        existingJob = await documentOcrJobService.getStatus({ fileKey: s3Key, userId });
-      } catch {
-        existingJob = null;
+    let isExistingCompleted = false;
+    let isExistingProcessing = false;
+
+    for (const fItem of filesList) {
+      const currentS3Key = extractFileKey(fItem);
+      if (!currentS3Key) continue;
+      const fileName =
+        (typeof fItem === "object" ? fItem?.fileName || fItem?.originalFileName : null) ||
+        currentS3Key.split("/").pop();
+      fileNames.push(fileName);
+
+      let existingJob = null;
+      if (documentOcrJobService?.getStatus) {
+        try {
+          existingJob = await documentOcrJobService.getStatus({ fileKey: currentS3Key, userId });
+        } catch {
+          existingJob = null;
+        }
+      }
+
+      if (existingJob) {
+        let normStatus = "completed";
+        if (existingJob.status === "COMPLETED" || existingJob.status === "completed") {
+          normStatus = ocrStatusEnum?.COMPLETED || "completed";
+          isExistingCompleted = true;
+        } else if (
+          existingJob.status === "RUNNING" ||
+          existingJob.status === "QUEUED" ||
+          existingJob.status === "PROCESSING" ||
+          existingJob.status === "in_progress"
+        ) {
+          normStatus = ocrStatusEnum?.IN_PROGRESS || "in_progress";
+          isExistingProcessing = true;
+        } else {
+          normStatus = String(existingJob.status || "in_progress").toLowerCase();
+        }
+
+        createdDocs.push({
+          id: existingJob.id,
+          fileName,
+          s3Key: currentS3Key,
+          ocrStatus: normStatus,
+          extractedStructuredData: existingJob.extractedStructuredData || null,
+        });
+        createdJobs.push(existingJob);
+      } else {
+        const ext = currentS3Key.includes(".") ? currentS3Key.split(".").pop().toLowerCase() : "";
+        const inferredMime =
+          ext === "pdf"
+            ? "application/pdf"
+            : ext === "png"
+              ? "image/png"
+              : ext === "jpg" || ext === "jpeg"
+                ? "image/jpeg"
+                : "application/pdf";
+        const mimeType = fItem?.mimeType || fItem?.fileType || inferredMime;
+
+        const job = await documentOcrJobService.enqueue({
+          fileKey: currentS3Key,
+          mimeType,
+          userId,
+        });
+
+        createdDocs.push({
+          id: job.id,
+          fileName,
+          s3Key: currentS3Key,
+          ocrStatus: ocrStatusEnum?.IN_PROGRESS || "in_progress",
+        });
+        createdJobs.push(job);
       }
     }
 
-    if (existingJob && existingJob.status === "COMPLETED") {
-      console.log(`[UnifiedChatHelper] Document already completed for s3Key=${s3Key}`);
-      replyText = `Document '${fileName}' has already been processed and is ready in your Health Vault.`;
-      docResult = {
-        document: {
-          id: existingJob.id,
-          fileName,
-          s3Key,
-          ocrStatus: ocrStatusEnum?.COMPLETED || "completed",
-        },
-        job: existingJob,
-      };
-    } else if (
-      existingJob &&
-      (existingJob.status === "RUNNING" ||
-        existingJob.status === "QUEUED" ||
-        existingJob.status === "PROCESSING")
-    ) {
-      const pct = existingJob.percentage != null ? `${existingJob.percentage}%` : "in progress";
-      console.log(
-        `[UnifiedChatHelper] Document processing in progress for s3Key=${s3Key} (${pct})`,
-      );
-      replyText = `Document '${fileName}' OCR processing is currently ${pct} (Stage: ${existingJob.stage || "PROCESSING"}).`;
-      docResult = {
-        document: {
-          id: existingJob.id,
-          fileName,
-          s3Key,
-          ocrStatus: ocrStatusEnum?.IN_PROGRESS || "in_progress",
-          percentage: existingJob.percentage,
-          stage: existingJob.stage,
-        },
-        job: existingJob,
-      };
+    if (filesList.length === 1 && isExistingCompleted) {
+      replyText = `Document '${fileNames[0]}' has already been processed and is ready in your Health Vault.`;
+    } else if (filesList.length === 1 && isExistingProcessing) {
+      const firstJob = createdJobs[0] || {};
+      const pct = firstJob.percentage != null ? `${firstJob.percentage}%` : "in progress";
+      replyText = `Document '${fileNames[0]}' OCR processing is currently ${pct} (Stage: ${firstJob.stage || "PROCESSING"}).`;
+    } else if (filesList.length > 1) {
+      replyText = `${filesList.length} documents (${fileNames.map((n) => `'${n}'`).join(", ")}) uploaded. OCR text extraction & vector indexing started in background.`;
     } else {
-      console.log(`[UnifiedChatHelper] Enqueueing background OCR job for s3Key=${s3Key}`);
-      const ext = s3Key.includes(".") ? s3Key.split(".").pop().toLowerCase() : "";
-      const inferredMime =
-        ext === "pdf"
-          ? "application/pdf"
-          : ext === "png"
-            ? "image/png"
-            : ext === "jpg" || ext === "jpeg"
-              ? "image/jpeg"
-              : "application/pdf";
-      const mimeType = actionData?.mimeType || actionData?.fileType || inferredMime;
-
-      const job = await documentOcrJobService.enqueue({
-        fileKey: s3Key,
-        mimeType,
-        userId,
-      });
-
-      replyText = `Document '${fileName}' uploaded. OCR text extraction & vector indexing started in background.`;
-
-      docResult = {
-        document: {
-          id: job.id,
-          fileName,
-          s3Key,
-          ocrStatus: ocrStatusEnum?.IN_PROGRESS || "in_progress",
-        },
-        job,
-      };
+      replyText = `Document '${fileNames[0] || "file"}' uploaded. OCR text extraction & vector indexing started in background.`;
     }
+
+    docResult = {
+      document: createdDocs.length === 1 ? createdDocs[0] : createdDocs,
+      job: createdJobs.length === 1 ? createdJobs[0] : createdJobs,
+    };
   } else {
     docResult = await documentPersistenceService.addDocument({
       userId,
@@ -264,11 +324,72 @@ async function executeAddDocumentAction({
   }
 
   let extractedMedicines = [];
-  const rawMeds =
-    docResult?.job?.extractedStructuredData?.medications ||
-    docResult?.document?.structuredExtractedData?.medications ||
-    actionData?.rawOcrData?.extractedStructuredData?.medications ||
-    [];
+  const rawMeds = [];
+
+  const extractMedsFromStructured = (struct) => {
+    if (!struct || typeof struct !== "object") return [];
+    if (Array.isArray(struct.medications) && struct.medications.length > 0)
+      return struct.medications;
+    if (
+      Array.isArray(struct.structuredData?.medications) &&
+      struct.structuredData.medications.length > 0
+    )
+      return struct.structuredData.medications;
+    return [];
+  };
+
+  const jobsList = Array.isArray(docResult?.job)
+    ? docResult.job
+    : docResult?.job
+      ? [docResult.job]
+      : [];
+  const docsList = Array.isArray(docResult?.document)
+    ? docResult.document
+    : docResult?.document
+      ? [docResult.document]
+      : [];
+
+  if (jobsList.length > 0) {
+    for (const jobItem of jobsList) {
+      const meds = extractMedsFromStructured(jobItem?.extractedStructuredData);
+      if (meds.length > 0) rawMeds.push(...meds);
+    }
+  } else {
+    for (const docItem of docsList) {
+      const meds = extractMedsFromStructured(
+        docItem?.structuredExtractedData || docItem?.extractedStructuredData,
+      );
+      if (meds.length > 0) rawMeds.push(...meds);
+    }
+  }
+
+  if (rawMeds.length === 0 && actionData?.rawOcrData) {
+    const meds = extractMedsFromStructured(
+      actionData.rawOcrData.extractedStructuredData || actionData.rawOcrData,
+    );
+    if (meds.length > 0) rawMeds.push(...meds);
+  }
+
+  // DB Fallback: Check documents table for completed documents if rawMeds is still empty
+  if (rawMeds.length === 0 && filesList.length > 0 && userId) {
+    for (const fItem of filesList) {
+      const currentS3Key = extractFileKey(fItem);
+      if (!currentS3Key) continue;
+      try {
+        const [docRow] = await db
+          .select()
+          .from(document)
+          .where(and(eq(document.s3Key, currentS3Key), eq(document.userId, userId)));
+        if (docRow && docRow.structuredExtractedData) {
+          const meds = extractMedsFromStructured(docRow.structuredExtractedData);
+          if (meds.length > 0) rawMeds.push(...meds);
+        }
+      } catch (dbErr) {
+        // Ignore DB lookup error
+        console.log(dbErr);
+      }
+    }
+  }
 
   if (Array.isArray(rawMeds) && rawMeds.length > 0) {
     extractedMedicines = rawMeds.map((m, idx) => ({
@@ -279,9 +400,20 @@ async function executeAddDocumentAction({
       frequency: m.frequency || "ONCE",
       duration: m.duration || null,
       instructions: m.instructions || m.timing || null,
+      selected: true,
+      isSaved: false,
     }));
-    if (extractedMedicines.length > 0) {
-      replyText = `Document '${actionData?.fileName || "prescription"}' has been processed. Found ${extractedMedicines.length} medications in your document.`;
+    const docFileName =
+      fileNames.length > 0
+        ? fileNames.join(", ")
+        : actionData?.fileName || docResult?.document?.fileName || "prescription";
+    if (isOnboardingCompleted) {
+      replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW(
+        docFileName,
+        extractedMedicines.length,
+      );
+    } else {
+      replyText = `Document '${docFileName}' has been processed. Found ${extractedMedicines.length} medications in your document.`;
     }
   }
 
@@ -304,9 +436,21 @@ async function executeAddDocumentAction({
     });
   }
 
-  const suggestedAction = extractedMedicines.length > 0 ? "SHOW_EXTRACTED_MEDICINES" : null;
-  const options =
-    extractedMedicines.length > 0
+  const isPostOnboardingReview = isOnboardingCompleted && extractedMedicines.length > 0;
+  const returnedActionType = isPostOnboardingReview ? "REVIEW_MEDICINES_LIST" : "ADD_DOCUMENT";
+  const suggestedAction = isPostOnboardingReview
+    ? "REVIEW_MEDICINES_LIST"
+    : extractedMedicines.length > 0
+      ? "SHOW_EXTRACTED_MEDICINES"
+      : null;
+
+  const options = isPostOnboardingReview
+    ? [
+        { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+        { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+        { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+      ]
+    : extractedMedicines.length > 0
       ? [
           {
             label: `Add ${extractedMedicines.length} Extracted Medicines`,
@@ -318,7 +462,7 @@ async function executeAddDocumentAction({
 
   return buildUnifiedResponse({
     mode: "ACTION",
-    actionType: "ADD_DOCUMENT",
+    actionType: returnedActionType,
     reply: replyText,
     sessionId: activeSessionId,
     document: docResult.document,
