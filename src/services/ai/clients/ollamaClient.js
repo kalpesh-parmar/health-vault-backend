@@ -230,7 +230,13 @@ class OllamaClient {
     };
 
     try {
+      const requestStartTime = Date.now();
       const response = await this.requestWithRetry(config);
+      const baseTime = (onChunk && onChunk.startTime) || requestStartTime;
+
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Ollama response received +${Date.now() - baseTime}ms`);
+
       // STREAMING TEST ONLY
       // eslint-disable-next-line no-console
       console.log(`[STREAM TEST] LLM START`);
@@ -238,9 +244,13 @@ class OllamaClient {
       let firstChunkReceived = false;
       let totalChunks = 0;
       let buffer = "";
+      let isCompleted = false;
 
       return new Promise((resolve, reject) => {
         response.data.on("data", (chunk) => {
+          // eslint-disable-next-line no-console
+          console.log(`[STREAM DEBUG] Ollama data +${Date.now() - baseTime}ms`);
+
           if (!firstChunkReceived) {
             // STREAMING TEST ONLY
             // eslint-disable-next-line no-console
@@ -260,11 +270,15 @@ class OllamaClient {
               if (parsed.message?.content) {
                 totalChunks++;
 
-                // STREAMING TEST ONLY - Log every 50th chunk
-                if (totalChunks % 50 === 0) {
+                if (totalChunks === 1) {
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] FIRST TOKEN GENERATED +${Date.now() - baseTime}ms`);
+                }
+
+                if (totalChunks % 25 === 0) {
                   // eslint-disable-next-line no-console
                   console.log(
-                    `[STREAM TEST] CHUNK #${totalChunks} after ${Date.now() - startTime}ms`,
+                    `[STREAM DEBUG] Progress: ${totalChunks} chunks generated +${Date.now() - baseTime}ms`,
                   );
                 }
 
@@ -276,6 +290,12 @@ class OllamaClient {
                 console.log(`[STREAM TEST] LLM COMPLETE after ${Date.now() - startTime}ms`);
                 // eslint-disable-next-line no-console
                 console.log(`[STREAM TEST] TOTAL CHUNKS: ${totalChunks}`);
+
+                if (!isCompleted) {
+                  isCompleted = true;
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+                }
                 resolve(parsed);
               }
             } catch {
@@ -285,15 +305,31 @@ class OllamaClient {
         });
         response.data.on("error", (err) => reject(err));
         response.data.on("end", () => {
+          let resolved = false;
           if (buffer.trim()) {
             try {
               const parsed = JSON.parse(buffer);
-              if (parsed.done) resolve(parsed);
+              if (parsed.done) {
+                if (!isCompleted) {
+                  isCompleted = true;
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+                }
+                resolve(parsed);
+                resolved = true;
+              }
             } catch {
               // ignore
             }
           }
-          resolve({ done: true });
+          if (!resolved) {
+            if (!isCompleted) {
+              isCompleted = true;
+              // eslint-disable-next-line no-console
+              console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+            }
+            resolve({ done: true });
+          }
         });
       });
     } catch (error) {

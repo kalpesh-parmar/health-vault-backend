@@ -339,6 +339,10 @@ Content: ${c.content}`;
       }
 
       const _reqStartTime = Date.now();
+      const baseTime = onChunk?.startTime || _reqStartTime;
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Chat message processing started +${Date.now() - baseTime}ms`);
+
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
         documentId,
@@ -411,6 +415,10 @@ Content: ${c.content}`;
             previous: preferredLanguage,
           });
           detectedLanguage = normDetected;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
+          );
         }
       } catch (err) {
         debugLogger.error("sendMessage: Failed to detect language via ML model", {
@@ -574,6 +582,8 @@ Content: ${c.content}`;
         `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
         { intent, documentScope, detectedLanguage },
       );
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Intent analyzed: "${intent}" +${Date.now() - baseTime}ms`);
 
       let finalDocumentIds = [];
       if (intent === "DOCUMENT" || intent === "COMPARE") {
@@ -774,6 +784,8 @@ Content: ${c.content}`;
       if (intent === "GENERAL") {
         try {
           debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for GENERAL (Qwen)");
+          // eslint-disable-next-line no-console
+          console.log(`[STREAM DEBUG] Calling Qwen LLM (GENERAL) +${Date.now() - baseTime}ms`);
           const qwenStartTime = Date.now();
           const aiResponse = await this.qwenHealthChat(
             history,
@@ -972,6 +984,10 @@ Content: ${c.content}`;
               debugLogger.info(
                 `sendMessage: [SELECTION] ${JSON.stringify({ selectedChunks: summaryChunks.length, chunksPerDocument: chunksPerDocLog })}`,
               );
+              // eslint-disable-next-line no-console
+              console.log(
+                `[STREAM DEBUG] RAG chunks retrieved: ${summaryChunks.length} chunks +${Date.now() - baseTime}ms`,
+              );
 
               // Build coverage string for Qwen
               if (medicalEntities.length > 0) {
@@ -1002,6 +1018,10 @@ Content: ${c.content}`;
           try {
             debugLogger.info(
               "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
+            );
+            // eslint-disable-next-line no-console
+            console.log(
+              `[STREAM DEBUG] Calling Qwen LLM (DOCUMENT_RAG) +${Date.now() - baseTime}ms`,
             );
             const qwenStartTime = Date.now();
             const aiResponse = await this.qwenHealthChat(
