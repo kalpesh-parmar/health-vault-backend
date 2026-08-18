@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 const { eq, and } = require("drizzle-orm");
 
 const { env } = require("../configs/env");
@@ -244,7 +245,7 @@ class V1Service {
   }
   */
 
-  async onboardingChat(userId, body, onChunk) {
+  async onboardingChat(userId, body, onChunk, abortSignal) {
     const requestReceivedTime = Date.now();
     console.log(
       `[UnifiedChat] Request received at ${new Date(requestReceivedTime).toISOString()} for userId=${userId}`,
@@ -446,7 +447,8 @@ class V1Service {
         sessionId,
         documentId,
         preferredLanguage: userLang,
-        onChunk,
+        onChunk, //passing it down to frontend for streaming
+        abortSignal, //passing down
       });
 
       return buildUnifiedResponse({

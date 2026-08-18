@@ -150,6 +150,7 @@ class ChatService {
     preferredLanguage = "english",
     coverageStr = "",
     onChunk = null,
+    abortSignal = null,
   ) {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     const userQuery = lastUserMessage?.content || "";
@@ -177,7 +178,12 @@ class ChatService {
 
       const contextText = contextChunks
         .map((c) => {
+          let pName = "Unknown";
+          if (c.docData?.structuredExtractedData?.patient?.name) {
+            pName = c.docData.structuredExtractedData.patient.name;
+          }
           return `--- REPORT: ${c.docData?.fileName || "Unknown"} ---
+Patient Name: ${pName}
 Date: ${c.docData?.reportDate ? new Date(c.docData.reportDate).toISOString().split("T")[0] : "Unknown"}
 Section: ${c.sectionTitle || "General"}
 Content: ${c.content}`;
@@ -185,6 +191,10 @@ Content: ${c.content}`;
         .join("\n\n");
 
       let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang, coverageStr);
+
+      const uniqueDocsCount = new Set(contextChunks.map((c) => c.documentId)).size;
+      systemPrompt += `\n\nIMPORTANT DOCUMENT COUNT INSTRUCTION: You have been provided with extracted context from EXACTLY ${uniqueDocsCount} distinct medical report(s). If asked for an overview, summary, or total count of reports, you MUST state that there are exactly ${uniqueDocsCount} report(s). Do NOT hallucinate any other number.`;
+
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
@@ -201,17 +211,19 @@ Content: ${c.content}`;
 
       let answer = "";
       if (onChunk) {
+        //streming mode
         await ollamaClient.chatStream(
           formattedMessages,
           env.chatModel,
           (chunk) => {
-            answer += chunk;
-            onChunk(chunk);
+            answer += chunk; //save in local variable for final return
+            onChunk(chunk); //pass to frontend for streaming
           },
           {
             temperature: 0.2,
             maxTokens: 1024,
             rawOptions: { num_ctx: 8192 },
+            signal: abortSignal,
           },
         );
       } else {
@@ -219,6 +231,7 @@ Content: ${c.content}`;
           temperature: 0.2,
           maxTokens: 1024,
           rawOptions: { num_ctx: 8192 },
+          signal: abortSignal,
         });
       }
 
@@ -259,6 +272,7 @@ Content: ${c.content}`;
           temperature: 0.2,
           maxTokens: 2048,
           rawOptions: { num_ctx: 16384 },
+          signal: abortSignal,
         },
       );
     } else {
@@ -266,6 +280,7 @@ Content: ${c.content}`;
         temperature: 0.2,
         maxTokens: 2048,
         rawOptions: { num_ctx: 16384 },
+        signal: abortSignal,
       });
     }
 
@@ -300,7 +315,14 @@ Content: ${c.content}`;
     return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
   }
 
-  async sendMessage({ userId, documentId, question, sessionId: reqSessionId, onChunk }) {
+  async sendMessage({
+    userId,
+    documentId,
+    question,
+    sessionId: reqSessionId,
+    onChunk,
+    abortSignal,
+  }) {
     if (reqSessionId) {
       if (processingSessions.has(reqSessionId)) {
         throw new InvalidRequestException(
@@ -704,6 +726,7 @@ Content: ${c.content}`;
             fileName: document.fileName,
             reportDate: document.reportDate,
             documentType: document.documentType,
+            structuredExtractedData: document.structuredExtractedData,
           })
           .from(document)
           .where(inArray(document.id, finalDocumentIds));
@@ -760,6 +783,7 @@ Content: ${c.content}`;
             detectedLanguage,
             "",
             onChunk,
+            abortSignal,
           );
           debugLogger.info(
             `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${Date.now() - qwenStartTime}ms`,
@@ -988,6 +1012,7 @@ Content: ${c.content}`;
               detectedLanguage,
               coverageStr,
               onChunk,
+              abortSignal,
             );
             debugLogger.info(
               `sendMessage: [QWEN] ${JSON.stringify({ model: env.chatModel, language: detectedLanguage, contextChunks: summaryChunks.length, generationDuration: Date.now() - qwenStartTime })}`,

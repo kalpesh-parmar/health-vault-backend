@@ -20,7 +20,7 @@ print("GlotLID model loaded successfully!")
 
 
 # 3. Detect language
-text = "mara  hemoglobin ni sarkhamni karo"
+text = "Mala vitamin chi kami aahe"
 start_time = time.perf_counter()
 labels, probabilities = model.predict(text, k=1)
 end_time = time.perf_counter()

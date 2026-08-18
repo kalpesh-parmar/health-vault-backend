@@ -109,6 +109,10 @@ const unifiedChatSchema = z.object({
   history: z.array(z.record(z.any())).optional().default([]),
   displayLabel: z.string().optional().nullable(),
   preferredLanguage: z.string().optional().nullable(),
+  stream: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .nullable(),
 });
 
 /* Backup of original module.exports:
