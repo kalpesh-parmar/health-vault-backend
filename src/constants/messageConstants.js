@@ -47,6 +47,7 @@ const messageConstants = Object.freeze({
   MEDICATION_FETCHED: "Medication fetched successfully",
   MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
+  MEDICATION_DUPLICATE_CHECKED: "Medication duplicate check completed successfully",
 
   // reminders and refills
   MEDICATION_REMINDER_LIST_FETCHED: "Medication reminder list fetched successfully",
@@ -72,6 +73,13 @@ const messageConstants = Object.freeze({
   NO_FILE_UPLOAD: "No file uploaded",
   UNAUTHORIZED_ACCESS: "Unauthorized access",
   UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
+  BATCH_OCR_JOBS_STARTED: "Batch OCR jobs started successfully",
+  BATCH_OCR_JOBS_STATUS_FETCHED: "Batch OCR job statuses fetched successfully",
+  DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (fileName, count) =>
+    `Document '${fileName}' has been processed. Found ${count} medication${count > 1 ? "s" : ""} in your document. Please review and confirm to add them to your active medications:`,
+  MEDICATIONS_CONFIRMED_SUCCESS:
+    "Selected medications have been added to your active list successfully.",
+  MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",
 });
 
 module.exports = { messageConstants };

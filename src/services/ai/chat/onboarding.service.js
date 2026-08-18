@@ -1,8 +1,7 @@
 /* eslint-disable no-console */
-const fs = require("fs");
-const path = require("path");
+// const fs = require("fs");
+// const path = require("path");
 const { ollamaClient } = require("../clients/ollamaClient");
-const aiClient = require("../clients/aiClient.service");
 const { env } = require("../../../configs/env");
 // const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
@@ -20,282 +19,25 @@ const medicationReminderService = require("../../medicationReminder.service");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
-const { normalizeMedicine } = require("../helpers/medicineNormalize");
+const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 
-function cleanAndParseJson(text) {
-  if (text && typeof text === "object") {
-    text = text.text || JSON.stringify(text);
-  }
-
-  if (!text || typeof text !== "string") {
-    throw new Error(`Empty or invalid response type from AI model. Raw response: "${text}"`);
-  }
-
-  let cleaned = text.trim();
-  // Strip reasoning/think blocks emitted by Ollama reasoning models
-  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  cleaned = cleaned.replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1").trim();
-  cleaned = cleaned
-    .replace(/^```[a-zA-Z]*/, "")
-    .replace(/```$/, "")
-    .trim();
-
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (typeof parsed !== "object" || parsed === null) {
-      throw new Error("Parsed result is not a JSON object");
-    }
-    return parsed;
-  } catch {
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const matchText = jsonMatch[0].trim();
-      try {
-        const parsed = JSON.parse(matchText);
-        if (typeof parsed === "object" && parsed !== null) {
-          return parsed;
-        }
-      } catch (err) {
-        console.error("[OnboardingService] Failed parsing matching JSON block:", matchText, err);
-      }
-    }
-    console.error("[OnboardingService] JSON parse failed. Raw AI text was:", text);
-    throw new Error(`AI did not return a valid JSON object. Raw AI Response: "${text}"`);
-  }
-}
-
-function normalizeGenderLocally(rawText) {
-  if (!rawText || typeof rawText !== "string") return null;
-  const cleaned = rawText
-    .trim()
-    .replace(/^['"“`’\s.,!?-]+|['"“`’\s.,!?-]+$/g, "")
-    .toLowerCase();
-  if (!cleaned) return null;
-
-  const maleSet = new Set(["male", "m", "man", "boy", "guy", "पुरुष", "ஆண்"]);
-
-  const femaleSet = new Set(["female", "f", "woman", "girl", "lady", "महिला", "स्त्री", "பெண்"]);
-
-  const otherSet = new Set([
-    "other",
-    "non-binary",
-    "nonbinary",
-    "nb",
-    "prefer not to say",
-    "अन्य",
-    "மற்றவை",
-  ]);
-
-  // Dynamically pull localized tokens from existing i18n dictionaries
-  for (const lang of ["gu", "hi", "mr", "ta", "en"]) {
-    const mVal = getLocalizedTranslation("onboarding.fieldValue.male", lang);
-    if (mVal) maleSet.add(mVal.trim().toLowerCase());
-
-    const fVal = getLocalizedTranslation("onboarding.fieldValue.female", lang);
-    if (fVal) femaleSet.add(fVal.trim().toLowerCase());
-
-    const oVal = getLocalizedTranslation("onboarding.fieldValue.other", lang);
-    if (oVal) otherSet.add(oVal.trim().toLowerCase());
-  }
-
-  if (maleSet.has(cleaned)) return "male";
-  if (femaleSet.has(cleaned)) return "female";
-  if (otherSet.has(cleaned)) return "other";
-
-  return null;
-}
-
-function isValidGender(genderStr) {
-  if (!genderStr || typeof genderStr !== "string") return false;
-  const lower = genderStr.trim().toLowerCase();
-  return lower === "male" || lower === "female" || lower === "other";
-}
-
-function isValidFirstName(name) {
-  if (!name || typeof name !== "string") return false;
-  const cleaned = name.trim();
-  return cleaned.length >= 1 && /^[\p{L}\s.'-]+$/u.test(cleaned);
-}
-
-function isValidLastName(name) {
-  if (!name || typeof name !== "string") return false;
-  const cleaned = name.trim();
-  return cleaned.length >= 1 && /^[\p{L}\s.'-]+$/u.test(cleaned);
-}
-
-function validateEditedFields(editedData) {
-  if (!editedData || typeof editedData !== "object") return false;
-
-  if (
-    editedData.firstName !== undefined &&
-    editedData.firstName !== null &&
-    editedData.firstName !== ""
-  ) {
-    if (!isValidFirstName(editedData.firstName)) return false;
-  }
-  if (
-    editedData.lastName !== undefined &&
-    editedData.lastName !== null &&
-    editedData.lastName !== ""
-  ) {
-    if (!isValidLastName(editedData.lastName)) return false;
-  }
-  if (editedData.gender !== undefined && editedData.gender !== null && editedData.gender !== "") {
-    const normGen = normalizeGenderLocally(String(editedData.gender));
-    if (!normGen || !isValidGender(normGen)) return false;
-  }
-  if (
-    editedData.dateOfBirth !== undefined &&
-    editedData.dateOfBirth !== null &&
-    editedData.dateOfBirth !== ""
-  ) {
-    const normDob = normalizeDOB(String(editedData.dateOfBirth));
-    if (!normDob) return false;
-  }
-  if (
-    editedData.phoneNumber !== undefined &&
-    editedData.phoneNumber !== null &&
-    editedData.phoneNumber !== ""
-  ) {
-    const normPhone = normalizePhone(String(editedData.phoneNumber));
-    if (!normPhone) return false;
-  }
-
-  return true;
-}
-
-function normalizeFlowModeLocally(rawText) {
-  if (!rawText || typeof rawText !== "string") return null;
-  const cleaned = rawText.trim().toUpperCase();
-  const uploadSet = new Set(["UPLOAD", "DOCUMENT_UPLOADED", "DOC_UPLOAD"]);
-  const manualSet = new Set(["MANUAL", "MANUAL_ENTRY", "SKIP", "SKIP_QUESTION"]);
-  if (uploadSet.has(cleaned)) return "UPLOAD";
-  if (manualSet.has(cleaned)) return "MANUAL";
-  return null;
-}
-
-function splitName(fullName) {
-  if (!fullName || typeof fullName !== "string") {
-    return { firstName: "", lastName: "" };
-  }
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
-  return {
-    firstName: parts[0],
-    lastName: parts.slice(1).join(" "),
-  };
-}
-
-function normalizeName(name) {
-  if (!name) return null;
-  const cleaned = String(name).trim().replace(/\s+/g, " ");
-  if (!cleaned) return null;
-  return cleaned;
-}
-
-function normalizePhone(phoneStr) {
-  if (!phoneStr) return null;
-  const cleaned = String(phoneStr)
-    .trim()
-    .replace(/[^\d+]/g, "");
-  return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
-}
-
-function isSamePhone(p1, p2) {
-  if (!p1 || !p2) return false;
-  const digits1 = String(p1).replace(/\D/g, "");
-  const digits2 = String(p2).replace(/\D/g, "");
-
-  if (digits1.length === 0 || digits2.length === 0) return false;
-
-  const last10_1 = digits1.slice(-10);
-  const last10_2 = digits2.slice(-10);
-
-  if (last10_1 !== last10_2) return false;
-
-  if (digits1.length > 10 && digits2.length > 10) {
-    const cc1 = digits1.slice(0, digits1.length - 10);
-    const cc2 = digits2.slice(0, digits2.length - 10);
-    return cc1 === cc2;
-  }
-
-  return true;
-}
-
-function getLocalizedTranslation(key, language) {
-  try {
-    let langCode = "en";
-    if (language === "hindi" || language === "hi") langCode = "hi";
-    else if (language === "marathi" || language === "mr") langCode = "mr";
-    else if (language === "gujarati" || language === "gu") langCode = "gu";
-    else if (language === "tamil" || language === "ta") langCode = "ta";
-
-    const filePath = path.resolve(__dirname, `../../../i18n/onboarding/${langCode}.json`);
-    if (fs.existsSync(filePath)) {
-      const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      if (content && content[key]) {
-        return content[key];
-      }
-    }
-
-    // Strict fallback: if missing in target, resolve from en.json
-    if (langCode !== "en") {
-      const enFilePath = path.resolve(__dirname, "../../../i18n/onboarding/en.json");
-      if (fs.existsSync(enFilePath)) {
-        const enContent = JSON.parse(fs.readFileSync(enFilePath, "utf8"));
-        if (enContent && enContent[key]) {
-          return enContent[key];
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(
-      `[OnboardingService] Failed to load local i18n file for ${language}:`,
-      err.message,
-    );
-  }
-  return null;
-}
-
-async function getLocalizedText(key, defaultEnglish, language, variables = {}) {
-  let text = getLocalizedTranslation(key, language);
-  if (!text) {
-    text = await translateMessage(defaultEnglish, language);
-  }
-  if (text && typeof text === "string") {
-    for (const [varName, varVal] of Object.entries(variables)) {
-      text = text.replace(new RegExp(`\\{${varName}\\}`, "g"), String(varVal));
-    }
-  }
-  return text;
-}
-
-function normalizeDOB(dobStr) {
-  if (!dobStr || typeof dobStr !== "string") return "";
-  let cleaned = dobStr.trim();
-
-  // Translate Gujarati (૦-૯) and Devanagari (०-९) digits to ASCII (0-9)
-  const gujDigits = "૦૧૨૩૪૫૬૭૮૯";
-  const devDigits = "०१२३४५६७८९";
-  cleaned = cleaned
-    .replace(/[૦-૯]/g, (d) => gujDigits.indexOf(d))
-    .replace(/[०-९]/g, (d) => devDigits.indexOf(d));
-
-  // Regex to check YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    return cleaned;
-  }
-  // Check DD.MM.YYYY, DD/MM/YYYY or DD-MM-YYYY
-  const matchDmy = cleaned.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (matchDmy) {
-    const day = matchDmy[1].padStart(2, "0");
-    const month = matchDmy[2].padStart(2, "0");
-    const year = matchDmy[3];
-    return `${year}-${month}-${day}`;
-  }
-  return "";
-}
+const {
+  cleanAndParseJson,
+  // getLocalizedTranslation,
+  normalizeGenderLocally,
+  isValidGender,
+  isValidFirstName,
+  isValidLastName,
+  normalizeDOB,
+  normalizePhone,
+  validateEditedFields,
+  normalizeFlowModeLocally,
+  splitName,
+  normalizeName,
+  isSamePhone,
+  normalizeFieldVal,
+  getLocalizedText,
+} = require("../../../helpers/onboarding.helper");
 
 async function extractFieldFromMessage(fieldType, text, _lang) {
   // Direct check for language independent skip patterns
@@ -354,6 +96,38 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     const cleaned = text.trim().toUpperCase();
     if (["BEFORE_FOOD", "AFTER_FOOD"].includes(cleaned)) {
       return cleaned;
+    }
+  } else if (fieldType === "allergies") {
+    const trimmed = text.trim().toLowerCase();
+    const negativeSet = [
+      "no",
+      "none",
+      "no allergies",
+      "no allergy",
+      "nil",
+      "n/a",
+      "nothing",
+      "na",
+      "ના",
+      "નથી",
+      "કોઈ એલર્જી નથી",
+      "नहीं",
+      "कोई एलर्जी नहीं",
+    ];
+    if (negativeSet.includes(trimmed)) {
+      return [];
+    }
+    if (trimmed && trimmed.length < 60 && !/[?!=]/.test(trimmed)) {
+      const items = text
+        .split(",")
+        .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+        .filter(Boolean);
+      if (
+        items.length > 0 &&
+        items.every((i) => i.length < 30 && (!i.includes(" ") || i.split(" ").length <= 3))
+      ) {
+        return items;
+      }
     }
   }
 
@@ -526,21 +300,44 @@ const OnboardingStep = {
 
 function getMissingRequiredStep(state) {
   const data = state.existingUserData || {};
+  const isSocial = state.useSocialData === true || state.selectedProfileSource === "SOCIAL";
+  const isDoc = state.useDocumentData === true || state.selectedProfileSource === "DOCUMENT";
+
   const useDoc =
+    !isSocial &&
     state.useDocumentData !== false &&
     state.flowMode === "UPLOAD" &&
     state.documentConfirmed !== false &&
-    !!state.documentData;
+    (!!state.documentData || !!state.documentId);
 
   const docData = useDoc ? state.documentData || {} : {};
+  const socialData = state.socialData || {};
   const loginData = state.loginData || {};
 
-  const getVal = (key) =>
-    data[key] ||
-    loginData[key]?.value ||
-    docData[key] ||
-    (key === "phoneNumber" ? docData.mobile || docData.phoneNumber : null) ||
-    null;
+  const getVal = (key) => {
+    if (data[key] !== undefined && data[key] !== null && data[key] !== "") {
+      return data[key];
+    }
+    if (isSocial) {
+      return socialData[key] !== undefined && socialData[key] !== null && socialData[key] !== ""
+        ? socialData[key]
+        : loginData[key]?.value || null;
+    }
+    if (isDoc) {
+      return docData[key] !== undefined && docData[key] !== null && docData[key] !== ""
+        ? docData[key]
+        : key === "phoneNumber"
+          ? docData.mobile || docData.phoneNumber
+          : null;
+    }
+    return (
+      socialData[key] ||
+      loginData[key]?.value ||
+      docData[key] ||
+      (key === "phoneNumber" ? docData.mobile || docData.phoneNumber : null) ||
+      null
+    );
+  };
 
   if (!getVal("firstName")) return "ASK_FIRST_NAME";
   if (!getVal("lastName")) return "ASK_LAST_NAME";
@@ -553,12 +350,25 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  // HARD RULE: If profile is NOT confirmed, check required fields FIRST, then show RESOLVE_PROFILE_SOURCE card
-  if (!state.profileConfirmed) {
-    const missingRequired = getMissingRequiredStep(state);
-    if (missingRequired) {
-      return missingRequired;
-    }
+  const useDoc =
+    state.useDocumentData !== false &&
+    state.flowMode === "UPLOAD" &&
+    state.documentConfirmed !== false &&
+    (!!state.documentData || !!state.documentId);
+
+  const missingRequired = getMissingRequiredStep(state);
+  if (missingRequired) {
+    return missingRequired;
+  }
+
+  // MATRIX RULE: In MANUAL or SKIP flow (or when no document data exists to compare against),
+  // auto-confirm profile and strictly BAN RESOLVE_PROFILE_SOURCE for both Social and Mobile logins.
+  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc) {
+    state.profileConfirmed = true;
+  }
+
+  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow with valid documentData
+  if (state.flowMode === "UPLOAD" && useDoc && !state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
   }
 
@@ -578,19 +388,23 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
-    const useDoc =
-      state.useDocumentData !== false &&
-      state.flowMode === "UPLOAD" &&
-      state.documentConfirmed !== false;
+    const hasExtractedMedicines =
+      (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
+      (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
+
+    state.isOnboardingCompleted = false;
+
+    if (!state.medicinesConfirmed && hasExtractedMedicines) {
+      state.medicationFlowStarted = true;
+      if (!Array.isArray(state.medicinesToAdd) || state.medicinesToAdd.length === 0) {
+        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
+      }
+      return "REVIEW_MEDICINES_LIST";
+    }
 
     if (!state.medicationFlowStarted) {
       state.medicationFlowStarted = true;
-      if (useDoc && state.foundMedicines && state.foundMedicines.length > 0) {
-        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
-        return "REVIEW_MEDICINES_LIST";
-      } else {
-        return "MEDICINE_OPTIONS";
-      }
+      return "MEDICINE_OPTIONS";
     }
     if (state.currentStep) {
       return state.currentStep;
@@ -599,22 +413,6 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   return "REGISTER_USER";
-}
-
-function normalizeFieldVal(val, type) {
-  if (val === undefined || val === null) return "";
-  const str = String(val).trim();
-  const lower = str.toLowerCase();
-  if (lower === "" || lower === "null" || lower === "undefined" || lower === "nan") {
-    return "";
-  }
-  if (type === "name") {
-    return lower.replace(/\s+/g, " ");
-  }
-  if (type === "gender") {
-    return lower;
-  }
-  return str;
 }
 
 function getProfileMismatches(state) {
@@ -682,7 +480,7 @@ function getProfileMismatches(state) {
       key: item.key,
       label: item.label,
       loginValue: rawLogin || null,
-      documentValue: loginField.verified ? rawLogin : rawDoc || null,
+      documentValue: rawDoc || null,
       isMismatch,
       verified: loginField.verified,
     });
@@ -708,6 +506,27 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
 
   const docData = useDoc ? state.documentData || {} : {};
 
+  let normSource = null;
+  if (typeof sourceChoice === "string" && sourceChoice.trim()) {
+    const upper = sourceChoice.trim().toUpperCase();
+    if (["DOCUMENT", "DOC", "MEDICAL_DOCUMENT"].includes(upper)) {
+      normSource = "DOCUMENT";
+    } else if (
+      [
+        "LOGIN",
+        "SOCIAL",
+        "SOCIAL_LOGIN",
+        "GOOGLE",
+        "FACEBOOK",
+        "APPLE",
+        "MICROSOFT",
+        "MOBILE",
+      ].includes(upper)
+    ) {
+      normSource = "LOGIN";
+    }
+  }
+
   for (const key of compareKeys) {
     const loginField = state.loginData?.[key] || { value: null, verified: false };
     const rawLogin = loginField.value;
@@ -731,19 +550,37 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     const existingVal = state.existingUserData?.[key] || null;
     const shownValue = loginField.verified ? rawLogin : rawLogin || rawDoc || existingVal || null;
 
-    if (loginField.verified) {
-      state.existingUserData[key] = rawLogin;
-    } else if (editedData) {
+    if (editedData) {
+      state.selectedProfileSource = "MANUAL";
+      state.useSocialData = false;
+      state.useDocumentData = false;
       if (editedData[key] !== undefined && editedData[key] !== null && editedData[key] !== "") {
         state.existingUserData[key] = editedData[key];
       } else {
-        state.existingUserData[key] = existingVal || shownValue;
+        state.existingUserData[key] = shownValue;
       }
-    } else if (isMismatch && sourceChoice) {
-      const chosenVal = sourceChoice === "DOCUMENT" ? rawDoc : rawLogin;
+    } else if (normSource === "DOCUMENT") {
+      const docVal = state.documentData?.[key] !== undefined ? state.documentData[key] : rawDoc;
+      const validDocVal = docVal !== undefined && docVal !== null && docVal !== "" ? docVal : null;
+      state.existingUserData[key] = validDocVal || existingVal || rawLogin || null;
+      state.selectedProfileSource = "DOCUMENT";
+      state.useDocumentData = true;
+      state.useSocialData = false;
+    } else if (normSource === "LOGIN") {
+      const socialVal = state.socialData?.[key] !== undefined ? state.socialData[key] : rawLogin;
+      const validSocialVal =
+        socialVal !== undefined && socialVal !== null && socialVal !== "" ? socialVal : null;
+      state.existingUserData[key] = validSocialVal || existingVal || rawDoc || null;
+      state.selectedProfileSource = "SOCIAL";
+      state.useSocialData = true;
+      state.useDocumentData = false;
+    } else if (loginField.verified) {
+      state.existingUserData[key] = rawLogin;
+    } else if (isMismatch && normSource) {
+      const chosenVal = normSource === "DOCUMENT" ? rawDoc : rawLogin;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
-      state.existingUserData[key] = existingVal || rawLogin || rawDoc || null;
+      state.existingUserData[key] = rawLogin || rawDoc || existingVal || null;
     }
   }
 
@@ -785,7 +622,7 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
 }
 
 function computeCurrentStep(state) {
-  if (state.isOnboardingCompleted) {
+  if (state.isOnboardingCompleted && state.medicationFlowDone) {
     return state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
   }
   if (!state.preferredLanguage) return "ASK_LANGUAGE";
@@ -807,7 +644,26 @@ function computeCurrentStep(state) {
 }
 
 async function updateStateFromMessage(state, message, userId = null) {
-  const msg = (message || "").trim();
+  let rawText = "";
+  if (typeof message === "object" && message !== null) {
+    rawText = JSON.stringify(message);
+  } else {
+    rawText = (message || "").trim();
+  }
+
+  let extractedVal = rawText;
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === "object") {
+      extractedVal = String(
+        parsed.value || parsed.key || parsed.label || parsed.option || rawText,
+      ).trim();
+    }
+  } catch {
+    // Plain string
+  }
+
+  const msg = extractedVal;
   const lower = msg.toLowerCase();
   const isSkip = [
     "skip",
@@ -816,6 +672,37 @@ async function updateStateFromMessage(state, message, userId = null) {
     "question skip",
     "skipquestion",
   ].includes(lower);
+
+  let isMedicineSelectionMsg = false;
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText);
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        (parsed.selected !== undefined ||
+          parsed.action === "CONFIRM" ||
+          parsed.value === "CONFIRM" ||
+          parsed.value === "CONFIRM_SELECTED")
+      ) {
+        isMedicineSelectionMsg = true;
+      }
+    } catch {
+      const upper = String(rawText).trim().toUpperCase();
+      if (upper === "CONFIRM" || upper === "CONFIRM_SELECTED") {
+        isMedicineSelectionMsg = true;
+      }
+    }
+  }
+
+  if (
+    isMedicineSelectionMsg &&
+    (!state.currentStep ||
+      state.currentStep === "MEDICINE_OPTIONS" ||
+      state.currentStep === "POST_ONBOARDING")
+  ) {
+    state.currentStep = "REVIEW_MEDICINES_LIST";
+  }
 
   if (!state.currentStep) return;
 
@@ -869,10 +756,48 @@ async function updateStateFromMessage(state, message, userId = null) {
         payload = JSON.parse(msg);
       } catch {
         const msgUpper = msg.toUpperCase();
-        if (msgUpper === "SOCIAL" || msgUpper === "LOGIN" || msgUpper === "YES") {
+        const socialOptions = [
+          "SOCIAL",
+          "LOGIN",
+          "SOCIAL_LOGIN",
+          "GOOGLE",
+          "FACEBOOK",
+          "APPLE",
+          "MICROSOFT",
+          "MOBILE",
+          "YES",
+        ];
+        const docOptions = ["DOCUMENT", "DOC", "MEDICAL_DOCUMENT", "NO"];
+        if (socialOptions.includes(msgUpper)) {
           payload = { source: "LOGIN" };
-        } else if (msgUpper === "DOCUMENT" || msgUpper === "NO") {
+        } else if (docOptions.includes(msgUpper)) {
           payload = { source: "DOCUMENT" };
+        }
+      }
+
+      if (payload && typeof payload === "object") {
+        if (!payload.source && !payload.edited && !payload.confirmed) {
+          const sourceVal = payload.source || payload.value || payload.option || payload.key;
+          if (typeof sourceVal === "string") {
+            const upper = sourceVal.toUpperCase();
+            if (
+              [
+                "SOCIAL",
+                "LOGIN",
+                "SOCIAL_LOGIN",
+                "GOOGLE",
+                "FACEBOOK",
+                "APPLE",
+                "MICROSOFT",
+                "MOBILE",
+                "YES",
+              ].includes(upper)
+            ) {
+              payload.source = "LOGIN";
+            } else if (["DOCUMENT", "DOC", "MEDICAL_DOCUMENT", "NO"].includes(upper)) {
+              payload.source = "DOCUMENT";
+            }
+          }
         }
       }
 
@@ -901,9 +826,9 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
           mergeAndApplyProfile(state, null, payload.edited);
           state.profileManuallyEdited = true;
-          state.profileConfirmed = false;
+          state.profileConfirmed = true;
           state.stepClarificationNeeded = false;
-          state.currentStep = "RESOLVE_PROFILE_SOURCE";
+          state.currentStep = computeCurrentStep(state);
         } else {
           state.profileConfirmed = false;
           state.stepClarificationNeeded = true;
@@ -940,12 +865,6 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
-      if (
-        state.documentOwnershipConfirmed !== undefined &&
-        state.documentOwnershipConfirmed !== null
-      ) {
-        break;
-      }
       let answer = null;
       try {
         const payload = JSON.parse(msg);
@@ -977,6 +896,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.documentOwnershipConfirmed = true;
         state.documentConfirmed = true;
         state.useDocumentData = true;
+        state.profileConfirmed = false;
         state.currentStep = computeCurrentStep(state);
       } else if (answer === "NO") {
         state.documentOwnershipConfirmed = false;
@@ -1022,13 +942,51 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_FIRST_NAME": {
-      const nameVal = await extractFieldFromMessage("firstName", msg, state.preferredLanguage);
-      console.log("[SC]====> Extracted first name:", nameVal);
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(parsed.value || parsed.firstName || parsed.name || msg).trim();
+        }
+      } catch {
+        // Not a JSON payload
+      }
+
+      let nameVal = await extractFieldFromMessage("firstName", rawVal, state.preferredLanguage);
+      if (!nameVal && rawVal && typeof rawVal === "string") {
+        const cleaned = rawVal.replace(/[{}[\]"]/g, "").trim();
+        if (cleaned.length > 0 && cleaned.length < 50) {
+          nameVal = cleaned;
+        }
+      }
+
       if (nameVal) {
         const { firstName, lastName } = splitName(nameVal);
-        state.existingUserData.firstName = firstName || null;
+        const finalFn = firstName || nameVal;
+        state.existingUserData.firstName = finalFn;
+        if (!state.loginData) state.loginData = {};
+        state.loginData.firstName = { value: finalFn, verified: true, provenance: "manual" };
+
         if (lastName) {
-          state.existingUserData.lastName = lastName;
+          if (!state.existingUserData.lastName) state.existingUserData.lastName = lastName;
+          if (!state.loginData.lastName || !state.loginData.lastName.value) {
+            state.loginData.lastName = { value: lastName, verified: true, provenance: "manual" };
+          }
+        }
+
+        if (userId) {
+          try {
+            const existingP = await patientRepository.findById(userId);
+            const fn = finalFn || existingP?.firstName || "";
+            const ln = (lastName !== undefined ? lastName : existingP?.lastName) || "";
+            const fullName = `${fn} ${ln}`.trim();
+            await patientRepository.updateById(userId, { firstName: finalFn, fullName });
+          } catch (err) {
+            console.warn(
+              "[OnboardingService] Immediate DB update for firstName failed:",
+              err.message,
+            );
+          }
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -1036,30 +994,135 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_LAST_NAME": {
-      const nameVal = await extractFieldFromMessage("lastName", msg, state.preferredLanguage);
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(parsed.value || parsed.lastName || parsed.name || msg).trim();
+        }
+      } catch {
+        // Not a JSON payload
+      }
+
+      let nameVal = await extractFieldFromMessage("lastName", rawVal, state.preferredLanguage);
+      if (!nameVal && rawVal && typeof rawVal === "string") {
+        const cleaned = rawVal.replace(/[{}[\]"]/g, "").trim();
+        if (cleaned.length > 0 && cleaned.length < 50) {
+          nameVal = cleaned;
+        }
+      }
+
       if (nameVal) {
         state.existingUserData.lastName = nameVal;
+        if (!state.loginData) state.loginData = {};
+        state.loginData.lastName = { value: nameVal, verified: true, provenance: "manual" };
+
+        if (userId) {
+          try {
+            const existingP = await patientRepository.findById(userId);
+            const fn = existingP?.firstName || state.existingUserData.firstName || "";
+            const fullName = `${fn} ${nameVal}`.trim();
+            await patientRepository.updateById(userId, { lastName: nameVal, fullName });
+          } catch (err) {
+            console.warn(
+              "[OnboardingService] Immediate DB update for lastName failed:",
+              err.message,
+            );
+          }
+        }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
     case "ASK_DOB": {
-      const dobVal = await extractFieldFromMessage("dateOfBirth", msg, state.preferredLanguage);
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(parsed.value || parsed.dateOfBirth || parsed.dob || msg).trim();
+        }
+      } catch {
+        // Not a JSON payload
+      }
+
+      let dobVal = await extractFieldFromMessage("dateOfBirth", rawVal, state.preferredLanguage);
+      if (!dobVal && rawVal && typeof rawVal === "string") {
+        dobVal = rawVal.trim();
+      }
+
       const dob = normalizeDOB(dobVal);
       if (dob) {
         state.existingUserData.dateOfBirth = dob;
+        if (!state.loginData) state.loginData = {};
+        state.loginData.dateOfBirth = { value: dob, verified: true, provenance: "manual" };
+
+        if (userId) {
+          try {
+            await patientRepository.updateById(userId, { dateOfBirth: new Date(dob) });
+          } catch (err) {
+            console.warn(
+              "[OnboardingService] Immediate DB update for dateOfBirth failed:",
+              err.message,
+            );
+          }
+        }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
     case "ASK_GENDER": {
-      const genVal = await extractFieldFromMessage("gender", msg, state.preferredLanguage);
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(parsed.value || parsed.gender || msg).trim();
+        }
+      } catch {
+        // Not a JSON payload
+      }
+
+      let genVal = await extractFieldFromMessage("gender", rawVal, state.preferredLanguage);
+      if (!genVal && rawVal && typeof rawVal === "string") {
+        const lower = rawVal.toLowerCase().trim();
+        if (
+          lower.includes("female") ||
+          lower.includes("woman") ||
+          lower.includes("girl") ||
+          lower === "f" ||
+          lower.includes("મહિલા") ||
+          lower.includes("સ્ત્રી")
+        ) {
+          genVal = "female";
+        } else if (
+          lower.includes("male") ||
+          lower.includes("man") ||
+          lower.includes("boy") ||
+          lower === "m" ||
+          lower.includes("પુરુષ")
+        ) {
+          genVal = "male";
+        }
+      }
+
       if (genVal && typeof genVal === "string") {
         const genNorm = genVal.toLowerCase();
         if (genNorm === "male" || genNorm === "female") {
           state.existingUserData.gender = genNorm;
+          if (!state.loginData) state.loginData = {};
+          state.loginData.gender = { value: genNorm, verified: true, provenance: "manual" };
+
+          if (userId) {
+            try {
+              await patientRepository.updateById(userId, { gender: genNorm });
+            } catch (err) {
+              console.warn(
+                "[OnboardingService] Immediate DB update for gender failed:",
+                err.message,
+              );
+            }
+          }
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -1067,17 +1130,32 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_BLOOD_GROUP": {
-      if (isSkip || msg.toUpperCase() === "SKIP") {
+      let rawVal = msg;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          rawVal = String(
+            parsed.value || parsed.key || parsed.label || parsed.option || msg,
+          ).trim();
+        }
+      } catch {
+        // Not a JSON string payload
+      }
+
+      const upperVal = rawVal.trim().toUpperCase();
+      const isSkipVal = isSkip || upperVal === "SKIP" || upperVal === "SKIP_QUESTION";
+
+      if (isSkipVal) {
         state.bloodGroupSkipped = true;
         state.existingUserData.bloodGroup = null;
       } else {
-        const norm = msg.trim().toUpperCase().replace(/\s+/g, "");
+        const norm = upperVal.replace(/\s+/g, "");
         if (bloodGroupTypeValues.includes(norm)) {
           state.existingUserData.bloodGroup = norm;
         } else {
           const extractedBg = await extractFieldFromMessage(
             "bloodGroup",
-            msg,
+            rawVal,
             state.preferredLanguage,
           );
           if (extractedBg && typeof extractedBg === "string") {
@@ -1093,7 +1171,27 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_ALLERGIES": {
-      if (isSkip || msg.toUpperCase() === "SKIP") {
+      const negativePatterns = [
+        "no",
+        "none",
+        "no allergies",
+        "no allergy",
+        "nil",
+        "n/a",
+        "nothing",
+        "na",
+        "ના",
+        "નથી",
+        "કોઈ એલર્જી નથી",
+        "नहीं",
+        "कोई एलर्जी नहीं",
+      ];
+      const isNegative =
+        isSkip ||
+        msg.toUpperCase() === "SKIP" ||
+        negativePatterns.includes(msg.trim().toLowerCase());
+
+      if (isNegative) {
         state.allergiesSkipped = true;
         state.existingUserData.allergies = [];
       } else {
@@ -1104,6 +1202,18 @@ async function updateStateFromMessage(state, message, userId = null) {
         );
         if (Array.isArray(allergiesVal)) {
           state.existingUserData.allergies = allergiesVal;
+          state.allergiesSkipped = true;
+        } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
+          const parsed = allergiesVal
+            .replace(/^\[|\]$/g, "")
+            .split(",")
+            .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
+            .filter(Boolean);
+          state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
+          state.allergiesSkipped = true;
+        } else if (msg.trim()) {
+          state.existingUserData.allergies = [msg.trim()];
+          state.allergiesSkipped = true;
         }
       }
       state.currentStep = getNextRequiredOrOptionalStep(state);
@@ -1141,11 +1251,25 @@ async function updateStateFromMessage(state, message, userId = null) {
       try {
         payload = JSON.parse(msg);
       } catch {
-        payload = {};
+        const upper = String(msg || "")
+          .trim()
+          .toUpperCase();
+        payload = { value: upper };
       }
 
-      if (payload.selected) {
-        const selectedIds = payload.selected;
+      const val = String(payload.value || payload.action || payload.key || msg || "")
+        .trim()
+        .toUpperCase();
+      const isConfirm =
+        val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
+      const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
+      const isSkip = val === "SKIP" || val === "SKIP_ALL" || payload.skipAll;
+
+      if (isConfirm) {
+        state.medicinesConfirmed = true;
+        const selectedIds =
+          payload.selected ||
+          (state.medicinesToAdd || []).map((m) => m.id || m.client_med_id).filter(Boolean);
 
         // Optionally update medicines if FE sends updated list in payload
         if (Array.isArray(payload.medicines)) {
@@ -1167,7 +1291,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
           ...m,
-          selected: selectedIds.includes(m.id || m.client_med_id),
+          selected: selectedIds.length > 0 ? selectedIds.includes(m.id || m.client_med_id) : true,
         }));
 
         let nextIncompleteIndex = -1;
@@ -1190,7 +1314,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         } else {
           // Filter selected medicines that have NOT been saved in DB yet (preventing duplicate insertion)
           const unsavedMeds = state.medicinesToAdd.filter((m) => m.selected && !m.isSaved);
-          if (unsavedMeds.length > 0) {
+          if (unsavedMeds.length > 0 && userId) {
             const bulkCreated = await medicationService.bulkCreate(userId, unsavedMeds);
 
             for (let i = 0; i < unsavedMeds.length; i++) {
@@ -1219,11 +1343,12 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
           state.currentStep = "MEDICINE_OPTIONS";
         }
-      } else if (payload.addNew) {
+      } else if (isAdd) {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
-      } else if (payload.skipAll) {
+      } else if (isSkip) {
         state.medicationFlowDone = true;
+        state.medicinesConfirmed = true;
         state.currentStep = "MEDICINE_OPTIONS";
       }
       break;
@@ -1238,18 +1363,37 @@ async function updateStateFromMessage(state, message, userId = null) {
         payload = {};
       }
 
-      if (payload.medicine) {
-        const clientMedId =
-          payload.clientMedId ||
-          payload.medicine.client_med_id ||
-          payload.medicine.id ||
-          `med_${Date.now()}`;
+      const medObj =
+        payload.medicine ||
+        (payload.name || payload.medicationName || payload.medication_name ? payload : null);
 
-        const rawType = String(payload.medicine.type || "TABLET").toUpperCase();
-        const rawFreq = String(payload.medicine.frequency || "ONCE").toUpperCase();
+      if (medObj) {
+        const isEditing =
+          state.currentStep === "EDIT_MEDICINE" &&
+          state.currentMedicineIndex !== undefined &&
+          state.currentMedicineIndex !== null &&
+          state.currentMedicineIndex >= 0;
+
+        let clientMedId;
+        if (isEditing && state.medicinesToAdd && state.medicinesToAdd[state.currentMedicineIndex]) {
+          clientMedId =
+            payload.clientMedId ||
+            medObj.client_med_id ||
+            medObj.id ||
+            state.medicinesToAdd[state.currentMedicineIndex].client_med_id ||
+            state.medicinesToAdd[state.currentMedicineIndex].id ||
+            `med_${Date.now()}`;
+        } else {
+          // When adding a new medicine, generate a fresh unique ID so it never overwrites existing items
+          clientMedId = `med_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        }
+
+        const rawType = String(medObj.type || medObj.medicationType || "TABLET").toUpperCase();
+        const rawFreq = String(medObj.frequency || "ONCE").toUpperCase();
 
         let newMed = {
-          ...payload.medicine,
+          ...medObj,
+          name: medObj.name || medObj.medicationName || "New Medicine",
           client_med_id: clientMedId,
           id: clientMedId,
           type: rawType,
@@ -1283,20 +1427,8 @@ async function updateStateFromMessage(state, message, userId = null) {
         if (!state.medicinesToAdd) state.medicinesToAdd = [];
 
         let existingIdx = -1;
-        if (
-          state.currentStep === "EDIT_MEDICINE" &&
-          state.currentMedicineIndex !== undefined &&
-          state.currentMedicineIndex !== null &&
-          state.currentMedicineIndex >= 0 &&
-          state.currentMedicineIndex < state.medicinesToAdd.length
-        ) {
+        if (isEditing && state.currentMedicineIndex < state.medicinesToAdd.length) {
           existingIdx = state.currentMedicineIndex;
-        } else if (newMed.client_med_id) {
-          existingIdx = state.medicinesToAdd.findIndex(
-            (m) =>
-              (m.client_med_id && m.client_med_id === newMed.client_med_id) ||
-              (m.id && m.id === newMed.client_med_id),
-          );
         }
 
         if (existingIdx >= 0) {
@@ -1311,103 +1443,12 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
 
         state.activeMedicine = newMed;
+        state.currentMedicineIndex = undefined;
         // Direct transition to REVIEW_MEDICINES_LIST with updated list
         state.currentStep = "REVIEW_MEDICINES_LIST";
       }
       break;
     }
-
-    /*
-    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step logic (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
-    case "CONFIRM_MEDICINE": {
-      let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        payload = {};
-      }
-
-      if (payload.confirmed) {
-        if (state.confirmMode === "SINGLE") {
-          if (!state.activeMedicine?.client_med_id) {
-            throw new Error("client_med_id is missing");
-          }
-
-          const createdMedication = await medicationService.create(userId, state.activeMedicine);
-
-          try {
-            await medicationReminderService.createReminder(userId, {
-              medicationId: createdMedication.id,
-            });
-          } catch (err) {
-            console.error(
-              "[OnboardingService] Failed to create reminder for single medicine:",
-              err,
-            );
-          }
-
-          let nextIncompleteIndex = -1;
-          for (let i = 0; i < state.medicinesToAdd.length; i++) {
-            const m = state.medicinesToAdd[i];
-            if (m.selected && m.client_med_id !== state.activeMedicine.client_med_id) {
-              try {
-                await medicationService.validate(m);
-              } catch {
-                nextIncompleteIndex = i;
-                break;
-              }
-            }
-          }
-
-          if (nextIncompleteIndex >= 0) {
-            state.currentMedicineIndex = nextIncompleteIndex;
-            state.currentStep = "EDIT_MEDICINE";
-          } else {
-            const savedClientMedIds = [state.activeMedicine.client_med_id];
-            const otherValidMeds = (state.medicinesToAdd || []).filter(
-              (m) => m.selected && !savedClientMedIds.includes(m.client_med_id),
-            );
-
-            if (otherValidMeds.length > 0) {
-              state.validMedsToBulkCreate = otherValidMeds;
-              state.confirmMode = "BULK";
-              state.currentStep = "CONFIRM_MEDICINE";
-            } else {
-              state.currentStep = "MEDICINE_OPTIONS";
-            }
-          }
-        } else if (state.confirmMode === "BULK") {
-          if (state.validMedsToBulkCreate && state.validMedsToBulkCreate.length > 0) {
-            const bulkCreated = await medicationService.bulkCreate(
-              userId,
-              state.validMedsToBulkCreate,
-            );
-
-            for (const med of bulkCreated) {
-              try {
-                await medicationReminderService.createReminder(userId, { medicationId: med.id });
-              } catch (err) {
-                console.error(
-                  `[OnboardingService] Failed to create reminder for bulk medicine ${med.id}:`,
-                  err,
-                );
-              }
-            }
-          }
-          state.currentStep = "MEDICINE_OPTIONS";
-        }
-      } else if (payload.edit) {
-        state.currentStep = "EDIT_MEDICINE";
-        if (state.confirmMode === "SINGLE") {
-          const idx = state.medicinesToAdd.findIndex(
-            (m) => m.client_med_id === state.activeMedicine.client_med_id,
-          );
-          if (idx >= 0) state.currentMedicineIndex = idx;
-        }
-      }
-      break;
-    }
-    */
 
     case "MEDICINE_OPTIONS": {
       let payload;
@@ -1428,6 +1469,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       } else if (key === "DASHBOARD" || key === "ASK_REPORT") {
         state.medicationFlowDone = true;
         state.isOnboardingCompleted = true;
+        state.medicinesConfirmed = true;
         state.currentStep = computeCurrentStep(state);
       }
       break;
@@ -1453,35 +1495,6 @@ async function updateStateFromMessage(state, message, userId = null) {
       state.currentStep = computeCurrentStep(state);
       break;
     }
-  }
-}
-
-// const staticTranslations = {
-//   Yes: { gujarati: "હા", hindi: "हाँ", marathi: "हो", tamil: "ஆம்" },
-//   No: { gujarati: "ના", hindi: "नहीं", marathi: "नाही", tamil: "இல்லை" },
-//   Skip: { gujarati: "છોડી દો", hindi: "छोड़ें", marathi: "वगळा", tamil: "தவிர்க்கவும்" },
-//   Confirm: {
-//     gujarati: "પુષ્ટિ કરો",
-//     hindi: "पुष्टि करें",
-//     marathi: "पुष्टी करा",
-//     tamil: "உறுதிப்படுத்துக",
-//   },
-//   Edit: {
-//     gujarati: "ફેરફાર કરો",
-//     hindi: "संपादित करें",
-//     marathi: "संपादित करा",
-//     tamil: "திருத்து",
-//   },
-// };
-
-async function translateMessage(text, language) {
-  if (!text || language === "english") return text;
-
-  try {
-    return await aiClient.translate(text, "english", language);
-  } catch (err) {
-    console.error(`[OnboardingService] Failed to translate text to ${language}:`, err);
-    return text; // Fallback to English
   }
 }
 
@@ -1768,7 +1781,7 @@ async function getLocalizedResponse(step, state) {
       );
       const failedMsg = await getLocalizedText(
         "onboarding.upload.failed",
-        "❌ Document processing failed. Please try again or enter details manually.",
+        "Document processing failed. Please try again or enter details manually.",
         state.preferredLanguage,
       );
 
@@ -1942,7 +1955,23 @@ async function getLocalizedResponse(step, state) {
     case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       const idx = state.currentMedicineIndex;
-      const med = idx !== undefined && state.medicinesToAdd ? state.medicinesToAdd[idx] : null;
+      const med =
+        idx !== undefined && idx !== null && state.medicinesToAdd
+          ? state.medicinesToAdd[idx]
+          : null;
+      const emptyMedTemplate = {
+        id: "",
+        client_med_id: "",
+        name: "",
+        type: "TABLET",
+        dose: { count: 1 },
+        frequency: "ONCE",
+        duration: "",
+        notes: "",
+        prescribed_by: "",
+        refill_alert: false,
+        total_quantity: 30,
+      };
       const message = med
         ? await getLocalizedText(
             "onboarding.addMedicine.messageEdit",
@@ -1957,130 +1986,11 @@ async function getLocalizedResponse(step, state) {
           );
       return {
         action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
+        renderType: "MEDICINE_FORM",
         message,
-        medicine: med,
+        medicine: med || emptyMedTemplate,
       };
     }
-
-    /*
-    // TEMPORARILY COMMENTED OUT: CONFIRM_MEDICINE step response builder (bypassed in favor of REVIEW_MEDICINES_LIST direct confirmation)
-    case "CONFIRM_MEDICINE": {
-      let title = "";
-      let lines = [];
-      const lang = state.preferredLanguage;
-
-      if (state.confirmMode === "SINGLE" && state.activeMedicine) {
-        const med = state.activeMedicine;
-        title =
-          med.name ||
-          (await getLocalizedText("onboarding.confirmMedicine.title", "Medicine Summary", lang));
-
-        // Localize type:
-        const typeLabel = await getLocalizedText(
-          `onboarding.medicationType.${med.type}`,
-          med.type,
-          lang,
-        );
-
-        // Localize dose:
-        const typeLower = med.type.toLowerCase();
-        const doseTypeKey =
-          med.type === "TABLET"
-            ? "onboarding.dose.tablets"
-            : med.type === "CAPSULE"
-              ? "onboarding.dose.capsules"
-              : "";
-        const doseUnitText = doseTypeKey
-          ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
-          : med.dose.unit;
-        const doseStr =
-          med.type === "TABLET" || med.type === "CAPSULE"
-            ? `${med.dose.count} ${doseUnitText}`
-            : `${med.dose.value} ${doseUnitText}`;
-
-        // Localize frequency:
-        const freqText = await getLocalizedText(
-          `onboarding.medicationFrequency.${med.frequency}`,
-          med.frequency,
-          lang,
-        );
-
-        // Localize times:
-        let timesVal = [];
-        if (med.medicationSchedule) {
-          if (Array.isArray(med.medicationSchedule.times)) {
-            timesVal = med.medicationSchedule.times;
-          } else {
-            const sch = med.medicationSchedule;
-            if (sch.Morning) timesVal.push(sch.Morning);
-            if (sch.Noon) timesVal.push(sch.Noon);
-            if (sch.Night) timesVal.push(sch.Night);
-            if (Array.isArray(sch.Custom)) timesVal.push(...sch.Custom);
-          }
-        }
-        const noneText = await getLocalizedText("common.none", "None", lang);
-        const timesStr = timesVal.length > 0 ? timesVal.join(", ") : noneText;
-
-        // Localize prescribed by and notes:
-        const prescribedByStr = med.prescribed_by || noneText;
-        const notesStr = med.notes || noneText;
-
-        lines = [
-          `Type: ${typeLabel}`,
-          `Dose: ${doseStr}`,
-          `Frequency: ${freqText}`,
-          `Times: ${timesStr}`,
-          `Prescribed By: ${prescribedByStr}`,
-          `Notes: ${notesStr}`,
-        ];
-      } else if (state.confirmMode === "BULK" && state.validMedsToBulkCreate) {
-        title = await getLocalizedText(
-          "onboarding.confirmMedicine.titleBulk",
-          "Confirm all medications",
-          lang,
-        );
-        lines = await Promise.all(
-          state.validMedsToBulkCreate.map(async (m) => {
-            const typeLower = m.type.toLowerCase();
-            const doseTypeKey =
-              m.type === "TABLET"
-                ? "onboarding.dose.tablets"
-                : m.type === "CAPSULE"
-                  ? "onboarding.dose.capsules"
-                  : "";
-            const doseUnitText = doseTypeKey
-              ? await getLocalizedText(doseTypeKey, `${typeLower}(s)`, lang)
-              : m.dose.unit;
-            const doseStr =
-              m.type === "TABLET" || m.type === "CAPSULE"
-                ? `${m.dose.count} ${doseUnitText}`
-                : `${m.dose.value} ${doseUnitText}`;
-            const freqText = await getLocalizedText(
-              `onboarding.medicationFrequency.${m.frequency}`,
-              m.frequency,
-              lang,
-            );
-            const timesVal =
-              m.medicationSchedule?.times || m.medicationSchedule?.reminderTimes || [];
-            const timesStr =
-              Array.isArray(timesVal) && timesVal.length > 0 ? ` @ ${timesVal.join(", ")}` : "";
-            return `${m.name} (${doseStr}, ${freqText}${timesStr})`;
-          }),
-        );
-      }
-
-      return {
-        action: "CONFIRM_MEDICINE",
-        message: await getLocalizedText(
-          "onboarding.confirmMedicine.message",
-          "Please verify if these details are correct before saving:",
-          lang,
-        ),
-        summary: { title, lines },
-      };
-    }
-    */
-
     case "MEDICINE_OPTIONS":
       return {
         action: "MEDICINE_OPTIONS",
@@ -2118,6 +2028,7 @@ async function getLocalizedResponse(step, state) {
             primary: false,
           },
         ],
+        medicines: state.medicinesToAdd || [],
       };
 
     case "COMPLETE":
@@ -2211,11 +2122,15 @@ class OnboardingService {
       state.documentUploaded = state.uploadedMedicalDocument || false;
     if (state.documentConfirmed === undefined) state.documentConfirmed = false;
     if (state.documentOwnershipConfirmed === undefined) {
-      state.documentOwnershipConfirmed = state.documentConfirmed ? true : null;
+      state.documentOwnershipConfirmed = null;
     }
     if (state.bloodGroupSkipped === undefined) state.bloodGroupSkipped = false;
     if (state.allergiesSkipped === undefined) state.allergiesSkipped = false;
     if (state.documentExtracted === undefined) state.documentExtracted = false;
+    if (state.selectedProfileSource === undefined) state.selectedProfileSource = null;
+    if (state.useSocialData === undefined) state.useSocialData = false;
+    if (state.useDocumentData === undefined) state.useDocumentData = false;
+    if (state.profileManuallyEdited === undefined) state.profileManuallyEdited = false;
 
     // Synchronize medications from DB for UPLOAD flow if they are not loaded yet or if document changed
     if (
@@ -2269,7 +2184,20 @@ class OnboardingService {
     }
 
     // Check for social login data
-    if (
+    if (state.loginData && typeof state.loginData === "object") {
+      state.hasLoginData = Object.values(state.loginData).some(
+        (field) => field && field.value !== null && field.value !== "",
+      );
+      state.hasSocialData = state.hasLoginData;
+      state.socialData = {
+        firstName: state.loginData.firstName?.value || null,
+        lastName: state.loginData.lastName?.value || null,
+        email: state.loginData.email?.value || null,
+        gender: state.loginData.gender?.value || null,
+        dateOfBirth: state.loginData.dateOfBirth?.value || null,
+        phoneNumber: state.loginData.phoneNumber?.value || null,
+      };
+    } else if (
       state.hasLoginData === undefined ||
       state.hasLoginData === null ||
       state.loginData === undefined
@@ -2345,7 +2273,7 @@ class OnboardingService {
           };
 
           state.hasLoginData = Object.values(state.loginData).some(
-            (field) => field.value !== null && field.value !== "",
+            (field) => field && field.value !== null && field.value !== "",
           );
 
           // Backward compatibility aliases
@@ -2383,6 +2311,45 @@ class OnboardingService {
       if (uData.bloodGroup === "") uData.bloodGroup = null;
       if (uData.phoneNumber === "") uData.phoneNumber = null;
       if (uData.address === "") uData.address = null;
+
+      if (userId) {
+        try {
+          const patientRec = await patientRepository.findById(userId);
+          if (patientRec) {
+            if (patientRec.firstName && !uData.firstName) uData.firstName = patientRec.firstName;
+            if (patientRec.lastName && !uData.lastName) uData.lastName = patientRec.lastName;
+            if (patientRec.dateOfBirth && !uData.dateOfBirth) {
+              uData.dateOfBirth =
+                typeof patientRec.dateOfBirth.toISOString === "function"
+                  ? patientRec.dateOfBirth.toISOString().split("T")[0]
+                  : String(patientRec.dateOfBirth).split("T")[0];
+            }
+            if (patientRec.gender && !uData.gender) uData.gender = patientRec.gender;
+            if (patientRec.email && !uData.email) uData.email = patientRec.email;
+            if (patientRec.mobile && !uData.phoneNumber) {
+              uData.phoneNumber = (patientRec.countryCode || "") + patientRec.mobile;
+            }
+            if (patientRec.bloodGroup && !uData.bloodGroup) {
+              uData.bloodGroup = patientRec.bloodGroup;
+              state.bloodGroupSkipped = true;
+            }
+            if (
+              patientRec.allergies &&
+              Array.isArray(patientRec.allergies) &&
+              patientRec.allergies.length > 0 &&
+              (!uData.allergies || uData.allergies.length === 0)
+            ) {
+              uData.allergies = patientRec.allergies;
+              state.allergiesSkipped = true;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to backfill existingUserData from patients table:",
+            err.message,
+          );
+        }
+      }
     }
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
@@ -2398,8 +2365,8 @@ class OnboardingService {
     if (state.currentStep === "ASK_USE_SOCIAL_LOGIN_INFO") {
       state.currentStep = "RESOLVE_PROFILE_SOURCE";
     }
-    // 1. If onboarding is completed, return completed status immediately
-    if (state.isOnboardingCompleted) {
+    // 1. If onboarding is completed and medication flow is done, return completed status immediately
+    if (state.isOnboardingCompleted && state.medicationFlowDone) {
       if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
         // Let it pass through to updateStateFromMessage
       } else {
@@ -2459,30 +2426,7 @@ class OnboardingService {
         },
       });
     }
-    // 2. Process incoming user message based on current expected step BEFORE update
-    if (!isInitCall) {
-      await updateStateFromMessage(state, msg, userId);
-    }
-    // Extra safeguard: if a document has already been uploaded/extracted in UPLOAD flow,
-    // ensure we don't get stuck in upload/confirm steps.
-    const isDocUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
-    if (state.flowMode === "UPLOAD" && isDocUploaded) {
-      if (
-        state.currentStep === "ASK_UPLOAD_DOCUMENT" ||
-        state.currentStep === "ASK_UPLOAD_OR_SKIP"
-      ) {
-        if (
-          state.documentOwnershipConfirmed === undefined ||
-          state.documentOwnershipConfirmed === null
-        ) {
-          state.currentStep = "CONFIRM_DOCUMENT_OWNERSHIP";
-        } else {
-          state.currentStep = computeCurrentStep(state);
-        }
-      }
-    }
-
-    // 3. If Medical Document uploaded in UPLOAD flow, fetch extracted data from DB
+    // 2. If Medical Document uploaded in UPLOAD flow, fetch extracted data from DB BEFORE updating state from message
     if (state.flowMode === "UPLOAD" && state.documentId && !state.documentExtracted) {
       console.log(
         `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
@@ -2544,22 +2488,31 @@ class OnboardingService {
             allergies: normAllergies,
           };
 
-          // Existing state.existingUserData assignment
-          if (normFirstName || normLastName) {
-            state.existingUserData.firstName = normFirstName || state.existingUserData.firstName;
-            state.existingUserData.lastName = normLastName || state.existingUserData.lastName;
-          }
+          // Assign document data to state.existingUserData ONLY if profile is already confirmed AND document profile source was selected
+          const allowDocIdentityOverride =
+            state.profileConfirmed && state.selectedProfileSource === "DOCUMENT";
 
-          if (normDob) {
-            state.existingUserData.dateOfBirth = normDob;
-          }
+          if (allowDocIdentityOverride) {
+            if (normFirstName || normLastName) {
+              state.existingUserData.firstName = normFirstName || state.existingUserData.firstName;
+              state.existingUserData.lastName = normLastName || state.existingUserData.lastName;
+            }
 
-          if (normGender) {
-            state.existingUserData.gender = normGender;
-          }
+            if (normDob) {
+              state.existingUserData.dateOfBirth = normDob;
+            }
 
-          if (normEmail) {
-            state.existingUserData.email = normEmail;
+            if (normGender) {
+              state.existingUserData.gender = normGender;
+            }
+
+            if (normEmail) {
+              state.existingUserData.email = normEmail;
+            }
+
+            if (normPhone) {
+              state.existingUserData.phoneNumber = normPhone;
+            }
           }
 
           if (normBloodGroup) {
@@ -2568,10 +2521,6 @@ class OnboardingService {
 
           if (normAllergies.length > 0) {
             state.existingUserData.allergies = normAllergies;
-          }
-
-          if (normPhone) {
-            state.existingUserData.phoneNumber = normPhone;
           }
 
           if (Array.isArray(patientInfo.medicalConditions)) {
@@ -2593,7 +2542,6 @@ class OnboardingService {
           // Set state.documentExtracted = true ONLY after documentData is successfully assigned
           state.documentExtracted = true;
           state.documentUploaded = true;
-          state.currentStep = computeCurrentStep(state);
           console.log(
             "[OnboardingService] Successfully loaded and merged document data:",
             state.documentData,
@@ -2631,9 +2579,40 @@ class OnboardingService {
       }
     }
 
+    // 3. Process incoming user message based on current expected step AFTER document data pre-loading
+    if (!isInitCall) {
+      await updateStateFromMessage(state, msg, userId);
+    }
+
+    // Extra safeguard: if a document has already been uploaded/extracted in UPLOAD flow,
+    // ensure we don't get stuck in upload/confirm steps.
+    const isDocUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
+    if (state.flowMode === "UPLOAD" && isDocUploaded) {
+      if (
+        state.currentStep === "ASK_UPLOAD_DOCUMENT" ||
+        state.currentStep === "ASK_UPLOAD_OR_SKIP"
+      ) {
+        if (
+          state.documentOwnershipConfirmed === undefined ||
+          state.documentOwnershipConfirmed === null
+        ) {
+          state.currentStep = "CONFIRM_DOCUMENT_OWNERSHIP";
+        } else {
+          state.currentStep = computeCurrentStep(state);
+        }
+      }
+    }
+
     // 4. Resolve next step after updates
-    // If the step is REGISTER_USER, mark as completed
-    if (state.currentStep === "REGISTER_USER") {
+    // If the step is REGISTER_USER, COMPLETE, or POST_ONBOARDING, mark as completed
+    if (
+      state.currentStep === "REGISTER_USER" ||
+      state.currentStep === "COMPLETE" ||
+      state.currentStep === "POST_ONBOARDING"
+    ) {
+      state.isOnboardingCompleted = true;
+      state.medicationFlowDone = true;
+      state.medicinesConfirmed = true;
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
@@ -2681,7 +2660,7 @@ class OnboardingService {
       }
       if (state.existingUserData.bloodGroup)
         updateData.bloodGroup = state.existingUserData.bloodGroup;
-      if (state.existingUserData.allergies && state.existingUserData.allergies.length > 0)
+      if (Array.isArray(state.existingUserData.allergies))
         updateData.allergies = state.existingUserData.allergies;
 
       if (state.isOnboardingCompleted) {
@@ -2727,6 +2706,10 @@ class OnboardingService {
         hasLoginData: state.hasLoginData,
         loginData: state.loginData,
         profileConfirmed: state.profileConfirmed,
+        selectedProfileSource: state.selectedProfileSource || null,
+        useSocialData: state.useSocialData || false,
+        useDocumentData: state.useDocumentData || false,
+        profileManuallyEdited: state.profileManuallyEdited || false,
         documentText: state.documentText,
         documentData: state.documentData,
         loginProvider: state.loginProvider,
@@ -2814,7 +2797,6 @@ class OnboardingService {
 const onboardingService = new OnboardingService();
 
 module.exports = {
-  OnboardingService,
   onboardingService,
   splitName,
   normalizeDOB,

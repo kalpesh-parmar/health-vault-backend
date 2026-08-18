@@ -191,6 +191,42 @@ class ChatSessionRepository {
   }
 
   /**
+   * Attaches a documentId to active_document_ids inside chat_sessions metadata.
+   * @param {string} sessionId - ID of the chat session
+   * @param {string} userId - ID of the owning patient
+   * @param {string} documentId - ID of the document being attached
+   */
+  async attachDocument(sessionId, userId, documentId) {
+    if (!sessionId || !userId || !documentId) return null;
+
+    const session = await this.findSessionById(sessionId, userId);
+    if (!session) return null;
+
+    const currentMetadata = session.metadata || {};
+    const activeIds = Array.isArray(currentMetadata.active_document_ids)
+      ? [...currentMetadata.active_document_ids]
+      : [];
+
+    if (!activeIds.includes(documentId)) {
+      activeIds.push(documentId);
+    }
+
+    const [updated] = await this.client
+      .update(chatSession)
+      .set({
+        metadata: {
+          ...currentMetadata,
+          active_document_ids: activeIds,
+        },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(chatSession.id, sessionId), eq(chatSession.userId, userId)))
+      .returning();
+
+    return updated;
+  }
+
+  /**
    * Removes a specific documentId from active_document_ids inside chat_sessions metadata when a document is deleted.
    * @param {string} documentId - ID of the document being deleted
    * @param {string} userId - ID of the owning patient

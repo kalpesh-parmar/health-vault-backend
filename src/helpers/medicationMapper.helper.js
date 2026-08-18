@@ -1,8 +1,8 @@
 /**
  * Map AI-extracted medications into the existing `medications` table.
  *
- * Why a dedicated service
- * ───────────────────────
+ * Why a dedicated service / helper
+ * ───────────────────────────────
  * The AI extractor returns medications as free-form objects:
  *
  *     { name, dosage, frequency, timing, duration, instructions }
@@ -17,7 +17,7 @@
  * raw extraction. We only normalize.
  */
 
-const { normalizeMedicine } = require("./medicineNormalize");
+const { normalizeMedicine } = require("./medicineNormalize.helper");
 
 class MedicationMapper {
   /**

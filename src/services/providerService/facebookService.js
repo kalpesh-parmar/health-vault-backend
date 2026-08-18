@@ -10,13 +10,23 @@ async function facebookLogin(firebaseIdToken, userInfo) {
     }
 
     const facebookUser = await verifyFirebaseToken(firebaseIdToken);
-    userInfo.providerUserId = facebookUser.uid;
-    userInfo.email = facebookUser.email;
-    userInfo.firstName = facebookUser.first_name || "User";
-    userInfo.lastName = facebookUser.last_name || "";
+
+    console.log(
+      "[FACEBOOK AUTH LOG] Decoded Token Payload:",
+      JSON.stringify(facebookUser, null, 2),
+    );
+
+    const nameParts = (facebookUser.name || "").trim().split(" ");
+
+    userInfo.providerUserId = facebookUser.uid || facebookUser.user_id || facebookUser.sub;
+    userInfo.email = facebookUser.email || null;
+    userInfo.firstName = facebookUser.first_name || nameParts[0] || "User";
+    userInfo.lastName = facebookUser.last_name || nameParts.slice(1).join(" ") || "";
     if (facebookUser.picture) {
       userInfo.avatarUrl = facebookUser.picture;
     }
+
+    console.log("[FACEBOOK AUTH LOG] Extracted User Info:", JSON.stringify(userInfo, null, 2));
   } catch (err) {
     if (env.enableDummyAuth) {
       userInfo = {
