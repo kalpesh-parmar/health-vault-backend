@@ -569,7 +569,7 @@ class DocumentOcrJobService {
                 summary: summaryEnglish || summaryPreferredLanguage || "",
                 observations: Array.isArray(structured?.diagnosis) ? structured.diagnosis : [],
                 medications: structured?.medications || [],
-                labResults: structured?.labResults || [],
+                testResults: structured?.testResults || structured?.labResults || [],
               },
             });
             // eslint-disable-next-line no-console
@@ -585,13 +585,17 @@ class DocumentOcrJobService {
       });
     } catch (error) {
       await documentProcessingJobRepository.markFailed(jobId, error).catch(() => {});
-      await documentRepository.updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.warn("[ocr-job] sync to documents.ocrStatus failed", {
-          error: err.message,
-          fileKey,
+      await documentRepository
+        .updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED, {
+          remarks: `Processing failed: ${error.message}`,
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("[ocr-job] sync to documents.ocrStatus failed", {
+            error: err.message,
+            fileKey,
+          });
         });
-      });
       ocrProgressBus.fail(fileKey, error);
       // eslint-disable-next-line no-console
       console.error("[ocr-job] pipeline failed", { error: error.message, fileKey, jobId, userId });

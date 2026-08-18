@@ -182,6 +182,10 @@ paths:
                 actionData:
                   type: object
                   description: Payload parameters for the specified actionType
+                stream:
+                  type: boolean
+                  description: Set to true to receive SSE streaming response
+                  example: true
                 message:
                   type: string
                   description: User message or text prompt

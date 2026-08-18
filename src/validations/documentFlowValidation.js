@@ -74,7 +74,7 @@ const createChatSessionSchema = z
 const sendChatMessageSchema = z
   .object({
     documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
-    question: z.string().trim().min(1).max(4000),
+    question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
     preferredLanguage: z.string().optional(),
   })
@@ -109,6 +109,10 @@ const unifiedChatSchema = z.object({
   history: z.array(z.record(z.any())).optional().default([]),
   displayLabel: z.string().optional().nullable(),
   preferredLanguage: z.string().optional().nullable(),
+  stream: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .nullable(),
 });
 
 /* Backup of original module.exports:

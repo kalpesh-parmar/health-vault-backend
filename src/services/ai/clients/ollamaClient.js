@@ -123,6 +123,7 @@ class OllamaClient {
         data: payload,
         timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
         headers: { "Content-Type": "application/json" },
+        signal: options.signal,
       };
 
       try {
@@ -225,29 +226,75 @@ class OllamaClient {
       responseType: "stream",
       timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
+      signal: options.signal,
     };
 
     try {
       const response = await this.requestWithRetry(config);
+      // STREAMING TEST ONLY
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM TEST] LLM START`);
+      const startTime = Date.now();
+      let firstChunkReceived = false;
+      let totalChunks = 0;
+      let buffer = "";
+
       return new Promise((resolve, reject) => {
         response.data.on("data", (chunk) => {
-          const lines = chunk.toString().split("\n").filter(Boolean);
+          if (!firstChunkReceived) {
+            // STREAMING TEST ONLY
+            // eslint-disable-next-line no-console
+            console.log(`[STREAM TEST] FIRST LLM CHUNK after ${Date.now() - startTime}ms`);
+            firstChunkReceived = true;
+          }
+
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          // Keep the last partial line in the buffer
+          buffer = lines.pop();
+
           for (const line of lines) {
+            if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
               if (parsed.message?.content) {
+                totalChunks++;
+
+                // STREAMING TEST ONLY - Log every 50th chunk
+                if (totalChunks % 50 === 0) {
+                  // eslint-disable-next-line no-console
+                  console.log(
+                    `[STREAM TEST] CHUNK #${totalChunks} after ${Date.now() - startTime}ms`,
+                  );
+                }
+
                 onChunk(parsed.message.content);
               }
               if (parsed.done) {
+                // STREAMING TEST ONLY
+                // eslint-disable-next-line no-console
+                console.log(`[STREAM TEST] LLM COMPLETE after ${Date.now() - startTime}ms`);
+                // eslint-disable-next-line no-console
+                console.log(`[STREAM TEST] TOTAL CHUNKS: ${totalChunks}`);
                 resolve(parsed);
               }
             } catch {
-              // Ignore partial JSON chunks
+              // Ignore invalid JSON that shouldn't happen with correct buffering
             }
           }
         });
         response.data.on("error", (err) => reject(err));
-        response.data.on("end", () => resolve({ done: true }));
+        response.data.on("end", () => {
+          if (buffer.trim()) {
+            try {
+              const parsed = JSON.parse(buffer);
+              if (parsed.done) resolve(parsed);
+            } catch {
+              // ignore
+            }
+          }
+          resolve({ done: true });
+        });
       });
     } catch (error) {
       // eslint-disable-next-line no-console

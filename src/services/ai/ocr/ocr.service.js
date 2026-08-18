@@ -1657,6 +1657,7 @@ ${rawText}
               : [],
           recommendations: structuredData.remarks ? [structuredData.remarks] : [],
           medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
+          testResults: structuredData.testResults || [],
         },
       });
 
