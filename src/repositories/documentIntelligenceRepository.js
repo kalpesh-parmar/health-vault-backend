@@ -11,6 +11,7 @@ const {
 const { medication } = require("../models/medication");
 const { notification } = require("../models/notification");
 const { patient } = require("../models/patient");
+const { expandSynonyms } = require("../utils/synonyms");
 
 function toVectorLiteral(values) {
   return `[${values.map((value) => Number(value).toFixed(8)).join(",")}]`;
@@ -83,7 +84,8 @@ class DocumentIntelligenceRepository {
       );
     }
     if (keywords && keywords.length > 0) {
-      const keywordConditions = keywords.map(
+      const expandedKeywords = expandSynonyms(keywords);
+      const keywordConditions = expandedKeywords.map(
         (kw) => sql`${documentChunk.content} ILIKE ${"%" + kw + "%"}`,
       );
       conditions.push(sql`(${sql.join(keywordConditions, sql` OR `)})`);

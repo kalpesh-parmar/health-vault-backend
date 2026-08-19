@@ -177,7 +177,7 @@ class V1Service {
     return { message: "Job cancelled successfully" };
   }
 
-  async onboardingChat(userId, body) {
+  async onboardingChat(userId, body, onChunk = null, abortSignal = null) {
     const requestReceivedTime = Date.now();
     console.log(
       `[UnifiedChat] Request received at ${new Date(requestReceivedTime).toISOString()} for userId=${userId}`,
@@ -636,6 +636,8 @@ class V1Service {
         sessionId,
         documentId,
         preferredLanguage: userLang,
+        onChunk,
+        abortSignal,
       });
 
       return buildUnifiedResponse({
