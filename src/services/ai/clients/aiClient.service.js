@@ -1,33 +1,5 @@
-const FormData = require("form-data");
-const axios = require("axios");
-
-const { env } = require("../../../configs/env");
+const aiServiceClient = require("../../../clients/aiServiceClient");
 const { InternalServerException } = require("../../../exceptions/appError");
-
-const DEFAULT_TIMEOUT = 300 * 1000; // Increased to 5 minutes for heavy OCR/Vision tasks
-const TRANSIENT_STATUS = new Set([502, 503, 504]);
-
-function shouldRetry(error) {
-  if (!error.response) return true;
-  return TRANSIENT_STATUS.has(error.response.status);
-}
-
-async function postWithRetry(url, body, { headers, timeout = DEFAULT_TIMEOUT, retries = 1 } = {}) {
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const response = await axios.post(url, body, { headers, timeout });
-      return response.data;
-    } catch (error) {
-      lastError = error;
-      if (!shouldRetry(error) || attempt === retries) break;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-    }
-  }
-  const status = lastError.response?.status || 502;
-  const detail = lastError.response?.data?.error || lastError.message;
-  throw new InternalServerException(`AI service request failed (${status}): ${detail}`);
-}
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -43,7 +15,6 @@ class MemoryLRUCache {
       this.cache.delete(key);
       return null;
     }
-    // Refresh insertion order (LRU)
     this.cache.delete(key);
     this.cache.set(key, entry);
     return entry.value;
@@ -53,7 +24,6 @@ class MemoryLRUCache {
     if (this.cache.has(key)) {
       this.cache.delete(key);
     } else if (this.cache.size >= this.maxSize) {
-      // Evict oldest (first key in map iterator)
       const oldestKey = this.cache.keys().next().value;
       this.cache.delete(oldestKey);
     }
@@ -61,13 +31,13 @@ class MemoryLRUCache {
   }
 }
 
-class AiServiceClient {
+class AiServiceClientWrapper {
   constructor() {
     this.translationCache = new MemoryLRUCache();
   }
 
   get baseUrl() {
-    return env.aiServiceUrl;
+    return aiServiceClient.baseUrl;
   }
 
   async translate(text, srcLang = "en", tgtLang) {
@@ -77,16 +47,7 @@ class AiServiceClient {
     if (cached) return cached;
 
     try {
-      const response = await postWithRetry(
-        `${this.baseUrl}/api/v1/translate`,
-        {
-          text,
-          src_lang: srcLang,
-          tgt_lang: tgtLang,
-        },
-        { timeout: 30000, retries: 2 },
-      );
-
+      const response = await aiServiceClient.translate({ text, srcLang, tgtLang });
       const translatedText = response?.translated_text || text;
       this.translationCache.set(cacheKey, translatedText);
       return translatedText;
@@ -95,53 +56,60 @@ class AiServiceClient {
         `[AiServiceClient] Translation failed from ${srcLang} to ${tgtLang}:`,
         err.message,
       );
-      return text; // Fallback to original text
+      return text;
     }
   }
 
-  async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
-    console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
+  async validateMedicalDocument(params) {
+    try {
+      return await aiServiceClient.validateMedicalDocument(params);
+    } catch (error) {
+      if (
+        error.statusCode === 503 ||
+        error.errorCode === "MEDGEMMA_UNAVAILABLE" ||
+        error.response?.status === 503
+      ) {
+        const err = new InternalServerException(
+          "MedGemma medical validation service is unavailable",
+        );
+        err.errorCode = "MEDGEMMA_UNAVAILABLE";
+        err.statusCode = 503;
+        throw err;
+      }
+      throw error;
+    }
+  }
 
-    const response = await postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
-      bucket,
-      fileKey,
-      mimeType,
-      mode,
-    });
-
-    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500)); // Log first 500 chars to avoid huge logs
+  async runOcrFromStorage(params) {
+    console.log(
+      "running ocr from storage",
+      params.bucket,
+      params.fileKey,
+      params.mimeType,
+      params.mode,
+    );
+    const response = await aiServiceClient.runOcrFromStorage(params);
+    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500));
     return response;
   }
 
   async normalizeStructuredOcr(structuredOcr) {
-    const data = await postWithRetry(`${this.baseUrl}/v1/extraction/normalize`, { structuredOcr });
+    const data = await aiServiceClient.normalizeStructuredOcr(structuredOcr);
     return data?.data || data;
   }
 
-  async summarizeStructuredDocument({
-    structuredDocument,
-    patientContext,
-    medications = [],
-    medicalEntities = [],
-  }) {
-    const data = await postWithRetry(`${this.baseUrl}/v1/extraction/summarize`, {
-      structuredDocument,
-      patientContext,
-      medications,
-      medicalEntities,
-    });
+  async summarizeStructuredDocument(params) {
+    const data = await aiServiceClient.summarizeStructuredDocument(params);
     return data?.data || data;
   }
 
   async embedText(text) {
-    const data = await postWithRetry(`${this.baseUrl}/v1/embeddings`, { text });
+    const data = await aiServiceClient.embedText(text);
     return data?.embedding || [];
   }
 
   async extractGraphs(structuredDocument) {
-    const data = await postWithRetry(`${this.baseUrl}/v1/extraction/graphs`, {
-      structuredDocument,
-    });
+    const data = await aiServiceClient.extractGraphs(structuredDocument);
     return data?.graphs || [];
   }
 
@@ -149,21 +117,17 @@ class AiServiceClient {
     console.log(
       `[AiClientService] runOcrFromBuffer started for ${filename}, size: ${buffer?.length}`,
     );
-    const form = new FormData();
-    form.append("file", buffer, { contentType: mimeType, filename });
-    form.append("mode", mode);
-
     try {
-      const response = await axios.post(`${this.baseUrl}/v1/run-ocr`, form, {
-        headers: form.getHeaders(),
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        timeout: DEFAULT_TIMEOUT,
+      const responseData = await aiServiceClient.runOcrFromBuffer({
+        buffer,
+        filename,
+        mimeType,
+        mode,
       });
       console.log(
-        `[AiClientService] runOcrFromBuffer success for ${filename}. Response keys: ${Object.keys(response.data).join(",")}. Has fullText: ${!!response.data.fullText}`,
+        `[AiClientService] runOcrFromBuffer success for ${filename}. Response keys: ${Object.keys(responseData).join(",")}. Has fullText: ${!!responseData.fullText}`,
       );
-      return response.data;
+      return responseData;
     } catch (err) {
       console.error(`[AiClientService] runOcrFromBuffer failed for ${filename}:`, err.message);
       throw err;
@@ -171,4 +135,4 @@ class AiServiceClient {
   }
 }
 
-module.exports = new AiServiceClient();
+module.exports = new AiServiceClientWrapper();

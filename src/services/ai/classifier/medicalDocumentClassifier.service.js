@@ -1,10 +1,84 @@
 const pdfParse = require("pdf-parse");
 const prompts = require("../prompts");
-const { ollamaClient } = require("../clients/ollamaClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
 const aiClient = require("../clients/aiClient.service");
 const { env } = require("../../../configs/env");
 
 class MedicalDocumentClassifierService {
+  async classifyFromStorage({ bucket, fileKey, mimeType, traceId }) {
+    let result = null;
+
+    if (env.medgemmaEnabled) {
+      try {
+        result = await aiClient.validateMedicalDocument({
+          bucket,
+          fileKey,
+          mimeType,
+          traceId,
+          maxPages: env.medgemmaMaxPages,
+        });
+      } catch (err) {
+        if (
+          err.errorCode === "MEDGEMMA_UNAVAILABLE" ||
+          err.statusCode === 503 ||
+          err.code === "ECONNREFUSED" ||
+          err.code === "ETIMEDOUT" ||
+          err.message?.includes("Network Error") ||
+          err.message?.includes("connect")
+        ) {
+          console.warn(
+            `[MedicalDocumentClassifierService] MedGemma service unavailable (${err.errorCode || err.message}). Falling back to text classifier.`,
+          );
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!result) {
+      const objectStorageService = require("../../objectStorage.service");
+      const buffer = await objectStorageService.getFileBuffer(fileKey);
+      const rawClassification = await this.classify({
+        buffer,
+        mimetype: mimeType,
+        filename: fileKey,
+      });
+
+      result = {
+        isMedical: !!(rawClassification.isMedicalDocument || rawClassification.isMedical),
+        confidence: Number(rawClassification.confidence) || 0.5,
+        documentType: rawClassification.documentType || null,
+        reason: rawClassification.reason || null,
+        method: "fallback",
+        model: env.chatModel,
+      };
+    }
+
+    const isMedical = !!result.isMedical;
+    const confidence = Number(result.confidence) || 0;
+    const minConfidence = env.medgemmaMinConfidence || 0.6;
+
+    if (isMedical && confidence < minConfidence) {
+      return {
+        isMedical: false,
+        confidence,
+        documentType: result.documentType || null,
+        reason: "LOW_CONFIDENCE",
+        method: result.method || "vision",
+        model: result.model || env.medgemmaModel,
+      };
+    }
+
+    return {
+      isMedical,
+      confidence,
+      documentType: result.documentType || null,
+      reason: result.reason || null,
+      method: result.method || "vision",
+      model: result.model || env.medgemmaModel,
+    };
+  }
+
   async classify(file) {
     /*
     // --- OLD CODE (Vision Model approach) ---

@@ -6,7 +6,6 @@ const { messageConstants } = require("../constants/messageConstants");
 const providers = Object.freeze({
   gcp: gcpStorageService,
   s3: fileService,
-  aws: fileService,
 });
 
 class ObjectStorageService {

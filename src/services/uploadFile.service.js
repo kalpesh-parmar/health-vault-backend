@@ -1,37 +1,15 @@
-const { env } = require("../configs/env");
+const {
+  MAX_FILE_SIZES,
+  ALLOWED_UPLOAD_TYPES,
+  UPLOAD_TYPE_TO_CATEGORY,
+  ALLOWED_MIME_TYPES,
+} = require("../configs/fileConfig");
 const { messageConstants } = require("../constants/messageConstants");
-const { FileCategory } = require("../enums/fileCategory");
 const { InvalidRequestException } = require("../exceptions/appError");
 const objectStorageService = require("./objectStorage.service");
 
-const ALLOWED_UPLOAD_TYPES = new Set(["PATIENT_PROFILE", "PATIENT_DOCUMENT"]);
-
-const ALLOWED_MIME_TYPES = {
-  PATIENT_PROFILE: new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]),
-  PATIENT_DOCUMENT: new Set([
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/webp",
-    "image/tiff",
-  ]),
-};
-
-const MAX_FILE_SIZES = {
-  PATIENT_PROFILE: 5 * 1024 * 1024, // 5 MB
-  PATIENT_DOCUMENT: env.ocrMaxFileBytes || env.aiMaxInlineBytes || 150 * 1024 * 1024, // 150 MB
-};
-
-const UPLOAD_TYPE_TO_CATEGORY = {
-  PATIENT_PROFILE: FileCategory.PROFILE,
-  PATIENT_DOCUMENT: FileCategory.DOCUMENT,
-};
-
 class UploadFileService {
   async uploadFile(file, uploadType, patientId) {
-    console.log("upload");
-
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "File is required");
     }

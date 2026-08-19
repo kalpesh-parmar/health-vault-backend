@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     summary_max_chunks: int = Field(default=8, alias="SUMMARY_MAX_CHUNKS")
     summary_num_predict: int = Field(default=220, alias="SUMMARY_NUM_PREDICT")
 
+    medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")
+    medgemma_max_pages: int = Field(default=2, alias="MEDGEMMA_MAX_PAGES")
+    medgemma_timeout_ms: int = Field(default=120000, alias="MEDGEMMA_TIMEOUT_MS")
+    medgemma_min_confidence: float = Field(default=0.6, alias="MEDGEMMA_MIN_CONFIDENCE")
+    medgemma_fallback: str = Field(default="text_classifier", alias="MEDGEMMA_FALLBACK")
+    ollama_base_url: str | None = Field(default=None, alias="OLLAMA_BASE_URL")
+
     @model_validator(mode="after")
     def validate_required_configuration(self) -> "Settings":
         missing: list[str] = []

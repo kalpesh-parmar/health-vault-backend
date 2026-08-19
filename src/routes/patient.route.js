@@ -1,12 +1,7 @@
 const express = require("express");
 const patientController = require("../controllers/patient.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
-const {
-  profileUploadMulter,
-  documentUploadMulter,
-  validateProfileUpload,
-  validateDocumentUpload,
-} = require("../validations");
+const { profileUploadMulter, validateProfileUpload } = require("../validations");
 
 const router = express.Router();
 
@@ -23,14 +18,6 @@ router.post(
   profileUploadMulter,
   validateProfileUpload,
   patientController.uploadProfileImage,
-);
-
-router.post(
-  "/:patientId/documents/upload",
-  verifyToken,
-  documentUploadMulter,
-  validateDocumentUpload,
-  patientController.uploadDocuments,
 );
 
 module.exports = router;

@@ -9,6 +9,13 @@ import threading
 import time
 from collections import OrderedDict
 from typing import Any
+
+# Safely pre-load PyTorch native DLLs before Paddle/PaddleOCR load OpenMP on Windows
+try:
+    import torch  # noqa: F401
+except Exception:
+    pass
+
 import paddle
 
 from app.core.errors import ModelUnavailableError, OcrEmptyResultError

@@ -345,8 +345,6 @@ class DocumentOcrJobService {
               rawTextToSummarize,
               preferredLanguage,
             );
-            console.log("[SC]>>>> pref summary", summaryPreferredLanguage);
-            console.log("[SC]>>>>>language", preferredLanguage);
           }
         }
       }
@@ -389,7 +387,7 @@ class DocumentOcrJobService {
       const analyzedDocumentType = normalizeDocumentType(
         structured?.documentType || structured?.reportType,
       );
-      console.time("[OCR]: updateOcrStatusByFileKey");
+
       const updatedDoc = await documentRepository
         .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
           documentType: analyzedDocumentType,
@@ -404,7 +402,6 @@ class DocumentOcrJobService {
           });
           return null;
         });
-      console.timeEnd("[OCR]: updateOcrStatusByFileKey");
       ocrProgressBus.publish(
         fileKey,
         buildStageEvent(STAGES.COMPLETED, {
@@ -418,7 +415,6 @@ class DocumentOcrJobService {
         }),
       );
       ocrProgressBus.complete(fileKey);
-      console.timeEnd("[OCR]: starting process");
 
       // Non-blocking fire-and-forget background embedding pipeline
       setImmediate(async () => {

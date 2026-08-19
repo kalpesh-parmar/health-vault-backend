@@ -1,7 +1,7 @@
 const { env } = require("../../../configs/env");
 const DocumentIntelligenceRepository = require("../../../repositories/documentIntelligenceRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const { ollamaClient } = require("../clients/ollamaClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
 
 const CHUNK_TARGET_CHARS = 900;
 const CHUNK_OVERLAP_CHARS = 120;

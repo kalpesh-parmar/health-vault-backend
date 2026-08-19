@@ -2,7 +2,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { env } = require("../../../configs/env");
-const { ollamaClient } = require("../clients/ollamaClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
 const {
   AppError,
   NonMedicalDocumentException,
@@ -1091,8 +1091,8 @@ Return STRICT JSON only:
 
       for (const res of pageResults) {
         if (res.status === "SUCCESS") {
-          if (res.pageType === "MEDICAL") {
-            hasMedicalPage = true;
+          if (res.pageType === "MEDICAL" || file.enforceMedicalGate === false) {
+            if (res.pageType === "MEDICAL") hasMedicalPage = true;
             pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
           } else {
             skippedPages.push({ page: res.pageNum, reason: res.pageType });
@@ -1106,7 +1106,7 @@ Return STRICT JSON only:
       }
 
       // Document-Level Medical Check: Reject only if NO page in the document was medical
-      if (!hasMedicalPage) {
+      if (!hasMedicalPage && file.enforceMedicalGate !== false) {
         const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
         const uniqueCategories = [...new Set(detectedCategories)];
         const categoryStr =

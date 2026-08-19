@@ -7,7 +7,7 @@ const {
   medicalDocumentClassifierService,
 } = require("./classifier/medicalDocumentClassifier.service");
 const aiClient = require("./clients/aiClient.service");
-const { ollamaClient } = require("./clients/ollamaClient");
+const { ollamaClient } = require("../../clients/ollamaClient");
 const aiModelFactory = require("./factories/aiModelFactory");
 const medicationMapper = require("./helpers/medicationMapper");
 

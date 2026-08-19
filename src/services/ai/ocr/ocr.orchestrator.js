@@ -1,11 +1,7 @@
 const { env } = require("../../../configs/env");
 const objectStorageService = require("../../objectStorage.service");
 const { AppError, NonMedicalDocumentException } = require("../../../exceptions/appError");
-const {
-  OcrEmptyResultError,
-  OcrInvalidResponseError,
-  validateDocument,
-} = require("./ocr.validator");
+const { OcrEmptyResultError, OcrInvalidResponseError } = require("./ocr.validator");
 const { createTrace, ocrLogger } = require("./ocr.logger");
 const { ocrService } = require("./ocr.service");
 
@@ -143,10 +139,11 @@ function buildOcrResult({
 }
 
 class OcrOrchestrator {
-  async runFromStorage({ fileKey, mimeType, traceId }) {
+  async runFromStorage({ bucket, fileKey, mimeType, traceId, enforceMedicalGate = true }) {
     const trace = createTrace(traceId);
     const t0 = Date.now();
     ocrLogger.info(trace, "ocr_started", {
+      bucket,
       fileKey,
       mimeType,
       storageProvider: env.storageProvider,
@@ -173,10 +170,18 @@ class OcrOrchestrator {
       mimeType,
       traceId: trace,
       startedAt: t0,
+      enforceMedicalGate,
     });
   }
 
-  async runFromBuffer({ buffer, filename, mimeType, traceId, startedAt }) {
+  async runFromBuffer({
+    buffer,
+    filename,
+    mimeType,
+    traceId,
+    startedAt,
+    enforceMedicalGate = true,
+  }) {
     const trace = createTrace(traceId);
     const t0 = startedAt || Date.now();
     ocrLogger.info(trace, "ocr_started", {
@@ -186,7 +191,7 @@ class OcrOrchestrator {
       source: "buffer",
     });
 
-    const { mimeType: resolvedMime } = validateDocument({ buffer, filename, mimeType });
+    // const { mimeType: resolvedMime } = validateDocument({ buffer, filename, mimeType });
 
     let result;
     try {
@@ -208,8 +213,9 @@ class OcrOrchestrator {
       const jsonStr = await ocrService.extractMedicalData({
         buffer,
         filename,
-        mimeType: resolvedMime,
+        mimeType,
         traceId: trace,
+        enforceMedicalGate,
       });
       const parsedOCR = JSON.parse(jsonStr);
 
@@ -218,7 +224,7 @@ class OcrOrchestrator {
         engine: `ollama:${env.aiModel}`,
         medicalExtraction: parsedOCR.medicalExtraction,
         filename,
-        mimeType: resolvedMime,
+        mimeType,
       });
     } catch (error) {
       ocrLogger.error(trace, "ocr_model_failed", {

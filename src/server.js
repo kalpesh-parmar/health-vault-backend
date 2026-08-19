@@ -19,6 +19,7 @@ const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes/index.route");
 const cronService = require("./services/cron.service");
 const cronRegisterHandler = require("./configs/cronConfig");
+const sseConnectionService = require("./services/sseConnection.service");
 
 const app = express();
 const server = http.createServer(app);
@@ -50,18 +51,32 @@ if (require.main === module) {
     console.log("cron system initialized...");
   });
 
-  const shutdown = (signal) => {
-    console.log(`${signal} received. Closing server.`);
-    server.close(() => {
-      pool
-        .end()
-        .then(() => process.exit(0))
-        .catch((error) => {
-          console.error("Failed to close database pool", error);
-          process.exit(1);
-        });
+  function shutdown(signal) {
+    console.log(signal + " received, shutting down");
+
+    // Stop accepting new SSE connections and release active streams
+    sseConnectionService.destroy();
+
+    //Stop accepting new HTTP requests
+    server.close(async () => {
+      try {
+        // Close database connections
+        await pool.end();
+
+        console.log("Graceful shutdown completed.");
+        process.exit(0);
+      } catch (error) {
+        console.error("Failed during shutdown:", error);
+        process.exit(1);
+      }
     });
-  };
+
+    // Force shutdown if cleanup takes too long
+    setTimeout(() => {
+      console.error("Graceful shutdown timed out.");
+      process.exit(1);
+    }, 10_000).unref();
+  }
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
