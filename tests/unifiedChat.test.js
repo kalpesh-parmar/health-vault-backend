@@ -614,4 +614,70 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(res.state.medicationFlowDone).toBe(true);
     expect(res.state.currentStep).toBe("COMPLETE");
   });
+
+  test("chatService sendMessage should include active profile medications in patient context without chunking", async () => {
+    const medicationRepository = require("../src/repositories/medicationRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const { ollamaClient } = require("../src/services/ai/clients/ollamaClient");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-999",
+      firstName: "Test",
+      lastName: "User",
+      gender: "male",
+      dateOfBirth: new Date("1990-01-01"),
+      bloodGroup: "O+",
+      allergies: ["Penicillin"],
+      preferredLanguage: "english",
+    });
+
+    jest.spyOn(medicationRepository, "findAll").mockResolvedValue([
+      {
+        id: "med-1",
+        medicationName: "Metformin 850mg",
+        medicationType: "TABLET",
+        dosePerIntake: 1,
+        unit: "tablet",
+        frequency: "DAILY",
+        foodFrequency: "BEFORE_FOOD",
+        medicationSchedule: { Morning: "09:00:00" },
+        prescribedBy: "Dr. Dave",
+        notes: "Take with full glass of water",
+      },
+    ]);
+
+    jest
+      .spyOn(chatSessionRepository, "listSessions")
+      .mockResolvedValue({ items: [{ id: "session-999" }] });
+    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-999" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
+      id: "msg-1",
+      ...msg,
+    }));
+
+    let capturedPrompt = "";
+    jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
+      const sysMsg = messages.find((m) => m.role === "system");
+      capturedPrompt = sysMsg ? sysMsg.content : "";
+      return "Metformin should be taken before food as prescribed.";
+    });
+
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    const result = await chatService.sendMessage({
+      userId: "patient-999",
+      question: "When should I take Metformin?",
+      sessionId: "session-999",
+    });
+
+    expect(capturedPrompt).toContain("Active Profile Medications");
+    expect(capturedPrompt).toContain("Metformin 850mg");
+    expect(capturedPrompt).toContain("BEFORE_FOOD");
+    expect(capturedPrompt).toContain("Dr. Dave");
+    expect(result.reply).toBe("Metformin should be taken before food as prescribed.");
+
+    jest.restoreAllMocks();
+  });
 });
