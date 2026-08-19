@@ -583,6 +583,131 @@ class MedicationService {
       suggestedActions,
     };
   }
+
+  // CHECK DUPLICATE MEDICATIONS BATCH
+  async checkDuplicateMedicationsBatch(userId, medicineList = []) {
+    if (!Array.isArray(medicineList) || medicineList.length === 0) {
+      return [];
+    }
+
+    let activeMedications = [];
+    if (userId) {
+      try {
+        activeMedications = await medicationRepository.findAll(userId);
+      } catch (err) {
+        console.warn(
+          "[MedicationService] Active medications DB query failed in batch duplicate check:",
+          err.message,
+        );
+        activeMedications = [];
+      }
+    }
+
+    const results = medicineList.map((item, index) => {
+      const incomingRaw =
+        item.medicationName || item.name || item.medicine_name || item.medicineName || "";
+      const incomingNorm = normalizeMedicationName(incomingRaw);
+
+      const exactMatches = [];
+      const similarMatches = [];
+
+      if (incomingNorm || incomingRaw) {
+        // Check against active DB medications
+        for (const med of activeMedications) {
+          const existingRaw = med.medicationName || "";
+          const existingNorm = normalizeMedicationName(existingRaw);
+
+          if (!existingNorm && !existingRaw) continue;
+
+          if (
+            incomingNorm === existingNorm ||
+            incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
+          ) {
+            exactMatches.push(med);
+          } else if (
+            incomingNorm.length >= 3 &&
+            existingNorm.length >= 3 &&
+            (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
+          ) {
+            similarMatches.push(med);
+          }
+        }
+
+        // Check against in-batch items (other extracted medicines in same request)
+        medicineList.forEach((otherItem, otherIdx) => {
+          if (otherIdx === index) return;
+          const otherRaw =
+            otherItem.medicationName ||
+            otherItem.name ||
+            otherItem.medicine_name ||
+            otherItem.medicineName ||
+            "";
+          const otherNorm = normalizeMedicationName(otherRaw);
+          if (!otherNorm && !otherRaw) return;
+
+          if (
+            incomingNorm === otherNorm ||
+            incomingRaw.toLowerCase().trim() === otherRaw.toLowerCase().trim()
+          ) {
+            if (!exactMatches.some((m) => m.client_med_id === otherItem.client_med_id)) {
+              exactMatches.push({
+                medicationName: otherRaw,
+                medicationType: otherItem.type || otherItem.medicationType || "TABLET",
+                inBatch: true,
+                index: otherIdx,
+              });
+            }
+          }
+        });
+      }
+
+      const hasDuplicate = exactMatches.length > 0 || similarMatches.length > 0;
+      let conflictType = null;
+      let matchedMedications = [];
+
+      if (exactMatches.length > 0) {
+        conflictType = "EXACT_DUPLICATE";
+        matchedMedications = exactMatches;
+      } else if (similarMatches.length > 0) {
+        conflictType = "SIMILAR_NAME";
+        matchedMedications = similarMatches;
+      }
+
+      const suggestedActions = hasDuplicate
+        ? [
+            {
+              action: "KEEP EXISTING",
+              label: "keep previous medication",
+            },
+            {
+              action: "REPLACE",
+              label: "replace previous medication",
+            },
+            {
+              action: "EDIT",
+              label: "edit previous medication",
+            },
+            {
+              action: "REMOVE NEW",
+              label: "remove incoming new medication",
+            },
+          ]
+        : [];
+
+      return {
+        ...item,
+        duplicateInfo: {
+          hasDuplicate,
+          conflictType,
+          matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
+          matchedMedications,
+          suggestedActions,
+        },
+      };
+    });
+
+    return results;
+  }
 }
 
 module.exports = new MedicationService();
