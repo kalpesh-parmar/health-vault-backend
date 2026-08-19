@@ -11,6 +11,14 @@ module.exports = {
     timeout: 5000,
   },
 
+  apple: {
+    baseURL: env.appleBaseUrl || "https://appleid.apple.com",
+    endpoints: {
+      keys: "/auth/keys",
+    },
+    timeout: 5000,
+  },
+
   facebook: {
     baseURL: env.facebookGraphBaseUrl || "https://graph.facebook.com",
     endpoints: {

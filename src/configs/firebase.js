@@ -1,5 +1,7 @@
 const admin = require("firebase-admin");
 const { env } = require("./env");
+const { SocialMedia } = require("../enums/loginType.enum");
+const { errorConstants } = require("../constants/errorConstants");
 
 function getCredential() {
   const base64Creds = env.firebaseCredentialsBase64 || env.gcpCredentialsBase64;
@@ -50,17 +52,29 @@ async function verifyFirebaseToken(firebaseToken) {
   return admin.auth(app).verifyIdToken(firebaseToken);
 }
 
-async function findOrCreateFirebaseUser(email, name, providerUid) {
+async function findOrCreateFirebaseUser(
+  email,
+  name,
+  providerUid,
+  provider = SocialMedia.MICROSOFT,
+) {
   const app = initializeFirebase();
   if (!app) {
-    throw new Error("Firebase Admin SDK is not initialized. Check credentials in env.");
+    throw new Error(errorConstants.FIREBASE_ADMIN_SDK_IS_NOT_INITIALIZED);
   }
 
   const auth = admin.auth(app);
   let userRecord = null;
 
+  // Determine custom uid with provider prefix
+  let customUid;
+  if (providerUid.startsWith("microsoft_") || providerUid.startsWith("apple_")) {
+    customUid = providerUid;
+  } else {
+    customUid = `${provider}_${providerUid}`;
+  }
+
   // 1. Try to find by custom uid (preferred to ensure consistency)
-  const customUid = `microsoft_${providerUid}`;
   try {
     userRecord = await auth.getUser(customUid);
   } catch (error) {
@@ -69,8 +83,8 @@ async function findOrCreateFirebaseUser(email, name, providerUid) {
     }
   }
 
-  // 2. Try to find by email if present and not found by UID
-  if (!userRecord && email) {
+  // 2. Try to find by email if present and not found by UID (disabled for Apple to avoid account collision)
+  if (!userRecord && email && provider !== SocialMedia.APPLE) {
     try {
       userRecord = await auth.getUserByEmail(email);
     } catch (error) {
@@ -101,7 +115,7 @@ async function findOrCreateFirebaseUser(email, name, providerUid) {
 async function createCustomFirebaseToken(uid) {
   const app = initializeFirebase();
   if (!app) {
-    throw new Error("Firebase Admin SDK is not initialized. Check credentials in env.");
+    throw new Error(errorConstants.FIREBASE_ADMIN_SDK_IS_NOT_INITIALIZED);
   }
   return admin.auth(app).createCustomToken(uid);
 }

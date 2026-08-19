@@ -120,6 +120,14 @@ const errorConstants = Object.freeze({
 
   // SSE Emitter Error
   CHANNEL_KEY_IS_REQUIRED: "Channel Key is required",
+
+  //SOCIAL AUTHENTICATION ERROR
+  FIREBASE_ADMIN_SDK_IS_NOT_INITIALIZED:
+    "Firebase Admin SDK is not initialized. Check credentials in env.",
+  APPLE_IDENTITY_TOKEN_IS_REQUIRED: "Apple identityToken (providerToken) is required",
+  INVALID_APPLE_TOKEN: "Invalid Apple token",
+  FIREBASE_CUSTOME_TOKEN_GENERATION_FAILED: "Firebase Custom Token generation failed",
+  INVALID_FIREBASE_TOKEN: "Invalid firebase token",
 });
 
 module.exports = { errorConstants };

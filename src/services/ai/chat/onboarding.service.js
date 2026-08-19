@@ -10,7 +10,7 @@ const userOnboardingRepository = require("../../../repositories/userOnboardingRe
 const authProviderRepository = require("../../../repositories/authProviderRepository");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const medicationService = require("../../medication.service");
-const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
+const { languageTypeValues, languageNativeLabels } = require("../../../enums/language.enum");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 // const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
 const { medicationTypeValues } = require("../../../enums/medicationType");
@@ -21,6 +21,7 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../helpers/medicineNormalize");
+const { SocialMediaProviders, SocialMedia, LoginType } = require("../../../enums/loginType.enum");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
@@ -2259,16 +2260,16 @@ class OnboardingService {
           const providerNames = providers.map((p) => p.provider);
 
           let primaryProvider = "email";
-          if (providerNames.includes("google")) {
-            primaryProvider = "google";
-          } else if (providerNames.includes("facebook")) {
-            primaryProvider = "facebook";
-          } else if (providerNames.includes("microsoft")) {
-            primaryProvider = "microsoft";
-          } else if (providerNames.includes("apple")) {
-            primaryProvider = "apple";
-          } else if (providerNames.includes("mobile")) {
-            primaryProvider = "mobile";
+          if (providerNames.includes(SocialMedia.GOOGLE)) {
+            primaryProvider = SocialMedia.GOOGLE;
+          } else if (providerNames.includes(SocialMedia.FACEBOOK)) {
+            primaryProvider = SocialMedia.FACEBOOK;
+          } else if (providerNames.includes(SocialMedia.MICROSOFT)) {
+            primaryProvider = SocialMedia.MICROSOFT;
+          } else if (providerNames.includes(SocialMedia.APPLE)) {
+            primaryProvider = SocialMedia.APPLE;
+          } else if (providerNames.includes(LoginType.MOBILE)) {
+            primaryProvider = LoginType.MOBILE;
           } else if (providerNames.includes("password")) {
             primaryProvider = "email";
           }
@@ -2277,10 +2278,10 @@ class OnboardingService {
           let isPhoneVerified = false;
           let isEmailVerified = false;
 
-          if (providerNames.includes("mobile")) {
+          if (providerNames.includes(LoginType.MOBILE)) {
             isPhoneVerified = true;
           }
-          if (providerNames.some((p) => ["google", "facebook", "microsoft", "apple"].includes(p))) {
+          if (providerNames.some((p) => SocialMediaProviders.includes(p))) {
             if (patient.email) {
               isEmailVerified = true;
             }

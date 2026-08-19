@@ -168,6 +168,8 @@ const env = Object.freeze({
 
   microsoftClientId: stringFromEnv("MICROSOFT_CLIENT_ID"),
   microsoftTenantId: stringFromEnv("MICROSOFT_TENANT_ID") || "common",
+  appleClientId: stringFromEnv("APPLE_CLIENT_ID", "com.anonymous.DocumentsVaultApp"),
+  appleBaseUrl: stringFromEnv("APPLE_BASE_URL", "https://appleid.apple.com"),
   enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", true),
 });
 

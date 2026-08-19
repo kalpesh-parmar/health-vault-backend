@@ -189,6 +189,15 @@ paths:
                   providerToken: "microsoft-id-token"
                   deviceToken: "DEVICE_TOKEN"
                   firebaseIdToken: "firebase-token"
+              apple:
+                value:
+                  loginType: social
+                  provider: apple
+                  providerToken: "apple-identity-token-jwt"
+                  email: "user@privaterelay.appleid.com"
+                  firstName: "John"
+                  lastName: "Appleseed"
+                  deviceToken: "DEVICE_TOKEN"
               mobile:
                 value:
                   loginType: mobile

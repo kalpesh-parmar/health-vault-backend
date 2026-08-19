@@ -5,7 +5,7 @@ const { genderTypeValue } = require("../enums/genderType");
 const { userStatusValues } = require("../enums/userStatus.enum");
 // const { provider } = require("../services/objectStorage.service");
 const { providerValues } = require("../enums/providerType");
-const { loginTypeValues } = require("../enums/loginType.enum");
+const { LoginTypeValues, SocialMediaProviders, LoginType } = require("../enums/loginType.enum");
 
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const uppercaseRegex = /[A-Z]/;
@@ -121,7 +121,7 @@ const updatePatientSchema = z
 const socialLogin = z
   .object({
     deviceToken: z.string().max(500).optional().nullable(),
-    loginType: z.enum(loginTypeValues),
+    loginType: z.enum(LoginTypeValues),
     provider: z.enum(providerValues),
     providerType: z.string().optional(),
     providerToken: z.string().optional(),
@@ -131,17 +131,14 @@ const socialLogin = z
     lastName: z.string().max(100).optional().nullable(),
   })
   .superRefine((data, ctx) => {
-    if (data.loginType === "mobile" && data.provider !== "mobile") {
+    if (data.loginType === LoginType.MOBILE && data.provider !== LoginType.MOBILE) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Provider must be mobile when login type is mobile",
         path: ["provider"],
       });
     }
-    if (
-      data.loginType === "social" &&
-      !["google", "facebook", "apple", "microsoft"].includes(data.provider)
-    ) {
+    if (data.loginType === LoginType.SOCIAL && !SocialMediaProviders.includes(data.provider)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Provider must be google, facebook, apple, or microsoft when login type is social",
@@ -153,7 +150,7 @@ const socialLogin = z
 const authFailureSchema = z.object({
   identifier: z.string().optional(),
   provider: z.enum(providerValues),
-  loginType: z.enum(loginTypeValues),
+  loginType: z.enum(LoginTypeValues),
 });
 
 const refreshTokenSchema = z

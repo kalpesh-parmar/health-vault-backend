@@ -9,9 +9,9 @@ const {
   uniqueIndex,
   index,
 } = require("drizzle-orm/pg-core");
-const { loginTypeValues } = require("../enums/loginType.enum");
+const { LoginTypeValues } = require("../enums/loginType.enum");
 const { providerValues } = require("../enums/providerType");
-const loginTypeEnum = pgEnum("login_type", loginTypeValues);
+const loginTypeEnum = pgEnum("login_type", LoginTypeValues);
 const providerEnum = pgEnum("provider", providerValues);
 const loginAttempt = pgTable(
   "login_attempts",

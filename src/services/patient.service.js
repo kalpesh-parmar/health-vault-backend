@@ -41,6 +41,7 @@ const { socialLogin, authFailureSchema } = require("../validations/patientValida
 const objectStorageService = require("./objectStorage.service");
 const authProviderRepository = require("../repositories/authProviderRepository");
 const loginAttemptRepository = require("../repositories/loginAttemptRepository");
+const { SocialMediaProviders, LoginType } = require("../enums/loginType.enum");
 
 let cachedKeys = null;
 let keysExpiryTime = 0;
@@ -419,7 +420,10 @@ class PatientService {
           uid: `mock-uid-${provider}-${firebaseIdToken}`,
           email: null,
           name: null,
-          phone_number: loginType === "mobile" && provider === "mobile" ? "+911111111111" : null,
+          phone_number:
+            loginType === LoginType.MOBILE && provider === LoginType.MOBILE
+              ? "+911111111111"
+              : null,
         };
       } else {
         if (!firebaseIdToken) {
@@ -520,9 +524,11 @@ class PatientService {
 
         const patientCode = await createUniquePatientCode();
 
-        const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
-        const socialProviders = ["google", "facebook", "apple", "microsoft"];
-        const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
+        const isMobileVerified =
+          provider === LoginType.MOBILE && loginType === LoginType.MOBILE && !!mobile;
+        const socialProviders = SocialMediaProviders;
+        const isEmailVerified =
+          socialProviders.includes(provider) && loginType === LoginType.SOCIAL;
 
         patientUser = await patientRepository.create({
           patientCode,
@@ -560,7 +566,7 @@ class PatientService {
       firebaseUid,
     };
 
-    if (provider === "mobile" && loginType === "mobile" && !!mobile) {
+    if (provider === LoginType.MOBILE && loginType === LoginType.MOBILE && !!mobile) {
       updateData.isMobileVerified = true;
       if (!patientUser.mobile) {
         updateData.mobile = mobile;
@@ -568,8 +574,8 @@ class PatientService {
       }
     }
 
-    const socialProvidersList = ["google", "facebook", "apple", "microsoft"];
-    if (socialProvidersList.includes(provider) && loginType === "social") {
+    const socialProvidersList = SocialMediaProviders;
+    if (socialProvidersList.includes(provider) && loginType === LoginType.SOCIAL) {
       updateData.isEmailVerified = true;
     }
 
