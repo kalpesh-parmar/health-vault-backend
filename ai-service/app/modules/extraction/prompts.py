@@ -40,7 +40,9 @@ Required schema:
       "pharmacyName": string|null,
       "issueDate": string|null,
       "refillInstructions": string|null,
-      "medications": []
+      "medications": [],
+      "prescribedBy": string|null,
+      "timing": string|null,
     }}
   ],
   "labReports": [],

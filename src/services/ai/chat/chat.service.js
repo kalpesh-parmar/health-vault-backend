@@ -261,7 +261,7 @@ class ChatService {
       }
 
       const contextText = Array.from(chunksByDoc.entries())
-        .map(([chunks]) => {
+        .map(([, chunks]) => {
           const docData = chunks[0].docData || {};
           let pName = "Unknown";
           if (docData.structuredExtractedData?.patient?.name) {

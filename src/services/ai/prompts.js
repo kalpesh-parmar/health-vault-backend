@@ -301,7 +301,9 @@ JSON format:
       "duration": "Duration",
       "qty": "Quantity",
       "instructions": "Instructions",
-      "type": "Type (tablet, syrup, injection, etc.)"
+      "type": "Type (tablet, syrup, injection, etc.)",
+      "prescribedBy": "Doctor Name or null",
+      "timing": "Timing or null",
     }
   ],
   "diagnosis": "Diagnosis text or null",

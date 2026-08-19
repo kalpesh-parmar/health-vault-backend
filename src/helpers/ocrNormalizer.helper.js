@@ -185,6 +185,7 @@ function buildMedications(normalized) {
       instructions: med?.instructions || med?.notes || null,
       name: med?.name || med?.medicineName || med?.medicationName || null,
       timing: med?.timing || med?.when || null,
+      prescribedBy: med?.prescribedBy || med?.doctorName || null,
     });
   }
 
@@ -197,6 +198,12 @@ function buildMedications(normalized) {
         instructions: med?.instructions || null,
         name: med?.name || med?.medicineName || null,
         timing: med?.timing || null,
+        prescribedBy:
+          med?.prescribedBy ||
+          med?.doctorName ||
+          prescription?.doctorName ||
+          normalized.doctorInfo?.name ||
+          null,
       });
     }
   }
