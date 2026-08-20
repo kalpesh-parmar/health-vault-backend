@@ -811,7 +811,7 @@ Content: ${c.content}
           assistantText =
             preferredLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
-              : "Sorry, error occurred.";
+              : "Please try again later.";
         }
       } else {
         // DATA RETRIEVER (Vector Search)

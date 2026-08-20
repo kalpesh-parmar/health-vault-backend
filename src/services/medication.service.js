@@ -363,7 +363,7 @@ class MedicationService {
       unit = payload.dose.unit;
     }
 
-    const dosePerIntake = Number.isInteger(value) ? value : null;
+    const dosePerIntake = typeof value === "number" && !isNaN(value) && value > 0 ? value : null;
     const unitDb = unit.toUpperCase();
 
     const foodContext = payload.foodContext || defaults.food_context;

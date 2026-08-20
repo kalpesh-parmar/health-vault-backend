@@ -22,6 +22,7 @@ const foodEnum = pgEnum("food_type", foodTypeValues);
 const medicationUnitType = pgEnum("unit", mediactionUnitValues);
 
 const { patient } = require("./patient");
+const { doublePrecision } = require("drizzle-orm/pg-core");
 
 const medication = pgTable(
   "medications",
@@ -36,7 +37,7 @@ const medication = pgTable(
     medicationName: varchar("medication_name", { length: 255 }).notNull(),
     medicationType: medicationTypeEnum("medication_type").notNull(),
     prescribedBy: varchar("prescribed_by", { length: 255 }),
-    dosePerIntake: integer("dose_per_intake"),
+    dosePerIntake: doublePrecision("dose_per_intake"),
     frequency: frequencyEnum("frequency").notNull(),
     medicationSchedule: json("medication_schedule").notNull(),
     foodFrequency: foodEnum("food_frequency").notNull(),
