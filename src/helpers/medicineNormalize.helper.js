@@ -369,10 +369,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     bestTaken: [foodFrequency],
     dailyConsumption,
     dosePerIntake: hasTabletType
-      ? Number.isInteger(count)
+      ? typeof count === "number" && count > 0
         ? count
         : null
-      : Number.isInteger(value)
+      : typeof value === "number" && value > 0
         ? value
         : null,
     doseReminders: false,
