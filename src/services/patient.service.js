@@ -37,7 +37,7 @@ const {
 } = require("../configs/firebase");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const axios = require("axios");
+const microsoftClient = require("../clients/microsoftClient");
 const { socialLogin, authFailureSchema } = require("../validations/patientValidation");
 const objectStorageService = require("./objectStorage.service");
 const authProviderRepository = require("../repositories/authProviderRepository");
@@ -53,10 +53,8 @@ async function getMicrosoftPublicKeys() {
   }
 
   try {
-    const response = await axios.get(
-      "https://login.microsoftonline.com/common/discovery/v2.0/keys",
-    );
-    cachedKeys = response.data.keys;
+    const data = await microsoftClient.fetchCommonPublicKeys();
+    cachedKeys = data.keys;
     keysExpiryTime = now + 24 * 60 * 60 * 1000; // cache for 24 hours
     return cachedKeys;
   } catch (error) {
@@ -128,8 +126,8 @@ async function verifyMicrosoftToken(idToken) {
 
         // Verify issuer (iss)
         const iss = decodedPayload.iss || "";
-        const isValidIssuer =
-          iss.startsWith("https://login.microsoftonline.com/") && iss.endsWith("/v2.0");
+        const expectedIssuerPrefix = `${env.microsoftBaseUrl}/`;
+        const isValidIssuer = iss.startsWith(expectedIssuerPrefix) && iss.endsWith("/v2.0");
         if (!isValidIssuer) {
           return reject(new Error(`Invalid issuer: ${iss}`));
         }

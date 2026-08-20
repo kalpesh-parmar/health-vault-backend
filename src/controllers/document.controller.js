@@ -6,6 +6,7 @@
  * file keeps only the read/delete/download endpoints.
  */
 
+const { StatusCodes } = require("http-status-codes");
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
 const documentService = require("../services/document.service");
@@ -61,6 +62,11 @@ async function getDocumentSummaryList(req, res) {
   return successResponse(res, result, "Document summaries fetched successfully");
 }
 
+async function uploadDocuments(req, res) {
+  const result = await documentService.uploadDocuments(req.files, req.auth.userId);
+  return successResponse(res, result, messageConstants.FILE_UPLOADED, StatusCodes.ACCEPTED);
+}
+
 module.exports = {
   deleteDocument,
   deleteFile,
@@ -71,4 +77,5 @@ module.exports = {
   listDocuments,
   updateDocument,
   listDocumentsPaginated,
+  uploadDocuments,
 };

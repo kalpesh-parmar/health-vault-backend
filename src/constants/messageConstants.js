@@ -70,6 +70,7 @@ const messageConstants = Object.freeze({
   MEDICATION_REFILLED: "Medication refilled successfully",
 
   //OCR Message
+  DOCUMENT_PROCESSING: "Document Processing",
   NO_FILE_UPLOAD: "No file uploaded",
   UNAUTHORIZED_ACCESS: "Unauthorized access",
   UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
@@ -80,6 +81,17 @@ const messageConstants = Object.freeze({
   MEDICATIONS_CONFIRMED_SUCCESS:
     "Selected medications have been added to your active list successfully.",
   MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",
+  VALIDATE_DOCUMENT_FORMAT: "Validate document format",
+  CHECK_DOCUMENT_IS_MEDICAL: "Checking whether the document is a medical document",
+  OCR_PAGE_OF_TOTAL_PAGE: (page = 0, totalPages = 0) => `OCR page ${page} of ${totalPages}`,
+  DOCUMENT_PROCESSING_COMPLETED_SUCCESSFULLY: "Document processing completed successfully",
+  DOCUMENT_PROCESSING_FAILED: "Document processing failed",
+  DOCUMENT_PROCESSING_CANCELLED: "Document processing cancelled",
+  UNKNOWN_DOCUMENT_STAGE: (stage) => `Unknown document stage: ${stage}`,
+
+  //SSE Emitter
+  SSE_STATS_FETCHED: "SSE stats fetched successfully",
+  QUEUE_FOR_EXTRACTION: "Queued for extraction",
 });
 
 module.exports = { messageConstants };

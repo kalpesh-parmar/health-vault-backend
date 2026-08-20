@@ -1,14 +1,15 @@
 const axios = require("axios");
 const { maskSensitiveData, truncatePayload } = require("../utils/apiLoggerUtil");
 
-const enabled = process.env.ENABLE_API_LOGS === "true";
+function attachLoggingInterceptors(instance = axios) {
+  const enabled = process.env.ENABLE_API_LOGS === "true";
+  if (!enabled) return instance;
 
-if (enabled) {
-  axios.interceptors.request.use(
+  instance.interceptors.request.use(
     (config) => {
       config.metadata = { startTime: Date.now() };
 
-      const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
+      const fullUrl = config.baseURL ? `${config.baseURL}${config.url || ""}` : config.url;
 
       const reqLog = {
         type: "OUTGOING_REQUEST",
@@ -41,12 +42,12 @@ if (enabled) {
     },
   );
 
-  axios.interceptors.response.use(
+  instance.interceptors.response.use(
     (response) => {
       const config = response.config || {};
       const startTime = config.metadata ? config.metadata.startTime : Date.now();
       const duration = Date.now() - startTime;
-      const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
+      const fullUrl = config.baseURL ? `${config.baseURL}${config.url || ""}` : config.url;
 
       const resLog = {
         type: "OUTGOING_RESPONSE",
@@ -65,7 +66,7 @@ if (enabled) {
       const config = error.config || {};
       const startTime = config.metadata ? config.metadata.startTime : Date.now();
       const duration = Date.now() - startTime;
-      const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
+      const fullUrl = config.baseURL ? `${config.baseURL}${config.url || ""}` : config.url;
 
       const errorLog = {
         type: "OUTGOING_RESPONSE_ERROR",
@@ -84,4 +85,12 @@ if (enabled) {
       return Promise.reject(error);
     },
   );
+
+  return instance;
 }
+
+attachLoggingInterceptors(axios);
+
+module.exports = {
+  attachLoggingInterceptors,
+};

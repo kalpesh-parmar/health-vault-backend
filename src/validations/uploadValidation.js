@@ -1,7 +1,9 @@
 const multer = require("multer");
 const { z, ZodError } = require("zod");
-const { ALLOWED_MIME_TYPES, MAX_FILE_SIZES } = require("../services/uploadFile.service");
 const { InvalidRequestException } = require("../exceptions/appError");
+const { errorConstants } = require("../constants/errorConstants");
+const { env } = require("../configs/env");
+const { MAX_FILE_SIZES, ALLOWED_MIME_TYPES } = require("../configs/fileConfig");
 
 const patientIdParamSchema = z.object({
   patientId: z
@@ -61,10 +63,9 @@ function profileUploadMulter(req, res, next) {
 }
 
 function documentUploadMulter(req, res, next) {
-  console.time("document upload multer: ");
   rawDocumentMulter(req, res, (err) => {
-    console.error("Error: document upload multer: ", err);
     if (err) {
+      console.error("Error: document upload multer: ", err);
       if (err.code === "LIMIT_FILE_SIZE") {
         return next(
           new InvalidRequestException(
@@ -73,11 +74,12 @@ function documentUploadMulter(req, res, next) {
         );
       }
       if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
-        return next(new InvalidRequestException("Maximum 5 document files allowed."));
+        return next(
+          new InvalidRequestException(errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED),
+        );
       }
       return next(new InvalidRequestException(err.message || "File upload error"));
     }
-    console.timeEnd("document upload multer: ");
     return next();
   });
 }
@@ -116,24 +118,16 @@ async function validateProfileUpload(req, _res, next) {
 }
 
 async function validateDocumentUpload(req, _res, next) {
-  console.log("document validate starting....");
   try {
-    try {
-      req.params = await patientIdParamSchema.parseAsync(req.params);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        throw new InvalidRequestException(error.issues[0]?.message || "Invalid patient ID");
-      }
-      throw error;
-    }
-
     const files = req.files;
     if (!files || !Array.isArray(files) || files.length === 0) {
       throw new InvalidRequestException("At least one document file is required.");
     }
 
-    if (files.length > 5) {
-      throw new InvalidRequestException("Maximum 5 document files allowed.");
+    if (files.length > env.maxFilesPerUpload) {
+      throw new InvalidRequestException(
+        errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED(env.maxFilesPerUpload),
+      );
     }
 
     for (const file of files) {
@@ -151,7 +145,6 @@ async function validateDocumentUpload(req, _res, next) {
         throw error;
       }
     }
-
     return next();
   } catch (error) {
     console.error("Error - Validate Document: ", error);
@@ -160,7 +153,6 @@ async function validateDocumentUpload(req, _res, next) {
 }
 
 module.exports = {
-  patientIdParamSchema,
   profileUploadFileSchema,
   documentUploadFileSchema,
   profileUploadMulter,

@@ -1,3 +1,5 @@
+const { env } = require("../configs/env");
+
 const errorConstants = Object.freeze({
   END_DATE_REQUIRED: "End date is required if not ongoing",
   NOT_NEGATIVE: "Cannot be negative",
@@ -106,6 +108,18 @@ const errorConstants = Object.freeze({
   QUANTITY_REQUIRED: "Quantity is required",
   START_DATE_PAST: "Start date cannot be in the past.",
   FUTURE_REMINDER_CANNOT_BE_COMPLETED: "Future remider cannot be completed",
+
+  //DOCUMENT UPLOAD ERROR
+  UNAUTHORIZED_ACCESS_TO_PATIENT_RESOURCE: "Unauthorized access to patient resource",
+  AT_LEAST_ONE_DOCUMENT_FILE_IS_REQUIRED: "At least one document file is required.",
+  FILE_KEY_IS_REQUIRED: "File key is required",
+  INVALID_DOCUMENT_TYPE: "Invalid document type",
+  UPLOADED_FILE_NOT_A_VALID_MEDICAL_DOCUMENT: "Uploaded file is not a valid medical document",
+  MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED: (maxFilesPerUpload = env.maxFilesPerUpload) =>
+    `Maximum ${maxFilesPerUpload} document files allowed.`,
+
+  // SSE Emitter Error
+  CHANNEL_KEY_IS_REQUIRED: "Channel Key is required",
 });
 
 module.exports = { errorConstants };

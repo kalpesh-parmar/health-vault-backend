@@ -1,20 +1,23 @@
-const axios = require("axios");
-const http = require("http");
-
-const { env } = require("../../../configs/env");
-
-const axiosInstance = axios.create({
-  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
-});
+const { createHttpClient } = require("../configs/http.config");
+const apiConfig = require("../configs/api.config");
+const { env } = require("../configs/env");
 
 class OllamaClient {
   constructor() {
-    this.baseUrl = env.ollamaUrl || "http://122.174.67.117:11434/";
+    this.client = createHttpClient({
+      baseURL: apiConfig.ollama.baseURL,
+      timeout: apiConfig.ollama.timeout,
+    });
+    this.endpoints = apiConfig.ollama.endpoints;
+  }
+
+  get baseUrl() {
+    return apiConfig.ollama.baseURL;
   }
 
   async listTags() {
     try {
-      const response = await axiosInstance.get(`${this.baseUrl}/api/tags`, {
+      const response = await this.client.get(this.endpoints.tags, {
         timeout: 5000,
       });
       const models = response.data?.models || [];
@@ -30,7 +33,7 @@ class OllamaClient {
     let attempt = 0;
     while (true) {
       try {
-        return await axiosInstance(requestConfig);
+        return await this.client(requestConfig);
       } catch (error) {
         attempt++;
         const isNetworkOrTimeout = !error.response || error.response.status >= 500;
@@ -93,7 +96,7 @@ class OllamaClient {
   }
 
   async chat(messages, model, options = {}) {
-    const url = `${this.baseUrl}/api/chat`;
+    const url = this.endpoints.chat;
     let numPredict = options.maxTokens ?? 1024;
     let attempt = 1;
     let response;
@@ -160,10 +163,6 @@ class OllamaClient {
             `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
           );
 
-        // Check retry conditions:
-        // - done_reason === "length"
-        // - message.content is empty
-        // - first attempt failed
         const contentIsEmpty = !message.content || !message.content.trim();
         if (doneReason === "length" && contentIsEmpty && attempt === 1) {
           // eslint-disable-next-line no-console
@@ -205,7 +204,7 @@ class OllamaClient {
   }
 
   async chatStream(messages, model, onChunk, options = {}) {
-    const url = `${this.baseUrl}/api/chat`;
+    const url = this.endpoints.chat;
     const payload = {
       model,
       messages,
@@ -304,7 +303,7 @@ class OllamaClient {
   }
 
   async generate(prompt, model, options = {}) {
-    const url = `${this.baseUrl}/api/generate`;
+    const url = this.endpoints.generate;
     const payload = {
       model,
       prompt,
@@ -355,13 +354,12 @@ class OllamaClient {
       console.error("[OllamaClient] Generate failed:", error.message);
       // eslint-disable-next-line no-console
       console.log("[Ollama error]:==", error.response);
-
       throw error;
     }
   }
 
   async embeddings(prompt, model) {
-    const url = `${this.baseUrl}/api/embeddings`;
+    const url = this.endpoints.embeddings;
     const payload = {
       model,
       prompt,

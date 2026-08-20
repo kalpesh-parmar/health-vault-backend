@@ -1,8 +1,8 @@
-const axios = require("axios");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { env } = require("../configs/env");
 const { UnauthorizedException, InvalidRequestException } = require("../exceptions/appError");
+const microsoftClient = require("../clients/microsoftClient");
 
 const microsoftJwksCache = {
   keys: null,
@@ -10,8 +10,7 @@ const microsoftJwksCache = {
 };
 
 async function fetchMicrosoftOpenIdConfig(tenant) {
-  const openIdConfigUrl = `https://login.microsoftonline.com/${tenant}/v2.0/.well-known/openid-configuration`;
-  const { data } = await axios.get(openIdConfigUrl, { timeout: 5000 });
+  const data = await microsoftClient.fetchOpenIdConfig(tenant);
   if (!data?.jwks_uri) {
     throw new Error("Microsoft OpenID configuration did not return jwks_uri");
   }
@@ -25,7 +24,7 @@ async function getMicrosoftJwks(tenant) {
   }
 
   const openIdConfig = await fetchMicrosoftOpenIdConfig(tenant);
-  const { data } = await axios.get(openIdConfig.jwks_uri, { timeout: 5000 });
+  const data = await microsoftClient.fetchJwks(openIdConfig.jwks_uri);
   microsoftJwksCache.keys = data.keys;
   microsoftJwksCache.expiresAt = now + 60 * 60 * 1000;
   return microsoftJwksCache.keys;
@@ -83,7 +82,7 @@ async function verifyToken(providerToken) {
   try {
     verified = jwt.verify(providerToken, publicKey, {
       audience: env.microsoftClientId,
-      issuer: `https://login.microsoftonline.com/${tenant}/v2.0`,
+      issuer: `${env.microsoftBaseUrl}/${tenant}/v2.0`,
       algorithms: ["RS256"],
     });
   } catch (error) {

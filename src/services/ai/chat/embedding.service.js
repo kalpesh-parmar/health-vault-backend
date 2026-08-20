@@ -1,7 +1,7 @@
 const { env } = require("../../../configs/env");
 const DocumentIntelligenceRepository = require("../../../repositories/documentIntelligenceRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const { ollamaClient } = require("../clients/ollamaClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
 const {
   normalizeVectorDimension,
   splitText,

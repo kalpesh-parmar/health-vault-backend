@@ -1,9 +1,8 @@
-const axios = require("axios");
 const crypto = require("crypto");
 const { GoogleGenAI } = require("@google/genai");
-
 const { env } = require("../../../configs/env");
 const { URL } = require("url");
+const aiModelClient = require("../../../clients/aiModelClient");
 
 const TRANSIENT_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -242,10 +241,11 @@ class ChatCompletionsClient {
       validateChatCompletionsPayload(payload);
       logAiHttpRequest({ engine: this.engine, url, headers, payload });
       try {
-        const { data } = await axios.post(url, payload, {
-          timeout: this.config.timeoutMs,
+        const data = await aiModelClient.postChatCompletions({
+          baseUrl: this.config.baseUrl,
+          payload,
           headers,
-          proxy: false,
+          timeoutMs: this.config.timeoutMs,
         });
         return data;
       } catch (error) {
@@ -261,15 +261,14 @@ class ChatCompletionsClient {
   }
 
   async validateModelAvailable() {
-    const url = `${this.config.baseUrl.replace(/\/$/, "")}/models`;
     const headers = {
       ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {}),
     };
     try {
-      const { data } = await axios.get(url, {
-        timeout: this.config.timeoutMs,
+      const data = await aiModelClient.getChatModels({
+        baseUrl: this.config.baseUrl,
         headers,
-        proxy: false,
+        timeoutMs: this.config.timeoutMs,
       });
       const dataList = Array.isArray(data?.data) ? data.data : [];
       const models = new Set(dataList.map((model) => model.id).filter(Boolean));
@@ -332,10 +331,11 @@ class AnthropicMessagesClient {
       };
       logAiHttpRequest({ engine: this.engine, url, headers, payload });
       try {
-        const { data } = await axios.post(url, payload, {
-          timeout: this.config.timeoutMs,
+        const data = await aiModelClient.postAnthropicMessages({
+          baseUrl: this.config.baseUrl,
+          payload,
           headers,
-          proxy: false,
+          timeoutMs: this.config.timeoutMs,
         });
         return data;
       } catch (error) {
@@ -374,7 +374,7 @@ function isAnthropicEndpoint(baseUrl) {
 function createAiClient(config = env) {
   const clientConfig = {
     apiKey: config.aiApiKey,
-    baseUrl: config.aiBaseUrl,
+    baseUrl: env.ollamaUrl,
     maxOutputTokens: config.aiMaxOutputTokens,
     model: config.aiModel,
     timeoutMs: config.aiTimeoutMs,

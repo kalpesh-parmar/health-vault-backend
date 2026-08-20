@@ -1,0 +1,465 @@
+openapi: 3.0.0
+info:
+  title: Server-Sent Events (SSE) API
+  version: 1.0.0
+  description: |
+    Real-time Server-Sent Events (SSE) streaming API for batch document processing,
+    OCR progress tracking, pipeline stage milestones, and connection statistics.
+
+components:
+  schemas:
+    SseConnectedEvent:
+      type: object
+      description: Initial handshake event emitted immediately upon SSE connection establishment.
+      properties:
+        type:
+          type: string
+          example: "stream.connected"
+        stage:
+          type: string
+          example: "CONNECTED"
+        batchId:
+          type: string
+          example: "bat_7a8b9c0d"
+        message:
+          type: string
+          example: "Batch SSE stream connected"
+
+    SseProgressEvent:
+      type: object
+      description: Real-time progress event emitted as documents advance through pipeline stages.
+      properties:
+        eventId:
+          type: integer
+          example: 1
+        processName:
+          type: string
+          example: "Document Processing"
+        fileKey:
+          type: string
+          example: "doc_9f8e7d6c"
+        fileName:
+          type: string
+          example: "blood_test_report.pdf"
+        batchId:
+          type: string
+          example: "bat_7a8b9c0d"
+        patientId:
+          type: string
+          example: "11111111-2222-3333-4444-555555555555"
+        stage:
+          type: string
+          enum:
+            - QUEUED
+            - VALIDATING
+            - UPLOADING
+            - OCR_RUNNING
+            - PARSING
+            - FIELD_EXTRACTION
+            - ANALYZING
+            - SUMMARIZING
+            - GRAPH_EXTRACTION
+            - PERSISTING
+            - CHUNKING
+            - EMBEDDING
+            - COMPLETED
+            - FAILED
+            - CANCELLED
+          example: "OCR_RUNNING"
+        stageStatus:
+          type: string
+          enum:
+            - QUEUED
+            - STARTED
+            - IN_PROGRESS
+            - COMPLETED
+            - FAILED
+            - CANCELLED
+          example: "IN_PROGRESS"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 15
+        percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 15
+        status:
+          type: string
+          enum:
+            - SUCCESS
+            - FAILED
+          example: "SUCCESS"
+        message:
+          type: string
+          nullable: true
+          example: "Extracting document"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-08-19T11:54:25.000Z"
+        elapsedMs:
+          type: integer
+          example: 1250
+        extra:
+          type: object
+          description: Optional contextual metadata such as page number or extraction metrics.
+          properties:
+            page:
+              type: integer
+              example: 1
+            totalPages:
+              type: integer
+              example: 3
+
+    SseDocumentCompletedEvent:
+      type: object
+      description: Terminal completion event emitted when an individual document finishes processing.
+      properties:
+        eventId:
+          type: integer
+          example: 8
+        type:
+          type: string
+          example: "document.completed"
+        processName:
+          type: string
+          example: "Document Processing"
+        fileKey:
+          type: string
+          example: "doc_9f8e7d6c"
+        fileName:
+          type: string
+          example: "blood_test_report.pdf"
+        batchId:
+          type: string
+          example: "bat_7a8b9c0d"
+        patientId:
+          type: string
+          example: "11111111-2222-3333-4444-555555555555"
+        stage:
+          type: string
+          example: "COMPLETED"
+        stageStatus:
+          type: string
+          example: "COMPLETED"
+        progress:
+          type: integer
+          example: 100
+        percentage:
+          type: integer
+          example: 100
+        status:
+          type: string
+          example: "SUCCESS"
+        message:
+          type: string
+          example: "Document processing completed successfully"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-08-19T11:54:30.000Z"
+        elapsedMs:
+          type: integer
+          example: 6200
+
+    SseDocumentFailedEvent:
+      type: object
+      description: Terminal failure event emitted when a document validation or pipeline stage fails.
+      properties:
+        eventId:
+          type: integer
+          example: 3
+        type:
+          type: string
+          example: "document.failed"
+        processName:
+          type: string
+          example: "Document Processing"
+        fileKey:
+          type: string
+          example: "doc_9f8e7d6c"
+        fileName:
+          type: string
+          example: "non_medical_bill.pdf"
+        batchId:
+          type: string
+          example: "bat_7a8b9c0d"
+        patientId:
+          type: string
+          example: "11111111-2222-3333-4444-555555555555"
+        stage:
+          type: string
+          example: "VALIDATING"
+        stageStatus:
+          type: string
+          example: "FAILED"
+        progress:
+          type: integer
+          example: 2
+        percentage:
+          type: integer
+          example: 2
+        status:
+          type: string
+          example: "FAILED"
+        message:
+          type: string
+          example: "Uploaded file is not a valid medical document"
+        errorCode:
+          type: string
+          example: "NON_MEDICAL_DOCUMENT"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-08-19T11:54:26.000Z"
+        elapsedMs:
+          type: integer
+          example: 850
+
+    SseBatchCompletedEvent:
+      type: object
+      description: Final batch-level terminal event emitted when all documents in the batch reach a terminal state.
+      properties:
+        eventId:
+          type: integer
+          example: 12
+        type:
+          type: string
+          example: "batch.completed"
+        stage:
+          type: string
+          example: "COMPLETED"
+        batchId:
+          type: string
+          example: "bat_7a8b9c0d"
+        total:
+          type: integer
+          description: Total number of documents registered in the batch.
+          example: 2
+        completed:
+          type: integer
+          description: Number of documents that finished processing.
+          example: 2
+        failed:
+          type: integer
+          description: Number of failed documents in the batch.
+          example: 0
+        pending:
+          type: array
+          items:
+            type: string
+          description: List of pending fileKeys in the batch.
+          example: []
+        isComplete:
+          type: boolean
+          description: Flag indicating whether all documents in the batch are complete.
+          example: true
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-08-19T11:54:32.000Z"
+
+    SseStatsData:
+      type: object
+      description: Statistics regarding active SSE channels, batches, and subscriber connections.
+      properties:
+        channels:
+          type: integer
+          description: Current number of active in-memory channels.
+          example: 4
+        batches:
+          type: integer
+          description: Number of active batch channels registered.
+          example: 2
+        subscribers:
+          type: integer
+          description: Total count of connected SSE subscribers across all channels.
+          example: 3
+        adapterEnabled:
+          type: boolean
+          description: Whether a distributed multi-instance pub/sub adapter is configured.
+          example: false
+
+    SseStatsResponse:
+      type: object
+      properties:
+        data:
+          $ref: "#/components/schemas/SseStatsData"
+        status:
+          type: object
+          properties:
+            description:
+              type: string
+              example: "SSE stats fetched successfully"
+            status:
+              type: string
+              example: "SUCCESS"
+            statusCode:
+              type: integer
+              example: 200
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        errorCode:
+          type: string
+          example: "INTERNAL_SERVER_ERROR"
+        message:
+          type: string
+          example: "An unexpected error occurred"
+        details:
+          type: object
+          nullable: true
+          example: null
+
+paths:
+  /sse/{fileKey}/stream:
+    get:
+      tags:
+        - SSE
+      summary: Establish individual file-level SSE stream for real-time document progress
+      description: |
+        Establishes a dedicated Server-Sent Events (SSE) HTTP connection (`text/event-stream`)
+        for a single document identified by `fileKey`. Receives exclusively progress, completed,
+        or failed events for this document with zero cross-talk.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: fileKey
+          required: true
+          schema:
+            type: string
+          description: Unique logical document key (e.g. `doc_9f8e7d6c`)
+          example: "doc_9f8e7d6c"
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema:
+            type: string
+          description: ID of the last received SSE event for replay on reconnection
+          example: "2"
+        - in: query
+          name: lastEventId
+          required: false
+          schema:
+            type: string
+          description: Alternative query parameter to resume stream from a specific event ID
+          example: "2"
+      responses:
+        "200":
+          description: |
+            SSE connection established. Emits continuous event frames for this individual document:
+            ```text
+            id: 1
+            event: stream.connected
+            data: {"type":"stream.connected","batchId":"bat_7a8b9c0d","fileKey":"doc_9f8e7d6c","stage":"CONNECTED","stageStatus":"CONNECTED","progress":0,"percentage":0,"message":"File SSE stream connected"}
+
+            id: 2
+            event: progress
+            data: {"eventId":2,"type":"progress","fileKey":"doc_9f8e7d6c","batchId":"bat_7a8b9c0d","stage":"OCR_RUNNING","stageStatus":"IN_PROGRESS","progress":15,"percentage":15,"status":"SUCCESS","message":"Extracting document"}
+            ```
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: "text/event-stream; charset=utf-8"
+            Cache-Control:
+              schema:
+                type: string
+                example: "no-cache, no-transform"
+            Connection:
+              schema:
+                type: string
+                example: "keep-alive"
+            X-Accel-Buffering:
+              schema:
+                type: string
+                example: "no"
+          content:
+            text/event-stream:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SseConnectedEvent"
+                  - $ref: "#/components/schemas/SseProgressEvent"
+                  - $ref: "#/components/schemas/SseDocumentCompletedEvent"
+                  - $ref: "#/components/schemas/SseDocumentFailedEvent"
+        "401":
+          description: Unauthorized - missing or invalid JWT session token
+        "403":
+          description: Forbidden - authenticated user does not own this document
+        "404":
+          description: Document not found or stream expired
+
+  /sse/batches/{batchId}/stream:
+    get:
+      tags:
+        - SSE
+      summary: Establish SSE stream for batch processing updates
+      description: |
+        Establishes a persistent Server-Sent Events (SSE) HTTP connection (`text/event-stream`)
+        to stream real-time progress and status updates for all documents in a specific upload batch.
+      parameters:
+        - in: path
+          name: batchId
+          required: true
+          schema:
+            type: string
+          description: Unique batch identifier (e.g. `bat_7a8b9c0d`)
+          example: "bat_7a8b9c0d"
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema:
+            type: string
+          description: ID of the last received SSE event for replay on reconnection
+          example: "4"
+        - in: query
+          name: lastEventId
+          required: false
+          schema:
+            type: string
+          description: Alternative query parameter to resume stream from a specific event ID
+          example: "4"
+      responses:
+        "200":
+          description: SSE connection established. Emits continuous event frames in `text/event-stream` format.
+          content:
+            text/event-stream:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SseConnectedEvent"
+                  - $ref: "#/components/schemas/SseProgressEvent"
+                  - $ref: "#/components/schemas/SseDocumentCompletedEvent"
+                  - $ref: "#/components/schemas/SseDocumentFailedEvent"
+                  - $ref: "#/components/schemas/SseBatchCompletedEvent"
+        "400":
+          description: Invalid or missing batchId
+        "500":
+          description: Internal server error
+
+  /sse/stats:
+    get:
+      tags:
+        - SSE
+      summary: Fetch SSE connection and batch processing statistics
+      description: Returns active SSE metrics including total active channels, registered batches, subscriber count, and pub/sub adapter status.
+      responses:
+        "200":
+          description: SSE statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SseStatsResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

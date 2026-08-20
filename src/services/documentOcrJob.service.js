@@ -465,15 +465,10 @@ class DocumentOcrJobService {
             ]);
             summaryEnglish = sumEng;
             summaryPreferredLanguage = sumPref;
-          } else if (!summaryPreferredLanguage) {
             summaryPreferredLanguage = await ocrService.generateSummary(
               rawTextToSummarize,
               preferredLanguage,
             );
-            // eslint-disable-next-line no-console
-            console.log("[SC]>>>> pref summary", summaryPreferredLanguage);
-            // eslint-disable-next-line no-console
-            console.log("[SC]>>>>>language", preferredLanguage);
           }
         }
       }
@@ -518,8 +513,10 @@ class DocumentOcrJobService {
       const analyzedDocumentType = normalizeDocumentType(
         ocrResponse?.documentType || structured?.documentType || structured?.reportType,
       );
+
       // eslint-disable-next-line no-console
       console.time("[OCR]: updateOcrStatusByFileKey");
+
       const updatedDoc = await documentRepository
         .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
           documentType: analyzedDocumentType,
@@ -535,8 +532,10 @@ class DocumentOcrJobService {
           });
           return null;
         });
+
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: updateOcrStatusByFileKey");
+
       ocrProgressBus.publish(
         fileKey,
         buildStageEvent(STAGES.COMPLETED, {
@@ -550,6 +549,7 @@ class DocumentOcrJobService {
         }),
       );
       ocrProgressBus.complete(fileKey);
+
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: starting process");
 

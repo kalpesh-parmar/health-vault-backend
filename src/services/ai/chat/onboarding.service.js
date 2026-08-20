@@ -1,7 +1,5 @@
 /* eslint-disable no-console */
-// const fs = require("fs");
-// const path = require("path");
-const { ollamaClient } = require("../clients/ollamaClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
 const { env } = require("../../../configs/env");
 // const { ONBOARDING_SYSTEM_PROMPT } = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");

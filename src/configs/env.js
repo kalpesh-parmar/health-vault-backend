@@ -14,9 +14,9 @@ function booleanFromEnv(key, defaultValue = false) {
   return process.env[key] === "true";
 }
 
-function stringFromEnv(key) {
+function stringFromEnv(key, defaultValue = undefined) {
   const value = process.env[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  return typeof value === "string" && value.trim() ? value.trim() : defaultValue;
 }
 
 function hasAwsCredentials() {
@@ -99,6 +99,7 @@ const env = Object.freeze({
   // Storage Buckets & Providers
   storageProvider: resolveStorageProvider(),
   awsBucketName: stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
+  maxFilesPerUpload: numberFromEnv("MAX_FILES_PER_UPLOAD", 5),
 
   // AWS S3
   awsAccessKeyId: stringFromEnv("AWS_ACCESS_KEY_ID"),
@@ -116,16 +117,17 @@ const env = Object.freeze({
 
   // AI Settings (Local & Google Cloud / External)
   aiApiKey: stringFromEnv("AI_API_KEY"),
-  aiBaseUrl: stringFromEnv("AI_BASE_URL"),
   aiModel: stringFromEnv("AI_MODEL"),
-  aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:8000",
+  aiServiceUrl: stringFromEnv("AI_SERVICE_URL", "http://localhost:8000"),
   useExternalOcrService: booleanFromEnv("USE_EXTERNAL_AI_SERVICE", false),
   aiTimeoutMs: numberFromEnv("AI_TIMEOUT_MS", 90 * 1000),
   aiMaxRetries: numberFromEnv("AI_MAX_RETRIES", 2),
   aiPageConcurrency: numberFromEnv("AI_PAGE_CONCURRENCY", 4),
   aiMaxOutputTokens: numberFromEnv("AI_MAX_OUTPUT_TOKENS", 8192),
-  aiMaxInlineBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 150 * 1024 * 1024),
-  ocrMaxFileBytes: numberFromEnv("AI_MAX_INLINE_BYTES", 150 * 1024 * 1024),
+
+  ocrMaxFileBytes: numberFromEnv("OCR_MAX_FILE_BYTES", 150 * 1024 * 1024),
+  ocrConcurrency: numberFromEnv("OCR_BATCH_CONCURRENCY", 3),
+
   aiMinTextChars: numberFromEnv("AI_MIN_TEXT_CHARS", 8),
   aiMinConfidence: Number.isFinite(Number(process.env.AI_MIN_CONFIDENCE))
     ? Number(process.env.AI_MIN_CONFIDENCE)
@@ -135,7 +137,7 @@ const env = Object.freeze({
   apiKey: stringFromEnv("CHATBOT_API_KEY"),
   chatbotAPIKey: stringFromEnv("CHATBOT_API_KEY"),
 
-  ollamaUrl: stringFromEnv("AI_BASE_URL"),
+  ollamaUrl: stringFromEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
   ocrModel: process.env.OCR_MODEL,
   chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
   // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
@@ -152,20 +154,33 @@ const env = Object.freeze({
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
 
   //client Ids based on Provider
+  microsoftBaseUrl: stringFromEnv("MICROSOFT_BASE_URL", "https://login.microsoftonline.com"),
+  facebookGraphBaseUrl: stringFromEnv("FACEBOOK_GRAPH_BASE_URL", "https://graph.facebook.com"),
   facebookAppId: stringFromEnv("FACEBOOK_APP_ID"),
   facebookAppSecret: stringFromEnv("FACEBOOK_APP_SECRET"),
   googleClientId: stringFromEnv("GOOGLE_CLIENT_ID"),
   googleWebClientId: stringFromEnv("GOOGLE_WEB_CLIENT_ID"),
+  medgemmaModel: stringFromEnv("MEDGEMMA_MODEL") || "medgemma:4b",
+  medgemmaEnabled: booleanFromEnv("MEDGEMMA_ENABLED", true),
+  medgemmaTimeoutMs: numberFromEnv("MEDGEMMA_TIMEOUT_MS", 600000),
+  medgemmaMinConfidence: Number.isFinite(Number(process.env.MEDGEMMA_MIN_CONFIDENCE))
+    ? Number(process.env.MEDGEMMA_MIN_CONFIDENCE)
+    : 0.6,
+  medgemmaMaxPages: numberFromEnv("MEDGEMMA_MAX_PAGES", 2),
+  draftDocumentTtlHours: numberFromEnv("DRAFT_DOCUMENT_TTL_HOURS", 24),
+
   microsoftClientId: stringFromEnv("MICROSOFT_CLIENT_ID"),
   microsoftTenantId: stringFromEnv("MICROSOFT_TENANT_ID") || "common",
   enableDummyAuth: booleanFromEnv("ENABLE_DUMMY_AUTH", true),
 });
 
+const { assertNonCloudModel } = require("../utils/modelGuard");
+
 function validateEnv(config) {
   const missing = [];
 
   if (!config.aiModel) missing.push("AI_MODEL");
-  if (!config.aiBaseUrl) missing.push("AI_BASE_URL");
+  if (!config.ollamaUrl) missing.push("OLLAMA_BASE_URL");
   if (!config.databaseUrl) missing.push("DATABASE_URL");
   if (!config.jwtSecret) missing.push("JWT_SECRET");
 
@@ -192,6 +207,12 @@ function validateEnv(config) {
       "[EnvValidation] AI_EMBEDDING_MODEL is missing in environment. Using default 'bge-m3:latest'.",
     );
   }
+
+  // PHI Model Guard: Assert non-cloud models for privacy
+  assertNonCloudModel(config.aiModel, "AI_MODEL");
+  assertNonCloudModel(config.chatModel, "CHAT_MODEL");
+  assertNonCloudModel(config.embeddingModel, "AI_EMBEDDING_MODEL");
+  assertNonCloudModel(config.medgemmaModel, "MEDGEMMA_MODEL");
 
   if (missing.length) {
     // eslint-disable-next-line no-console

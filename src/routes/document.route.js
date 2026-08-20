@@ -6,6 +6,7 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
 // const { idParamSchema } = require("../validations/commonValidation");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
+const { validateDocumentUpload, documentUploadMulter } = require("../validations");
 
 const router = express.Router();
 
@@ -45,5 +46,13 @@ router.put("/update/:id", verifyToken, documentController.updateDocument);
 // Legacy filter endpoints kept for backwards compatibility.
 router.post("/list", verifyToken, documentController.listDocuments);
 router.post("/list-paginated", verifyToken, documentController.listDocumentsPaginated);
+
+router.post(
+  "/upload",
+  verifyToken,
+  documentUploadMulter,
+  validateDocumentUpload,
+  documentController.uploadDocuments,
+);
 
 module.exports = router;
