@@ -427,25 +427,6 @@ async function executeAddDocumentAction({
     }
   }
 
-  let activeSessionId = sessionId;
-  if (!activeSessionId && isOnboardingCompleted) {
-    const newSession = await chatService.createSession({
-      userId,
-      title: docResult?.document?.fileName || "Document Chat",
-    });
-    activeSessionId = newSession?.id || null;
-  }
-
-  if (activeSessionId) {
-    await chatSessionRepository.appendMessage({
-      sessionId: activeSessionId,
-      userId,
-      role: "assistant",
-      content: replyText,
-      metadata: { actionType: "ADD_DOCUMENT", documentId: docResult?.document?.id },
-    });
-  }
-
   const isPostOnboardingReview = isOnboardingCompleted && extractedMedicines.length > 0;
   const returnedActionType = isPostOnboardingReview ? "REVIEW_MEDICINES_LIST" : "ADD_DOCUMENT";
   const suggestedAction = isPostOnboardingReview
@@ -469,6 +450,33 @@ async function executeAddDocumentAction({
           },
         ]
       : [];
+
+  let activeSessionId = sessionId;
+  if (!activeSessionId && isOnboardingCompleted) {
+    const newSession = await chatService.createSession({
+      userId,
+      title: docResult?.document?.fileName || "Document Chat",
+    });
+    activeSessionId = newSession?.id || null;
+  }
+
+  if (activeSessionId) {
+    await chatSessionRepository.appendMessage({
+      sessionId: activeSessionId,
+      userId,
+      role: "assistant",
+      content: replyText,
+      metadata: {
+        mode: "ACTION",
+        actionType: returnedActionType,
+        suggestedAction,
+        options,
+        medicines: extractedMedicines,
+        document: docResult?.document,
+        documentId: docResult?.document?.id,
+      },
+    });
+  }
 
   return buildUnifiedResponse({
     mode: "ACTION",

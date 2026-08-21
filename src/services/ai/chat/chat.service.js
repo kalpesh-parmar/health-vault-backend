@@ -431,7 +431,29 @@ ${chunksContent}`;
         messageConstants.SESSION_FETCHED ? "Chat session not found" : "Not found",
       );
     }
-    return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
+    const result = await chatSessionRepository.listMessages({
+      cursor,
+      direction,
+      limit,
+      sessionId,
+      userId,
+    });
+
+    const items = (result.items || []).map((msg) => {
+      const meta = msg.metadata || {};
+      return {
+        ...msg,
+        actionType: meta.actionType || msg.actionType || null,
+        options: meta.options || msg.options || [],
+        medicines: meta.medicines || msg.medicines || [],
+        document: meta.document || msg.document || null,
+        suggestedAction: meta.suggestedAction || msg.suggestedAction || null,
+        mode: meta.mode || msg.mode || null,
+        medication: meta.medication || msg.medication || null,
+      };
+    });
+
+    return { ...result, items };
   }
 
   async sendMessage({

@@ -437,6 +437,9 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.type && !input.medicationType) {
     input.medicationType = String(input.type).toUpperCase();
   }
+  if (input.instructions && !input.notes) {
+    input.notes = String(input.instructions).slice(0, 1000);
+  }
   if (input.dose && input.dosePerIntake === undefined) {
     input.dosePerIntake =
       typeof input.dose === "object"
@@ -467,24 +470,31 @@ function normalizeCreateMedicationInput(payload = {}) {
     input.foodFrequency = "AFTER_FOOD";
   }
 
-  // Strip non-schema properties so Zod .strict() validation passes
-  delete input.name;
-  delete input.type;
-  delete input.dose;
-  delete input.client_med_id;
-  delete input.clientMedId;
-  delete input.resolution;
-  delete input.selected;
-  delete input.replaceMedicationId;
-  delete input.targetMedicationId;
-  delete input.isSaved;
-  delete input.dbId;
-  delete input.source;
-  delete input.subtitle;
-  delete input.duration;
-  delete input.needsReview;
+  // Whitelist ONLY allowed schema keys so Zod .strict() validation passes without unrecognized key errors
+  const allowedKeys = [
+    "medicationName",
+    "medicationType",
+    "prescribedBy",
+    "dosePerIntake",
+    "frequency",
+    "medicationSchedule",
+    "foodFrequency",
+    "startDate",
+    "endDate",
+    "ongoing",
+    "totalQuantity",
+    "reminderBeforeMinutes",
+    "notes",
+  ];
 
-  return input;
+  const sanitized = {};
+  for (const key of allowedKeys) {
+    if (input[key] !== undefined) {
+      sanitized[key] = input[key];
+    }
+  }
+
+  return sanitized;
 }
 
 module.exports = {
