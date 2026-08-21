@@ -17,8 +17,8 @@ class ObjectStorageService {
     }
   }
 
-  async uploadFile(file, folder) {
-    return this.provider.uploadFile(file, folder);
+  async uploadFile(file, folder, patientId, options = {}) {
+    return this.provider.uploadFile(file, folder, patientId, options);
   }
 
   async uploadBuffer({ body, contentType, key }) {

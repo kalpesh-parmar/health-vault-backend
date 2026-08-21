@@ -67,6 +67,17 @@ async function uploadDocuments(req, res) {
   return successResponse(res, result, messageConstants.FILE_UPLOADED, StatusCodes.ACCEPTED);
 }
 
+async function retryDocument(req, res) {
+  const fileKey = req?.query?.fileKey;
+  const file = req.files?.[0] || req.file || null;
+  const result = await documentService.retryDocument({
+    fileKey,
+    userId: req.auth.userId,
+    file,
+  });
+  return successResponse(res, result, "Document retry initiated", StatusCodes.ACCEPTED);
+}
+
 module.exports = {
   deleteDocument,
   deleteFile,
@@ -75,6 +86,7 @@ module.exports = {
   getDocumentSummaryList,
   getDownloadFile,
   listDocuments,
+  retryDocument,
   updateDocument,
   listDocumentsPaginated,
   uploadDocuments,

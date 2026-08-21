@@ -68,7 +68,6 @@ async function refillMedication(req, res) {
 // check duplicate medication
 async function checkDuplicateMedication(req, res) {
   const result = await medicationService.checkDuplicateMedication(req.auth.userId, req.body);
-
   return successResponse(res, result, messageConstants.MEDICATION_DUPLICATE_CHECKED);
 }
 

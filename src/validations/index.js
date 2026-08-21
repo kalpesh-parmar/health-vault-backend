@@ -6,6 +6,7 @@ const {
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
   listDocumentsQuerySchema,
+  retryDocumentSchema,
 } = require("./documentValidation");
 const { listRefillQuerySchema } = require("./refillValidation");
 const {
@@ -114,4 +115,5 @@ module.exports = {
   jobIdParamSchema,
   validateJobIdParam,
   validateBatchJobIdsBody,
+  retryDocumentSchema,
 };

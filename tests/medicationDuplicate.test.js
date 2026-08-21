@@ -101,10 +101,10 @@ describe("MedicationService - checkDuplicateMedication", () => {
       const results = await medicationService.checkDuplicateMedicationsBatch("user-1", batchInput);
 
       expect(results).toHaveLength(2);
-      expect(results[0].duplicateInfo.hasDuplicate).toBe(true);
-      expect(results[0].duplicateInfo.conflictType).toBe("EXACT_DUPLICATE");
-      expect(results[0].duplicateInfo.matchedMedication.id).toBe("med-1");
-      expect(results[1].duplicateInfo.hasDuplicate).toBe(false);
+      expect(results[0]?.duplicateInfo?.hasDuplicate).toBe(true);
+      expect(results[0]?.duplicateInfo?.conflictType).toBe("EXACT_DUPLICATE");
+      expect(results[0]?.duplicateInfo?.matchedMedication?.id).toBe("med-1");
+      expect(results[1]?.duplicateInfo?.hasDuplicate).toBe(false);
     });
 
     test("should detect in-batch duplicates within extracted list", async () => {

@@ -188,11 +188,23 @@ class SseConnectionService {
       percentage: pct,
       message,
       errorCode: payload.errorCode || "PIPELINE_FAILED",
+      retryable: payload.retryable !== undefined ? payload.retryable : true,
+      requiresReupload: payload.requiresReupload !== undefined ? payload.requiresReupload : false,
+      failedStage: payload.failedStage || payload.stage,
+      resumeStage: payload.resumeStage || payload.stage,
       ...payload,
     });
 
     this.closeChannel(channelKey);
     return event;
+  }
+
+  reopen(channelKey) {
+    const channel = this.channels.get(channelKey);
+    if (!channel) return this.getOrCreate(channelKey, false);
+    channel.terminal = false;
+    channel.expiresAt = Date.now() + config.streamTtlMs;
+    return channel;
   }
 
   completeBatch(batchId, payload = {}) {
@@ -227,6 +239,30 @@ class SseConnectionService {
       batch.completed = true;
       this.completeBatch(batchId);
     }
+  }
+
+  unmarkDocumentDone(batchId, fileKey) {
+    const batch = this.batches.get(batchId);
+    if (!batch) return;
+
+    batch.done.delete(fileKey);
+    batch.completed = false;
+    batch.terminalAt = null;
+
+    const key = batchChannelKey(batchId);
+    const channel = this.channels.get(key);
+    if (channel) {
+      channel.terminal = false;
+      channel.expiresAt = Date.now() + config.streamTtlMs;
+    }
+
+    this.emit(key, false, {
+      type: "document.retrying",
+      stage: StageType.STARTED,
+      batchId,
+      fileKey,
+      ...this.getBatchProgress(batchId),
+    });
   }
 
   closeChannel(channelKey) {

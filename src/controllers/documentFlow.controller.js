@@ -94,31 +94,93 @@ async function runOcr(req, res) {
   return successResponse(res, responseData, "OCR jobs accepted", StatusCodes.ACCEPTED);
 }
 
+function formatJobStatusPayload(job) {
+  if (!job) return null;
+  const isFailed = job.status === "FAILED" || job.status === "REJECTED";
+  const isCompleted = job.status === "COMPLETED";
+  const stageStatus =
+    job.stageStatus || (isFailed ? "FAILED" : isCompleted ? "COMPLETED" : "IN_PROGRESS");
+  const percentage = job.percentage ?? (isCompleted ? 100 : 0);
+  const status = isFailed ? "FAILED" : "SUCCESS";
+  const message =
+    job.message ||
+    (isFailed
+      ? job.error || "Document processing failed"
+      : isCompleted
+        ? "Processing completed"
+        : `Processing ${job.stage || "document"}...`);
+
+  return {
+    processName: "document_processing",
+    fileKey: job.fileKey,
+    fileName: job.metadata?.originalName || job.fileKey.split("/").pop(),
+    batchId: job.metadata?.batchId || null,
+    patientId: job.userId,
+    stage: job.stage || (isCompleted ? "COMPLETED" : "QUEUED"),
+    stageStatus,
+    progress: percentage,
+    percentage,
+    status,
+    message,
+    attemptCount: job.attemptCount || 0,
+    completedStages: job.completedStages || [],
+    retryable:
+      job.retryable !== undefined ? job.retryable : isFailed ? job.status !== "REJECTED" : true,
+    requiresReupload: job.requiresReupload || false,
+    failedStage: isFailed ? job.stage || null : null,
+    resumeStage: job.stage || "QUEUED",
+    checkpointData: job.checkpointData || {},
+    rawOcrData: job.rawOcrData || null,
+    extractedStructuredData: job.extractedStructuredData || null,
+    graphs: job.graphs || [],
+    summary:
+      job.extractedStructuredData?.summaryInPreferredLanguage ||
+      job.extractedStructuredData?.summaryEnglish ||
+      "",
+    error: job.error || null,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt,
+    lastHeartbeatAt: job.lastHeartbeatAt,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
 /**
  * Polling fallback for clients that lose the SSE connection. Returns the
  * latest job state including the final extraction payload once
  * status === COMPLETED.
  */
 async function runOcrStatus(req, res) {
-  const { fileKey } = await validateSchema(fileKeySchema, req.params);
-  const job = await documentOcrJobService.getStatus({ fileKey, userId: req.auth.userId });
-  if (!job) throw new NotFoundException("OCR job not found for this fileKey");
-
-  if (job.status === "FAILED") {
-    return res.status(StatusCodes.OK).json({
-      status: "FAILED",
-      error: job.error || "AI response format is invalid.",
-    });
+  const fileKey = req.params?.fileKey || req.query?.fileKey;
+  if (!fileKey && req.query?.fileKeys) {
+    const rawKeys = Array.isArray(req.query.fileKeys)
+      ? req.query.fileKeys
+      : String(req.query.fileKeys)
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean);
+    const jobs = await Promise.all(
+      rawKeys.map(async (key) => {
+        const job = await documentOcrJobService.getStatus({
+          fileKey: key,
+          userId: req.auth.userId,
+        });
+        return job ? formatJobStatusPayload(job) : { fileKey: key, status: "NOT_FOUND" };
+      }),
+    );
+    return successResponse(res, jobs, "Document batch statuses fetched");
   }
 
-  if (job.extractedStructuredData) {
-    job.summary =
-      job.extractedStructuredData.summaryInPreferredLanguage ||
-      job.extractedStructuredData.summaryEnglish ||
-      "";
-  }
+  const { fileKey: validatedKey } = await validateSchema(fileKeySchema, { fileKey });
+  const job = await documentOcrJobService.getStatus({
+    fileKey: validatedKey,
+    userId: req.auth.userId,
+  });
+  if (!job) throw new NotFoundException("Document job not found for this fileKey");
 
-  return successResponse(res, job, "OCR job status fetched");
+  const formatted = formatJobStatusPayload(job);
+  return successResponse(res, formatted, "Document job status fetched");
 }
 
 /**
@@ -133,14 +195,7 @@ async function runOcrStatusBatch(req, res) {
       try {
         const job = await documentOcrJobService.getStatus({ fileKey, userId });
         if (!job) return { fileKey, status: "NOT_FOUND" };
-        if (job.status === "FAILED") {
-          return {
-            fileKey,
-            status: "FAILED",
-            error: job.error || "AI response format is invalid.",
-          };
-        }
-        return job;
+        return formatJobStatusPayload(job);
       } catch (err) {
         return { fileKey, status: "ERROR", error: err.message };
       }

@@ -1,4 +1,4 @@
-const { and, eq, inArray, lt } = require("drizzle-orm");
+const { and, eq, inArray, lt, ne, sql } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
@@ -187,6 +187,69 @@ class DocumentProcessingJobRepository {
       .where(
         and(inArray(documentProcessingJob.id, jobIds), eq(documentProcessingJob.userId, userId)),
       );
+  }
+
+  async claimJobForRetry(fileKey, userId) {
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        status: "RUNNING",
+        stageStatus: "IN_PROGRESS",
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        attemptCount: sql`${documentProcessingJob.attemptCount} + 1`,
+        error: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documentProcessingJob.fileKey, fileKey),
+          eq(documentProcessingJob.userId, userId),
+          ne(documentProcessingJob.status, "RUNNING"),
+        ),
+      )
+      .returning();
+    return row || null;
+  }
+
+  async checkpointStage(jobId, patch = {}) {
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        ...patch,
+        lastHeartbeatAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(documentProcessingJob.id, jobId))
+      .returning();
+    return row || null;
+  }
+
+  async findStalledRunningJobs(cutoffDate) {
+    return db
+      .select()
+      .from(documentProcessingJob)
+      .where(
+        and(
+          eq(documentProcessingJob.status, "RUNNING"),
+          lt(documentProcessingJob.lastHeartbeatAt, cutoffDate),
+        ),
+      );
+  }
+
+  async reconcileRunningJobsOnBoot() {
+    return db
+      .update(documentProcessingJob)
+      .set({
+        status: "FAILED",
+        stageStatus: "FAILED",
+        retryable: true,
+        error: "Server restarted during document processing",
+        requiresReupload: sql`CASE WHEN ${documentProcessingJob.stage} IN ('QUEUED', 'VALIDATING', 'UPLOADING') THEN true ELSE false END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(documentProcessingJob.status, "RUNNING"))
+      .returning();
   }
 
   async sweepExpired() {

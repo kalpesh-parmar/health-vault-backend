@@ -144,16 +144,51 @@ class ProgressEmitter {
         ? error
         : error?.message || messageConstants.DOCUMENT_PROCESSING_FAILED;
 
+    const errorCode =
+      extra.errorCode ||
+      error?.errorCode ||
+      (typeof error === "string" ? undefined : error?.code) ||
+      "PIPELINE_FAILED";
+    const retryable =
+      extra.retryable !== undefined
+        ? extra.retryable
+        : error?.retryable !== undefined
+          ? error.retryable
+          : true;
+    const requiresReupload = extra.requiresReupload !== undefined ? extra.requiresReupload : false;
+    const failedStage = extra.failedStage || stage;
+    const resumeStage = extra.resumeStage || stage;
+
     const event = this._base({
       stage,
       stageStatus: StageType.FAILED,
       percentage: this._lastPercentage,
       status: ProcessStatus.FAILED,
       message,
-      extra,
+      errorCode,
+      retryable,
+      requiresReupload,
+      failedStage,
+      resumeStage,
+      extra: {
+        errorCode,
+        retryable,
+        requiresReupload,
+        failedStage,
+        resumeStage,
+        ...extra,
+      },
     });
 
-    sseConnection.fail(this.fileKey, error, event);
+    sseConnection.fail(this.fileKey, error, {
+      ...event,
+      errorCode,
+      retryable,
+      requiresReupload,
+      failedStage,
+      resumeStage,
+      ...extra,
+    });
   }
 
   // Marks the document process as cancelled.

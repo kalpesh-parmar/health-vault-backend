@@ -26,6 +26,7 @@ const pool = new Pool({
   idleTimeoutMillis: env.dbIdleTimeoutMs,
   max: env.dbPoolMax,
   ssl: sslConfig,
+  logging: true,
 });
 
 const db = drizzle(pool);

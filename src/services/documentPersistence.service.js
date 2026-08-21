@@ -11,6 +11,7 @@ const patientRepository = require("../repositories/patientRepository");
 const medicationMapper = require("../helpers/medicationMapper.helper");
 const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
+const { medication } = require("../models/medication");
 const { embeddingService } = require("./ai/chat/embedding.service");
 const { inferFileType, buildPatientSuggestions, asText } = require("../helpers/document.helper");
 
@@ -63,7 +64,6 @@ class DocumentPersistenceService {
       const bucketName =
         payload.s3bucket ||
         (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
-
       const [documentRow] = await tx
         .insert(document)
         .values({
@@ -82,13 +82,39 @@ class DocumentPersistenceService {
           remarks: extractedStructuredData?.summary || null,
           reportDate: extractedStructuredData?.reportDate
             ? new Date(extractedStructuredData.reportDate)
-            : null,
+            : new Date(),
           s3Bucket: bucketName,
           s3Key: s3Key,
           structuredExtractedData: extractedStructuredData,
           userId,
           summaryEnglish: extractedStructuredData?.summaryEnglish || null,
           summaryInPreferredLanguage: extractedStructuredData?.summaryInPreferredLanguage || null,
+        })
+        .onConflictDoUpdate({
+          target: document.s3Key,
+          set: {
+            documentType: normalizeDocumentType(
+              payload.documentType ||
+                extractedStructuredData?.documentType ||
+                extractedStructuredData?.reportType,
+            ),
+            doctorName: extractedStructuredData?.doctorName || null,
+            fileName,
+            fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
+            fileType: inferFileType(mimeType),
+            hospitalName: extractedStructuredData?.hospitalName || null,
+            ocrExtractedText: rawOcrData?.fullText || null,
+            ocrStatus: ocrStatus.COMPLETED,
+            remarks: extractedStructuredData?.summary || null,
+            reportDate: extractedStructuredData?.reportDate
+              ? new Date(extractedStructuredData.reportDate)
+              : new Date(),
+            s3Bucket: bucketName,
+            structuredExtractedData: extractedStructuredData,
+            summaryEnglish: extractedStructuredData?.summaryEnglish || null,
+            summaryInPreferredLanguage: extractedStructuredData?.summaryInPreferredLanguage || null,
+            updatedAt: new Date(),
+          },
         })
         .returning();
 
@@ -139,9 +165,7 @@ class DocumentPersistenceService {
         patientName: extractedStructuredData?.patientName || null,
         rawAiResponse: extractedStructuredData?.rawSummary || null,
         recommendations: extractedStructuredData?.recommendations || [],
-        reportDate: extractedStructuredData?.reportDate
-          ? new Date(extractedStructuredData.reportDate)
-          : null,
+        reportDate: extractedStructuredData?.reportDate ?? null,
         reportType: extractedStructuredData?.reportType || null,
         summary: extractedStructuredData?.summary || null,
         testResults:
@@ -169,8 +193,8 @@ class DocumentPersistenceService {
         defaults: {
           prescribedBy: extractedStructuredData?.doctorName || null,
           startDate: extractedStructuredData?.reportDate
-            ? new Date(extractedStructuredData.reportDate).toISOString().slice(0, 10)
-            : new Date().toISOString().slice(0, 10),
+            ? new Date(extractedStructuredData.reportDate)
+            : new Date(),
         },
         medications: extractedStructuredData?.medications || [],
         patientCode: patient.patientCode,
@@ -179,7 +203,38 @@ class DocumentPersistenceService {
 
       const insertedMedications = [];
       for (const row of medicationRows) {
-        insertedMedications.push(await tx.insert("medications", row));
+        if (row.clientMedId) {
+          const [savedMed] = await tx
+            .insert(medication)
+            .values(row)
+            .onConflictDoUpdate({
+              target: [medication.userId, medication.clientMedId],
+              set: {
+                patientCode: row.patientCode,
+                medicationName: row.medicationName,
+                medicationType: row.medicationType,
+                prescribedBy: row.prescribedBy,
+                dosePerIntake: row.dosePerIntake,
+                frequency: row.frequency,
+                medicationSchedule: row.medicationSchedule,
+                foodFrequency: row.foodFrequency,
+                startDate: row.startDate,
+                endDate: row.endDate,
+                ongoing: row.ongoing,
+                totalQuantity: row.totalQuantity,
+                unit: row.unit,
+                dailyConsumption: row.dailyConsumption,
+                reminderBeforeMinutes: row.reminderBeforeMinutes,
+                notes: row.notes,
+                updatedAt: new Date(),
+              },
+            })
+            .returning();
+          insertedMedications.push(savedMed);
+        } else {
+          const [savedMed] = await tx.insert(medication).values(row).returning();
+          insertedMedications.push(savedMed);
+        }
       }
 
       let embeddingResult = { chunkCount: 0, chunkIds: [], embeddings: 0 };

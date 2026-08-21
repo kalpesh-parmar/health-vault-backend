@@ -2,15 +2,38 @@ const { StatusCodes } = require("http-status-codes");
 
 const { errorConstants } = require("../constants/errorConstants");
 
+const FATAL_ERROR_CODES = Object.freeze(
+  new Set([
+    "INVALID_DOCUMENT_TYPE",
+    "UPLOADED_FILE_NOT_A_VALID_MEDICAL_DOCUMENT",
+    "NON_MEDICAL_DOCUMENT",
+    "FILE_SIZE_INVALID",
+    "FILE_TOO_LARGE",
+    "CORRUPT_FILE",
+    "ENCRYPTED_FILE",
+    "UNSUPPORTED_MEDIA_TYPE",
+  ]),
+);
+
 class AppError extends Error {
-  constructor(statusCode, message, errorCode) {
+  constructor(statusCode, message, errorCode, retryable = undefined) {
     super(message);
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.description = message;
     this.errorCode = errorCode;
-    // this.details = details;
+    this._retryable = retryable;
     Error.captureStackTrace(this, this.constructor);
+  }
+
+  get retryable() {
+    if (this._retryable !== undefined) {
+      return this._retryable;
+    }
+    if (this.errorCode && FATAL_ERROR_CODES.has(this.errorCode)) {
+      return false;
+    }
+    return true;
   }
 }
 
@@ -77,16 +100,27 @@ class ClassifierUnavailableException extends AppError {
   }
 }
 
+function isErrorRetryable(error) {
+  if (!error) return true;
+  if (typeof error.retryable === "boolean") return error.retryable;
+  if (error._retryable !== undefined) return Boolean(error._retryable);
+  const code = error.errorCode || error.code;
+  if (code && FATAL_ERROR_CODES.has(code)) return false;
+  return true;
+}
+
 module.exports = {
   AccessDeniedException,
   AlreadyExistsException,
   AppError,
   ClassifierUnavailableException,
   ConflictException,
+  FATAL_ERROR_CODES,
   InternalServerException,
   InvalidRequestException,
   NotFoundException,
   UnauthorizedException,
   NonMedicalDocumentException,
   SessionExpiredException,
+  isErrorRetryable,
 };

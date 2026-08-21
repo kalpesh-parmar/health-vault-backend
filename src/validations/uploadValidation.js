@@ -152,6 +152,36 @@ async function validateDocumentUpload(req, _res, next) {
   }
 }
 
+const rawDocumentRetryMulter = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_FILE_SIZES.PATIENT_DOCUMENT,
+    files: 1,
+  },
+}).single("file");
+
+function documentRetryUploadMulter(req, res, next) {
+  rawDocumentRetryMulter(req, res, (err) => {
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return next(
+          new InvalidRequestException(
+            `File size exceeds the limit of ${MAX_FILE_SIZES.PATIENT_DOCUMENT / (1024 * 1024)} MB per file`,
+          ),
+        );
+      }
+
+      if (err.code === "LIMIT_UNEXPECTED_FILE") {
+        return next(new InvalidRequestException("Only one document file is allowed."));
+      }
+
+      return next(new InvalidRequestException(err.message || "File upload error"));
+    }
+
+    return next();
+  });
+}
+
 module.exports = {
   profileUploadFileSchema,
   documentUploadFileSchema,
@@ -159,4 +189,5 @@ module.exports = {
   documentUploadMulter,
   validateProfileUpload,
   validateDocumentUpload,
+  documentRetryUploadMulter,
 };

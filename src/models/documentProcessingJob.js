@@ -9,6 +9,7 @@
  */
 
 const {
+  boolean,
   index,
   integer,
   jsonb,
@@ -19,10 +20,9 @@ const {
   uuid,
   varchar,
 } = require("drizzle-orm/pg-core");
+const { sql } = require("drizzle-orm");
 
 const { patient } = require("./patient");
-
-const JOB_STATUSES = Object.freeze(["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]);
 
 const documentProcessingJob = pgTable(
   "document_processing_jobs",
@@ -34,16 +34,26 @@ const documentProcessingJob = pgTable(
       .references(() => patient.id, { onDelete: "cascade" }),
     status: varchar("status", { length: 16 }).notNull().default("QUEUED"),
     stage: varchar("stage", { length: 64 }),
+    stageStatus: varchar("stage_status", { length: 32 }),
+    attemptCount: integer("attempt_count").default(0).notNull(),
     percentage: integer("percentage").default(0),
     currentStep: varchar("current_step", { length: 255 }),
     completedSteps: integer("completed_steps").default(0),
     pendingSteps: integer("pending_steps").default(0),
+    completedStages: text("completed_stages")
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    retryable: boolean("retryable"),
+    requiresReupload: boolean("requires_reupload").default(false).notNull(),
     message: text("message"),
     metadata: jsonb("metadata").default({}).notNull(),
+    checkpointData: jsonb("checkpoint_data").default({}).notNull(),
     rawOcrData: jsonb("raw_ocr_data"),
     extractedStructuredData: jsonb("extracted_structured_data"),
     graphs: jsonb("graphs").default([]).notNull(),
     error: text("error"),
+    lastHeartbeatAt: timestamp("last_heartbeat_at"),
     startedAt: timestamp("started_at"),
     completedAt: timestamp("completed_at"),
     expiresAt: timestamp("expires_at"),
@@ -55,7 +65,8 @@ const documentProcessingJob = pgTable(
     index("document_processing_jobs_user_id_idx").on(table.userId),
     index("document_processing_jobs_status_idx").on(table.status),
     index("document_processing_jobs_expires_at_idx").on(table.expiresAt),
+    index("document_processing_jobs_heartbeat_idx").on(table.lastHeartbeatAt),
   ],
 );
 
-module.exports = { JOB_STATUSES, documentProcessingJob };
+module.exports = { documentProcessingJob };

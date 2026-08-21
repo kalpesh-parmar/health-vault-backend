@@ -7,6 +7,7 @@ const { validateRequest } = require("../middlewares/validateRequest");
 // const { idParamSchema } = require("../validations/commonValidation");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
 const { validateDocumentUpload, documentUploadMulter } = require("../validations");
+const { documentRetryUploadMulter } = require("../validations/uploadValidation");
 
 const router = express.Router();
 
@@ -54,5 +55,7 @@ router.post(
   validateDocumentUpload,
   documentController.uploadDocuments,
 );
+
+router.post("/retry", verifyToken, documentRetryUploadMulter, documentController.retryDocument);
 
 module.exports = router;
