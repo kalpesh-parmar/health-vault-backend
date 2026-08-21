@@ -108,8 +108,8 @@ components:
           example: Dr. Smith
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePresesion
+          minimum: 0.1
           example: 1
 
         frequency:
@@ -189,8 +189,8 @@ components:
           example: Dr. Smith
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePrecision
+          minimum: 0.1
           example: 1
 
         frequency:
@@ -245,8 +245,8 @@ components:
           maxLength: 255
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePrecision
+          minimum: 0.1
 
         frequency:
           $ref: "#/components/schemas/FrequencyType"

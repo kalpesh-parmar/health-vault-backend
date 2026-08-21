@@ -1,4 +1,4 @@
-const { eq, and } = require("drizzle-orm");
+const { eq, and, desc } = require("drizzle-orm");
 
 const { env } = require("../configs/env");
 const { db } = require("../configs/db");
@@ -18,6 +18,7 @@ const { onboardingService } = require("./ai");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
+const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
 const { inferFileType } = require("../helpers/document.helper");
 const documentPersistenceService = require("./documentPersistence.service");
@@ -176,7 +177,7 @@ class V1Service {
     return { message: "Job cancelled successfully" };
   }
 
-  async onboardingChat(userId, body, onChunk, abortSignal) {
+  async onboardingChat(userId, body, onChunk = null, abortSignal = null) {
     const requestReceivedTime = Date.now();
     console.log(
       `[UnifiedChat] Request received at ${new Date(requestReceivedTime).toISOString()} for userId=${userId}`,
@@ -335,6 +336,8 @@ class V1Service {
         actionType === "SKIP_MEDICINES" ||
         actionType === "REVIEW_MEDICINES_LIST" ||
         actionType === "SHOW_EXTRACTED_MEDICINES" ||
+        isMedicineSelectionMsg ||
+        isAddMedicineMsg ||
         hasMedicineActionData ||
         (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0);
 
@@ -378,18 +381,158 @@ class V1Service {
         }
 
         let createdMeds = [];
-        const medsToProcess =
+        let medsToProcess =
           Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
             ? actionData.medicines
             : Array.isArray(body?.medicines) && body.medicines.length > 0
               ? body.medicines
               : null;
 
+        // Parse message JSON string if payload sent in message body
+        if (!medsToProcess && typeof message === "string" && message.trim().startsWith("{")) {
+          try {
+            const parsedMsg = JSON.parse(message);
+            if (Array.isArray(parsedMsg?.medicines) && parsedMsg.medicines.length > 0) {
+              medsToProcess = parsedMsg.medicines;
+            } else if (parsedMsg?.medicine && typeof parsedMsg.medicine === "object") {
+              medsToProcess = [parsedMsg.medicine];
+            } else if (Array.isArray(parsedMsg?.selected) && parsedMsg.selected.length > 0) {
+              medsToProcess = parsedMsg.selected.map((sItem) =>
+                typeof sItem === "object" ? sItem : { id: sItem, selected: true },
+              );
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        // Post-onboarding fallback: if confirming post-onboarding document medications and medsToProcess is still empty
+        if (
+          !isActiveOnboardingStep &&
+          (!medsToProcess || medsToProcess.length === 0) &&
+          userId &&
+          (actionType === "CONFIRM_MEDICINES" ||
+            actionType === "REVIEW_MEDICINES_LIST" ||
+            String(message || "").toUpperCase() === "CONFIRM" ||
+            String(message || "").toUpperCase() === "CONFIRM_SELECTED")
+        ) {
+          try {
+            const [latestDoc] = await db
+              .select()
+              .from(document)
+              .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
+              .orderBy(desc(document.createdAt))
+              .limit(1);
+
+            if (latestDoc && latestDoc.structuredExtractedData) {
+              const struct = latestDoc.structuredExtractedData;
+              const extracted = struct.medications || struct.structuredData?.medications || [];
+              if (Array.isArray(extracted) && extracted.length > 0) {
+                medsToProcess = extracted.map((m, idx) => ({
+                  id: m.id || m.client_med_id || `doc_med_${idx}`,
+                  name: m.name || m.medicationName || "Medical Document Medicine",
+                  medicationName: m.name || m.medicationName || "Medical Document Medicine",
+                  medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                  type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                  dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
+                  frequency: m.frequency || "ONCE",
+                  duration: m.duration || null,
+                  instructions: m.instructions || m.timing || null,
+                  selected: true,
+                }));
+              }
+            }
+          } catch (docLookupErr) {
+            console.warn(
+              "[UnifiedChat] Post-onboarding document lookup warning:",
+              docLookupErr.message,
+            );
+          }
+        }
+
         if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
-          for (const medData of medsToProcess) {
-            if (medData.selected === false) continue;
+          for (const rawMedData of medsToProcess) {
+            let medData =
+              typeof rawMedData === "object" && rawMedData !== null
+                ? { ...rawMedData }
+                : { id: rawMedData, selected: true };
+
+            if (
+              medData.selected === false ||
+              medData.resolution === "KEEP_EXISTING" ||
+              medData.resolution === "REMOVE_NEW"
+            ) {
+              continue;
+            }
+
+            if (
+              medData.resolution === "REPLACE" &&
+              (medData.replaceMedicationId || medData.targetMedicationId)
+            ) {
+              const targetId = medData.replaceMedicationId || medData.targetMedicationId;
+              try {
+                await medicationService.deleteMedication(targetId, userId);
+              } catch (delErr) {
+                console.warn(
+                  `[UnifiedChat] Soft-delete warning for replaced med ${targetId}:`,
+                  delErr.message,
+                );
+              }
+            }
+
+            if (!medData.name && !medData.medicationName && userId) {
+              try {
+                const [latestDoc] = await db
+                  .select()
+                  .from(document)
+                  .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
+                  .orderBy(desc(document.createdAt))
+                  .limit(1);
+
+                if (latestDoc && latestDoc.structuredExtractedData) {
+                  const struct = latestDoc.structuredExtractedData;
+                  const docMeds = struct.medications || struct.structuredData?.medications || [];
+                  const matchId =
+                    typeof rawMedData === "string"
+                      ? rawMedData
+                      : medData.id || medData.client_med_id;
+                  const foundInDoc = docMeds.find(
+                    (m, idx) =>
+                      m.id === matchId ||
+                      m.client_med_id === matchId ||
+                      `extracted_med_${idx + 1}` === matchId ||
+                      `doc_med_${idx}` === matchId,
+                  );
+
+                  if (foundInDoc) {
+                    medData = {
+                      ...foundInDoc,
+                      ...medData,
+                      name:
+                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
+                      medicationName:
+                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
+                      medicationType: String(
+                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
+                      ).toUpperCase(),
+                      type: String(
+                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
+                      ).toUpperCase(),
+                      dosePerIntake: foundInDoc.dosage ? parseFloat(foundInDoc.dosage) || 1 : 1,
+                      frequency: foundInDoc.frequency || "ONCE",
+                      duration: foundInDoc.duration || null,
+                      instructions: foundInDoc.instructions || foundInDoc.timing || null,
+                    };
+                  }
+                }
+              } catch (lookupErr) {
+                console.warn("[UnifiedChat] Document lookup for med ID failed:", lookupErr.message);
+              }
+            }
+
             try {
-              const med = await medicationService.createMedication(userId, medData);
+              const normalizedMedData = normalizeCreateMedicationInput(medData);
+              const med = await medicationService.createMedication(userId, normalizedMedData);
               if (med && med.id) {
                 createdMeds.push(med);
                 try {
@@ -403,7 +546,8 @@ class V1Service {
             }
           }
         } else if (hasMedicineActionData) {
-          const createdMed = await medicationService.createMedication(userId, actionData);
+          const normalizedActionData = normalizeCreateMedicationInput(actionData);
+          const createdMed = await medicationService.createMedication(userId, normalizedActionData);
           if (createdMed && createdMed.id) {
             createdMeds.push(createdMed);
             try {
@@ -417,22 +561,33 @@ class V1Service {
         }
         const createdMed = createdMeds[0] || null;
 
-        // If patient is in active Onboarding medicine loop, redirect to MEDICINE_OPTIONS step
+        // If patient is in active Onboarding medicine loop, update state and advance onboarding
         if (isActiveOnboardingStep) {
           const stateToUpdate = { ...effectiveState };
           if (!stateToUpdate.medicinesToAdd) stateToUpdate.medicinesToAdd = [];
-          if (createdMed) {
-            const clientMedId = createdMed.id || actionData?.clientMedId || `med_${Date.now()}`;
-            stateToUpdate.medicinesToAdd.push({
-              ...actionData,
-              id: createdMed.id,
-              client_med_id: clientMedId,
-              selected: true,
-              isSaved: true,
-              dbId: createdMed.id,
-            });
+
+          if (createdMeds.length > 0) {
+            for (const med of createdMeds) {
+              stateToUpdate.medicinesToAdd.push({
+                name: med.medicationName,
+                id: med.id,
+                client_med_id: med.clientMedId || med.id,
+                selected: true,
+                isSaved: true,
+                dbId: med.id,
+              });
+            }
+            stateToUpdate.medicinesConfirmed = true;
+            stateToUpdate.medicinesSavedToDb = true;
+            stateToUpdate.medicationFlowDone = true;
           }
-          stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+
+          if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
+            stateToUpdate.medicinesConfirmed = true;
+            stateToUpdate.medicationFlowDone = true;
+          } else {
+            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+          }
 
           const onboardingResult = await onboardingService.chat(
             "",
@@ -474,8 +629,11 @@ class V1Service {
             role: "assistant",
             content: replyText,
             metadata: {
+              mode: "ACTION",
               actionType: "CONFIRM_MEDICINES",
               medicationIds: createdMeds.map((m) => m.id),
+              medicines: createdMeds,
+              medication: createdMed,
             },
           });
         }

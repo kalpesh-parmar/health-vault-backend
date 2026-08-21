@@ -19,6 +19,7 @@ const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes/index.route");
 const cronService = require("./services/cron.service");
 const cronRegisterHandler = require("./configs/cronConfig");
+const { ollamaClient } = require("./services/ai/clients/ollamaClient");
 
 const app = express();
 const server = http.createServer(app);
@@ -48,6 +49,10 @@ if (require.main === module) {
     cronRegisterHandler();
     cronService.loadStartAll();
     console.log("cron system initialized...");
+
+    // Pre-warm local Ollama models to avoid first-request loading penalty
+    if (env.chatModel) ollamaClient.warmUp(env.chatModel).catch(() => {});
+    if (env.visionModel) ollamaClient.warmUp(env.visionModel).catch(() => {});
   });
 
   const shutdown = (signal) => {

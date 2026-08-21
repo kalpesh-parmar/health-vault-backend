@@ -11,10 +11,12 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
+const medicationRepository = require("../../../repositories/medicationRepository");
 
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
+const { containsEntity } = require("../../../utils/synonyms");
 
 // Debug logger
 const debugLogger = {
@@ -112,6 +114,76 @@ const AGE_KEYWORDS = [
   "என் வயது எவ்வளவு",
 ];
 
+/**
+ * Smart context builder for patient profile active medications.
+ * Implements capping (top 25) and dynamic keyword matching for 1,000+ scale.
+ *
+ * @param {Array} medications - Array of medication DB records
+ * @param {string} userQuestion - User question string
+ * @returns {string} Formatted active medications context text
+ */
+function buildMedicationsContext(medications = [], userQuestion = "") {
+  if (!Array.isArray(medications) || medications.length === 0) {
+    return "Active Profile Medications:\nNone";
+  }
+
+  const cleanQuestion = String(userQuestion || "").toLowerCase();
+  const totalCount = medications.length;
+
+  let selectedMeds = [];
+
+  if (totalCount <= 25) {
+    selectedMeds = medications;
+  } else {
+    // Rank/search: prioritize medications matching user question words
+    const matchedMeds = medications.filter((med) => {
+      if (!med.medicationName) return false;
+      const medNameClean = med.medicationName.toLowerCase().trim();
+      if (cleanQuestion.includes(medNameClean)) return true;
+      const words = medNameClean.split(/\s+/).filter((w) => w.length > 2);
+      return words.some((w) => cleanQuestion.includes(w));
+    });
+    const matchedIds = new Set(matchedMeds.map((m) => m.id));
+    const remainingMeds = medications.filter((m) => !matchedIds.has(m.id));
+
+    const maxRemaining = Math.max(0, 25 - matchedMeds.length);
+    selectedMeds = [...matchedMeds, ...remainingMeds.slice(0, maxRemaining)];
+  }
+
+  const formattedList = selectedMeds
+    .map((m) => {
+      const name = m.medicationName || "Unknown Medicine";
+      const type = m.medicationType ? ` (${m.medicationType})` : "";
+      const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
+      const unit = m.unit ? ` ${m.unit}` : "";
+      const doseStr = dose || unit ? `: ${dose}${unit}` : "";
+      const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
+      const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+
+      let scheduleStr = "";
+      if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
+        const times = Object.entries(m.medicationSchedule)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        if (times) scheduleStr = `, Schedule: [${times}]`;
+      }
+
+      const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
+      const notes = m.notes ? `, Notes: ${m.notes}` : "";
+
+      return `- ${name}${type}${doseStr}${freq}${food}${scheduleStr}${doctor}${notes}`;
+    })
+    .join("\n");
+
+  const header =
+    totalCount > 25
+      ? `Active Profile Medications (Total: ${totalCount}, Showing top 25 most relevant):`
+      : `Active Profile Medications (${totalCount}):`;
+
+  return `${header}\n${formattedList}`;
+}
+
 const processingSessions = new Set();
 
 function getMedicalEntityKeywords(question) {
@@ -176,19 +248,66 @@ class ChatService {
         };
       }
 
-      const contextText = contextChunks
-        .map((c) => {
+      const medicalEntities = getMedicalEntityKeywords(userQuery);
+
+      // Group context chunks by document ID
+      const chunksByDoc = new Map();
+      for (const chunk of contextChunks) {
+        const docId = String(chunk.documentId);
+        if (!chunksByDoc.has(docId)) {
+          chunksByDoc.set(docId, []);
+        }
+        chunksByDoc.get(docId).push(chunk);
+      }
+
+      const contextText = Array.from(chunksByDoc.entries())
+        .map(([, chunks]) => {
+          const docData = chunks[0].docData || {};
           let pName = "Unknown";
-          if (c.docData?.structuredExtractedData?.patient?.name) {
-            pName = c.docData.structuredExtractedData.patient.name;
+          if (docData.structuredExtractedData?.patient?.name) {
+            pName = docData.structuredExtractedData.patient.name;
           }
-          return `--- REPORT: ${c.docData?.fileName || "Unknown"} ---
-Patient Name: ${pName}
-Date: ${c.docData?.reportDate ? new Date(c.docData.reportDate).toISOString().split("T")[0] : "Unknown"}
-Section: ${c.sectionTitle || "General"}
-Content: ${c.content}`;
+          const fileName = docData.fileName || "Unknown";
+          const reportDate = docData.reportDate
+            ? new Date(docData.reportDate).toISOString().split("T")[0]
+            : "Unknown";
+
+          // Fallback context: extract matching structured summary tests if present
+          let structuredTestsStr = "";
+          if (
+            medicalEntities.length > 0 &&
+            docData.structuredExtractedData?.tests &&
+            Array.isArray(docData.structuredExtractedData.tests)
+          ) {
+            const relevantTests = docData.structuredExtractedData.tests.filter((t) => {
+              const testNameLower = t.name?.toLowerCase() || "";
+              return medicalEntities.some((entity) => {
+                return containsEntity(testNameLower, entity);
+              });
+            });
+
+            if (relevantTests.length > 0) {
+              structuredTestsStr =
+                `Requested Medical Information:\n` +
+                relevantTests
+                  .map((t) => `- ${t.name}: ${t.value} ${t.unit || ""} (${t.status || "NORMAL"})`)
+                  .join("\n");
+            }
+          }
+
+          const chunksContent = chunks
+            .map((c) => `[Section: ${c.sectionTitle || "General"}]\n${c.content}`)
+            .join("\n\n");
+
+          return `=== REPORT ===
+Document: ${fileName}
+Report Date: ${reportDate}
+Patient: ${pName}
+
+${structuredTestsStr ? structuredTestsStr + "\n\n" : ""}Evidence:
+${chunksContent}`;
         })
-        .join("\n\n");
+        .join("\n\n========================================\n\n");
 
       let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang, coverageStr);
 
@@ -312,7 +431,29 @@ Content: ${c.content}`;
         messageConstants.SESSION_FETCHED ? "Chat session not found" : "Not found",
       );
     }
-    return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
+    const result = await chatSessionRepository.listMessages({
+      cursor,
+      direction,
+      limit,
+      sessionId,
+      userId,
+    });
+
+    const items = (result.items || []).map((msg) => {
+      const meta = msg.metadata || {};
+      return {
+        ...msg,
+        actionType: meta.actionType || msg.actionType || null,
+        options: meta.options || msg.options || [],
+        medicines: meta.medicines || msg.medicines || [],
+        document: meta.document || msg.document || null,
+        suggestedAction: meta.suggestedAction || msg.suggestedAction || null,
+        mode: meta.mode || msg.mode || null,
+        medication: meta.medication || msg.medication || null,
+      };
+    });
+
+    return { ...result, items };
   }
 
   async sendMessage({
@@ -766,6 +907,17 @@ Content: ${c.content}`;
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
 
+      // Fetch user's active medications for smart context injection
+      let medicationsContextStr = "";
+      try {
+        const activeMeds = await medicationRepository.findAll(userId);
+        medicationsContextStr = buildMedicationsContext(activeMeds, question);
+      } catch (err) {
+        debugLogger.error("sendMessage: Failed to fetch active medications for context", {
+          error: err.message,
+        });
+      }
+
       // Build patient context
       let patientContextStr = "";
       if (p) {
@@ -778,7 +930,17 @@ Content: ${c.content}`;
           p.allergies && Array.isArray(p.allergies) && p.allergies.length > 0
             ? p.allergies.join(", ")
             : "None";
-        patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}\nIMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user's specific question.`;
+        patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}`;
+      }
+
+      if (medicationsContextStr) {
+        patientContextStr = patientContextStr
+          ? `${patientContextStr}\n\n${medicationsContextStr}`
+          : medicationsContextStr;
+      }
+
+      if (patientContextStr) {
+        patientContextStr += `\nIMPORTANT INSTRUCTION: Use the above profile information and active medications ONLY to answer the user's specific question.`;
       }
 
       if (intent === "GENERAL") {
@@ -806,7 +968,7 @@ Content: ${c.content}`;
           assistantText =
             detectedLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
-              : "Sorry, error occurred.";
+              : "Please try again later.";
         }
       } else {
         // DATA RETRIEVER (Vector Search)
@@ -860,30 +1022,105 @@ Content: ${c.content}`;
             }
 
             if (summaryChunks.length === 0) {
-              // PARALLEL RETRIEVAL
-              const chunkPromises = finalDocumentIds.map((dId) =>
-                intelligenceRepository.searchSimilarChunks({
-                  userId,
-                  queryEmbedding,
-                  limit: documentScope === "FULL_DOCUMENT" ? 40 : 20,
-                  documentIds: [dId],
-                  keywords: medicalEntities,
-                }),
-              );
-              const results = await Promise.all(chunkPromises);
+              // PARALLEL RETRIEVAL (Per Document + Per Entity)
+              const queryPromises = [];
 
-              // Check coverage
-              let retrievedCount = 0;
-              results.forEach((docChunks, index) => {
-                if (docChunks && docChunks.length > 0) {
-                  retrievedCount++;
-                  relevantChunks.push(...docChunks);
+              for (const dId of finalDocumentIds) {
+                if (medicalEntities.length > 0) {
+                  for (const entity of medicalEntities) {
+                    queryPromises.push(
+                      (async () => {
+                        try {
+                          const chunks = await intelligenceRepository.searchSimilarChunks({
+                            userId,
+                            queryEmbedding,
+                            limit: 10,
+                            documentIds: [dId],
+                            keywords: [entity],
+                          });
+                          return { dId, entity, chunks, success: true };
+                        } catch (err) {
+                          debugLogger.error(
+                            `Failed to retrieve chunks for doc ${dId} and entity ${entity}`,
+                            {
+                              error: err.message,
+                            },
+                          );
+                          return { dId, entity, chunks: [], success: false };
+                        }
+                      })(),
+                    );
+                  }
                 } else {
-                  debugLogger.warn(
-                    `sendMessage: [COVERAGE] No chunks found for document ${finalDocumentIds[index]}`,
+                  queryPromises.push(
+                    (async () => {
+                      try {
+                        const chunks = await intelligenceRepository.searchSimilarChunks({
+                          userId,
+                          queryEmbedding,
+                          limit: 20,
+                          documentIds: [dId],
+                        });
+                        return { dId, entity: null, chunks, success: true };
+                      } catch (err) {
+                        console.log("err", err);
+                        return { dId, entity: null, chunks: [], success: false };
+                      }
+                    })(),
                   );
                 }
-              });
+              }
+
+              const queryResults = await Promise.all(queryPromises);
+
+              // Track retrieval status and calculate detailed statuses
+              let retrievedCount = 0;
+              const retrievedDocs = new Set();
+              for (const r of queryResults) {
+                if (r.success && r.chunks.length > 0) {
+                  retrievedDocs.add(String(r.dId));
+                }
+                relevantChunks.push(...r.chunks);
+              }
+              retrievedCount = retrievedDocs.size;
+
+              const entityStatusPerDoc = new Map(); // Key: `${docIdStr}_${entity}`, Value: 'FOUND' | 'NOT_FOUND_VERIFIED' | 'NOT_VERIFIED'
+
+              for (const dId of finalDocumentIds) {
+                const docIdStr = String(dId);
+                const docData = docNameMap[dId] || {};
+
+                for (const entity of medicalEntities) {
+                  const statusKey = `${docIdStr}_${entity}`;
+                  const qRes = queryResults.find(
+                    (r) => String(r.dId) === docIdStr && r.entity === entity,
+                  );
+
+                  if (!qRes || !qRes.success) {
+                    entityStatusPerDoc.set(statusKey, "NOT_VERIFIED");
+                    continue;
+                  }
+
+                  const foundInChunks = qRes.chunks.some((c) => containsEntity(c.content, entity));
+                  let foundInSummary = false;
+                  if (
+                    docData.structuredExtractedData?.tests &&
+                    Array.isArray(docData.structuredExtractedData.tests)
+                  ) {
+                    foundInSummary = docData.structuredExtractedData.tests.some((t) => {
+                      const testNameLower = t.name?.toLowerCase() || "";
+                      return containsEntity(testNameLower, entity);
+                    });
+                  }
+
+                  if (foundInChunks || foundInSummary) {
+                    entityStatusPerDoc.set(statusKey, "FOUND");
+                    entitiesFoundPerDoc.get(docIdStr).add(entity);
+                  } else {
+                    entityStatusPerDoc.set(statusKey, "NOT_FOUND_VERIFIED");
+                  }
+                }
+              }
 
               // 1. Deduplicate by chunkId + documentId to preserve same-text chunks across different docs
               const uniqueChunks = [];
@@ -924,7 +1161,7 @@ Content: ${c.content}`;
                 let hasEntity = false;
 
                 for (const entity of medicalEntities) {
-                  if (c.content.toLowerCase().includes(entity)) {
+                  if (containsEntity(c.content, entity)) {
                     entitiesFoundPerDoc.get(docIdStr).add(entity);
                     hasEntity = true;
                   }
@@ -993,14 +1230,17 @@ Content: ${c.content}`;
               if (medicalEntities.length > 0) {
                 coverageStr = finalDocumentIds
                   .map((id) => {
-                    const found = entitiesFoundPerDoc.get(String(id));
-                    const missing = medicalEntities.filter((e) => !found.has(e));
+                    const docIdStr = String(id);
                     let docLabel = `Document ${id}`;
                     if (docNameMap[id]) docLabel = docNameMap[id].fileName || docLabel;
-                    let report = `${docLabel}: `;
-                    if (found.size > 0) report += `FOUND [${Array.from(found).join(", ")}]. `;
-                    if (missing.length > 0) report += `MISSING [${missing.join(", ")}].`;
-                    return report.trim();
+
+                    const entityStatuses = medicalEntities.map((entity) => {
+                      const statusKey = `${docIdStr}_${entity}`;
+                      const status = entityStatusPerDoc.get(statusKey) || "NOT_VERIFIED";
+                      return `${entity.toUpperCase()}: ${status}`;
+                    });
+
+                    return `${docLabel}: [${entityStatuses.join(", ")}]`;
                   })
                   .join("\n");
               }

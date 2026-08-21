@@ -49,7 +49,12 @@ JSON FORMAT:
     {
       "name": null,
       "dosage": null,
-      "frequency": null
+      "frequency": null,
+      "prescribedBy":null,
+      "duration":null,
+      "instructions":null,
+      "name":null,
+      "timing":null,
     }
   ],
 

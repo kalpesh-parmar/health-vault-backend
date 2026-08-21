@@ -536,7 +536,8 @@ Required JSON format:
       "dosage": "Dosage (e.g. 500mg)",
       "frequency": "Frequency (e.g. Once daily)",
       "duration": "Duration (e.g. 5 days)",
-      "instructions": "Instructions (e.g. After food)"
+      "instructions": "Instructions (e.g. After food)",
+      "prescribedBy":"Doctor name (e.g. Dr. Mahipal)"
     }
   ],
   "testResults": [

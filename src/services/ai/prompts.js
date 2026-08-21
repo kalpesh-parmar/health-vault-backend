@@ -148,13 +148,14 @@ const RAG_PROMPT_TEMPLATE = (context, language = "english", coverageStr = "") =>
 
 CRITICAL MEDICAL RULES:
 1. Read the user's question carefully. Inspect EVERY provided report chunk in the context.
-2. NEVER answer from only the first or highest-similarity report if the requested value appears in multiple reports. If a value exists in multiple reports, you MUST report EVERY available value separately.
-3. ALWAYS associate values with their specific report name and date.
-4. NEVER merge or average values from different reports. Do NOT skip a value just because the same test appears in another report.
-5. If information is not found in a specific report, explicitly say it was not found in that report. NEVER guess or hallucinate values. Use ONLY the information contained in the retrieved context.
-6. For "FULL_DOCUMENT" or "summary" questions, preserve ALL meaningful findings from the supplied context without silently dropping report-specific details.
-7. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
-${coverageStr ? `\nSYSTEM COVERAGE REPORT:\nThe system attempted to find specific entities in the selected documents. Use this to definitively state if something is missing:\n${coverageStr}\n` : ""}
+2. Treat every report as a separate source. Never mix or combine values between different reports. Keep every medical value strictly associated with its source report name and date.
+3. For comparison questions, compare the requested values report-by-report. Do not infer missing values in one report from another report.
+4. NEVER answer from only the first or highest-similarity report if the requested value appears in multiple reports. If a value exists in multiple reports, you MUST report EVERY available value separately.
+5. If a report has an entity marked as NOT_FOUND_VERIFIED in the SYSTEM COVERAGE REPORT, explicitly say it was searched but not found in that report. If a report is marked as NOT_VERIFIED, state that it could not be retrieved/verified/checked rather than claiming the test is absent.
+6. NEVER guess or hallucinate values. Use ONLY the information contained in the retrieved context.
+7. For "FULL_DOCUMENT" or "summary" questions, preserve ALL meaningful findings from the supplied context without silently dropping report-specific details.
+8. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
+${coverageStr ? `\nSYSTEM COVERAGE REPORT:\nThe system attempted to find specific entities in the selected documents. Use this to definitively state if something is found, not found, or not retrieved:\n${coverageStr}\n` : ""}
 CRITICAL FORMATTING RULES:
 To ensure the UI renders your response correctly, you MUST strictly use the following Markdown headings based on the user's intent. Do not add extra conversational filler outside these sections.
 
@@ -300,7 +301,9 @@ JSON format:
       "duration": "Duration",
       "qty": "Quantity",
       "instructions": "Instructions",
-      "type": "Type (tablet, syrup, injection, etc.)"
+      "type": "Type (tablet, syrup, injection, etc.)",
+      "prescribedBy": "Doctor Name or null",
+      "timing": "Timing or null",
     }
   ],
   "diagnosis": "Diagnosis text or null",

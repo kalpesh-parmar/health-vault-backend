@@ -369,10 +369,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     bestTaken: [foodFrequency],
     dailyConsumption,
     dosePerIntake: hasTabletType
-      ? Number.isInteger(count)
+      ? typeof count === "number" && count > 0
         ? count
         : null
-      : Number.isInteger(value)
+      : typeof value === "number" && value > 0
         ? value
         : null,
     doseReminders: false,
@@ -437,6 +437,9 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.type && !input.medicationType) {
     input.medicationType = String(input.type).toUpperCase();
   }
+  if (input.instructions && !input.notes) {
+    input.notes = String(input.instructions).slice(0, 1000);
+  }
   if (input.dose && input.dosePerIntake === undefined) {
     input.dosePerIntake =
       typeof input.dose === "object"
@@ -460,8 +463,38 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
     input.totalQuantity = 30;
   }
+  if (!input.startDate) {
+    input.startDate = new Date().toISOString().split("T")[0];
+  }
+  if (!input.foodFrequency) {
+    input.foodFrequency = "AFTER_FOOD";
+  }
 
-  return input;
+  // Whitelist ONLY allowed schema keys so Zod .strict() validation passes without unrecognized key errors
+  const allowedKeys = [
+    "medicationName",
+    "medicationType",
+    "prescribedBy",
+    "dosePerIntake",
+    "frequency",
+    "medicationSchedule",
+    "foodFrequency",
+    "startDate",
+    "endDate",
+    "ongoing",
+    "totalQuantity",
+    "reminderBeforeMinutes",
+    "notes",
+  ];
+
+  const sanitized = {};
+  for (const key of allowedKeys) {
+    if (input[key] !== undefined) {
+      sanitized[key] = input[key];
+    }
+  }
+
+  return sanitized;
 }
 
 module.exports = {

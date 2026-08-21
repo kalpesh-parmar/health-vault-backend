@@ -614,4 +614,227 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(res.state.medicationFlowDone).toBe(true);
     expect(res.state.currentStep).toBe("COMPLETE");
   });
+
+  test("chatService sendMessage should include active profile medications in patient context without chunking", async () => {
+    const medicationRepository = require("../src/repositories/medicationRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const { ollamaClient } = require("../src/services/ai/clients/ollamaClient");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-999",
+      firstName: "Test",
+      lastName: "User",
+      gender: "male",
+      dateOfBirth: new Date("1990-01-01"),
+      bloodGroup: "O+",
+      allergies: ["Penicillin"],
+      preferredLanguage: "english",
+    });
+
+    jest.spyOn(medicationRepository, "findAll").mockResolvedValue([
+      {
+        id: "med-1",
+        medicationName: "Metformin 850mg",
+        medicationType: "TABLET",
+        dosePerIntake: 1,
+        unit: "tablet",
+        frequency: "DAILY",
+        foodFrequency: "BEFORE_FOOD",
+        medicationSchedule: { Morning: "09:00:00" },
+        prescribedBy: "Dr. Dave",
+        notes: "Take with full glass of water",
+      },
+    ]);
+
+    jest
+      .spyOn(chatSessionRepository, "listSessions")
+      .mockResolvedValue({ items: [{ id: "session-999" }] });
+    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-999" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
+      id: "msg-1",
+      ...msg,
+    }));
+
+    let capturedPrompt = "";
+    jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
+      const sysMsg = messages.find((m) => m.role === "system");
+      capturedPrompt = sysMsg ? sysMsg.content : "";
+      return "Metformin should be taken before food as prescribed.";
+    });
+
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    const result = await chatService.sendMessage({
+      userId: "patient-999",
+      question: "When should I take Metformin?",
+      sessionId: "session-999",
+    });
+
+    expect(capturedPrompt).toContain("Active Profile Medications");
+    expect(capturedPrompt).toContain("Metformin 850mg");
+    expect(capturedPrompt).toContain("BEFORE_FOOD");
+    expect(capturedPrompt).toContain("Dr. Dave");
+    expect(result.reply).toBe("Metformin should be taken before food as prescribed.");
+
+    jest.restoreAllMocks();
+  });
+
+  test("onboardingService should preserve activeMedicine and manual medicines when merging document extracted medicines", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const mockState = {
+      flowMode: "UPLOAD",
+      currentStep: "REVIEW_MEDICINES_LIST",
+      activeMedicine: {
+        id: "med_1787291544368_8907",
+        name: "Insulin",
+        type: "TABLET",
+        source: "MANUAL",
+      },
+      foundMedicines: [{ name: "MBSON SL" }, { name: "Caldison D3" }],
+      medicinesToAdd: [
+        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
+        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
+      ],
+    };
+
+    const res = await onboardingService.chat("", [], mockState, null);
+
+    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
+    expect(medNames).toContain("Insulin");
+    expect(medNames).toContain("MBSON SL");
+    expect(medNames).toContain("Caldison D3");
+  });
+
+  test("onboardingService should append new medicine when ADD_MEDICINE is called even if currentMedicineIndex was set", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const mockState = {
+      flowMode: "UPLOAD",
+      currentStep: "EDIT_MEDICINE",
+      currentMedicineIndex: 2,
+      medicinesToAdd: [
+        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
+        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
+        { id: "med_1", name: "Insulin", source: "MANUAL" },
+        { id: "med_2", name: "Omnacortil 20", source: "MANUAL" },
+      ],
+    };
+
+    const newMedPayload = JSON.stringify({
+      name: "Omnacortil 40",
+      type: "TABLET",
+      addNew: true,
+    });
+
+    const res = await onboardingService.chat(newMedPayload, [], mockState, null);
+
+    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
+    expect(medNames).toContain("MBSON SL");
+    expect(medNames).toContain("Caldison D3");
+    expect(medNames).toContain("Insulin");
+    expect(medNames).toContain("Omnacortil 20");
+    expect(medNames).toContain("Omnacortil 40");
+    expect(res.state.medicinesToAdd.length).toBe(5);
+  });
+
+  test("post-onboarding medicine confirmation with string IDs should resolve document medication and persist to DB", async () => {
+    const patientRepository = require("../src/repositories/patientRepository");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const medicationService = require("../src/services/medication.service");
+    const medicationReminderService = require("../src/services/medicationReminder.service");
+    const ocrService = require("../src/services/ocr.service");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "user-123",
+      firstName: "Shraddha",
+      onboardingCompleted: true,
+    });
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
+    });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockResolvedValue({ id: "msg-123" });
+    jest.spyOn(medicationService, "createMedication").mockResolvedValue({
+      id: "created-med-123",
+      medicationName: "inj. meropenum",
+      medicationType: "TABLET",
+    });
+    jest.spyOn(medicationReminderService, "createReminder").mockResolvedValue({ id: "rem-123" });
+
+    const reqBody = {
+      actionType: "CONFIRM_MEDICINES",
+      actionData: {
+        medicines: ["extracted_med_1", "extracted_med_2"],
+      },
+      message: "Confirm Selection",
+      sessionId: "session-123",
+      state: { isOnboardingCompleted: true },
+    };
+
+    const response = await ocrService.onboardingChat("user-123", reqBody, null);
+
+    expect(response.actionType).toBe("CONFIRM_MEDICINES");
+    expect(medicationService.createMedication).toHaveBeenCalled();
+
+    jest.restoreAllMocks();
+  });
+
+  test("normalizeCreateMedicationInput should strip extra OCR keys like id, dosage, timing, instructions to pass Zod .strict()", () => {
+    const rawOcrInput = {
+      id: "extracted_med_1",
+      name: "inj. meropenum",
+      type: "TABLET",
+      dosage: "1 tab",
+      timing: "morning",
+      instructions: "take with water",
+      duplicateInfo: { hasDuplicate: false },
+    };
+
+    const sanitized = normalizeCreateMedicationInput(rawOcrInput);
+
+    expect(sanitized.medicationName).toBe("inj. meropenum");
+    expect(sanitized.medicationType).toBe("TABLET");
+    expect(sanitized.notes).toBe("take with water");
+    expect(sanitized.id).toBeUndefined();
+    expect(sanitized.dosage).toBeUndefined();
+    expect(sanitized.timing).toBeUndefined();
+    expect(sanitized.instructions).toBeUndefined();
+    expect(sanitized.duplicateInfo).toBeUndefined();
+  });
+
+  test("chatService listMessages should format message metadata into top-level options, medicines, and actionType", async () => {
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    jest
+      .spyOn(chatSessionRepository, "findSessionById")
+      .mockResolvedValue({ id: "session-123", userId: "user-123" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({
+      items: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: "Found 2 medications",
+          metadata: {
+            actionType: "REVIEW_MEDICINES_LIST",
+            options: [{ label: "Confirm Selected", actionType: "CONFIRM_MEDICINES" }],
+            medicines: [{ name: "inj. meropenum" }],
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const res = await chatService.listMessages({ sessionId: "session-123", userId: "user-123" });
+
+    expect(res.items[0].actionType).toBe("REVIEW_MEDICINES_LIST");
+    expect(res.items[0].options).toHaveLength(1);
+    expect(res.items[0].medicines).toHaveLength(1);
+    expect(res.items[0].medicines[0].name).toBe("inj. meropenum");
+
+    jest.restoreAllMocks();
+  });
 });

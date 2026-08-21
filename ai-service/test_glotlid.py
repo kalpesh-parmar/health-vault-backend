@@ -18,7 +18,7 @@ model = fasttext.load_model(model_path)
 print("GlotLID model loaded successfully!")
 
 # 3. Detect language
-text = "Mara report ma kai problem che"
+text = "vayitru vali erpadum karanangal enna?"
 start_time = time.perf_counter()
 labels, probabilities = model.predict(text, k=1)
 end_time = time.perf_counter()
