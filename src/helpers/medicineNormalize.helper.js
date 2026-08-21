@@ -369,10 +369,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     bestTaken: [foodFrequency],
     dailyConsumption,
     dosePerIntake: hasTabletType
-      ? Number.isInteger(count)
+      ? typeof count === "number" && count > 0
         ? count
         : null
-      : Number.isInteger(value)
+      : typeof value === "number" && value > 0
         ? value
         : null,
     doseReminders: false,
@@ -460,6 +460,29 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
     input.totalQuantity = 30;
   }
+  if (!input.startDate) {
+    input.startDate = new Date().toISOString().split("T")[0];
+  }
+  if (!input.foodFrequency) {
+    input.foodFrequency = "AFTER_FOOD";
+  }
+
+  // Strip non-schema properties so Zod .strict() validation passes
+  delete input.name;
+  delete input.type;
+  delete input.dose;
+  delete input.client_med_id;
+  delete input.clientMedId;
+  delete input.resolution;
+  delete input.selected;
+  delete input.replaceMedicationId;
+  delete input.targetMedicationId;
+  delete input.isSaved;
+  delete input.dbId;
+  delete input.source;
+  delete input.subtitle;
+  delete input.duration;
+  delete input.needsReview;
 
   return input;
 }

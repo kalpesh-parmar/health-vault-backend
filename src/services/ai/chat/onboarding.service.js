@@ -1265,6 +1265,37 @@ async function updateStateFromMessage(state, message, userId = null) {
       const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
       const isSkip = val === "SKIP" || val === "SKIP_ALL" || payload.skipAll;
 
+      // Handle duplicate conflict resolution payloads if provided
+      if (Array.isArray(payload.resolutions)) {
+        payload.resolutions.forEach((res) => {
+          const medId = res.client_med_id || res.id || res.name;
+          const idx = (state.medicinesToAdd || []).findIndex(
+            (m) =>
+              (m.client_med_id && m.client_med_id === medId) ||
+              (m.id && m.id === medId) ||
+              (m.name && String(m.name).toLowerCase() === String(res.name || "").toLowerCase()),
+          );
+          if (idx >= 0) {
+            const currentMed = state.medicinesToAdd[idx];
+            if (res.resolution === "KEEP_EXISTING" || res.resolution === "REMOVE_NEW") {
+              currentMed.selected = false;
+              currentMed.resolution = res.resolution;
+            } else if (res.resolution === "REPLACE") {
+              currentMed.selected = true;
+              currentMed.resolution = "REPLACE";
+              currentMed.replaceMedicationId = res.targetMedicationId || res.replaceMedicationId;
+            } else if (res.resolution === "EDIT" && res.updatedMedication) {
+              state.medicinesToAdd[idx] = {
+                ...currentMed,
+                ...res.updatedMedication,
+                selected: true,
+                resolution: "EDIT",
+              };
+            }
+          }
+        });
+      }
+
       if (isConfirm) {
         state.medicinesConfirmed = true;
         const selectedIds =
@@ -1291,7 +1322,12 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
           ...m,
-          selected: selectedIds.length > 0 ? selectedIds.includes(m.id || m.client_med_id) : true,
+          selected:
+            m.resolution === "KEEP_EXISTING" || m.resolution === "REMOVE_NEW"
+              ? false
+              : selectedIds.length > 0
+                ? selectedIds.includes(m.id || m.client_med_id)
+                : true,
         }));
 
         let nextIncompleteIndex = -1;
@@ -1312,8 +1348,28 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.currentMedicineIndex = nextIncompleteIndex;
           state.currentStep = "ADD_MEDICINE";
         } else {
+          // Process soft-deletions for replaced medications
+          for (const m of state.medicinesToAdd) {
+            if (m.selected && m.resolution === "REPLACE" && m.replaceMedicationId && userId) {
+              try {
+                await medicationService.deleteMedication(m.replaceMedicationId, userId);
+              } catch (delErr) {
+                console.warn(
+                  `[OnboardingService] Soft-delete warning for replaced med ${m.replaceMedicationId}:`,
+                  delErr.message,
+                );
+              }
+            }
+          }
+
           // Filter selected medicines that have NOT been saved in DB yet (preventing duplicate insertion)
-          const unsavedMeds = state.medicinesToAdd.filter((m) => m.selected && !m.isSaved);
+          const unsavedMeds = state.medicinesToAdd.filter(
+            (m) =>
+              m.selected &&
+              !m.isSaved &&
+              m.resolution !== "KEEP_EXISTING" &&
+              m.resolution !== "REMOVE_NEW",
+          );
           if (unsavedMeds.length > 0 && userId) {
             const bulkCreated = await medicationService.bulkCreate(userId, unsavedMeds);
 
@@ -2535,6 +2591,15 @@ class OnboardingService {
 
           if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
             state.foundMedicines = extracted.medications;
+            const builtMeds = medicationService.buildFromDocument(state.foundMedicines);
+            if (userId) {
+              state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                builtMeds,
+              );
+            } else {
+              state.medicinesToAdd = builtMeds;
+            }
           } else {
             state.foundMedicines = [];
           }

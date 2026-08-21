@@ -1,8 +1,9 @@
-const { pgTable, uuid, timestamp, integer, boolean, index } = require("drizzle-orm/pg-core");
+const { pgTable, uuid, timestamp, boolean, index } = require("drizzle-orm/pg-core");
 const { medication } = require("./medication");
 const { patient } = require("./patient");
 const { frequencyType } = require("../enums/frequencyType");
 const { pgEnum } = require("drizzle-orm/pg-core");
+const { doublePrecision } = require("drizzle-orm/pg-core");
 const frequencyTypeEnum = pgEnum("frequency", frequencyType);
 const medicationReminder = pgTable(
   "medication_reminders",
@@ -18,7 +19,7 @@ const medicationReminder = pgTable(
         onDelete: "cascade",
       })
       .notNull(),
-    dosePerIntake: integer("dose_per_intake"),
+    dosePerIntake: doublePrecision("dose_per_intake"),
     // routineBase: frequencyTypeEnum("frequency").default(frequencyType.ONCE_DAILY).notNull(),
     // refillReminderTime: timestamp("refill_reminder_time"),
     // medicationTime: json("medication_times"),

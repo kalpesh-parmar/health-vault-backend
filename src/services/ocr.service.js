@@ -18,6 +18,7 @@ const { onboardingService } = require("./ai");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
+const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
 const { inferFileType } = require("../helpers/document.helper");
 const documentPersistenceService = require("./documentPersistence.service");
@@ -387,9 +388,32 @@ class V1Service {
 
         if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
           for (const medData of medsToProcess) {
-            if (medData.selected === false) continue;
+            if (
+              medData.selected === false ||
+              medData.resolution === "KEEP_EXISTING" ||
+              medData.resolution === "REMOVE_NEW"
+            ) {
+              continue;
+            }
+
+            if (
+              medData.resolution === "REPLACE" &&
+              (medData.replaceMedicationId || medData.targetMedicationId)
+            ) {
+              const targetId = medData.replaceMedicationId || medData.targetMedicationId;
+              try {
+                await medicationService.deleteMedication(targetId, userId);
+              } catch (delErr) {
+                console.warn(
+                  `[UnifiedChat] Soft-delete warning for replaced med ${targetId}:`,
+                  delErr.message,
+                );
+              }
+            }
+
             try {
-              const med = await medicationService.createMedication(userId, medData);
+              const normalizedMedData = normalizeCreateMedicationInput(medData);
+              const med = await medicationService.createMedication(userId, normalizedMedData);
               if (med && med.id) {
                 createdMeds.push(med);
                 try {
@@ -403,7 +427,8 @@ class V1Service {
             }
           }
         } else if (hasMedicineActionData) {
-          const createdMed = await medicationService.createMedication(userId, actionData);
+          const normalizedActionData = normalizeCreateMedicationInput(actionData);
+          const createdMed = await medicationService.createMedication(userId, normalizedActionData);
           if (createdMed && createdMed.id) {
             createdMeds.push(createdMed);
             try {
@@ -417,22 +442,33 @@ class V1Service {
         }
         const createdMed = createdMeds[0] || null;
 
-        // If patient is in active Onboarding medicine loop, redirect to MEDICINE_OPTIONS step
+        // If patient is in active Onboarding medicine loop, update state and advance onboarding
         if (isActiveOnboardingStep) {
           const stateToUpdate = { ...effectiveState };
           if (!stateToUpdate.medicinesToAdd) stateToUpdate.medicinesToAdd = [];
-          if (createdMed) {
-            const clientMedId = createdMed.id || actionData?.clientMedId || `med_${Date.now()}`;
-            stateToUpdate.medicinesToAdd.push({
-              ...actionData,
-              id: createdMed.id,
-              client_med_id: clientMedId,
-              selected: true,
-              isSaved: true,
-              dbId: createdMed.id,
-            });
+
+          if (createdMeds.length > 0) {
+            for (const med of createdMeds) {
+              stateToUpdate.medicinesToAdd.push({
+                name: med.medicationName,
+                id: med.id,
+                client_med_id: med.clientMedId || med.id,
+                selected: true,
+                isSaved: true,
+                dbId: med.id,
+              });
+            }
+            stateToUpdate.medicinesConfirmed = true;
+            stateToUpdate.medicinesSavedToDb = true;
+            stateToUpdate.medicationFlowDone = true;
           }
-          stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+
+          if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
+            stateToUpdate.medicinesConfirmed = true;
+            stateToUpdate.medicationFlowDone = true;
+          } else {
+            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+          }
 
           const onboardingResult = await onboardingService.chat(
             "",

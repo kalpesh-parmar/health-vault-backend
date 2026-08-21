@@ -32,7 +32,6 @@ const doseField = z
     required_error: errorConstants.DOSE_REQUIRED,
     invalid_type_error: errorConstants.INVALID_NUMBER,
   })
-  .int()
   .positive(errorConstants.DOSE_POSITIVE);
 
 const dateField = z.coerce.date({

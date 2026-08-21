@@ -3,6 +3,7 @@ const { db } = require("../configs/db");
 const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
+const medicationService = require("../services/medication.service");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -392,10 +393,12 @@ async function executeAddDocumentAction({
   }
 
   if (Array.isArray(rawMeds) && rawMeds.length > 0) {
-    extractedMedicines = rawMeds.map((m, idx) => ({
+    const rawList = rawMeds.map((m, idx) => ({
       id: m.id || m.client_med_id || `extracted_med_${idx + 1}`,
+      name: m.name || m.medicationName || "Unknown Medicine",
       medicationName: m.name || m.medicationName || "Unknown Medicine",
       medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+      type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
       dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
       frequency: m.frequency || "ONCE",
       duration: m.duration || null,
@@ -403,6 +406,13 @@ async function executeAddDocumentAction({
       selected: true,
       isSaved: false,
     }));
+
+    if (userId) {
+      extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList);
+    } else {
+      extractedMedicines = rawList;
+    }
+
     const docFileName =
       fileNames.length > 0
         ? fileNames.join(", ")
@@ -413,7 +423,7 @@ async function executeAddDocumentAction({
         extractedMedicines.length,
       );
     } else {
-      replyText = `Document '${docFileName}' has been processed. Found ${extractedMedicines.length} medications in your document.`;
+      replyText = `Document '${docFileName}' has been processed. Found ${extractedMedicines.length} medications in your documents.`;
     }
   }
 

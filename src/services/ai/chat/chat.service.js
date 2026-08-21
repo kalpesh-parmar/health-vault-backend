@@ -11,6 +11,7 @@ const { ollamaClient } = require("../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
+const medicationRepository = require("../../../repositories/medicationRepository");
 
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
@@ -133,6 +134,76 @@ function isTextInLanguage(text, language) {
     return !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(text);
   }
   return false;
+}
+
+/**
+ * Smart context builder for patient profile active medications.
+ * Implements capping (top 25) and dynamic keyword matching for 1,000+ scale.
+ *
+ * @param {Array} medications - Array of medication DB records
+ * @param {string} userQuestion - User question string
+ * @returns {string} Formatted active medications context text
+ */
+function buildMedicationsContext(medications = [], userQuestion = "") {
+  if (!Array.isArray(medications) || medications.length === 0) {
+    return "Active Profile Medications:\nNone";
+  }
+
+  const cleanQuestion = String(userQuestion || "").toLowerCase();
+  const totalCount = medications.length;
+
+  let selectedMeds = [];
+
+  if (totalCount <= 25) {
+    selectedMeds = medications;
+  } else {
+    // Rank/search: prioritize medications matching user question words
+    const matchedMeds = medications.filter((med) => {
+      if (!med.medicationName) return false;
+      const medNameClean = med.medicationName.toLowerCase().trim();
+      if (cleanQuestion.includes(medNameClean)) return true;
+      const words = medNameClean.split(/\s+/).filter((w) => w.length > 2);
+      return words.some((w) => cleanQuestion.includes(w));
+    });
+    const matchedIds = new Set(matchedMeds.map((m) => m.id));
+    const remainingMeds = medications.filter((m) => !matchedIds.has(m.id));
+
+    const maxRemaining = Math.max(0, 25 - matchedMeds.length);
+    selectedMeds = [...matchedMeds, ...remainingMeds.slice(0, maxRemaining)];
+  }
+
+  const formattedList = selectedMeds
+    .map((m) => {
+      const name = m.medicationName || "Unknown Medicine";
+      const type = m.medicationType ? ` (${m.medicationType})` : "";
+      const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
+      const unit = m.unit ? ` ${m.unit}` : "";
+      const doseStr = dose || unit ? `: ${dose}${unit}` : "";
+      const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
+      const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+
+      let scheduleStr = "";
+      if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
+        const times = Object.entries(m.medicationSchedule)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        if (times) scheduleStr = `, Schedule: [${times}]`;
+      }
+
+      const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
+      const notes = m.notes ? `, Notes: ${m.notes}` : "";
+
+      return `- ${name}${type}${doseStr}${freq}${food}${scheduleStr}${doctor}${notes}`;
+    })
+    .join("\n");
+
+  const header =
+    totalCount > 25
+      ? `Active Profile Medications (Total: ${totalCount}, Showing top 25 most relevant):`
+      : `Active Profile Medications (${totalCount}):`;
+
+  return `${header}\n${formattedList}`;
 }
 
 const processingSessions = new Set();
@@ -669,6 +740,17 @@ Content: ${c.content}
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
 
+      // Fetch user's active medications for smart context injection
+      let medicationsContextStr = "";
+      try {
+        const activeMeds = await medicationRepository.findAll(userId);
+        medicationsContextStr = buildMedicationsContext(activeMeds, question);
+      } catch (err) {
+        debugLogger.error("sendMessage: Failed to fetch active medications for context", {
+          error: err.message,
+        });
+      }
+
       // Build patient context
       let patientContextStr = "";
       if (p) {
@@ -681,7 +763,17 @@ Content: ${c.content}
           p.allergies && Array.isArray(p.allergies) && p.allergies.length > 0
             ? p.allergies.join(", ")
             : "None";
-        patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}\nIMPORTANT INSTRUCTION: Use the above profile information ONLY to answer the user's specific question.`;
+        patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}`;
+      }
+
+      if (medicationsContextStr) {
+        patientContextStr = patientContextStr
+          ? `${patientContextStr}\n\n${medicationsContextStr}`
+          : medicationsContextStr;
+      }
+
+      if (patientContextStr) {
+        patientContextStr += `\nIMPORTANT INSTRUCTION: Use the above profile information and active medications ONLY to answer the user's specific question.`;
       }
 
       if (intent === "GENERAL") {
@@ -719,7 +811,7 @@ Content: ${c.content}
           assistantText =
             preferredLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
-              : "Sorry, error occurred.";
+              : "Please try again later.";
         }
       } else {
         // DATA RETRIEVER (Vector Search)
