@@ -1229,10 +1229,29 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (isYes) {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
-          state.medicinesToAdd = (state.foundMedicines || []).map((m, index) => {
+          const docMeds = (state.foundMedicines || []).map((m, index) => {
             const { onboardingMed } = normalizeMedicine(m, index);
             return onboardingMed;
           });
+          const existingManualMeds = (state.medicinesToAdd || []).filter(
+            (m) =>
+              m &&
+              (m.source === "MANUAL" ||
+                m.isManual ||
+                m.source !== "OCR" ||
+                (m.id && (String(m.id).startsWith("med_") || String(m.id).startsWith("client_"))) ||
+                (m.client_med_id &&
+                  (String(m.client_med_id).startsWith("med_") ||
+                    String(m.client_med_id).startsWith("client_")))),
+          );
+          const combined = [...docMeds];
+          for (const manualMed of existingManualMeds) {
+            const medId = manualMed.id || manualMed.client_med_id;
+            if (!combined.some((c) => (c.id || c.client_med_id) === medId)) {
+              combined.push(manualMed);
+            }
+          }
+          state.medicinesToAdd = combined;
           // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
         } else {
           state.medicinesToAdd = [{ isConfirmed: false }];
@@ -1424,20 +1443,47 @@ async function updateStateFromMessage(state, message, userId = null) {
         (payload.name || payload.medicationName || payload.medication_name ? payload : null);
 
       if (medObj) {
-        const isEditing =
-          state.currentStep === "EDIT_MEDICINE" &&
-          state.currentMedicineIndex !== undefined &&
-          state.currentMedicineIndex !== null &&
-          state.currentMedicineIndex >= 0;
+        if (!state.medicinesToAdd) state.medicinesToAdd = [];
+
+        const isExplicitAddNew =
+          payload.addNew === true ||
+          payload.action === "ADD" ||
+          payload.action === "ADD_NEW" ||
+          payload.mode === "ADD" ||
+          payload.isEditing === false ||
+          state.currentStep === "ADD_MEDICINE";
+
+        const payloadMedId = payload.clientMedId || medObj.client_med_id || medObj.id;
+        let matchedIndex = -1;
+        if (!isExplicitAddNew && payloadMedId && Array.isArray(state.medicinesToAdd)) {
+          matchedIndex = state.medicinesToAdd.findIndex(
+            (m) =>
+              (m.id && m.id === payloadMedId) ||
+              (m.client_med_id && m.client_med_id === payloadMedId),
+          );
+        }
+
+        let existingIdx = -1;
+        if (!isExplicitAddNew) {
+          if (matchedIndex >= 0) {
+            existingIdx = matchedIndex;
+          } else if (
+            state.currentStep === "EDIT_MEDICINE" &&
+            state.currentMedicineIndex !== undefined &&
+            state.currentMedicineIndex !== null &&
+            state.currentMedicineIndex >= 0 &&
+            state.currentMedicineIndex < state.medicinesToAdd.length
+          ) {
+            existingIdx = state.currentMedicineIndex;
+          }
+        }
 
         let clientMedId;
-        if (isEditing && state.medicinesToAdd && state.medicinesToAdd[state.currentMedicineIndex]) {
+        if (existingIdx >= 0 && state.medicinesToAdd[existingIdx]) {
           clientMedId =
-            payload.clientMedId ||
-            medObj.client_med_id ||
-            medObj.id ||
-            state.medicinesToAdd[state.currentMedicineIndex].client_med_id ||
-            state.medicinesToAdd[state.currentMedicineIndex].id ||
+            payloadMedId ||
+            state.medicinesToAdd[existingIdx].client_med_id ||
+            state.medicinesToAdd[existingIdx].id ||
             `med_${Date.now()}`;
         } else {
           // When adding a new medicine, generate a fresh unique ID so it never overwrites existing items
@@ -1480,14 +1526,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           console.warn("[OnboardingService] Medicine validation issue:", valErr.message);
         }
 
-        if (!state.medicinesToAdd) state.medicinesToAdd = [];
-
-        let existingIdx = -1;
-        if (isEditing && state.currentMedicineIndex < state.medicinesToAdd.length) {
-          existingIdx = state.currentMedicineIndex;
-        }
-
-        if (existingIdx >= 0) {
+        if (existingIdx >= 0 && existingIdx < state.medicinesToAdd.length) {
           state.medicinesToAdd[existingIdx] = {
             ...state.medicinesToAdd[existingIdx],
             ...newMed,
@@ -2138,6 +2177,29 @@ class OnboardingService {
     if (state.medicinesSavedToDb === undefined || state.medicinesSavedToDb === null)
       state.medicinesSavedToDb = false;
     if (state.activeMedicine === undefined) state.activeMedicine = null;
+    if (
+      state.activeMedicine &&
+      (state.activeMedicine.name || state.activeMedicine.medicationName)
+    ) {
+      const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
+      const activeName = (state.activeMedicine.name || state.activeMedicine.medicationName || "")
+        .trim()
+        .toLowerCase();
+      const exists = (state.medicinesToAdd || []).some(
+        (m) =>
+          (activeId && (m.id === activeId || m.client_med_id === activeId)) ||
+          ((m.name || m.medicationName || "").trim().toLowerCase() === activeName &&
+            activeName.length > 0),
+      );
+      if (!exists) {
+        state.medicinesToAdd.push({
+          ...state.activeMedicine,
+          selected:
+            state.activeMedicine.selected !== undefined ? state.activeMedicine.selected : true,
+          isSaved: false,
+        });
+      }
+    }
     if (state.confirmMode === undefined) state.confirmMode = null;
     if (state.pendingQueue === undefined || state.pendingQueue === null) state.pendingQueue = [];
     if (state.validMedsToBulkCreate === undefined || state.validMedsToBulkCreate === null)
@@ -2592,13 +2654,78 @@ class OnboardingService {
           if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
             state.foundMedicines = extracted.medications;
             const builtMeds = medicationService.buildFromDocument(state.foundMedicines);
+            const existingMeds = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd : [];
+            const existingManualMeds = existingMeds.filter(
+              (m) =>
+                m &&
+                (m.source === "MANUAL" ||
+                  m.isManual ||
+                  m.source !== "OCR" ||
+                  (m.id &&
+                    (String(m.id).startsWith("med_") || String(m.id).startsWith("client_"))) ||
+                  (m.client_med_id &&
+                    (String(m.client_med_id).startsWith("med_") ||
+                      String(m.client_med_id).startsWith("client_")))),
+            );
+
+            if (
+              state.activeMedicine &&
+              (state.activeMedicine.name || state.activeMedicine.medicationName)
+            ) {
+              const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
+              const activeName = (
+                state.activeMedicine.name ||
+                state.activeMedicine.medicationName ||
+                ""
+              )
+                .trim()
+                .toLowerCase();
+              const isAlreadyPresent = existingManualMeds.some(
+                (m) =>
+                  (activeId && (m.id === activeId || m.client_med_id === activeId)) ||
+                  ((m.name || m.medicationName || "").trim().toLowerCase() === activeName &&
+                    activeName.length > 0),
+              );
+              if (!isAlreadyPresent) {
+                existingManualMeds.push({
+                  ...state.activeMedicine,
+                  selected:
+                    state.activeMedicine.selected !== undefined
+                      ? state.activeMedicine.selected
+                      : true,
+                  isSaved: false,
+                });
+              }
+            }
+
+            const combinedMeds = [...builtMeds];
+            const builtIdSet = new Set(
+              builtMeds.map((b) => b.id || b.client_med_id).filter(Boolean),
+            );
+            const builtNameSet = new Set(
+              builtMeds
+                .map((b) => (b.name || b.medicationName || "").trim().toLowerCase())
+                .filter(Boolean),
+            );
+
+            for (const manualMed of existingManualMeds) {
+              const medId = manualMed.id || manualMed.client_med_id;
+              const medName = (manualMed.name || manualMed.medicationName || "")
+                .trim()
+                .toLowerCase();
+              if ((medId && builtIdSet.has(medId)) || (medName && builtNameSet.has(medName))) {
+                continue;
+              }
+              combinedMeds.push(manualMed);
+            }
+
             if (userId) {
               state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
                 userId,
-                builtMeds,
+                combinedMeds,
               );
             } else {
-              state.medicinesToAdd = builtMeds;
+              state.medicinesToAdd = combinedMeds;
             }
           } else {
             state.foundMedicines = [];

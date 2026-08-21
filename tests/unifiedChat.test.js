@@ -680,4 +680,63 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     jest.restoreAllMocks();
   });
+
+  test("onboardingService should preserve activeMedicine and manual medicines when merging document extracted medicines", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const mockState = {
+      flowMode: "UPLOAD",
+      currentStep: "REVIEW_MEDICINES_LIST",
+      activeMedicine: {
+        id: "med_1787291544368_8907",
+        name: "Insulin",
+        type: "TABLET",
+        source: "MANUAL",
+      },
+      foundMedicines: [{ name: "MBSON SL" }, { name: "Caldison D3" }],
+      medicinesToAdd: [
+        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
+        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
+      ],
+    };
+
+    const res = await onboardingService.chat("", [], mockState, null);
+
+    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
+    expect(medNames).toContain("Insulin");
+    expect(medNames).toContain("MBSON SL");
+    expect(medNames).toContain("Caldison D3");
+  });
+
+  test("onboardingService should append new medicine when ADD_MEDICINE is called even if currentMedicineIndex was set", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const mockState = {
+      flowMode: "UPLOAD",
+      currentStep: "EDIT_MEDICINE",
+      currentMedicineIndex: 2,
+      medicinesToAdd: [
+        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
+        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
+        { id: "med_1", name: "Insulin", source: "MANUAL" },
+        { id: "med_2", name: "Omnacortil 20", source: "MANUAL" },
+      ],
+    };
+
+    const newMedPayload = JSON.stringify({
+      name: "Omnacortil 40",
+      type: "TABLET",
+      addNew: true,
+    });
+
+    const res = await onboardingService.chat(newMedPayload, [], mockState, null);
+
+    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
+    expect(medNames).toContain("MBSON SL");
+    expect(medNames).toContain("Caldison D3");
+    expect(medNames).toContain("Insulin");
+    expect(medNames).toContain("Omnacortil 20");
+    expect(medNames).toContain("Omnacortil 40");
+    expect(res.state.medicinesToAdd.length).toBe(5);
+  });
 });
