@@ -121,5 +121,32 @@ describe("MedicationService - checkDuplicateMedication", () => {
       expect(results[0].duplicateInfo.hasDuplicate).toBe(true);
       expect(results[0].duplicateInfo.conflictType).toBe("EXACT_DUPLICATE");
     });
+
+    test("should ignore self-match against DB for already saved medicines but flag real duplicates for new additions", async () => {
+      medicationRepository.findAll.mockResolvedValue([
+        {
+          id: "med-100",
+          userId: "user-1",
+          medicationName: "Paracetamol 500mg",
+          softDelete: false,
+        },
+      ]);
+
+      const batchInput = [
+        { name: "Paracetamol 500mg", type: "TABLET", isSaved: true, dbId: "med-100" }, // Previously saved medicine (self)
+        { name: "Paracetamol 500mg", type: "TABLET", isSaved: false }, // Newly added duplicate medicine
+      ];
+
+      const results = await medicationService.checkDuplicateMedicationsBatch("user-1", batchInput);
+
+      expect(results).toHaveLength(2);
+      // Previously saved medicine matching itself in DB should NOT trigger false duplicate conflict
+      expect(results[0].duplicateInfo.hasDuplicate).toBe(false);
+      expect(results[0].isSaved).toBe(true);
+
+      // Newly added medicine matching existing saved medicine SHOULD trigger duplicate conflict
+      expect(results[1].duplicateInfo.hasDuplicate).toBe(true);
+      expect(results[1].duplicateInfo.conflictType).toBe("EXACT_DUPLICATE");
+    });
   });
 });

@@ -19,8 +19,19 @@ const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
 const { normalizeMedicationName } = require("../helpers/medication.helper");
+const medicationReminderService = require("./medicationReminder.service");
 
 class MedicationService {
+  // VALIDATE ONBOARDING MEDICATION
+  async validate(payload) {
+    if (!payload) return null;
+    try {
+      return await validateSchema(medicationOnboardingSchema, payload);
+    } catch {
+      return payload;
+    }
+  }
+
   // CREATE MEDICATION
   async createMedication(userId, payload) {
     /*
@@ -314,7 +325,7 @@ class MedicationService {
   }
 
   // Onboarding Helper: validate payload
-  async validate(payload) {
+  async validateMedicationOnboarding(payload) {
     return await validateSchema(medicationOnboardingSchema, payload);
   }
 
@@ -430,28 +441,51 @@ class MedicationService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    const mappedList = payloadList.map((payload) => {
-      const frequencyDb = this._mapFrequencyToDb(payload.frequency);
-      const defaults = this.applyDefaults(payload.frequency);
+    if (!Array.isArray(payloadList) || payloadList.length === 0) {
+      return [];
+    }
 
-      let value = undefined;
-      let unit = undefined;
+    const mappedList = payloadList.map((rawPayload) => {
+      const payload =
+        typeof rawPayload === "object" && rawPayload !== null ? { ...rawPayload } : {};
 
-      if (payload.type === "TABLET" || payload.type === "CAPSULE") {
-        value = payload.dose.count;
-        unit = payload.type.toLowerCase();
-      } else {
-        value = payload.dose.value;
-        unit = payload.dose.unit;
+      const name = payload.medicationName || payload.name || payload.medicineName || "Medication";
+      const medType = String(
+        payload.medicationType || payload.type || payload.unit || "TABLET",
+      ).toUpperCase();
+      const frequencyRaw = payload.frequency || payload.frequencyType || "Once Daily";
+
+      const frequencyDb = this._mapFrequencyToDb(frequencyRaw);
+      const defaults = this.applyDefaults(frequencyRaw);
+
+      let value = 1;
+      let unit = medType.toLowerCase();
+
+      if (typeof payload.dose === "object" && payload.dose !== null) {
+        if (payload.dose.count !== undefined && payload.dose.count !== null) {
+          value = parseFloat(payload.dose.count) || 1;
+        } else if (payload.dose.value !== undefined && payload.dose.value !== null) {
+          value = parseFloat(payload.dose.value) || 1;
+        }
+        if (payload.dose.unit) {
+          unit = String(payload.dose.unit).toLowerCase();
+        }
+      } else if (typeof payload.dose === "number" || typeof payload.dose === "string") {
+        const parsed = parseFloat(payload.dose);
+        if (!isNaN(parsed) && parsed > 0) {
+          value = parsed;
+        }
+      } else if (payload.dosePerIntake) {
+        value = parseFloat(payload.dosePerIntake) || 1;
       }
 
-      const dosePerIntake = Number.isInteger(value) ? value : null;
-      const unitDb = unit.toUpperCase();
+      const dosePerIntake = Math.ceil(value);
+      const unitDb = (unit || medType).toUpperCase();
 
-      const foodContext = payload.foodContext || defaults.food_context;
+      const foodContext = payload.foodContext || payload.foodFrequency || defaults.food_context;
       const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
 
-      const frequencyCount = this._getFrequencyCount(payload.frequency);
+      const frequencyCount = this._getFrequencyCount(frequencyRaw);
       const dailyConsumption = Math.ceil(value) * frequencyCount;
 
       let timeSchedule;
@@ -463,10 +497,10 @@ class MedicationService {
           payload.medicationSchedule.Custom)
       ) {
         timeSchedule = {
-          Morning: payload.medicationSchedule.Morning,
-          Noon: payload.medicationSchedule.Noon,
-          Night: payload.medicationSchedule.Night,
-          Custom: payload.medicationSchedule.Custom,
+          Morning: payload.medicationSchedule.Morning || null,
+          Noon: payload.medicationSchedule.Noon || null,
+          Night: payload.medicationSchedule.Night || null,
+          Custom: payload.medicationSchedule.Custom || null,
         };
       } else {
         timeSchedule = defaults.medicationSchedule;
@@ -476,16 +510,16 @@ class MedicationService {
         ...timeSchedule,
         dose: { value, unit },
         source: payload.source || "MANUAL",
-        refillAlert: !!payload.refill_alert,
+        refillAlert: !!payload.refill_alert || !!payload.refillAlert,
         foodContext: foodFrequency,
       };
 
       return {
         userId,
         patientCode: patient.patientCode,
-        medicationName: payload.name,
-        medicationType: payload.type,
-        prescribedBy: payload.prescribed_by || null,
+        medicationName: name,
+        medicationType: medType,
+        prescribedBy: payload.prescribedBy || payload.prescribed_by || null,
         dosePerIntake,
         frequency: frequencyDb,
         medicationSchedule,
@@ -493,17 +527,39 @@ class MedicationService {
         startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
         endDate: null,
         ongoing: true,
-        totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
+        totalQuantity:
+          payload.totalQuantity !== undefined
+            ? payload.totalQuantity
+            : payload.total_quantity !== undefined
+              ? payload.total_quantity
+              : 30,
         unit: unitDb,
         dailyConsumption,
         reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
         notes: payload.notes || null,
-        clientMedId: payload.client_med_id,
+        clientMedId: payload.clientMedId || payload.client_med_id || payload.id || null,
         softDelete: false,
       };
     });
 
-    return await medicationRepository.bulkInsert(mappedList);
+    const inserted = await medicationRepository.bulkInsert(mappedList);
+
+    if (Array.isArray(inserted)) {
+      for (const med of inserted) {
+        if (med && med.id) {
+          try {
+            await medicationReminderService.createReminder(userId, { medicationId: med.id });
+          } catch (remErr) {
+            console.error(
+              `[bulkCreate] Failed to create reminder for med ${med.id}:`,
+              remErr.message,
+            );
+          }
+        }
+      }
+    }
+
+    return inserted;
   }
 
   // CHECK DUPLICATE MEDICATION
@@ -610,6 +666,8 @@ class MedicationService {
 
       const exactMatches = [];
       const similarMatches = [];
+      let selfDbMatch = null;
+      const itemIsSaved = Boolean(item.isSaved === true || item.dbId);
 
       if (incomingNorm || incomingRaw) {
         // Check against active DB medications
@@ -619,10 +677,31 @@ class MedicationService {
 
           if (!existingNorm && !existingRaw) continue;
 
-          if (
+          const medClientMedId = med.clientMedId || med.client_med_id;
+          const itemClientMedId = item.client_med_id || item.clientMedId;
+
+          const isExactNameMatch =
             incomingNorm === existingNorm ||
-            incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
-          ) {
+            (incomingRaw &&
+              existingRaw &&
+              incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim());
+
+          // Check if item is the exact same record in DB (by dbId, id, clientMedId, or explicit isSaved status)
+          const isSameDbRecord =
+            (item.dbId && String(item.dbId) === String(med.id)) ||
+            (item.id && String(item.id) === String(med.id)) ||
+            (itemClientMedId &&
+              medClientMedId &&
+              String(itemClientMedId) === String(medClientMedId)) ||
+            (item.id && medClientMedId && String(item.id) === String(medClientMedId)) ||
+            (itemIsSaved && isExactNameMatch);
+
+          if (isSameDbRecord) {
+            selfDbMatch = med;
+            continue; // Skip self-match against DB for already saved items
+          }
+
+          if (isExactNameMatch) {
             exactMatches.push(med);
           } else if (
             incomingNorm.length >= 3 &&
@@ -636,6 +715,9 @@ class MedicationService {
         // Check against in-batch items (other extracted medicines in same request)
         medicineList.forEach((otherItem, otherIdx) => {
           if (otherIdx === index) return;
+          // If this item is already saved, do not flag duplicate conflicts on it caused by unsaved new draft items
+          if ((itemIsSaved || selfDbMatch) && !otherItem.isSaved) return;
+
           const otherRaw =
             otherItem.medicationName ||
             otherItem.name ||
@@ -647,7 +729,9 @@ class MedicationService {
 
           if (
             incomingNorm === otherNorm ||
-            incomingRaw.toLowerCase().trim() === otherRaw.toLowerCase().trim()
+            (incomingRaw &&
+              otherRaw &&
+              incomingRaw.toLowerCase().trim() === otherRaw.toLowerCase().trim())
           ) {
             if (!exactMatches.some((m) => m.client_med_id === otherItem.client_med_id)) {
               exactMatches.push({
@@ -694,14 +778,25 @@ class MedicationService {
           ]
         : [];
 
+      const isAlreadySaved = Boolean(itemIsSaved || selfDbMatch);
+      const matchedDbId = item.dbId || (selfDbMatch ? selfDbMatch.id : undefined);
+      const finalHasDuplicate = isAlreadySaved ? false : hasDuplicate;
+
       return {
         ...item,
+        isSaved: isAlreadySaved,
+        dbId: matchedDbId || item.dbId,
         duplicateInfo: {
-          hasDuplicate,
-          conflictType,
-          matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
-          matchedMedications,
-          suggestedActions,
+          hasDuplicate: finalHasDuplicate,
+          conflictType: finalHasDuplicate ? conflictType : null,
+          matchedMedication: finalHasDuplicate
+            ? matchedMedications.length > 0
+              ? matchedMedications[0]
+              : null
+            : null,
+          matchedMedications: finalHasDuplicate ? matchedMedications : [],
+          suggestedActions: finalHasDuplicate ? suggestedActions : [],
+          isAlreadySaved,
         },
       };
     });

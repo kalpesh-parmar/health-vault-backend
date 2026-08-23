@@ -15,7 +15,6 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
-const medicationReminderService = require("../../medicationReminder.service");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
@@ -1231,6 +1230,8 @@ async function updateStateFromMessage(state, message, userId = null) {
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
           const docMeds = (state.foundMedicines || []).map((m, index) => {
             const { onboardingMed } = normalizeMedicine(m, index);
+            if (m.isSaved) onboardingMed.isSaved = true;
+            if (m.dbId) onboardingMed.dbId = m.dbId;
             return onboardingMed;
           });
           const existingManualMeds = (state.medicinesToAdd || []).filter(
@@ -1279,6 +1280,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       const val = String(payload.value || payload.action || payload.key || msg || "")
         .trim()
         .toUpperCase();
+
       const isConfirm =
         val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
       const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
@@ -1311,6 +1313,12 @@ async function updateStateFromMessage(state, message, userId = null) {
                 resolution: "EDIT",
               };
             }
+            if (state.medicinesToAdd[idx]) {
+              state.medicinesToAdd[idx].duplicateInfo = {
+                ...(state.medicinesToAdd[idx].duplicateInfo || {}),
+                hasDuplicate: false,
+              };
+            }
           }
         });
       }
@@ -1339,15 +1347,27 @@ async function updateStateFromMessage(state, message, userId = null) {
           });
         }
 
-        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
-          ...m,
-          selected:
+        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => {
+          const isSelected =
             m.resolution === "KEEP_EXISTING" || m.resolution === "REMOVE_NEW"
               ? false
               : selectedIds.length > 0
                 ? selectedIds.includes(m.id || m.client_med_id)
-                : true,
-        }));
+                : true;
+
+          return {
+            ...m,
+            selected: isSelected,
+            duplicateInfo: {
+              hasDuplicate: false,
+              conflictType: null,
+              matchedMedication: null,
+              matchedMedications: [],
+              suggestedActions: [],
+              isAlreadySaved: Boolean(m.isSaved || m.dbId),
+            },
+          };
+        });
 
         let nextIncompleteIndex = -1;
         for (let i = 0; i < state.medicinesToAdd.length; i++) {
@@ -1403,16 +1423,16 @@ async function updateStateFromMessage(state, message, userId = null) {
               if (matchIdx >= 0 && created) {
                 state.medicinesToAdd[matchIdx].isSaved = true;
                 state.medicinesToAdd[matchIdx].dbId = created.id;
-                try {
-                  await medicationReminderService.createReminder(userId, {
-                    medicationId: created.id,
-                  });
-                } catch (err) {
-                  console.error(
-                    `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
-                    err,
-                  );
-                }
+                // try {
+                //   await medicationReminderService.createReminder(userId, {
+                //     medicationId: created.id,
+                //   });
+                // } catch (err) {
+                //   console.error(
+                //     `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
+                //     err,
+                //   );
+                // }
               }
             }
           }
@@ -1539,6 +1559,21 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         state.activeMedicine = newMed;
         state.currentMedicineIndex = undefined;
+
+        if (userId && Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0) {
+          try {
+            state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+              userId,
+              state.medicinesToAdd,
+            );
+          } catch (batchErr) {
+            console.warn(
+              "[OnboardingService] Failed to check batch duplicates after ADD_MEDICINE:",
+              batchErr.message,
+            );
+          }
+        }
+
         // Direct transition to REVIEW_MEDICINES_LIST with updated list
         state.currentStep = "REVIEW_MEDICINES_LIST";
       }
@@ -2359,7 +2394,13 @@ class OnboardingService {
 
           let fullMobile = null;
           if (patient.mobile) {
-            fullMobile = (patient.countryCode || "") + patient.mobile;
+            const rawMob = String(patient.mobile).trim();
+            const rawCode = patient.countryCode ? String(patient.countryCode).trim() : "";
+            fullMobile =
+              rawMob.startsWith("+") || (rawCode && rawMob.startsWith(rawCode))
+                ? rawMob
+                : rawCode + rawMob;
+            fullMobile = normalizePhone(fullMobile) || fullMobile;
           }
 
           state.loginData = {
@@ -2445,7 +2486,13 @@ class OnboardingService {
             if (patientRec.gender && !uData.gender) uData.gender = patientRec.gender;
             if (patientRec.email && !uData.email) uData.email = patientRec.email;
             if (patientRec.mobile && !uData.phoneNumber) {
-              uData.phoneNumber = (patientRec.countryCode || "") + patientRec.mobile;
+              const rawMob = String(patientRec.mobile).trim();
+              const rawCode = patientRec.countryCode ? String(patientRec.countryCode).trim() : "";
+              const combined =
+                rawMob.startsWith("+") || (rawCode && rawMob.startsWith(rawCode))
+                  ? rawMob
+                  : rawCode + rawMob;
+              uData.phoneNumber = normalizePhone(combined) || combined;
             }
             if (patientRec.bloodGroup && !uData.bloodGroup) {
               uData.bloodGroup = patientRec.bloodGroup;
@@ -2836,8 +2883,13 @@ class OnboardingService {
         if (
           state.existingUserData.phoneNumber !== undefined &&
           state.existingUserData.phoneNumber !== null
-        )
-          updateData.mobile = state.existingUserData.phoneNumber;
+        ) {
+          const normMob = normalizePhone(state.existingUserData.phoneNumber);
+          updateData.mobile = normMob || state.existingUserData.phoneNumber;
+          if (updateData.mobile && updateData.mobile.length > 20) {
+            updateData.mobile = updateData.mobile.slice(0, 20);
+          }
+        }
 
         if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
           const existingPatient = await patientRepository.findById(userId);

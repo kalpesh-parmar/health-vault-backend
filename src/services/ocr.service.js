@@ -310,7 +310,7 @@ class V1Service {
       if (isAddMedicineMsg) {
         currentOnboardingStep = "ADD_MEDICINE";
         effectiveState.currentStep = "ADD_MEDICINE";
-      } else if (!currentOnboardingStep && (isMedicineSelectionMsg || hasUnconfirmedMedicines)) {
+      } else if (isMedicineSelectionMsg || (!currentOnboardingStep && hasUnconfirmedMedicines)) {
         currentOnboardingStep = "REVIEW_MEDICINES_LIST";
         effectiveState.currentStep = "REVIEW_MEDICINES_LIST";
       }
@@ -321,7 +321,6 @@ class V1Service {
           currentOnboardingStep !== "COMPLETE" &&
           currentOnboardingStep !== "POST_ONBOARDING" &&
           effectiveState?.medicationFlowDone !== true) ||
-          isMedicineSelectionMsg ||
           isAddMedicineMsg ||
           hasUnconfirmedMedicines);
 
@@ -377,6 +376,25 @@ class V1Service {
             actionType: "SKIP_MEDICINES",
             reply: replyText,
             sessionId: activeSessionId,
+          });
+        }
+
+        if (isAddMedicineMsg && !hasMedicineActionData && !isActiveOnboardingStep) {
+          let activeSessionId = sessionId;
+          if (!activeSessionId && isOnboardingCompleted) {
+            const newSession = await chatService.createSession({
+              userId,
+              title: "Medication Chat",
+            });
+            activeSessionId = newSession?.id || null;
+          }
+
+          return buildUnifiedResponse({
+            mode: "ACTION",
+            actionType: "ADD_MEDICINE",
+            reply: "Please enter the medication details:",
+            sessionId: activeSessionId,
+            options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
           });
         }
 
@@ -450,7 +468,7 @@ class V1Service {
           }
         }
 
-        if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
+        if (!isActiveOnboardingStep && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
           for (const rawMedData of medsToProcess) {
             let medData =
               typeof rawMedData === "object" && rawMedData !== null
@@ -530,6 +548,17 @@ class V1Service {
               }
             }
 
+            if (!medData.name && !medData.medicationName) {
+              const matchIdStr = String(medData.id || "");
+              if (matchIdStr.startsWith("extracted_med_") || matchIdStr.startsWith("doc_med_")) {
+                medData.name = "Medical Document Medicine";
+                medData.medicationName = "Medical Document Medicine";
+              } else {
+                // Skip raw database UUIDs or unrecognized string IDs lacking a medication name
+                continue;
+              }
+            }
+
             try {
               const normalizedMedData = normalizeCreateMedicationInput(medData);
               const med = await medicationService.createMedication(userId, normalizedMedData);
@@ -590,7 +619,7 @@ class V1Service {
           }
 
           const onboardingResult = await onboardingService.chat(
-            "",
+            message || "",
             history,
             stateToUpdate,
             userId,
