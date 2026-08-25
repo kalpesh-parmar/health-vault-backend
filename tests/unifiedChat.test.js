@@ -619,7 +619,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     const medicationRepository = require("../src/repositories/medicationRepository");
     const chatSessionRepository = require("../src/repositories/chatSessionRepository");
     const patientRepository = require("../src/repositories/patientRepository");
-    const { ollamaClient } = require("../src/services/ai/clients/ollamaClient");
+    const { ollamaClient } = require("../src/clients/ollamaClient");
 
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: "patient-999",

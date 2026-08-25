@@ -1,29 +1,5 @@
-const axios = require("axios");
-const { DEFAULT_TIMEOUT, TRANSIENT_STATUS } = require("../../../configs/aiConfig");
 const aiServiceClient = require("../../../clients/aiServiceClient");
 const { InternalServerException } = require("../../../exceptions/appError");
-
-async function postWithRetry(url, body, { headers, timeout = DEFAULT_TIMEOUT, retries = 1 } = {}) {
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      const response = await axios.post(url, body, { headers, timeout });
-      return response.data;
-    } catch (error) {
-      lastError = error;
-      if (!shouldRetry(error) || attempt === retries) break;
-      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-    }
-  }
-  const status = lastError.response?.status || 502;
-  const detail = lastError.response?.data?.error || lastError.message;
-  throw new InternalServerException(`AI service request failed (${status}): ${detail}`);
-}
-
-function shouldRetry(error) {
-  if (!error.response) return true;
-  return TRANSIENT_STATUS.has(error.response.status);
-}
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -76,8 +52,8 @@ class AiServiceClientWrapper {
     );
     try {
       const startTime = Date.now();
-      const response = await postWithRetry(
-        `${this.baseUrl}/api/v1/translate`,
+      const response = await aiServiceClient.postWithRetry(
+        aiServiceClient.endpoints.translate,
         {
           text,
           src_lang: srcLang,
@@ -163,7 +139,7 @@ class AiServiceClientWrapper {
     // eslint-disable-next-line no-console
     console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
 
-    const response = await postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
+    const response = await aiServiceClient.runOcrFromStorage({
       bucket,
       fileKey,
       mimeType,
@@ -222,8 +198,8 @@ class AiServiceClientWrapper {
   async detectLanguage(text) {
     if (!text || !text.trim()) return "english";
     try {
-      const response = await postWithRetry(
-        `${this.baseUrl}/api/v1/language/detect`,
+      const response = await aiServiceClient.postWithRetry(
+        "/api/v1/language/detect",
         { text },
         { timeout: 5000, retries: 1 },
       );

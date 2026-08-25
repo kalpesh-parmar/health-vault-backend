@@ -3,7 +3,7 @@ const { ProgressEmitter } = require("../../src/services/progressEmitter.service"
 const { DOCUMENT_STAGES } = require("../../src/constants/documentProgress.constants");
 const { StageType, ProcessStatus } = require("../../src/enums/stageStatus");
 const sseController = require("../../src/controllers/sse.controller");
-const documentService = require("../../src/services/document.service");
+// const documentService = require("../../src/services/document.service");
 
 describe("Individual File-Level SSE Progress Tracking Unit Tests", () => {
   beforeEach(() => {
@@ -212,14 +212,11 @@ describe("Individual File-Level SSE Progress Tracking Unit Tests", () => {
       on: jest.fn(),
     };
 
-    // Mock document record owned by user_victim
-    jest.spyOn(documentService, "getDocumentRecord").mockReturnValue({
-      fileKey: "doc_unauthorized_999",
-      uploadedBy: "user_victim",
-      patientId: "user_victim",
-      batchId: "bat_victim",
-      fileName: "private_report.pdf",
-    });
+    // Setup in-memory channel in sseConnection owned by user_victim
+    const channel = sseConnection.getOrCreate("doc_unauthorized_999");
+    channel.ownerId = "user_victim";
+    channel.batchId = "bat_victim";
+    channel.fileName = "private_report.pdf";
 
     sseController.streamFile(unauthorizedReq, mockRes);
     expect(mockRes.status).toHaveBeenCalledWith(403);
