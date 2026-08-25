@@ -1,5 +1,5 @@
 const { errorConstants } = require("../constants/errorConstants");
-const { NotFoundException } = require("../exceptions/appError");
+const { NotFoundException, ConflictException } = require("../exceptions/appError");
 const medicationRepository = require("../repositories/medicationRepository");
 const patientRepository = require("../repositories/patientRepository");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
@@ -33,7 +33,7 @@ class MedicationService {
   }
 
   // CREATE MEDICATION
-  async createMedication(userId, payload) {
+  async createMedication(userId, payload, options = {}) {
     /*
     // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
     const normalizedInput = normalizeCreateMedicationInput(payload);
@@ -45,11 +45,49 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
+
+    if (!options.skipDuplicateCheck) {
+      const { resolution, replaceMedicationId } = validData;
+      if (resolution === "REPLACE" && replaceMedicationId) {
+        try {
+          await this.deleteMedication(replaceMedicationId, userId);
+        } catch (delErr) {
+          console.warn(
+            `[MedicationService] Soft-delete warning for replaced med ${replaceMedicationId}:`,
+            delErr.message,
+          );
+        }
+      } else {
+        const dupCheck = await this.checkDuplicateMedication(userId, validData);
+        if (dupCheck.hasDuplicate) {
+          throw new ConflictException("A similar medication already exists.", {
+            duplicateInfo: {
+              existingMedicationId: dupCheck.matchedMedication
+                ? dupCheck.matchedMedication.id
+                : null,
+              existingMedicationName: dupCheck.matchedMedication
+                ? dupCheck.matchedMedication.medicationName
+                : null,
+              matchType: dupCheck.conflictType === "EXACT_DUPLICATE" ? "exact" : "fuzzy",
+              matchedMedication: dupCheck.matchedMedication,
+              matchedMedications: dupCheck.matchedMedications,
+            },
+            suggestedActions: dupCheck.suggestedActions,
+          });
+        }
+      }
+    }
+
+    const { resolution, replaceMedicationId, ...medicationPayload } = validData;
+    console.log(resolution);
+    console.log(replaceMedicationId);
+
+    const { endDate, dailyConsumption, unit, startDate } =
+      calculateMedicationValues(medicationPayload);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
-      ...validData,
+      ...medicationPayload,
       endDate,
       dailyConsumption,
       unit,
@@ -59,7 +97,7 @@ class MedicationService {
   }
 
   // UPDATE MEDICATION
-  async updateMedication(id, userId, payload) {
+  async updateMedication(id, userId, payload, options = {}) {
     // Validate request payload
     const validData = await validateSchema(updateMedicationSchema, payload);
 
@@ -69,6 +107,77 @@ class MedicationService {
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+
+    if (!options.skipDuplicateCheck && validData.medicationName) {
+      const { resolution, replaceMedicationId } = validData;
+      if (
+        resolution === "REPLACE" &&
+        replaceMedicationId &&
+        String(replaceMedicationId) !== String(id)
+      ) {
+        try {
+          await this.deleteMedication(replaceMedicationId, userId);
+        } catch (delErr) {
+          console.warn(
+            `[MedicationService] Soft-delete warning for replaced med ${replaceMedicationId} on update:`,
+            delErr.message,
+          );
+        }
+      } else {
+        const activeMedications = await medicationRepository.findAll(userId);
+        const incomingRaw = validData.medicationName;
+        const incomingNorm = normalizeMedicationName(incomingRaw);
+        const exactMatches = [];
+        const similarMatches = [];
+
+        for (const med of activeMedications) {
+          if (String(med.id) === String(id)) continue;
+
+          const existingRaw = med.medicationName || "";
+          const existingNorm = normalizeMedicationName(existingRaw);
+          if (!existingNorm && !existingRaw) continue;
+
+          if (
+            incomingNorm === existingNorm ||
+            incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
+          ) {
+            exactMatches.push(med);
+          } else if (
+            incomingNorm.length >= 3 &&
+            existingNorm.length >= 3 &&
+            (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
+          ) {
+            similarMatches.push(med);
+          }
+        }
+
+        const hasDuplicate = exactMatches.length > 0 || similarMatches.length > 0;
+        if (hasDuplicate) {
+          const conflictType = exactMatches.length > 0 ? "EXACT_DUPLICATE" : "SIMILAR_NAME";
+          const matchedMedications = exactMatches.length > 0 ? exactMatches : similarMatches;
+          const matchedMedication = matchedMedications[0] || null;
+          throw new ConflictException("A similar medication already exists.", {
+            duplicateInfo: {
+              existingMedicationId: matchedMedication ? matchedMedication.id : null,
+              existingMedicationName: matchedMedication ? matchedMedication.medicationName : null,
+              matchType: conflictType === "EXACT_DUPLICATE" ? "exact" : "fuzzy",
+              matchedMedication,
+              matchedMedications,
+            },
+            suggestedActions: [
+              { action: "KEEP EXISTING", label: "keep previous medication" },
+              { action: "REPLACE", label: "replace previous medication" },
+              { action: "EDIT", label: "edit previous medication" },
+              { action: "REMOVE NEW", label: "remove incoming new medication" },
+            ],
+          });
+        }
+      }
+    }
+
+    const { resolution, replaceMedicationId, ...updatePayload } = validData;
+    console.log(resolution, "resolution");
+    console.log(replaceMedicationId, "REPLACE MEDICATION Id");
 
     // Find reminder
     const reminder = await medicationReminderRepository.findByMedicationId(id);
@@ -80,23 +189,23 @@ class MedicationService {
     );
 
     // If total quantity is updated, recalculate remaining quantity
-    if (validData.totalQuantity !== undefined) {
+    if (updatePayload.totalQuantity !== undefined) {
       const completedCount =
         await medicationReminderOccurrenceRepository.countCompletedOccurrencesByMedicationId(id);
       const consumedQuantity = completedCount * Number(existingMedication.dosePerIntake || 1);
-      remainingQuantity = Math.max(0, Number(validData.totalQuantity) - consumedQuantity);
+      remainingQuantity = Math.max(0, Number(updatePayload.totalQuantity) - consumedQuantity);
     }
 
     // Merge existing medication with incoming updates
     const updatedPayload = {
       ...existingMedication,
-      ...validData,
+      ...updatePayload,
     };
 
     // Use updated total quantity if provided
     const totalQuantity =
-      validData.totalQuantity !== undefined
-        ? Number(validData.totalQuantity)
+      updatePayload.totalQuantity !== undefined
+        ? Number(updatePayload.totalQuantity)
         : Number(existingMedication.totalQuantity);
 
     const medicationDataForCalculation = {
@@ -112,7 +221,7 @@ class MedicationService {
 
     // Update medication
     const updatedMedication = await medicationRepository.updateById(id, {
-      ...validData,
+      ...updatePayload,
       totalQuantity,
       endDate,
       dailyConsumption,

@@ -1,9 +1,12 @@
 const medicationService = require("../src/services/medication.service");
 const patientRepository = require("../src/repositories/patientRepository");
 const medicationRepository = require("../src/repositories/medicationRepository");
+const medicationReminderRepository = require("../src/repositories/medicationReminderRepository");
 
 jest.mock("../src/repositories/patientRepository");
 jest.mock("../src/repositories/medicationRepository");
+jest.mock("../src/repositories/medicationReminderRepository");
+jest.mock("../src/repositories/medicationReminderOccurrenceRepository");
 
 describe("MedicationService - checkDuplicateMedication", () => {
   beforeEach(() => {
@@ -147,6 +150,123 @@ describe("MedicationService - checkDuplicateMedication", () => {
       // Newly added medicine matching existing saved medicine SHOULD trigger duplicate conflict
       expect(results[1].duplicateInfo.hasDuplicate).toBe(true);
       expect(results[1].duplicateInfo.conflictType).toBe("EXACT_DUPLICATE");
+    });
+  });
+
+  describe("createMedication & updateMedication - Integrated Duplicate Checking", () => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const validCreatePayload = {
+      medicationName: "Dolo 650",
+      medicationType: "TABLET",
+      dosePerIntake: 1,
+      frequency: "Once Daily",
+      foodFrequency: "AFTER_FOOD",
+      startDate: todayStr,
+      totalQuantity: 30,
+      medicationSchedule: { MORNING: "09:00:00" },
+    };
+
+    test("createMedication: should create medication when no duplicate exists", async () => {
+      patientRepository.findById.mockResolvedValue({ id: "user-1", patientCode: "PAT001" });
+      medicationRepository.findAll.mockResolvedValue([]);
+      medicationRepository.create.mockResolvedValue({ id: "med-new", ...validCreatePayload });
+
+      const res = await medicationService.createMedication("user-1", validCreatePayload);
+      expect(res.id).toBe("med-new");
+      expect(medicationRepository.create).toHaveBeenCalled();
+    });
+
+    test("createMedication: should throw ConflictException when duplicate exists and no resolution provided", async () => {
+      patientRepository.findById.mockResolvedValue({ id: "user-1", patientCode: "PAT001" });
+      medicationRepository.findAll.mockResolvedValue([
+        { id: "med-existing", medicationName: "Dolo 650", softDelete: false },
+      ]);
+
+      await expect(
+        medicationService.createMedication("user-1", validCreatePayload),
+      ).rejects.toThrow("A similar medication already exists.");
+    });
+
+    test("createMedication: should soft-delete existing medication and create new one when resolution is REPLACE", async () => {
+      patientRepository.findById.mockResolvedValue({ id: "user-1", patientCode: "PAT001" });
+      medicationRepository.findAll.mockResolvedValue([
+        { id: "med-existing", userId: "user-1", medicationName: "Dolo 650", softDelete: false },
+      ]);
+      medicationRepository.findById.mockResolvedValue({
+        id: "med-existing",
+        userId: "user-1",
+        medicationName: "Dolo 650",
+      });
+      medicationRepository.softDeleteById.mockResolvedValue(true);
+      medicationRepository.create.mockResolvedValue({ id: "med-replaced", ...validCreatePayload });
+
+      const res = await medicationService.createMedication("user-1", {
+        ...validCreatePayload,
+        resolution: "REPLACE",
+        replaceMedicationId: "med-existing",
+      });
+
+      expect(medicationRepository.softDeleteById).toHaveBeenCalledWith("med-existing");
+      expect(res.id).toBe("med-replaced");
+    });
+
+    test("createMedication: should bypass duplicate check when skipDuplicateCheck option is true", async () => {
+      patientRepository.findById.mockResolvedValue({ id: "user-1", patientCode: "PAT001" });
+      medicationRepository.findAll.mockResolvedValue([
+        { id: "med-existing", medicationName: "Dolo 650", softDelete: false },
+      ]);
+      medicationRepository.create.mockResolvedValue({ id: "med-bypassed", ...validCreatePayload });
+
+      const res = await medicationService.createMedication("user-1", validCreatePayload, {
+        skipDuplicateCheck: true,
+      });
+
+      expect(res.id).toBe("med-bypassed");
+    });
+
+    test("updateMedication: should not throw conflict when updating non-name fields on existing medication (self-match)", async () => {
+      const existingMed = {
+        id: "med-1",
+        userId: "user-1",
+        medicationName: "Dolo 650",
+        medicationType: "TABLET",
+        totalQuantity: 30,
+        dosePerIntake: 1,
+      };
+      medicationRepository.findById.mockResolvedValue(existingMed);
+      medicationRepository.findAll.mockResolvedValue([existingMed]);
+      medicationReminderRepository.findByMedicationId.mockResolvedValue(null);
+      medicationRepository.updateById.mockResolvedValue({ ...existingMed, dosePerIntake: 2 });
+
+      const res = await medicationService.updateMedication("med-1", "user-1", {
+        medicationName: "Dolo 650",
+        dosePerIntake: 2,
+      });
+
+      expect(res.dosePerIntake).toBe(2);
+    });
+
+    test("updateMedication: should throw ConflictException when renaming to a name that collides with another active medication", async () => {
+      const currentMed = {
+        id: "med-1",
+        userId: "user-1",
+        medicationName: "Dolo 650",
+        medicationType: "TABLET",
+      };
+      const anotherMed = {
+        id: "med-2",
+        userId: "user-1",
+        medicationName: "Paracetamol",
+        medicationType: "TABLET",
+      };
+      medicationRepository.findById.mockResolvedValue(currentMed);
+      medicationRepository.findAll.mockResolvedValue([currentMed, anotherMed]);
+
+      await expect(
+        medicationService.updateMedication("med-1", "user-1", {
+          medicationName: "Paracetamol",
+        }),
+      ).rejects.toThrow("A similar medication already exists.");
     });
   });
 });

@@ -865,29 +865,96 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
       let answer = null;
-      try {
-        const payload = JSON.parse(msg);
-        if (payload && payload.value) {
-          answer = String(payload.value).toUpperCase();
-        } else if (payload && payload.confirm !== undefined) {
-          answer = payload.confirm ? "YES" : "NO";
+      let rawObj = null;
+
+      if (typeof message === "object" && message !== null) {
+        rawObj = message;
+      } else {
+        try {
+          const parsed = JSON.parse(rawText);
+          if (parsed && typeof parsed === "object") {
+            rawObj = parsed;
+          }
+        } catch {
+          // Plain string
         }
-      } catch {
-        const msgUpper = msg.toUpperCase();
-        if (msgUpper === "YES" || msgUpper === "Y") {
+      }
+
+      if (rawObj) {
+        const val = String(
+          rawObj.value ||
+            rawObj.answer ||
+            rawObj.confirm ||
+            rawObj.action ||
+            rawObj.actionType ||
+            rawObj.key ||
+            rawObj.label ||
+            "",
+        ).toUpperCase();
+        if (
+          ["YES", "Y", "TRUE", "CONFIRM", "CONFIRMED", "ACCEPT", "ACCEPT_DOCUMENT"].includes(val) ||
+          rawObj.confirm === true ||
+          rawObj.documentConfirmed === true
+        ) {
           answer = "YES";
-        } else if (msgUpper === "NO" || msgUpper === "N") {
+        } else if (
+          ["NO", "N", "FALSE", "REJECT", "DECLINE"].includes(val) ||
+          rawObj.confirm === false ||
+          rawObj.documentConfirmed === false
+        ) {
           answer = "NO";
         }
       }
 
       if (!answer) {
-        const extractedConf = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+        const msgUpper = String(msg || "")
+          .trim()
+          .toUpperCase();
+        if (["YES", "Y", "TRUE", "HA", "હાં", "હા", "સાચું", "हाँ", "1"].includes(msgUpper)) {
+          answer = "YES";
+        } else if (
+          ["NO", "N", "FALSE", "NA", "ના", "નથી", "ખોટું", "नहीं", "0"].includes(msgUpper)
+        ) {
+          answer = "NO";
+        }
+      }
+
+      if (!answer) {
+        const extractedConf = await extractFieldFromMessage(
+          "yesNo",
+          rawText,
+          state.preferredLanguage,
+        );
         if (extractedConf && typeof extractedConf === "string") {
           const confNorm = extractedConf.toUpperCase();
           if (confNorm === "YES" || confNorm === "NO") {
             answer = confNorm;
           }
+        }
+      }
+
+      if (!answer) {
+        const lowerStr = rawText.toLowerCase().trim();
+        const yesPhrases = [
+          "yes",
+          "y",
+          "ha",
+          "હા",
+          "હાં",
+          "સાચું",
+          "हाँ",
+          "true",
+          "mine",
+          "my document",
+          "આ મારી",
+          "મારું છે",
+          "હા મારી છે",
+        ];
+        const noPhrases = ["no", "n", "na", "ના", "નથી", "नहीं", "ખોટું", "false", "not mine"];
+        if (yesPhrases.some((p) => lowerStr === p || lowerStr.includes(p))) {
+          answer = "YES";
+        } else if (noPhrases.some((p) => lowerStr === p || lowerStr.includes(p))) {
+          answer = "NO";
         }
       }
 

@@ -197,6 +197,8 @@ const createMedicationSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    replaceMedicationId: z.string().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -223,6 +225,14 @@ const createMedicationSchema = z
       }
     }
 
+    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["replaceMedicationId"],
+        message: "replaceMedicationId is required when resolution is REPLACE",
+      });
+    }
+
     validateMedicationSelections(data, ctx);
   });
 
@@ -246,6 +256,8 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    replaceMedicationId: z.string().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -260,6 +272,14 @@ const updateMedicationSchema = z
         code: z.ZodIssueCode.custom,
         path: ["dosePerIntake"],
         message: errorConstants.DOSE_GREATER_THAN_PILLS,
+      });
+    }
+
+    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["replaceMedicationId"],
+        message: "replaceMedicationId is required when resolution is REPLACE",
       });
     }
 

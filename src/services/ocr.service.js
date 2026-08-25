@@ -561,7 +561,9 @@ class V1Service {
 
             try {
               const normalizedMedData = normalizeCreateMedicationInput(medData);
-              const med = await medicationService.createMedication(userId, normalizedMedData);
+              const med = await medicationService.createMedication(userId, normalizedMedData, {
+                skipDuplicateCheck: true,
+              });
               if (med && med.id) {
                 createdMeds.push(med);
                 try {
@@ -576,7 +578,13 @@ class V1Service {
           }
         } else if (hasMedicineActionData) {
           const normalizedActionData = normalizeCreateMedicationInput(actionData);
-          const createdMed = await medicationService.createMedication(userId, normalizedActionData);
+          const createdMed = await medicationService.createMedication(
+            userId,
+            normalizedActionData,
+            {
+              skipDuplicateCheck: true,
+            },
+          );
           if (createdMed && createdMed.id) {
             createdMeds.push(createdMed);
             try {
@@ -712,15 +720,16 @@ class V1Service {
           const allergiesSkipped =
             dbState?.allergiesSkipped === true || incomingStateCleaned.allergiesSkipped === true;
 
-          const documentConfirmed =
-            dbState?.documentConfirmed === true ||
-            dbState?.documentOwnershipConfirmed === true ||
-            incomingStateCleaned.documentConfirmed === true ||
-            incomingStateCleaned.documentOwnershipConfirmed === true;
-
           const documentOwnershipConfirmed =
-            dbState?.documentOwnershipConfirmed === true ||
-            incomingStateCleaned.documentOwnershipConfirmed === true;
+            dbState?.documentOwnershipConfirmed !== undefined &&
+            dbState?.documentOwnershipConfirmed !== null
+              ? dbState.documentOwnershipConfirmed
+              : incomingStateCleaned.documentOwnershipConfirmed;
+
+          const documentConfirmed =
+            documentOwnershipConfirmed === true ||
+            dbState?.documentConfirmed === true ||
+            incomingStateCleaned.documentConfirmed === true;
 
           const useDocumentData =
             dbState?.useDocumentData === true ||
@@ -743,9 +752,15 @@ class V1Service {
             ...incomingStateCleaned,
             bloodGroupSkipped,
             allergiesSkipped,
-            ...(documentConfirmed ? { documentConfirmed: true } : {}),
-            ...(documentOwnershipConfirmed ? { documentOwnershipConfirmed: true } : {}),
-            ...(useDocumentData ? { useDocumentData: true } : {}),
+            ...(documentConfirmed !== undefined && documentConfirmed !== null
+              ? { documentConfirmed }
+              : {}),
+            ...(documentOwnershipConfirmed !== undefined && documentOwnershipConfirmed !== null
+              ? { documentOwnershipConfirmed }
+              : {}),
+            ...(useDocumentData !== undefined && useDocumentData !== null
+              ? { useDocumentData }
+              : {}),
             existingUserData: mergedUserData,
           };
 

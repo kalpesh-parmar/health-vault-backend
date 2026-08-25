@@ -837,4 +837,51 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     jest.restoreAllMocks();
   });
+
+  test("chatSessionController sendMessage should handle stream: true with SSE response format", async () => {
+    const chatSessionController = require("../src/controllers/chatSession.controller");
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    jest.spyOn(chatService, "sendMessage").mockImplementation(async ({ onChunk }) => {
+      if (onChunk) {
+        onChunk("Hello ");
+        onChunk("World!");
+      }
+      return { reply: "Hello World!", citations: [] };
+    });
+
+    const writtenChunks = [];
+    const headers = {};
+
+    const req = {
+      auth: { userId: "user-123" },
+      body: {
+        question: "Hello",
+        stream: true,
+      },
+      on: jest.fn(),
+      socket: { setTimeout: jest.fn() },
+    };
+
+    const res = {
+      setHeader: (key, value) => {
+        headers[key] = value;
+      },
+      write: (data) => {
+        writtenChunks.push(data);
+      },
+      end: jest.fn(),
+      writableEnded: false,
+    };
+
+    await chatSessionController.sendMessage(req, res);
+
+    expect(headers["Content-Type"]).toBe("text/event-stream");
+    expect(writtenChunks.some((chunk) => chunk.includes("Hello "))).toBe(true);
+    expect(writtenChunks.some((chunk) => chunk.includes("World!"))).toBe(true);
+    expect(writtenChunks.some((chunk) => chunk.includes('"type":"done"'))).toBe(true);
+    expect(res.end).toHaveBeenCalled();
+
+    jest.restoreAllMocks();
+  });
 });

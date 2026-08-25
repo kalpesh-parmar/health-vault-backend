@@ -228,6 +228,19 @@ components:
           maxLength: 1000
           example: Take after food
 
+        resolution:
+          type: string
+          enum:
+            - REPLACE
+            - KEEP_EXISTING
+            - EDIT
+          example: REPLACE
+
+        replaceMedicationId:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
+
     UpdateMedicationRequest:
       type: object
 
@@ -276,6 +289,19 @@ components:
           type: string
           nullable: true
           maxLength: 1000
+
+        resolution:
+          type: string
+          enum:
+            - REPLACE
+            - KEEP_EXISTING
+            - EDIT
+          example: REPLACE
+
+        replaceMedicationId:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
 
     RefillMedicationRequest:
       type: object
