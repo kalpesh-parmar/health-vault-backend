@@ -26,7 +26,6 @@ async function onboardingChat(req, res) {
     res.setHeader("X-Accel-Buffering", "no");
 
     // Bypass compression middleware for this specific SSE response
-    res.flush = () => {};
     req.socket.setTimeout(0);
     // Optionally flush headers if a middleware like compression is used
     if (typeof res.flushHeaders === "function") res.flushHeaders();
@@ -43,23 +42,50 @@ async function onboardingChat(req, res) {
     let sseChunkCount = 0;
 
     const onChunk = (chunk) => {
+      const baseTime = onChunk.startTime || sseStartTime;
       if (!res.writableEnded) {
         sseChunkCount++;
+        const shouldLog = sseChunkCount === 1 || sseChunkCount % 25 === 0;
+
         // STREAMING TEST ONLY
         if (sseChunkCount === 1) {
           // eslint-disable-next-line no-console
           console.log(`[STREAM TEST] FIRST SSE CHUNK SENT after ${Date.now() - sseStartTime}ms`);
-        } else if (sseChunkCount % 50 === 0) {
+        } else if (sseChunkCount % 25 === 0) {
           // eslint-disable-next-line no-console
           console.log(
             `[STREAM TEST] SSE CHUNK #${sseChunkCount} SENT after ${Date.now() - sseStartTime}ms`,
           );
         }
 
-        res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`);
-        if (typeof res.flush === "function") res.flush(); //foorce the data to go the frontend imediately
+        if (shouldLog) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[STREAM DEBUG] res.write START (chunk #${sseChunkCount}) +${Date.now() - baseTime}ms`,
+          );
+        }
+
+        res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`, (err) => {
+          if (shouldLog) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[STREAM DEBUG] res.write END (chunk #${sseChunkCount}) +${Date.now() - baseTime}ms${err ? ` (error: ${err.message})` : ""}`,
+            );
+          }
+        });
+
+        if (typeof res.flush === "function") {
+          if (shouldLog) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[STREAM DEBUG] res.flush (chunk #${sseChunkCount}) +${Date.now() - baseTime}ms`,
+            );
+          }
+          res.flush(); //foorce the data to go the frontend imediately
+        }
       }
     };
+    onChunk.startTime = sseStartTime;
 
     try {
       const result = await ocrService.onboardingChat(
