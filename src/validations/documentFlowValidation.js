@@ -1,19 +1,15 @@
 const { z } = require("zod");
-
 const { documentTypeValue } = require("../enums/documentType");
-
 const fileKeySchema = z
   .object({
     fileKey: z.string().trim().min(3).max(500),
   })
   .strict();
-
 const batchFileKeySchema = z
   .object({
     fileKeys: z.array(z.string().trim().min(3).max(500)).min(1).max(50),
   })
   .strict();
-
 const runOcrSchema = z
   .object({
     // fileKey: z.string().trim().max(500).optional(),
@@ -32,6 +28,7 @@ const runOcrSchema = z
             const parsed = JSON.parse(val);
             if (Array.isArray(parsed)) return parsed;
           } catch (e) {
+            // eslint-disable-next-line no-console
             console.log(e);
           }
           return [val];
@@ -69,16 +66,23 @@ const addDocumentSchema = z
 const createChatSessionSchema = z
   .object({
     title: z.string().trim().max(255).optional(),
-    documentId: z.string().uuid().optional(),
+    documentId: z.array(z.string().uuid()).optional(),
     sessionId: z.string().uuid().optional().nullable(),
   })
   .strict();
 
 const sendChatMessageSchema = z
   .object({
-    documentId: z.string().trim().min(3).max(500).optional().nullable(),
-    question: z.string().trim().min(1).max(4000),
+    documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
+    question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
+    preferredLanguage: z.string().optional(),
+    stream: z
+      .preprocess(
+        (val) => (val === "true" ? true : val === "false" ? false : val),
+        z.boolean().optional().default(false),
+      )
+      .optional(),
   })
   .strict();
 
@@ -97,6 +101,27 @@ const sessionListQuerySchema = z
   })
   .strict();
 
+const unifiedChatSchema = z.object({
+  actionType: z.string().trim().optional().nullable(),
+  actionData: z.record(z.any()).optional().nullable(),
+  message: z.string().trim().max(4000).optional().nullable(),
+  question: z.string().trim().max(4000).optional().nullable(),
+  sessionId: z.string().uuid().optional().nullable(),
+  documentId: z
+    .union([z.string().trim(), z.array(z.string().trim())])
+    .optional()
+    .nullable(),
+  state: z.record(z.any()).optional().nullable(),
+  history: z.array(z.record(z.any())).optional().default([]),
+  displayLabel: z.string().optional().nullable(),
+  preferredLanguage: z.string().optional().nullable(),
+  stream: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .nullable(),
+});
+
+/* Backup of original module.exports:
 module.exports = {
   addDocumentSchema,
   batchFileKeySchema,
@@ -106,4 +131,17 @@ module.exports = {
   sendChatMessageSchema,
   sessionListQuerySchema,
   sessionMessagesQuerySchema,
+};
+*/
+
+module.exports = {
+  addDocumentSchema,
+  batchFileKeySchema,
+  createChatSessionSchema,
+  fileKeySchema,
+  runOcrSchema,
+  sendChatMessageSchema,
+  sessionListQuerySchema,
+  sessionMessagesQuerySchema,
+  unifiedChatSchema,
 };

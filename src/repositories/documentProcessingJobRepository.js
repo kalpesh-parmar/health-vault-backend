@@ -1,4 +1,4 @@
-const { and, eq, lt } = require("drizzle-orm");
+const { and, eq, inArray, lt } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
@@ -175,6 +175,18 @@ class DocumentProcessingJobRepository {
       )
       .limit(1);
     return row || null;
+  }
+
+  async findManyByIdsAndUserId(jobIds, userId) {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      return [];
+    }
+    return db
+      .select()
+      .from(documentProcessingJob)
+      .where(
+        and(inArray(documentProcessingJob.id, jobIds), eq(documentProcessingJob.userId, userId)),
+      );
   }
 
   async sweepExpired() {

@@ -9,7 +9,6 @@ from app.core.json_utils import parse_json_object
 from app.modules.ocr.cleanup import clean_ocr_text, compress_for_llm
 from app.services.llm import LLMService
 from app.services.llm.service import LLMModelError
-
 logger = logging.getLogger(__name__)
 
 

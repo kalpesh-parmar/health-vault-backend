@@ -7,7 +7,12 @@ components:
       properties:
         id: { type: string, format: uuid }
         userId: { type: string, format: uuid }
-        documentId: { type: string, format: uuid, nullable: true }
+        documentId:
+          type: array
+          items:
+            type: string
+            format: uuid
+          nullable: true
         title: { type: string }
         lastMessageAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
@@ -32,7 +37,11 @@ components:
       type: object
       properties:
         title: { type: string }
-        documentId: { type: string, format: uuid }
+        documentId:
+          type: array
+          items:
+            type: string
+            format: uuid
 
     SendChatMessageRequest:
       type: object
@@ -40,7 +49,17 @@ components:
       properties:
         question: { type: string }
         sessionId: { type: string, format: uuid, nullable: true }
-        documentId: { type: string, nullable: true }
+        documentId:
+          type: array
+          items:
+            type: string
+          nullable: true
+        stream: { type: boolean, default: false }
+      example:
+        question: "What is my blood sugar level?"
+        documentId: ["doc_id_1", "doc_id_2"]
+        sessionId: "123e4567-e89b-12d3-a456-426614174000"
+        stream: true
 
 paths:
   /chat/session:
@@ -161,6 +180,29 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/SendChatMessageRequest" }
       responses:
+        "200":
+          description: Document Selection Required (when user must select from uploaded reports)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/ChatMessage" }
+                  ai: { $ref: "#/components/schemas/ChatMessage" }
+                  reply: { type: string }
+                  requireSelection: { type: boolean, example: true }
+                  allowMultiSelect: { type: boolean, example: true }
+                  selectionType: { type: string, example: "MULTIPLE" }
+                  reports:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        fileName: { type: string }
+                        documentType: { type: string }
+                        reportDate: { type: string }
+                        createdAt: { type: string }
         "201":
           description: Answer
           content:

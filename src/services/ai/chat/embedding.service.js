@@ -194,10 +194,12 @@ class EmbeddingService {
     };
   }
 }
-// module.exports = new EmbeddingService();
+const embeddingService = new EmbeddingService();
 
 module.exports = {
-  embeddingService: new EmbeddingService(),
+  embeddingService,
   buildChunks,
   splitText,
+  normalizeVectorDimension,
+  asArray,
 };

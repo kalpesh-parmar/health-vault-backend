@@ -69,7 +69,7 @@ class IntelligenceRepository:
         self,
         user_id: uuid.UUID,
         session_id: str | None,
-        limit: int = 8,
+        limit: int = 2,
     ) -> list[dict]:
         stmt = (
             select(ChatHistory)

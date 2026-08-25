@@ -139,9 +139,11 @@ const env = Object.freeze({
 
   ollamaUrl: stringFromEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen2.5:14b",
+  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
+  // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
   codeModel: process.env.CODE_MODEL,
-  visionModel: process.env.VISION_MODEL,
+  visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
+  qwenVlModel: stringFromEnv("QWEN_VL_MODEL") || process.env.VISION_MODEL || "qwen3-vl:latest",
   popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
@@ -193,11 +195,13 @@ function validateEnv(config) {
   }
 
   if (!process.env.CHAT_MODEL) {
+    // eslint-disable-next-line no-console
     console.warn(
-      "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen2.5:14b'.",
+      "[EnvValidation] CHAT_MODEL is missing in environment. Using default 'qwen3.5:9b'.",
     );
   }
   if (!process.env.AI_EMBEDDING_MODEL) {
+    // eslint-disable-next-line no-console
     console.warn(
       "[EnvValidation] AI_EMBEDDING_MODEL is missing in environment. Using default 'bge-m3:latest'.",
     );
@@ -210,6 +214,7 @@ function validateEnv(config) {
   assertNonCloudModel(config.medgemmaModel, "MEDGEMMA_MODEL");
 
   if (missing.length) {
+    // eslint-disable-next-line no-console
     console.warn(`[EnvValidation] Missing configuration variables: ${missing.join(", ")}`);
   }
   if (config.aiTimeoutMs <= 0) throw new Error("AI_TIMEOUT_MS must be greater than zero");

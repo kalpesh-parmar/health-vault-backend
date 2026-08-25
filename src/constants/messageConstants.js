@@ -9,6 +9,7 @@ const messageConstants = Object.freeze({
   DOCUMENT_FILTERED_LIST_FETCHED: "fetch data successfully",
   DOCUMENT_LIST_FETCHED: "Document list fetched successfully",
   DOCUMENT_TYPE_IS_REQUIRED: "Document type is required",
+  DOCUMENT_SELECTION_REQUIRED: "Document selection required",
   HEALTH_CHECK_SUCCESS: "Health check passed",
   NOTIFICATION_BADGE_COUNT_FETCHED: "fetch data successfully",
   NOTIFICATION_DELETED: "Notification deleted successfully",
@@ -39,6 +40,9 @@ const messageConstants = Object.freeze({
   DOCUMENT_DOWNLOAD_URL_FETCHED: "Document signed URL  fetched successfully",
   FAILED_ATTEMPT_LOGGED: "Failed attempt logged",
 
+  // dashboard
+  DASHBOARD_SUMMARY_FETCHED: "Dashboard summary fetched successfully",
+
   // medication
   MEDICATION_CREATED: "Medication created successfully",
   MEDICATION_UPDATED: "Medication updated successfully",
@@ -46,6 +50,7 @@ const messageConstants = Object.freeze({
   MEDICATION_FETCHED: "Medication fetched successfully",
   MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
+  MEDICATION_DUPLICATE_CHECKED: "Medication duplicate check completed successfully",
 
   // reminders and refills
   MEDICATION_REMINDER_LIST_FETCHED: "Medication reminder list fetched successfully",

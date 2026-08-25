@@ -108,8 +108,8 @@ components:
           example: Dr. Smith
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePresesion
+          minimum: 0.1
           example: 1
 
         frequency:
@@ -189,8 +189,8 @@ components:
           example: Dr. Smith
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePrecision
+          minimum: 0.1
           example: 1
 
         frequency:
@@ -228,6 +228,19 @@ components:
           maxLength: 1000
           example: Take after food
 
+        resolution:
+          type: string
+          enum:
+            - REPLACE
+            - KEEP_EXISTING
+            - EDIT
+          example: REPLACE
+
+        replaceMedicationId:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
+
     UpdateMedicationRequest:
       type: object
 
@@ -245,8 +258,8 @@ components:
           maxLength: 255
 
         dosePerIntake:
-          type: integer
-          minimum: 1
+          type: doublePrecision
+          minimum: 0.1
 
         frequency:
           $ref: "#/components/schemas/FrequencyType"
@@ -276,6 +289,19 @@ components:
           type: string
           nullable: true
           maxLength: 1000
+
+        resolution:
+          type: string
+          enum:
+            - REPLACE
+            - KEEP_EXISTING
+            - EDIT
+          example: REPLACE
+
+        replaceMedicationId:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
 
     RefillMedicationRequest:
       type: object
@@ -368,7 +394,81 @@ components:
         page:
           $ref: "#/components/schemas/MedicationPagination"
 
+    CheckDuplicateMedicationRequest:
+      type: object
+      required:
+        - medicationName
+      properties:
+        medicationName:
+          type: string
+          example: Paracetamol 500mg
+        medicationType:
+          $ref: "#/components/schemas/MedicationType"
+
+    CheckDuplicateMedicationResponse:
+      type: object
+      properties:
+        hasDuplicate:
+          type: boolean
+          example: true
+        conflictType:
+          type: string
+          enum:
+            - EXACT_DUPLICATE
+            - SIMILAR_NAME
+          nullable: true
+          example: EXACT_DUPLICATE
+        matchedMedication:
+          $ref: "#/components/schemas/Medication"
+        matchedMedications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Medication"
+        suggestedActions:
+          type: array
+          items:
+            type: object
+            properties:
+              action:
+                type: string
+                example: KEEP EXISTING
+              label:
+                type: string
+                example: Keep existing medication schedule
+              description:
+                type: string
+                example: Refill current active medication schedule
+
 paths:
+  /medications/check-duplicate:
+    post:
+      tags:
+        - Medication
+      summary: Check for duplicate active medications
+      description: >
+        Checks if an incoming medication name or type duplicates an existing active medication for the logged-in user.
+        Returns conflict type and suggested actions.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckDuplicateMedicationRequest"
+            examples:
+              checkParacetamol:
+                value:
+                  medicationName: Tab. Paracetamol 500mg
+                  medicationType: TABLET
+      responses:
+        "200":
+          description: Duplicate check completed successfully
+        "400":
+          description: Invalid request payload
+        "401":
+          description: Unauthorized
+
   /medications/create:
     post:
       tags:

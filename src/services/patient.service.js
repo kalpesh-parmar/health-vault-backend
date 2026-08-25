@@ -33,6 +33,7 @@ const {
   verifyFirebaseToken,
   findOrCreateFirebaseUser,
   createCustomFirebaseToken,
+  getFirebaseUser,
 } = require("../configs/firebase");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -445,7 +446,28 @@ class PatientService {
       }
     }
 
-    const email = decodedToken.email || data.email || null;
+    let email = decodedToken.email || data.email || null;
+
+    // Tier 2 Fallback: Check firebase.identities.email array in token claims
+    if (!email && decodedToken.firebase?.identities?.email) {
+      const emails = decodedToken.firebase.identities.email;
+      if (Array.isArray(emails) && emails.length > 0 && emails[0]) {
+        email = emails[0];
+      }
+    }
+
+    // Tier 4 Fallback: Query Firebase Admin SDK getUser for full user profile email
+    if (!email && decodedToken.uid) {
+      try {
+        const fbUser = await getFirebaseUser(decodedToken.uid);
+        if (fbUser) {
+          email = fbUser.email || fbUser.providerData?.find((p) => p && p.email)?.email || null;
+        }
+      } catch (err) {
+        console.warn("[PatientService] Could not fetch Firebase user fallback:", err.message);
+      }
+    }
+
     let firstName = data.firstName || null;
     let lastName = data.lastName || null;
     if (decodedToken.name) {
@@ -455,6 +477,14 @@ class PatientService {
     }
     const firebaseUid = decodedToken.uid;
     const providerUserId = firebaseUid; // Or decodedToken.sub
+
+    console.log(
+      `[SOCIAL LOGIN LOG] Provider: ${provider}, Decoded Token Payload:`,
+      JSON.stringify(decodedToken, null, 2),
+    );
+    console.log(
+      `[SOCIAL LOGIN LOG] Extracted Fields: email=${email}, firstName=${firstName}, lastName=${lastName}, firebaseUid=${firebaseUid}`,
+    );
 
     const identifier = firebaseUid;
 
@@ -491,6 +521,9 @@ class PatientService {
     let isNewUser = false;
     // ACCOUNT LINKING / CREATE USER
     if (!patientUser) {
+      /*
+      // Strategy A: Account linking via email/mobile/firebaseUid fallback is disabled.
+      // Legacy account linking logic commented out below:
       if (email) {
         patientUser = await patientRepository.findByEmail(email);
       }
@@ -516,41 +549,44 @@ class PatientService {
           });
         }
       } else {
-        isNewUser = true;
+      */
+      isNewUser = true;
 
-        const patientCode = await createUniquePatientCode();
+      const patientCode = await createUniquePatientCode();
 
-        const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
-        const socialProviders = ["google", "facebook", "apple", "microsoft"];
-        const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
+      const isMobileVerified = provider === "mobile" && loginType === "mobile" && !!mobile;
+      const socialProviders = ["google", "facebook", "apple", "microsoft"];
+      const isEmailVerified = socialProviders.includes(provider) && loginType === "social";
 
-        patientUser = await patientRepository.create({
-          patientCode,
-          firebaseUid,
-          mobile: mobile,
-          countryCode: countryCode,
-          email: email,
-          firstName: firstName,
-          lastName: lastName,
-          fullName:
-            decodedToken.name ||
-            (firstName && lastName ? `${firstName} ${lastName}` : firstName || null),
-          // isActive: true,
-          status: USER_STATUS.ACTIVE,
-          // isVerified: true,
-          isMobileVerified: isMobileVerified,
-          isEmailVerified: isEmailVerified,
-          onboardingCompleted: false,
-          lastLoginAt: new Date(),
-        });
+      patientUser = await patientRepository.create({
+        patientCode,
+        firebaseUid,
+        mobile: mobile,
+        countryCode: countryCode,
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        fullName:
+          decodedToken.name ||
+          (firstName && lastName ? `${firstName} ${lastName}` : firstName || null),
+        // isActive: true,
+        status: USER_STATUS.ACTIVE,
+        // isVerified: true,
+        isMobileVerified: isMobileVerified,
+        isEmailVerified: isEmailVerified,
+        onboardingCompleted: false,
+        lastLoginAt: new Date(),
+      });
 
-        await authProviderRepository.create({
-          userId: patientUser.id,
-          provider,
-          providerUserId: providerUserId,
-          email: email,
-        });
+      await authProviderRepository.create({
+        userId: patientUser.id,
+        provider,
+        providerUserId: providerUserId,
+        email: email,
+      });
+      /*
       }
+      */
     } else {
       assertPatientCanAuthenticate(patientUser);
     }

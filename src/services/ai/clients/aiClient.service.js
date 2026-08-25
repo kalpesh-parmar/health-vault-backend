@@ -1,5 +1,29 @@
+const axios = require("axios");
+const { DEFAULT_TIMEOUT, TRANSIENT_STATUS } = require("../../../configs/aiConfig");
 const aiServiceClient = require("../../../clients/aiServiceClient");
 const { InternalServerException } = require("../../../exceptions/appError");
+
+async function postWithRetry(url, body, { headers, timeout = DEFAULT_TIMEOUT, retries = 1 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await axios.post(url, body, { headers, timeout });
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetry(error) || attempt === retries) break;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  const status = lastError.response?.status || 502;
+  const detail = lastError.response?.data?.error || lastError.message;
+  throw new InternalServerException(`AI service request failed (${status}): ${detail}`);
+}
+
+function shouldRetry(error) {
+  if (!error.response) return true;
+  return TRANSIENT_STATUS.has(error.response.status);
+}
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -40,18 +64,36 @@ class AiServiceClientWrapper {
     return aiServiceClient.baseUrl;
   }
 
-  async translate(text, srcLang = "en", tgtLang) {
+  async _translateChunk(text, srcLang = "en", tgtLang) {
     if (!text || srcLang === tgtLang) return text;
     const cacheKey = `${srcLang}:${tgtLang}:${text}`;
     const cached = this.translationCache.get(cacheKey);
     if (cached) return cached;
 
+    // eslint-disable-next-line no-console
+    console.log(
+      `[AiServiceClient] Calling IndicTrans2 model to translate chunk (${text.length} chars) from ${srcLang} to ${tgtLang}...`,
+    );
     try {
-      const response = await aiServiceClient.translate({ text, srcLang, tgtLang });
+      const startTime = Date.now();
+      const response = await postWithRetry(
+        `${this.baseUrl}/api/v1/translate`,
+        {
+          text,
+          src_lang: srcLang,
+          tgt_lang: tgtLang,
+        },
+        { timeout: 300000, retries: 0 },
+      );
+      const endTime = Date.now();
+      // eslint-disable-next-line no-console
+      console.log(`[AiServiceClient] Translation API call took ${endTime - startTime}ms`);
+
       const translatedText = response?.translated_text || text;
       this.translationCache.set(cacheKey, translatedText);
       return translatedText;
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(
         `[AiServiceClient] Translation failed from ${srcLang} to ${tgtLang}:`,
         err.message,
@@ -80,16 +122,56 @@ class AiServiceClientWrapper {
     }
   }
 
-  async runOcrFromStorage(params) {
-    console.log(
-      "running ocr from storage",
-      params.bucket,
-      params.fileKey,
-      params.mimeType,
-      params.mode,
-    );
-    const response = await aiServiceClient.runOcrFromStorage(params);
-    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500));
+  async translate(text, srcLang = "en", tgtLang) {
+    if (!text || srcLang === tgtLang) return text;
+
+    // Check if the text is short enough to translate in one go
+    if (text.length <= 4000) {
+      return await this._translateChunk(text, srcLang, tgtLang);
+    }
+
+    // Otherwise, split the text into manageable paragraphs and translate them sequentially
+    const chunks = text.split("\n\n");
+
+    const chunkPromises = chunks.map(async (chunk) => {
+      if (!chunk.trim()) {
+        return chunk;
+      }
+
+      // If a single paragraph is still absurdly long, split by single newline
+      if (chunk.length > 4000) {
+        const subChunks = chunk.split("\n");
+        const subChunkPromises = subChunks.map(async (subChunk) => {
+          if (!subChunk.trim()) {
+            return subChunk;
+          }
+          return await this._translateChunk(subChunk, srcLang, tgtLang);
+        });
+        const translatedSubChunks = await Promise.all(subChunkPromises);
+        return translatedSubChunks.join("\n");
+      } else {
+        // Translate normal paragraph
+        return await this._translateChunk(chunk, srcLang, tgtLang);
+      }
+    });
+
+    const translatedChunks = await Promise.all(chunkPromises);
+    return translatedChunks.join("\n\n");
+  }
+
+  async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
+    // eslint-disable-next-line no-console
+    console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
+
+    const response = await postWithRetry(`${this.baseUrl}/v1/run-ocr`, {
+      bucket,
+      fileKey,
+      mimeType,
+      mode,
+    });
+
+    // eslint-disable-next-line no-console
+    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500)); // Log first 500 chars to avoid huge logs
     return response;
   }
 
@@ -114,6 +196,7 @@ class AiServiceClientWrapper {
   }
 
   async runOcrFromBuffer({ buffer, filename, mimeType, mode = "concise" }) {
+    // eslint-disable-next-line no-console
     console.log(
       `[AiClientService] runOcrFromBuffer started for ${filename}, size: ${buffer?.length}`,
     );
@@ -124,13 +207,31 @@ class AiServiceClientWrapper {
         mimeType,
         mode,
       });
+      // eslint-disable-next-line no-console
       console.log(
         `[AiClientService] runOcrFromBuffer success for ${filename}. Response keys: ${Object.keys(responseData).join(",")}. Has fullText: ${!!responseData.fullText}`,
       );
       return responseData;
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.error(`[AiClientService] runOcrFromBuffer failed for ${filename}:`, err.message);
       throw err;
+    }
+  }
+
+  async detectLanguage(text) {
+    if (!text || !text.trim()) return "english";
+    try {
+      const response = await postWithRetry(
+        `${this.baseUrl}/api/v1/language/detect`,
+        { text },
+        { timeout: 5000, retries: 1 },
+      );
+      return response?.language || "english";
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[AiClientService] Language detection failed:`, err.message);
+      return "english";
     }
   }
 }

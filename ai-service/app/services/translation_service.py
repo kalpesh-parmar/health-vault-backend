@@ -21,6 +21,10 @@ def mask_text(text: str) -> tuple[str, list[str]]:
         ("phone", r'\+?\d{1,4}[-.\s]?\d{3,5}[-.\s]?\d{3,5}(?:[-.\s]?\d{1,4})?'),
         ("date", r'\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b'),
         ("blood", r'(?<![A-Za-z])(?:AB|A|B|O)[+-]'),
+        ("emoji", r'[\u2600-\u27BF\U00010000-\U0010ffff]+'),
+        ("markdown_list", r'(?m)^[\s]*(?:#{1,6}|-|\*|•)\s+'),
+        ("markdown_bold", r'\*\*'),
+        ("medical_terms", r'(?i)\b(Hemoglobin|HbA1c|WBC|RBC|Platelets|Creatinine|LDL|HDL|TSH|Vitamin\s*D|Cholesterol|Bilirubin|Urea|Glucose)\b'),
     ]
     
     masked_text = text
@@ -46,7 +50,7 @@ def mask_text(text: str) -> tuple[str, list[str]]:
     curr_idx = 0
     for start, end, val in clean_matches:
         final_text += text[curr_idx:start]
-        mask_str = f"__MASK_{len(masks)}__"
+        mask_str = f"[#{len(masks)}#]"
         final_text += mask_str
         masks.append(val)
         curr_idx = end
@@ -63,9 +67,10 @@ def unmask_text(masked_text: str, masks: list[str]) -> str:
                 return masks[idx]
         except Exception:
             pass
-        return match.group(0)
+        return "" 
     
-    pattern = r'__\s*MASK_(\d+)\s*__'
+    # Matches the new [#0#] mask pattern safely without risking language-specific translation issues
+    pattern = r'\[\s*#\s*(\d+)\s*#\s*\]'
     unmasked = re.sub(pattern, replace_match, masked_text, flags=re.IGNORECASE)
     return unmasked
 
@@ -73,8 +78,10 @@ def unmask_text(masked_text: str, masks: list[str]) -> str:
 class TranslationService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.tokenizer = None
-        self.model = None
+        self.en_indic_tokenizer = None
+        self.en_indic_model = None
+        self.indic_en_tokenizer = None
+        self.indic_en_model = None
         self.ip = None
         self.device = "cpu"
         self.is_warm = False
@@ -90,7 +97,8 @@ class TranslationService:
 
             resolved_token = self.settings.hf_token or os.environ.get("HF_TOKEN")
             if resolved_token:
-                model_name = self.settings.translation_model_name
+                en_indic_name = "ai4bharat/indictrans2-en-indic-dist-200M"
+                indic_en_name = "ai4bharat/indictrans2-indic-en-dist-200M"
                 self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 logger.info(f"[TranslationService] Device selected: {self.device}")
 
@@ -100,14 +108,24 @@ class TranslationService:
                 else:
                     kwargs["use_auth_token"] = resolved_token
 
-                self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, **kwargs)
-                self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                    model_name,
+                logger.info(f"[TranslationService] Loading {en_indic_name}...")
+                self.en_indic_tokenizer = AutoTokenizer.from_pretrained(en_indic_name, trust_remote_code=True, **kwargs)
+                self.en_indic_model = AutoModelForSeq2SeqLM.from_pretrained(
+                    en_indic_name,
                     trust_remote_code=True,
                     **kwargs
                 ).to(self.device)
+
+                logger.info(f"[TranslationService] Loading {indic_en_name}...")
+                self.indic_en_tokenizer = AutoTokenizer.from_pretrained(indic_en_name, trust_remote_code=True, **kwargs)
+                self.indic_en_model = AutoModelForSeq2SeqLM.from_pretrained(
+                    indic_en_name,
+                    trust_remote_code=True,
+                    **kwargs
+                ).to(self.device)
+
                 self.is_warm = True
-                logger.info("[TranslationService] Translation model loaded successfully.")
+                logger.info("[TranslationService] Translation models loaded successfully.")
             else:
                 logger.warning("[TranslationService] Translation is disabled because HF_TOKEN is not configured.")
                 self.is_warm = False
@@ -115,8 +133,10 @@ class TranslationService:
             self.ip = IndicProcessor(inference=True)
         except Exception as e:
             logger.error(f"[TranslationService] Failed to warm up translation model: {e}", exc_info=True)
-            self.tokenizer = None
-            self.model = None
+            self.en_indic_tokenizer = None
+            self.en_indic_model = None
+            self.indic_en_tokenizer = None
+            self.indic_en_model = None
             self.ip = None
             self.is_warm = False
 
@@ -134,6 +154,7 @@ class TranslationService:
             "mr": "mar_Deva",
             "tamil": "tam_Taml",
             "ta": "tam_Taml",
+            "tn": "tam_Taml",
         }
         return mapping.get(l_clean, "eng_Latn")
 
@@ -155,19 +176,46 @@ class TranslationService:
         if src_code == tgt_code:
             return text
 
+        if tgt_code == "eng_Latn":
+            current_tokenizer = self.indic_en_tokenizer
+            current_model = self.indic_en_model
+        else:
+            current_tokenizer = self.en_indic_tokenizer
+            current_model = self.en_indic_model
+
+        if current_model is None or current_tokenizer is None:
+            logger.error(f"[TranslationService] Required translation model is not loaded for {src_code} -> {tgt_code}")
+            return text
+
         masked_text, masks = mask_text(text)
-        sentences = self.split_sentences(masked_text)
-        if not sentences:
+        
+        paragraphs = masked_text.split('\n')
+        all_sentences = []
+        sentence_to_para_map = []
+        
+        for i, para in enumerate(paragraphs):
+            if not para.strip():
+                continue
+            sentences = self.split_sentences(para)
+            for s in sentences:
+                all_sentences.append(s)
+                sentence_to_para_map.append(i)
+                
+        if not all_sentences:
             return text
 
         try:
             import torch
+            import time
+            start_time = time.time()
             translated_sentences = []
             
-            for sentence in sentences:
-                batch = self.ip.preprocess_batch([sentence], src_lang=src_code, tgt_lang=tgt_code)
+            batch_size = 4
+            for i in range(0, len(all_sentences), batch_size):
+                sentence_batch = all_sentences[i:i + batch_size]
+                batch = self.ip.preprocess_batch(sentence_batch, src_lang=src_code, tgt_lang=tgt_code)
                 
-                inputs = self.tokenizer(
+                inputs = current_tokenizer(
                     batch,
                     truncation=True,
                     padding="longest",
@@ -176,10 +224,10 @@ class TranslationService:
 
                 loop = asyncio.get_running_loop()
                 async with self._lock:
-                    def _generate():
+                    def _generate(inputs_arg=inputs, model_arg=current_model):
                         with torch.no_grad():
-                            return self.model.generate(
-                                **inputs,
+                            return model_arg.generate(
+                                **inputs_arg,
                                 use_cache=True,
                                 min_length=0,
                                 max_length=256,
@@ -188,11 +236,22 @@ class TranslationService:
                             )
                     generated_tokens = await loop.run_in_executor(None, _generate)
 
-                decoded = self.tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-                translated_sentences.append(decoded[0] if decoded else sentence)
+                decoded = current_tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+                postprocessed = self.ip.postprocess_batch(decoded, lang=tgt_code)
+                translated_sentences.extend(postprocessed)
 
-            translated_text = " ".join(translated_sentences)
+            translated_paragraphs = [""] * len(paragraphs)
+            for i, translated_sent in zip(sentence_to_para_map, translated_sentences):
+                if translated_paragraphs[i]:
+                    translated_paragraphs[i] += " " + translated_sent
+                else:
+                    translated_paragraphs[i] = translated_sent
+                    
+            translated_text = "\n".join(translated_paragraphs)
             unmasked_text = unmask_text(translated_text, masks)
+            
+            end_time = time.time()
+            logger.info(f"[TranslationService] Translated {len(text)} chars from {src_lang} to {tgt_lang} in {end_time - start_time:.2f} seconds")
             return unmasked_text
         except Exception as e:
             logger.error(f"[TranslationService] Error during translation: {e}", exc_info=True)

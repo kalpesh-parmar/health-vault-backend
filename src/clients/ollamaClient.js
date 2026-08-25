@@ -2,6 +2,10 @@ const { createHttpClient } = require("../configs/http.config");
 const apiConfig = require("../configs/api.config");
 const { env } = require("../configs/env");
 
+// const axiosInstance = axios.create({
+//   httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
+// });
+
 class OllamaClient {
   constructor() {
     this.client = createHttpClient({
@@ -23,6 +27,7 @@ class OllamaClient {
       const models = response.data?.models || [];
       return models.map((m) => m.name);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.warn("[OllamaClient] Failed to list tags:", error.message);
       return [];
     }
@@ -40,6 +45,7 @@ class OllamaClient {
           throw error;
         }
         const delay = initialDelay * Math.pow(2, attempt - 1);
+        // eslint-disable-next-line no-console
         console.warn(
           `[OllamaClient] Request failed (attempt ${attempt}/${retries + 1}). Retrying in ${delay}ms... Error: ${error.message}`,
         );
@@ -70,6 +76,7 @@ class OllamaClient {
       typeof thinkingText === "string" &&
       thinkingText.trim()
     ) {
+      // eslint-disable-next-line no-console
       console.warn(
         `[OllamaClient] Primary response field ('${apiType === "chat" ? "message.content" : "response"}') was empty. ` +
           `Falling back to 'thinking' field (length: ${thinkingText.length}).`,
@@ -121,8 +128,9 @@ class OllamaClient {
         method: "post",
         url,
         data: payload,
-        timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+        timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
         headers: { "Content-Type": "application/json" },
+        signal: options.signal,
       };
 
       try {
@@ -136,22 +144,32 @@ class OllamaClient {
         const thinkingLen = message.thinking?.length || 0;
         const totalDurationMs = raw.total_duration ? (raw.total_duration / 1e6).toFixed(2) : "N/A";
 
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Chat Model: ${model}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Chat Done Reason: ${doneReason}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Prompt eval (input) tokens: ${promptEvalCount}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Eval (output) tokens: ${evalCount}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Content length: ${contentLen}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Thinking length: ${thinkingLen}`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Total Ollama duration: ${totalDurationMs}ms`);
+        // eslint-disable-next-line no-console
         console.log(`[OllamaClient] Attempt: ${attempt}`);
 
         if (raw.load_duration)
+          // eslint-disable-next-line no-console
           console.log(
             `[OllamaClient] Model load duration: ${(raw.load_duration / 1e6).toFixed(2)}ms`,
           );
 
         const contentIsEmpty = !message.content || !message.content.trim();
         if (doneReason === "length" && contentIsEmpty && attempt === 1) {
+          // eslint-disable-next-line no-console
           console.warn(
             `[OllamaClient] Response truncated (done_reason=length with empty content). Retrying with larger output budget (attempt 2)...`,
           );
@@ -163,6 +181,7 @@ class OllamaClient {
 
         break;
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.error(`[OllamaClient] Chat attempt ${attempt} failed:`, error.message);
         throw error;
       }
@@ -208,33 +227,116 @@ class OllamaClient {
       url,
       data: payload,
       responseType: "stream",
-      timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+      timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
+      signal: options.signal,
     };
 
     try {
+      const requestStartTime = Date.now();
       const response = await this.requestWithRetry(config);
+      const baseTime = (onChunk && onChunk.startTime) || requestStartTime;
+
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Ollama response received +${Date.now() - baseTime}ms`);
+
+      // STREAMING TEST ONLY
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM TEST] LLM START`);
+      const startTime = Date.now();
+      let firstChunkReceived = false;
+      let totalChunks = 0;
+      let buffer = "";
+      let isCompleted = false;
+
       return new Promise((resolve, reject) => {
         response.data.on("data", (chunk) => {
-          const lines = chunk.toString().split("\n").filter(Boolean);
+          // eslint-disable-next-line no-console
+          console.log(`[STREAM DEBUG] Ollama data +${Date.now() - baseTime}ms`);
+
+          if (!firstChunkReceived) {
+            // STREAMING TEST ONLY
+            // eslint-disable-next-line no-console
+            console.log(`[STREAM TEST] FIRST LLM CHUNK after ${Date.now() - startTime}ms`);
+            firstChunkReceived = true;
+          }
+
+          buffer += chunk.toString();
+          const lines = buffer.split("\n");
+          // Keep the last partial line in the buffer
+          buffer = lines.pop();
+
           for (const line of lines) {
+            if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
               if (parsed.message?.content) {
+                totalChunks++;
+
+                if (totalChunks === 1) {
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] FIRST TOKEN GENERATED +${Date.now() - baseTime}ms`);
+                }
+
+                if (totalChunks % 25 === 0) {
+                  // eslint-disable-next-line no-console
+                  console.log(
+                    `[STREAM DEBUG] Progress: ${totalChunks} chunks generated +${Date.now() - baseTime}ms`,
+                  );
+                }
+
                 onChunk(parsed.message.content);
               }
               if (parsed.done) {
+                // STREAMING TEST ONLY
+                // eslint-disable-next-line no-console
+                console.log(`[STREAM TEST] LLM COMPLETE after ${Date.now() - startTime}ms`);
+                // eslint-disable-next-line no-console
+                console.log(`[STREAM TEST] TOTAL CHUNKS: ${totalChunks}`);
+
+                if (!isCompleted) {
+                  isCompleted = true;
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+                }
                 resolve(parsed);
               }
             } catch {
-              // Ignore partial JSON chunks
+              // Ignore invalid JSON that shouldn't happen with correct buffering
             }
           }
         });
         response.data.on("error", (err) => reject(err));
-        response.data.on("end", () => resolve({ done: true }));
+        response.data.on("end", () => {
+          let resolved = false;
+          if (buffer.trim()) {
+            try {
+              const parsed = JSON.parse(buffer);
+              if (parsed.done) {
+                if (!isCompleted) {
+                  isCompleted = true;
+                  // eslint-disable-next-line no-console
+                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+                }
+                resolve(parsed);
+                resolved = true;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          if (!resolved) {
+            if (!isCompleted) {
+              isCompleted = true;
+              // eslint-disable-next-line no-console
+              console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
+            }
+            resolve({ done: true });
+          }
+        });
       });
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] ChatStream failed:", error.message);
       throw error;
     }
@@ -263,7 +365,7 @@ class OllamaClient {
       method: "post",
       url,
       data: payload,
-      timeout: (options.timeout ?? env.aiTimeoutMs) || 90000,
+      timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
     };
 
@@ -288,7 +390,9 @@ class OllamaClient {
 
       return text;
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] Generate failed:", error.message);
+      // eslint-disable-next-line no-console
       console.log("[Ollama error]:==", error.response);
       throw error;
     }
@@ -306,7 +410,7 @@ class OllamaClient {
       method: "post",
       url,
       data: payload,
-      timeout: 60000,
+      timeout: 300000,
       headers: { "Content-Type": "application/json" },
     };
 
@@ -318,6 +422,7 @@ class OllamaClient {
       }
       return vector;
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("[OllamaClient] Embeddings failed:", error.message);
       throw error;
     }
@@ -325,6 +430,7 @@ class OllamaClient {
 
   async warmUp(model, numCtx = 8192) {
     if (!model) return;
+    // eslint-disable-next-line no-console
     console.log(`[OllamaClient] Pre-warming GPU VRAM for model '${model}' (num_ctx: ${numCtx})...`);
     try {
       await this.generate("", model, {
@@ -332,8 +438,10 @@ class OllamaClient {
         rawOptions: { num_ctx: numCtx },
         timeout: 10000,
       });
+      // eslint-disable-next-line no-console
       console.log(`[OllamaClient] Warm-up completed successfully for model '${model}'.`);
     } catch (err) {
+      // eslint-disable-next-line no-console
       console.warn(
         `[OllamaClient] Warm-up ping failed (model will load on first request):`,
         err.message,

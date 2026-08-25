@@ -22,6 +22,7 @@ const { messageConstants } = require("../constants/messageConstants");
 const { NotFoundException, InvalidRequestException } = require("../exceptions/appError");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
+const chatSessionRepository = require("../repositories/chatSessionRepository");
 const objectStorageService = require("./objectStorage.service");
 const {
   idParamSchema,
@@ -131,6 +132,9 @@ class DocumentService {
       throw new NotFoundException(errorConstants.DOCUMENT_NOT_FOUND);
     }
 
+    // Also remove the document from any chat sessions where it's referenced
+    await chatSessionRepository.removeDocumentFromSessions(params.id, userId);
+
     return deletedDocument;
   }
 
@@ -172,9 +176,14 @@ class DocumentService {
 
     if (updateData.fileName) {
       const existingExt = path.extname(existingDocument.fileName || "");
-      const newExt = path.extname(updateData.fileName);
-      if (!newExt && existingExt) {
-        updateData.fileName = `${updateData.fileName}${existingExt}`;
+      if (existingExt) {
+        const inputExt = path.extname(updateData.fileName);
+        const baseName = inputExt
+          ? path.basename(updateData.fileName, inputExt).trim()
+          : updateData.fileName.trim();
+        updateData.fileName = `${baseName}${existingExt}`;
+      } else {
+        updateData.fileName = updateData.fileName.trim();
       }
     }
 
@@ -258,7 +267,16 @@ class DocumentService {
         })),
       };
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error("Error in file upload: ", error);
+      // for (const key of uploadedFileKeys) {
+      //   try {
+      //     await objectStorageService.deleteFile(key);
+      //   } catch (cleanupErr) {
+      //     // eslint-disable-next-line no-console
+      //     console.warn(`[DocumentService] Cleanup failed for file key ${key}:`, cleanupErr.message);
+      //   }
+      // }
       throw error;
     }
   }

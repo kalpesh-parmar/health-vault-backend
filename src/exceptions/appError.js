@@ -3,13 +3,13 @@ const { StatusCodes } = require("http-status-codes");
 const { errorConstants } = require("../constants/errorConstants");
 
 class AppError extends Error {
-  constructor(statusCode, message, errorCode) {
+  constructor(statusCode, message, errorCode, details = null) {
     super(message);
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.description = message;
     this.errorCode = errorCode;
-    // this.details = details;
+    this.details = details;
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -66,8 +66,8 @@ class SessionExpiredException extends AppError {
 }
 
 class ConflictException extends AppError {
-  constructor(message = "Resource conflict") {
-    super(StatusCodes.CONFLICT, message, "CONFLICT");
+  constructor(message = "Resource conflict", details = null, errorCode = "CONFLICT") {
+    super(StatusCodes.CONFLICT, message, errorCode, details);
   }
 }
 

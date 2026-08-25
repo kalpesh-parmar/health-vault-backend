@@ -29,6 +29,7 @@ const {
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
 } = require("./medicationValidation");
 const {
   createReminderSchema,
@@ -45,7 +46,11 @@ const {
   validateProfileUpload,
   validateDocumentUpload,
 } = require("./uploadValidation");
-const { jobIdParamSchema, validateJobIdParam } = require("./ocrJobValidation");
+const {
+  jobIdParamSchema,
+  validateJobIdParam,
+  validateBatchJobIdsBody,
+} = require("./ocrJobValidation");
 
 function formatZodIssues(error) {
   return error.issues.map((issue) => ({
@@ -98,6 +103,7 @@ module.exports = {
   listOccurrencesQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
   patientIdParamSchema,
   profileUploadSchema,
   documentUploadSchema,
@@ -107,4 +113,5 @@ module.exports = {
   validateDocumentUpload,
   jobIdParamSchema,
   validateJobIdParam,
+  validateBatchJobIdsBody,
 };

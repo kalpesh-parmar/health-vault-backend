@@ -6,29 +6,28 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
-const { chatSession } = require("../../../models/chatSession");
-const { and, eq, desc, isNull } = require("drizzle-orm");
-
-const { ocrOrchestrator } = require("../ocr/ocr.orchestrator");
-const { ocrService } = require("../ocr/ocr.service");
-const documentPersistenceService = require("../../documentPersistence.service");
+const { eq, desc, inArray } = require("drizzle-orm");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
-const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+const medicationRepository = require("../../../repositories/medicationRepository");
+
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
+const { containsEntity } = require("../../../utils/synonyms");
 
 // Debug logger
 const debugLogger = {
+  // eslint-disable-next-line no-console
   info: (msg, data) => console.log(`[DEBUG] ${msg}`, JSON.stringify(data, null, 2)),
+  // eslint-disable-next-line no-console
   error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
 };
 
 const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
-const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
+// const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
 
 const NO_CONTEXT_REPLY_I18N = {
   english: "Information not found in uploaded reports.",
@@ -36,6 +35,14 @@ const NO_CONTEXT_REPLY_I18N = {
   hindi: "अपलोड की गई रिपोर्ट में यह जानकारी नहीं मिली।",
   marathi: "अपलोड केलेल्या अहवालात ही माहिती आढळली नाही.",
   tamil: "பதிவேற்றப்பட்ட அறிக்கைகளில் இந்தத் தகவல் காணப்படவில்லை.",
+};
+
+const REQUIRE_SELECTION_I18N = {
+  english: "Sure, please select your document that you have to compare.",
+  gujarati: "ચોક્કસ, કૃપા કરીને તમારો દસ્તાવેજ પસંદ કરો જેની તમારે સરખામણી કરવી છે.",
+  hindi: "ज़रूर, कृपया अपने उस दस्तावेज़ का चयन करें जिसकी आपको तुलना करनी है।",
+  marathi: "नक्की, कृपया तुमचा दस्तऐवज निवडा ज्याची तुम्हाला तुलना करायची आहे.",
+  tamil: "நிச்சயமாக, தயவுசெய்து நீங்கள் ஒப்பிட வேண்டிய உங்கள் ஆவணத்தைத் தேர்ந்தெடுக்கவும்.",
 };
 
 const EMERGENCY_WARNING_I18N = {
@@ -84,9 +91,121 @@ const AGE_REPLY_I18N = {
   },
 };
 
-function relevance(distance) {
-  if (distance == null) return null;
-  return Math.max(0, Math.min(1, 1 - Number(distance)));
+const AGE_KEYWORDS = [
+  // English
+  "what is my age",
+  "how old am i",
+  "calculate my age",
+  // Gujarati
+  "મારી ઉંમર શું છે",
+  "મારી ઉંમર કેટલી છે",
+  "હું કેટલા વર્ષનો છું",
+  // Hindi
+  "मेरी उम्र क्या है",
+  "मेरी आयु क्या है",
+  "मैं कितने साल का हूँ",
+  // Marathi
+  "माझे वय काय आहे",
+  "माझे वय किती आहे",
+  "मी किती वर्षांचा आहे",
+  // Tamil
+  "என் வயது என்ன",
+  "எனக்கு என்ன வயது",
+  "என் வயது எவ்வளவு",
+];
+
+/**
+ * Smart context builder for patient profile active medications.
+ * Implements capping (top 25) and dynamic keyword matching for 1,000+ scale.
+ *
+ * @param {Array} medications - Array of medication DB records
+ * @param {string} userQuestion - User question string
+ * @returns {string} Formatted active medications context text
+ */
+function buildMedicationsContext(medications = [], userQuestion = "") {
+  if (!Array.isArray(medications) || medications.length === 0) {
+    return "Active Profile Medications:\nNone";
+  }
+
+  const cleanQuestion = String(userQuestion || "").toLowerCase();
+  const totalCount = medications.length;
+
+  let selectedMeds = [];
+
+  if (totalCount <= 25) {
+    selectedMeds = medications;
+  } else {
+    // Rank/search: prioritize medications matching user question words
+    const matchedMeds = medications.filter((med) => {
+      if (!med.medicationName) return false;
+      const medNameClean = med.medicationName.toLowerCase().trim();
+      if (cleanQuestion.includes(medNameClean)) return true;
+      const words = medNameClean.split(/\s+/).filter((w) => w.length > 2);
+      return words.some((w) => cleanQuestion.includes(w));
+    });
+    const matchedIds = new Set(matchedMeds.map((m) => m.id));
+    const remainingMeds = medications.filter((m) => !matchedIds.has(m.id));
+
+    const maxRemaining = Math.max(0, 25 - matchedMeds.length);
+    selectedMeds = [...matchedMeds, ...remainingMeds.slice(0, maxRemaining)];
+  }
+
+  const formattedList = selectedMeds
+    .map((m) => {
+      const name = m.medicationName || "Unknown Medicine";
+      const type = m.medicationType ? ` (${m.medicationType})` : "";
+      const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
+      const unit = m.unit ? ` ${m.unit}` : "";
+      const doseStr = dose || unit ? `: ${dose}${unit}` : "";
+      const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
+      const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+
+      let scheduleStr = "";
+      if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
+        const times = Object.entries(m.medicationSchedule)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        if (times) scheduleStr = `, Schedule: [${times}]`;
+      }
+
+      const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
+      const notes = m.notes ? `, Notes: ${m.notes}` : "";
+
+      return `- ${name}${type}${doseStr}${freq}${food}${scheduleStr}${doctor}${notes}`;
+    })
+    .join("\n");
+
+  const header =
+    totalCount > 25
+      ? `Active Profile Medications (Total: ${totalCount}, Showing top 25 most relevant):`
+      : `Active Profile Medications (${totalCount}):`;
+
+  return `${header}\n${formattedList}`;
+}
+
+const processingSessions = new Set();
+
+function getMedicalEntityKeywords(question) {
+  if (!question) return [];
+  const entities = [
+    { key: "hemoglobin", regex: /hemoglobin|haemoglobin|hb|hgb/i },
+    { key: "glucose", regex: /glucose|blood sugar|sugar|hba1c/i },
+    { key: "rbc", regex: /rbc|red blood cell/i },
+    { key: "wbc", regex: /wbc|white blood cell/i },
+    { key: "platelets", regex: /platelets?/i },
+    { key: "creatinine", regex: /creatinine/i },
+    { key: "cholesterol", regex: /cholesterol|lipid/i },
+    { key: "vitamin d", regex: /vitamin d|vit d/i },
+    { key: "tsh", regex: /tsh|thyroid/i },
+  ];
+  const found = [];
+  for (const entity of entities) {
+    if (entity.regex.test(question)) {
+      found.push(entity.key);
+    }
+  }
+  return found;
 }
 
 class ChatService {
@@ -101,6 +220,9 @@ class ChatService {
     contextChunks = [],
     patientContextStr = "",
     preferredLanguage = "english",
+    coverageStr = "",
+    onChunk = null,
+    abortSignal = null,
   ) {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     const userQuery = lastUserMessage?.content || "";
@@ -126,24 +248,112 @@ class ChatService {
         };
       }
 
-      const contextText = contextChunks
-        .map(
-          (c, idx) =>
-            `[Chunk Index: ${idx + 1}, ID: ${c.chunkId || c.id}, Section: ${c.sectionTitle || "Report Content"}, Source: ${c.sourceType}, Similarity Score: ${(c.score ?? 1.0).toFixed(2)}]\nContent: ${c.content}`,
-        )
-        .join("\n\n");
+      const medicalEntities = getMedicalEntityKeywords(userQuery);
 
-      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang);
+      // Group context chunks by document ID
+      const chunksByDoc = new Map();
+      for (const chunk of contextChunks) {
+        const docId = String(chunk.documentId);
+        if (!chunksByDoc.has(docId)) {
+          chunksByDoc.set(docId, []);
+        }
+        chunksByDoc.get(docId).push(chunk);
+      }
+
+      const contextText = Array.from(chunksByDoc.entries())
+        .map(([, chunks]) => {
+          const docData = chunks[0].docData || {};
+          let pName = "Unknown";
+          if (docData.structuredExtractedData?.patient?.name) {
+            pName = docData.structuredExtractedData.patient.name;
+          }
+          const fileName = docData.fileName || "Unknown";
+          const reportDate = docData.reportDate
+            ? new Date(docData.reportDate).toISOString().split("T")[0]
+            : "Unknown";
+
+          // Fallback context: extract matching structured summary tests if present
+          let structuredTestsStr = "";
+          if (
+            medicalEntities.length > 0 &&
+            docData.structuredExtractedData?.tests &&
+            Array.isArray(docData.structuredExtractedData.tests)
+          ) {
+            const relevantTests = docData.structuredExtractedData.tests.filter((t) => {
+              const testNameLower = t.name?.toLowerCase() || "";
+              return medicalEntities.some((entity) => {
+                return containsEntity(testNameLower, entity);
+              });
+            });
+
+            if (relevantTests.length > 0) {
+              structuredTestsStr =
+                `Requested Medical Information:\n` +
+                relevantTests
+                  .map((t) => `- ${t.name}: ${t.value} ${t.unit || ""} (${t.status || "NORMAL"})`)
+                  .join("\n");
+            }
+          }
+
+          const chunksContent = chunks
+            .map((c) => `[Section: ${c.sectionTitle || "General"}]\n${c.content}`)
+            .join("\n\n");
+
+          return `=== REPORT ===
+Document: ${fileName}
+Report Date: ${reportDate}
+Patient: ${pName}
+
+${structuredTestsStr ? structuredTestsStr + "\n\n" : ""}Evidence:
+${chunksContent}`;
+        })
+        .join("\n\n========================================\n\n");
+
+      let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang, coverageStr);
+
+      const uniqueDocsCount = new Set(contextChunks.map((c) => c.documentId)).size;
+      systemPrompt += `\n\nIMPORTANT DOCUMENT COUNT INSTRUCTION: You have been provided with extracted context from EXACTLY ${uniqueDocsCount} distinct medical report(s). If asked for an overview, summary, or total count of reports, you MUST state that there are exactly ${uniqueDocsCount} report(s). Do NOT hallucinate any other number.`;
+
       if (patientContextStr) {
         systemPrompt += `\n\n${patientContextStr}`;
       }
+      const instructionContent =
+        prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
+        prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
+      systemPrompt += `\n\n${instructionContent}`;
       const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
-      console.log(`[ChatService] Running local RAG chat in ${normLang} using ${env.chatModel}...`);
-      const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-        temperature: 0.2,
-        maxTokens: 2048,
-      });
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ChatService] Running local RAG chat (generation in ${normLang}) using ${env.chatModel}...`,
+      );
+
+      let answer = "";
+      if (onChunk) {
+        //streming mode
+        await ollamaClient.chatStream(
+          formattedMessages,
+          env.chatModel,
+          (chunk) => {
+            answer += chunk; //save in local variable for final return
+            onChunk(chunk); //pass to frontend for streaming
+          },
+          {
+            temperature: 0.2,
+            maxTokens: 1024,
+            rawOptions: { num_ctx: 8192 },
+            signal: abortSignal,
+          },
+        );
+      } else {
+        answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
+          temperature: 0.2,
+          maxTokens: 1024,
+          rawOptions: { num_ctx: 8192 },
+          signal: abortSignal,
+        });
+      }
+
       return {
         answer,
         mode,
@@ -157,15 +367,42 @@ class ChatService {
       systemPrompt += `\n\n${patientContextStr}`;
     }
 
+    const instructionContent =
+      prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
+      prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
+    systemPrompt += `\n\n${instructionContent}`;
     const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
 
+    // eslint-disable-next-line no-console
     console.log(
-      `[ChatService] Running local general chat in ${normLang} using ${env.chatModel}...`,
+      `[ChatService] Running local general chat (generation in ${normLang}) using ${env.chatModel}...`,
     );
-    const answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-      temperature: 0.2,
-      maxTokens: 2048,
-    });
+
+    let answer = "";
+    if (onChunk) {
+      await ollamaClient.chatStream(
+        formattedMessages,
+        env.chatModel,
+        (chunk) => {
+          answer += chunk;
+          onChunk(chunk);
+        },
+        {
+          temperature: 0.2,
+          maxTokens: 2048,
+          rawOptions: { num_ctx: 16384 },
+          signal: abortSignal,
+        },
+      );
+    } else {
+      answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
+        temperature: 0.2,
+        maxTokens: 2048,
+        rawOptions: { num_ctx: 16384 },
+        signal: abortSignal,
+      });
+    }
+
     return {
       answer,
       mode,
@@ -194,513 +431,890 @@ class ChatService {
         messageConstants.SESSION_FETCHED ? "Chat session not found" : "Not found",
       );
     }
-    return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
-  }
-
-  async sendMessage({ userId, documentId, question, sessionId: reqSessionId }) {
-    debugLogger.info("sendMessage: Incoming payload", {
+    const result = await chatSessionRepository.listMessages({
+      cursor,
+      direction,
+      limit,
+      sessionId,
       userId,
-      documentId,
-      reqSessionId,
-      question: question?.substring(0, 100),
     });
 
-    if (!question?.trim()) {
-      throw new InvalidRequestException("Question is required");
+    const items = (result.items || []).map((msg) => {
+      const meta = msg.metadata || {};
+      return {
+        ...msg,
+        actionType: meta.actionType || msg.actionType || null,
+        options: meta.options || msg.options || [],
+        medicines: meta.medicines || msg.medicines || [],
+        document: meta.document || msg.document || null,
+        suggestedAction: meta.suggestedAction || msg.suggestedAction || null,
+        mode: meta.mode || msg.mode || null,
+        medication: meta.medication || msg.medication || null,
+      };
+    });
+
+    return { ...result, items };
+  }
+
+  async sendMessage({
+    userId,
+    documentId,
+    question,
+    sessionId: reqSessionId,
+    onChunk,
+    abortSignal,
+  }) {
+    if (reqSessionId) {
+      if (processingSessions.has(reqSessionId)) {
+        throw new InvalidRequestException(
+          "A message is already being processed for this session. Please wait.",
+        );
+      }
+      processingSessions.add(reqSessionId);
     }
 
-    // Resolve and normalize preferred language
-    let preferredLanguage = "english";
-    const p = await patientRepository.findById(userId);
-    if (p) {
-      preferredLanguage = p.preferredLanguage || "english";
-    }
-    if (!preferredLanguage || preferredLanguage === "english") {
+    try {
+      // Normalize documentId to array
+      if (documentId && !Array.isArray(documentId)) {
+        documentId = [documentId];
+      }
+
+      const _reqStartTime = Date.now();
+      const baseTime = onChunk?.startTime || _reqStartTime;
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Chat message processing started +${Date.now() - baseTime}ms`);
+
+      debugLogger.info("sendMessage: Incoming payload", {
+        userId,
+        documentId,
+        reqSessionId,
+        question: question?.substring(0, 100),
+      });
+
+      if (!question?.trim()) {
+        if (documentId && documentId.length > 0) {
+          let lookupSessionId = reqSessionId;
+          if (!lookupSessionId) {
+            const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
+            if (existingSessions?.items?.length > 0) {
+              lookupSessionId = existingSessions.items[0].id;
+            }
+          }
+          if (lookupSessionId) {
+            const recentMsgs = await chatSessionRepository.listMessages({
+              direction: "before",
+              limit: 10,
+              sessionId: lookupSessionId,
+              userId,
+            });
+            const lastUserMsg = (recentMsgs?.items || []).find((m) => m.role === "user");
+            if (lastUserMsg && lastUserMsg.content) {
+              question = lastUserMsg.content;
+              debugLogger.info("sendMessage: Re-using previous question from session", {
+                question,
+              });
+            }
+          }
+        }
+      }
+
+      if (!question?.trim()) {
+        throw new InvalidRequestException("Question is required");
+      }
+
+      // Resolve and normalize preferred language
+      let preferredLanguage = "english";
+      const p = await patientRepository.findById(userId);
+      if (p) {
+        preferredLanguage = p.preferredLanguage || "english";
+      }
+      if (!preferredLanguage || preferredLanguage === "english") {
+        try {
+          const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+          const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+          if (onboardingRecord?.data?.preferredLanguage) {
+            preferredLanguage = onboardingRecord.data.preferredLanguage;
+          }
+        } catch (err) {
+          debugLogger.error("sendMessage: Failed to get onboarding preferredLanguage", {
+            error: err.message,
+          });
+        }
+      }
+      preferredLanguage = normalizeLanguage(preferredLanguage);
+
+      // --- ML LANGUAGE DETECTION ---
+      let detectedLanguage = preferredLanguage;
       try {
-        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-        if (onboardingRecord?.data?.preferredLanguage) {
-          preferredLanguage = onboardingRecord.data.preferredLanguage;
+        const detectStartTime = Date.now();
+        const detectedLang = await aiClient.detectLanguage(question);
+        const detectDuration = Date.now() - detectStartTime;
+        if (detectedLang) {
+          const normDetected = normalizeLanguage(detectedLang);
+          debugLogger.info(`sendMessage: [LANGUAGE DETECTION] took ${detectDuration}ms`, {
+            detected: normDetected,
+            previous: preferredLanguage,
+          });
+          detectedLanguage = normDetected;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
+          );
         }
       } catch (err) {
-        debugLogger.error("sendMessage: Failed to read onboarding fallback language", {
+        debugLogger.error("sendMessage: Failed to detect language via ML model", {
           error: err.message,
         });
       }
-    }
-    preferredLanguage = normalizeLanguage(preferredLanguage);
+      // Force everything to use detectedLanguage
+      preferredLanguage = detectedLanguage;
+      const retrievalQuery = question;
 
-    // Intercept age-related questions
-    const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
-    if (
-      cleanQuestion === "what is my age" ||
-      cleanQuestion === "how old am i" ||
-      cleanQuestion === "calculate my age"
-    ) {
-      debugLogger.info("sendMessage: Intercepted age-related question", { question });
+      // Intercept specific questions
+      const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
+      let interceptedReply = null;
 
-      const ageTemplates = AGE_REPLY_I18N[preferredLanguage] || AGE_REPLY_I18N.english;
-      let replyText;
-      if (p && p.dateOfBirth) {
-        let dobStr = p.dateOfBirth;
-        if (p.dateOfBirth instanceof Date) {
-          dobStr = p.dateOfBirth.toISOString().split("T")[0];
-        } else if (typeof p.dateOfBirth === "string") {
-          dobStr = p.dateOfBirth.split("T")[0];
+      if (AGE_KEYWORDS.includes(cleanQuestion)) {
+        const ageTemplates = AGE_REPLY_I18N[detectedLanguage] || AGE_REPLY_I18N.english;
+        if (p && p.dateOfBirth) {
+          let dobStr =
+            p.dateOfBirth instanceof Date
+              ? p.dateOfBirth.toISOString().split("T")[0]
+              : String(p.dateOfBirth).split("T")[0];
+          const calculatedAge = getAgeFromDateOfBirth(p.dateOfBirth);
+          interceptedReply = ageTemplates.success(dobStr, calculatedAge);
+        } else {
+          interceptedReply = ageTemplates.missing;
         }
-        const calculatedAge = getAgeFromDateOfBirth(p.dateOfBirth);
-        replyText = ageTemplates.success(dobStr, calculatedAge);
-      } else {
-        replyText = ageTemplates.missing;
       }
 
       let session;
       if (reqSessionId) {
         session = await chatSessionRepository.findSessionById(reqSessionId, userId);
-        if (!session) {
-          throw new NotFoundException("Chat session not found");
-        }
-      } else if (!documentId?.trim()) {
-        const [existingSession] = await db
-          .select()
-          .from(chatSession)
-          .where(
-            and(
-              isNull(chatSession.documentId),
-              eq(chatSession.userId, userId),
-              eq(chatSession.softDelete, false),
-            ),
-          )
-          .orderBy(desc(chatSession.updatedAt))
-          .limit(1);
-        session =
-          existingSession ||
-          (await chatSessionRepository.createSession({
-            userId,
-            documentId: null,
-            title: "General Health Chat",
-          }));
+        if (!session) throw new NotFoundException("Chat session not found");
       } else {
-        const [existingDoc] = await db
-          .select()
-          .from(document)
-          .where(
-            and(
-              eq(document.s3Key, documentId),
-              eq(document.userId, userId),
-              eq(document.softDelete, false),
-            ),
-          )
-          .limit(1);
-        if (existingDoc) {
-          const [existingSession] = await db
-            .select()
-            .from(chatSession)
-            .where(
-              and(
-                eq(chatSession.documentId, existingDoc.id),
-                eq(chatSession.userId, userId),
-                eq(chatSession.softDelete, false),
-              ),
-            )
-            .orderBy(desc(chatSession.updatedAt))
-            .limit(1);
-          session =
-            existingSession ||
-            (await chatSessionRepository.createSession({
-              userId,
-              documentId: existingDoc.id,
-              title: existingDoc.fileName || "Document Chat",
-            }));
+        const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
+        if (existingSessions && existingSessions.items && existingSessions.items.length > 0) {
+          session = existingSessions.items[0];
         } else {
           session = await chatSessionRepository.createSession({
             userId,
-            documentId: null,
-            title: "General Health Chat",
+            title: "Health Chat",
+            metadata: { active_document_ids: documentId || [] },
           });
         }
       }
+      const sessionId = session.id;
 
-      const userMsg = await chatSessionRepository.appendMessage({
-        content: question.trim(),
-        role: "user",
-        sessionId: session.id,
-        userId,
-      });
-
-      const aiMsg = await chatSessionRepository.appendMessage({
-        citations: [],
-        content: replyText,
-        metadata: {
-          mode: !documentId?.trim() ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
-          emergency: false,
-          intercepted: true,
-        },
-        role: "assistant",
-        sessionId: session.id,
-        userId,
-      });
-
-      return {
-        ai: aiMsg,
-        citations: [],
-        reply: replyText,
-        user: userMsg,
-        mode: !documentId?.trim() ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
-        emergency: false,
-      };
-    }
-
-    let isGeneralHealth = !documentId?.trim();
-
-    let session;
-    let doc = null;
-
-    if (reqSessionId) {
-      session = await chatSessionRepository.findSessionById(reqSessionId, userId);
-      if (!session) {
-        throw new NotFoundException("Chat session not found");
-      }
-      if (session.documentId) {
-        doc = { id: session.documentId };
-        isGeneralHealth = false;
-      } else {
-        isGeneralHealth = true;
-      }
-    } else if (isGeneralHealth) {
-      // Find or create general health session
-      const [existingSession] = await db
-        .select()
-        .from(chatSession)
-        .where(
-          and(
-            isNull(chatSession.documentId),
-            eq(chatSession.userId, userId),
-            eq(chatSession.softDelete, false),
-          ),
-        )
-        .orderBy(desc(chatSession.updatedAt))
-        .limit(1);
-
-      session = existingSession;
-      if (!session) {
-        debugLogger.info("sendMessage: Creating new general health session");
-        session = await chatSessionRepository.createSession({
+      if (interceptedReply !== null) {
+        const userMsg = await chatSessionRepository.appendMessage({
+          content: question.trim(),
+          role: "user",
+          sessionId,
           userId,
-          documentId: null,
-          title: "General Health Chat",
         });
-      }
-    } else {
-      // Document RAG Flow - Retrieve document
-      const [existingDoc] = await db
-        .select()
-        .from(document)
-        .where(
-          and(
-            eq(document.id, documentId),
-            eq(document.userId, userId),
-            eq(document.softDelete, false),
-          ),
-        )
-        .limit(1);
-
-      if (existingDoc) {
-        doc = existingDoc;
-      } else {
-        // Run OCR if not indexed
-        debugLogger.info(
-          "sendMessage: Document not found in DB. Fetching and extracting from S3...",
-          { documentId },
-        );
-        let ocrResponse;
-        try {
-          ocrResponse = await ocrOrchestrator.runFromStorage({
-            fileKey: documentId,
-            mimeType: "application/pdf",
-            traceId: `chat_ocr_${Date.now()}`,
-          });
-        } catch (error) {
-          debugLogger.error("sendMessage: OCR pipeline failed", { error: error.message });
-          throw new InvalidRequestException(`OCR processing failed: ${error.message}`);
-        }
-
-        let patientContext = null;
-        try {
-          patientContext = await intelligenceRepository.getPatientContext(userId);
-        } catch {
-          patientContext = null;
-        }
-
-        const { rawOcrData, structured } = await ocrService.normalizeExtraction({
-          patientContext,
-          rawOcr: ocrResponse,
-        });
-
-        const addResult = await documentPersistenceService.addDocument({
-          userId,
-          payload: {
-            fileKey: documentId,
-            rawOcrData: {
-              ...rawOcrData,
-              mimeType: rawOcrData?.mimeType || "application/pdf",
-            },
-            extractedStructuredData: structured,
-          },
-        });
-        doc = addResult.document;
-      }
-
-      // Find or create session for document
-      const [existingSession] = await db
-        .select()
-        .from(chatSession)
-        .where(
-          and(
-            eq(chatSession.documentId, doc.id),
-            eq(chatSession.userId, userId),
-            eq(chatSession.softDelete, false),
-          ),
-        )
-        .orderBy(desc(chatSession.updatedAt))
-        .limit(1);
-
-      session = existingSession;
-      if (!session) {
-        session = await chatSessionRepository.createSession({
-          userId,
-          documentId: doc.id,
-          title: doc.fileName || "Document Chat",
-        });
-      }
-    }
-
-    const sessionId = session.id;
-
-    // Append user message
-    const userMessage = await chatSessionRepository.appendMessage({
-      content: question.trim(),
-      role: "user",
-      sessionId,
-      userId,
-    });
-
-    let assistantText = NO_CONTEXT_REPLY;
-    let citations = [];
-    let isEmergency = false;
-
-    let patientContextStr = "";
-    if (p) {
-      let dobStr = "Unknown";
-      if (p.dateOfBirth) {
-        dobStr =
-          p.dateOfBirth instanceof Date
-            ? p.dateOfBirth.toISOString().split("T")[0]
-            : String(p.dateOfBirth).split("T")[0];
-      }
-      patientContextStr = `Patient Profile:
-Name: ${p.firstName || ""} ${p.lastName || ""}
-Gender: ${p.gender || "Unknown"}
-Date of Birth: ${dobStr}
-Blood Group: ${p.bloodGroup || "Unknown"}`;
-    }
-
-    if (isGeneralHealth) {
-      // General Health chat flow
-      const recent = await chatSessionRepository.listMessages({
-        direction: "before",
-        limit: 8,
-        sessionId,
-        userId,
-      });
-      const items = recent && Array.isArray(recent.items) ? recent.items : [];
-      const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
-
-      debugLogger.info("sendMessage: Calling general health chat provider in " + preferredLanguage);
-      try {
-        const aiResponse = await this.qwenHealthChat(
-          history,
-          "GENERAL_HEALTH",
-          [],
-          patientContextStr,
-          preferredLanguage,
-        );
-        assistantText = aiResponse.answer;
-        isEmergency = !!aiResponse.emergency;
-      } catch (error) {
-        debugLogger.error(
-          "sendMessage: Local direct language call failed, falling back to translation",
-          {
-            error: error.message,
-          },
-        );
-        try {
-          const aiResponse = await this.qwenHealthChat(
-            history,
-            "GENERAL_HEALTH",
-            [],
-            patientContextStr,
-            "english",
-          );
-          let rawAns = aiResponse.answer;
-          isEmergency = !!aiResponse.emergency;
-
-          if (aiClient && typeof aiClient.translate === "function") {
-            assistantText = await aiClient.translate(rawAns, "english", preferredLanguage);
-          } else {
-            assistantText = rawAns;
-          }
-        } catch (fallbackErr) {
-          debugLogger.error("sendMessage: General health fallback failed", {
-            error: fallbackErr.message,
-          });
-          assistantText =
-            preferredLanguage === "gujarati"
-              ? "માફ કરશો, હું અત્યારે તમારી વિનંતી પર પ્રક્રિયા કરવામાં અસમર્થ છું. કૃપા કરીને પછીથી ફરી પ્રયાસ કરો."
-              : preferredLanguage === "hindi"
-                ? "क्षमा करें, मैं वर्तमान में आपके अनुरोध को संसाधित करने में असमर्थ हूँ। कृपया बाद में पुनः प्रयास करें।"
-                : preferredLanguage === "marathi"
-                  ? "क्षमस्व, मी सध्या आपल्या विनंतीवर प्रक्रिया करण्यास असमर्थ आहे. कृपया नंतर पुन्हा प्रयत्न करा."
-                  : preferredLanguage === "tamil"
-                    ? "மன்னிக்கவும், தற்போது உங்களது கோரிக்கையை எங்களால் செயல்படுத்த முடியவில்லை. தயவுசெய்து பின்னர் மீண்டும் முயற்சிக்கவும்."
-                    : "Sorry, I am currently unable to process your request. Please try again later.";
-        }
-      }
-    } else {
-      // Document RAG flow
-      debugLogger.info("sendMessage: Generating embedding for RAG query");
-      const queryEmbedding = await embeddingService.embedText(question);
-
-      const chunks = await intelligenceRepository.searchSimilarChunks({
-        documentId: doc.id,
-        limit: env.ragTopK,
-        queryEmbedding,
-        userId,
-      });
-
-      const safeChunks = Array.isArray(chunks) ? chunks : [];
-      const usableChunks = safeChunks
-        .map((chunk) => ({ ...chunk, score: relevance(chunk.distance) }))
-        .filter((chunk) =>
-          chunk.score == null ? true : chunk.score >= 1 - MIN_CITATION_RELEVANCE,
-        );
-
-      const fallbackNoContext =
-        NO_CONTEXT_REPLY_I18N[preferredLanguage] || NO_CONTEXT_REPLY_I18N.english;
-
-      if (!usableChunks.length) {
-        const aiMessage = await chatSessionRepository.appendMessage({
+        const aiMsg = await chatSessionRepository.appendMessage({
           citations: [],
-          content: fallbackNoContext,
-          metadata: { reason: "no_relevant_chunks" },
+          content: interceptedReply,
+          metadata: { mode: "GENERAL_HEALTH", emergency: false, intercepted: true, documentId: [] },
           role: "assistant",
           sessionId,
           userId,
         });
         return {
-          ai: aiMessage,
+          ai: aiMsg,
           citations: [],
-          reply: fallbackNoContext,
-          user: userMessage,
-          mode: "DOCUMENT_RAG",
+          reply: interceptedReply,
+          user: userMsg,
+          mode: "GENERAL_HEALTH",
           emergency: false,
         };
       }
 
+      // REQUEST ANALYZER
+      let intent = "GENERAL";
+      let documentScope = "NONE";
+      const intentStartTime = Date.now();
+
+      const lowerQuestion = retrievalQuery.toLowerCase();
+      const compareKeywords = [
+        "all",
+        "compare",
+        "trends",
+        "both",
+        "multiple",
+        "every",
+        "which",
+        "highest",
+        "lowest",
+        "across",
+        "સરખામણી",
+        "તુલના",
+        "तुलना",
+        "ஒப்பிடுக",
+      ];
+      const documentKeywords = [
+        "report",
+        "lab",
+        "result",
+        "upload",
+        "scan",
+        "test",
+        "mri",
+        "x-ray",
+        "prescription",
+        "summary",
+        "અહેવાલ",
+        "રિપોર્ટ",
+        "रिपोर्ट",
+        "अहवाल",
+        "அறிக்கை",
+      ];
+      const fullDocKeywords = [
+        "full",
+        "entire",
+        "complete",
+        "everything",
+        "detail",
+        "details",
+        "all details",
+        "બધી વિગતો",
+        "સંપૂર્ણ",
+        "पूरी",
+        "विस्तार",
+      ];
+
+      const hasCompare = compareKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasDocument = documentKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasFullDoc = fullDocKeywords.some((kw) => lowerQuestion.includes(kw));
+
+      if (documentId && documentId.length > 0) {
+        intent = documentId.length > 1 ? "COMPARE" : "DOCUMENT";
+        documentScope = documentId.length > 1 ? "SELECTED_MULTI_DOCUMENT" : "SINGLE_DOCUMENT";
+        if (hasFullDoc) documentScope = "FULL_DOCUMENT";
+      } else {
+        if (hasCompare && hasDocument) {
+          intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
+        } else if (hasCompare && lowerQuestion.includes("report")) {
+          intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
+        } else if (hasCompare) {
+          intent = "COMPARE";
+          documentScope = "ALL_DOCUMENTS";
+        } else if (hasDocument) {
+          if (lowerQuestion.includes("reports")) {
+            intent = "COMPARE";
+            documentScope = "ALL_DOCUMENTS";
+          } else {
+            intent = "DOCUMENT";
+            documentScope = "ALL_DOCUMENTS"; // Needs resolution to pick latest
+          }
+        } else {
+          intent = "GENERAL";
+          documentScope = "NONE";
+        }
+        if (hasFullDoc && intent !== "GENERAL") {
+          documentScope = "FULL_DOCUMENT";
+        }
+      }
+
+      debugLogger.info(
+        `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
+        { intent, documentScope, detectedLanguage },
+      );
+      // eslint-disable-next-line no-console
+      console.log(`[STREAM DEBUG] Intent analyzed: "${intent}" +${Date.now() - baseTime}ms`);
+
+      let finalDocumentIds = [];
+      if (intent === "DOCUMENT" || intent === "COMPARE") {
+        if (documentId && documentId.length > 0) {
+          finalDocumentIds = documentId;
+        } else {
+          const recentDocs = await db
+            .select({
+              id: document.id,
+              fileName: document.fileName,
+              documentType: document.documentType,
+              reportDate: document.reportDate,
+              createdAt: document.createdAt,
+            })
+            .from(document)
+            .where(eq(document.userId, userId))
+            .orderBy(desc(document.createdAt));
+
+          if (recentDocs.length === 0) {
+            intent = "GENERAL";
+            documentScope = "NONE";
+          } else if (
+            documentScope === "ALL_DOCUMENTS" ||
+            documentScope === "FULL_DOCUMENT" ||
+            documentScope === "COMPARE"
+          ) {
+            // Check if user is asking for selection vs specific reports
+            if (
+              intent === "COMPARE" &&
+              !retrievalQuery
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, " ")
+                .split(/\\s+/)
+                .filter((w) => w.length > 0)
+                .some(
+                  (w) =>
+                    !compareKeywords.includes(w) &&
+                    !documentKeywords.includes(w) &&
+                    ![
+                      "can",
+                      "you",
+                      "please",
+                      "and",
+                      "or",
+                      "show",
+                      "give",
+                      "me",
+                      "between",
+                      "these",
+                      "those",
+                      "results",
+                      "result",
+                      "of",
+                      "in",
+                      "from",
+                      "for",
+                      "with",
+                      "a",
+                      "an",
+                      "is",
+                      "are",
+                      "was",
+                      "were",
+                      "to",
+                      "do",
+                      "does",
+                      "did",
+                      "have",
+                      "has",
+                      "had",
+                    ].includes(w),
+                )
+            ) {
+              const userMsg = await chatSessionRepository.appendMessage({
+                content: question.trim(),
+                role: "user",
+                sessionId,
+                userId,
+              });
+              const replyText =
+                REQUIRE_SELECTION_I18N[detectedLanguage] || REQUIRE_SELECTION_I18N.english;
+              const aiMsg = await chatSessionRepository.appendMessage({
+                citations: [],
+                content: replyText,
+                metadata: {
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                  requireSelection: true,
+                  documentId: [],
+                  reports: recentDocs,
+                },
+                role: "assistant",
+                sessionId,
+                userId,
+              });
+              return {
+                ai: aiMsg,
+                user: userMsg,
+                reply: replyText,
+                requireSelection: true,
+                reports: recentDocs,
+                mode: "DOCUMENT_RAG",
+                emergency: false,
+              };
+            }
+            finalDocumentIds = recentDocs.map((d) => d.id);
+          } else if (recentDocs.length === 1) {
+            finalDocumentIds = [recentDocs[0].id];
+            documentScope = "SINGLE_DOCUMENT";
+          } else {
+            // Intent is DOCUMENT, trying to find which one
+            if (lowerQuestion.includes("first") || lowerQuestion.includes("oldest")) {
+              finalDocumentIds = [recentDocs[recentDocs.length - 1].id];
+            } else if (
+              lowerQuestion.includes("last") ||
+              lowerQuestion.includes("latest") ||
+              lowerQuestion.includes("recent")
+            ) {
+              finalDocumentIds = [recentDocs[0].id];
+            } else {
+              const matchedDocs = recentDocs.filter((d) => {
+                if (d.fileName) {
+                  const cleanName = d.fileName.toLowerCase().replace(".pdf", "").trim();
+                  if (
+                    !["report", "reports", "document", "documents", "file", "files"].includes(
+                      cleanName,
+                    )
+                  ) {
+                    if (lowerQuestion.includes(cleanName)) return true;
+                  }
+                }
+                return false;
+              });
+              if (matchedDocs.length > 0) {
+                finalDocumentIds = matchedDocs.map((d) => d.id);
+              } else {
+                finalDocumentIds = recentDocs.map((d) => d.id);
+                documentScope = "ALL_DOCUMENTS";
+              }
+            }
+          }
+        }
+      }
+
+      const docNameMap = {};
+      if (finalDocumentIds && finalDocumentIds.length > 0) {
+        const finalDocsMetadata = await db
+          .select({
+            id: document.id,
+            fileName: document.fileName,
+            reportDate: document.reportDate,
+            documentType: document.documentType,
+            structuredExtractedData: document.structuredExtractedData,
+          })
+          .from(document)
+          .where(inArray(document.id, finalDocumentIds));
+        finalDocsMetadata.forEach((d) => {
+          docNameMap[d.id] = d;
+        });
+      }
+
+      const userMessage = await chatSessionRepository.appendMessage({
+        content: question.trim(),
+        role: "user",
+        sessionId,
+        userId,
+      });
+
+      // HISTORY: Keep recent history even if documentId is passed to support follow-up questions
       const recent = await chatSessionRepository.listMessages({
         direction: "before",
-        limit: 8,
+        limit: 4,
         sessionId,
         userId,
       });
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
-      debugLogger.info("sendMessage: Calling RAG chat provider in " + preferredLanguage);
-      try {
-        const formattedChunks = usableChunks.map((c) => ({
-          chunkId: c.chunkId || c.id,
-          content: c.content,
-          score: c.score,
-          sectionTitle: c.sectionTitle,
-          sourceType: c.sourceType,
-          documentId: doc.id,
-        }));
+      let assistantText = NO_CONTEXT_REPLY;
+      let isEmergency = false;
+      let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
 
-        const aiResponse = await this.qwenHealthChat(
-          history,
-          "DOCUMENT_RAG",
-          formattedChunks,
-          patientContextStr,
-          preferredLanguage,
-        );
-        assistantText = aiResponse.answer;
-        citations = aiResponse.citations || formattedChunks;
-        isEmergency = !!aiResponse.emergency;
-      } catch (error) {
-        debugLogger.error(
-          "sendMessage: RAG local language call failed, falling back to translation",
-          {
-            error: error.message,
-          },
-        );
+      // Fetch user's active medications for smart context injection
+      let medicationsContextStr = "";
+      try {
+        const activeMeds = await medicationRepository.findAll(userId);
+        medicationsContextStr = buildMedicationsContext(activeMeds, question);
+      } catch (err) {
+        debugLogger.error("sendMessage: Failed to fetch active medications for context", {
+          error: err.message,
+        });
+      }
+
+      // Build patient context
+      let patientContextStr = "";
+      if (p) {
+        let dobStr = p.dateOfBirth
+          ? p.dateOfBirth instanceof Date
+            ? p.dateOfBirth.toISOString().split("T")[0]
+            : String(p.dateOfBirth).split("T")[0]
+          : "Unknown";
+        const allergiesStr =
+          p.allergies && Array.isArray(p.allergies) && p.allergies.length > 0
+            ? p.allergies.join(", ")
+            : "None";
+        patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}`;
+      }
+
+      if (medicationsContextStr) {
+        patientContextStr = patientContextStr
+          ? `${patientContextStr}\n\n${medicationsContextStr}`
+          : medicationsContextStr;
+      }
+
+      if (patientContextStr) {
+        patientContextStr += `\nIMPORTANT INSTRUCTION: Use the above profile information and active medications ONLY to answer the user's specific question.`;
+      }
+
+      if (intent === "GENERAL") {
         try {
-          const formattedChunks = usableChunks.map((c) => ({
-            chunkId: c.chunkId || c.id,
-            content: c.content,
-            score: c.score,
-            sectionTitle: c.sectionTitle,
-            sourceType: c.sourceType,
-            documentId: doc.id,
-          }));
+          debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for GENERAL (Qwen)");
+          // eslint-disable-next-line no-console
+          console.log(`[STREAM DEBUG] Calling Qwen LLM (GENERAL) +${Date.now() - baseTime}ms`);
+          const qwenStartTime = Date.now();
           const aiResponse = await this.qwenHealthChat(
             history,
-            "DOCUMENT_RAG",
-            formattedChunks,
+            "GENERAL_HEALTH",
+            [],
             patientContextStr,
-            "english",
+            detectedLanguage,
+            "",
+            onChunk,
+            abortSignal,
           );
-          let rawAns = aiResponse.answer;
-          citations = aiResponse.citations || formattedChunks;
+          debugLogger.info(
+            `sendMessage: [PERFORMANCE] Qwen LLM Generation (${env.chatModel}) took ${Date.now() - qwenStartTime}ms`,
+          );
+          assistantText = aiResponse.answer;
           isEmergency = !!aiResponse.emergency;
+        } catch {
+          assistantText =
+            detectedLanguage === "english"
+              ? "Sorry, I am currently unable to process your request."
+              : "Please try again later.";
+        }
+      } else {
+        // DATA RETRIEVER (Vector Search)
+        let summaryChunks = [];
+        let coverageStr = "";
+        try {
+          const retrieveStartTime = Date.now();
+          const lowerQ = retrievalQuery.toLowerCase();
 
-          if (aiClient && typeof aiClient.translate === "function") {
-            assistantText = await aiClient.translate(rawAns, "english", preferredLanguage);
-          } else {
-            assistantText = rawAns;
+          let detectedSectionType = null;
+          if (
+            lowerQ.includes("summary") ||
+            lowerQ.includes("overview") ||
+            documentScope === "FULL_DOCUMENT"
+          ) {
+            detectedSectionType = "summary";
           }
-        } catch (fallbackErr) {
-          debugLogger.error("sendMessage: RAG fallback failed", { error: fallbackErr.message });
-          assistantText = fallbackNoContext;
+
+          const medicalEntities = getMedicalEntityKeywords(lowerQ);
+          const queryEmbedding = await embeddingService.embedText(retrievalQuery);
+
+          let relevantChunks = [];
+          const entitiesFoundPerDoc = new Map();
+
+          if (finalDocumentIds && finalDocumentIds.length > 0) {
+            finalDocumentIds.forEach((id) => entitiesFoundPerDoc.set(String(id), new Set()));
+
+            if (documentScope === "FULL_DOCUMENT" && finalDocumentIds.length === 1) {
+              const structuredDoc = await intelligenceRepository.findStructuredDocumentByDocumentId(
+                finalDocumentIds[0],
+                userId,
+              );
+              if (structuredDoc && structuredDoc.rawText) {
+                summaryChunks = [
+                  {
+                    chunkId: "full-doc",
+                    documentId: finalDocumentIds[0],
+                    sectionTitle: "Complete Document",
+                    content: structuredDoc.rawText.substring(0, 40000),
+                    sourceType: "rawText",
+                    docData: docNameMap[finalDocumentIds[0]] || {},
+                  },
+                ];
+                debugLogger.info(
+                  `sendMessage: [SCOPE] ${JSON.stringify({ detectedLanguage, intent, documentScope, requestedDocumentCount: 1 })}`,
+                );
+                debugLogger.info(
+                  `sendMessage: [RETRIEVAL] Fetched full document raw text directly.`,
+                );
+              }
+            }
+
+            if (summaryChunks.length === 0) {
+              // PARALLEL RETRIEVAL (Per Document + Per Entity)
+              const queryPromises = [];
+
+              for (const dId of finalDocumentIds) {
+                if (medicalEntities.length > 0) {
+                  for (const entity of medicalEntities) {
+                    queryPromises.push(
+                      (async () => {
+                        try {
+                          const chunks = await intelligenceRepository.searchSimilarChunks({
+                            userId,
+                            queryEmbedding,
+                            limit: 10,
+                            documentIds: [dId],
+                            keywords: [entity],
+                          });
+                          return { dId, entity, chunks, success: true };
+                        } catch (err) {
+                          debugLogger.error(
+                            `Failed to retrieve chunks for doc ${dId} and entity ${entity}`,
+                            {
+                              error: err.message,
+                            },
+                          );
+                          return { dId, entity, chunks: [], success: false };
+                        }
+                      })(),
+                    );
+                  }
+                } else {
+                  queryPromises.push(
+                    (async () => {
+                      try {
+                        const chunks = await intelligenceRepository.searchSimilarChunks({
+                          userId,
+                          queryEmbedding,
+                          limit: 20,
+                          documentIds: [dId],
+                        });
+                        return { dId, entity: null, chunks, success: true };
+                      } catch (err) {
+                        console.log("err", err);
+                        return { dId, entity: null, chunks: [], success: false };
+                      }
+                    })(),
+                  );
+                }
+              }
+
+              const queryResults = await Promise.all(queryPromises);
+
+              // Track retrieval status and calculate detailed statuses
+              let retrievedCount = 0;
+              const retrievedDocs = new Set();
+              for (const r of queryResults) {
+                if (r.success && r.chunks.length > 0) {
+                  retrievedDocs.add(String(r.dId));
+                }
+                relevantChunks.push(...r.chunks);
+              }
+              retrievedCount = retrievedDocs.size;
+
+              const entityStatusPerDoc = new Map(); // Key: `${docIdStr}_${entity}`, Value: 'FOUND' | 'NOT_FOUND_VERIFIED' | 'NOT_VERIFIED'
+
+              for (const dId of finalDocumentIds) {
+                const docIdStr = String(dId);
+                const docData = docNameMap[dId] || {};
+
+                for (const entity of medicalEntities) {
+                  const statusKey = `${docIdStr}_${entity}`;
+                  const qRes = queryResults.find(
+                    (r) => String(r.dId) === docIdStr && r.entity === entity,
+                  );
+
+                  if (!qRes || !qRes.success) {
+                    entityStatusPerDoc.set(statusKey, "NOT_VERIFIED");
+                    continue;
+                  }
+
+                  const foundInChunks = qRes.chunks.some((c) => containsEntity(c.content, entity));
+                  let foundInSummary = false;
+                  if (
+                    docData.structuredExtractedData?.tests &&
+                    Array.isArray(docData.structuredExtractedData.tests)
+                  ) {
+                    foundInSummary = docData.structuredExtractedData.tests.some((t) => {
+                      const testNameLower = t.name?.toLowerCase() || "";
+                      return containsEntity(testNameLower, entity);
+                    });
+                  }
+
+                  if (foundInChunks || foundInSummary) {
+                    entityStatusPerDoc.set(statusKey, "FOUND");
+                    entitiesFoundPerDoc.get(docIdStr).add(entity);
+                  } else {
+                    entityStatusPerDoc.set(statusKey, "NOT_FOUND_VERIFIED");
+                  }
+                }
+              }
+
+              // 1. Deduplicate by chunkId + documentId to preserve same-text chunks across different docs
+              const uniqueChunks = [];
+              const seenChunks = new Set();
+              for (const c of relevantChunks) {
+                const chunkKey = `${c.documentId}_${c.chunkId}`;
+                if (!seenChunks.has(chunkKey)) {
+                  seenChunks.add(chunkKey);
+                  uniqueChunks.push(c);
+                }
+              }
+
+              // 2. Summary Preference
+              let filteredChunks = uniqueChunks;
+              if (detectedSectionType === "summary") {
+                const docsWithSummary = new Set(
+                  uniqueChunks
+                    .filter((c) => c.sourceType === "summary")
+                    .map((c) => String(c.documentId)),
+                );
+                filteredChunks = uniqueChunks.filter((c) => {
+                  if (c.sourceType === "ocr" && docsWithSummary.has(String(c.documentId)))
+                    return false;
+                  return true;
+                });
+              }
+
+              // 3. Selection Algorithm (Coverage-Aware)
+              const chunksPerDoc = new Map();
+              const finalSelection = [];
+
+              // Sort globally first
+              filteredChunks.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+
+              // Pass 1: Prioritize exact medical entity matches
+              for (const c of filteredChunks) {
+                const docIdStr = String(c.documentId);
+                let hasEntity = false;
+
+                for (const entity of medicalEntities) {
+                  if (containsEntity(c.content, entity)) {
+                    entitiesFoundPerDoc.get(docIdStr).add(entity);
+                    hasEntity = true;
+                  }
+                }
+
+                const count = chunksPerDoc.get(docIdStr) || 0;
+                if (hasEntity && count < 4) {
+                  if (!finalSelection.includes(c)) {
+                    finalSelection.push(c);
+                    chunksPerDoc.set(docIdStr, count + 1);
+                  }
+                }
+              }
+
+              // Pass 2: Fill remaining up to MAX_CONTEXT_CHUNKS (25)
+              const MAX_CONTEXT_CHUNKS = 25;
+              for (const c of filteredChunks) {
+                if (finalSelection.length >= MAX_CONTEXT_CHUNKS) break;
+                const docIdStr = String(c.documentId);
+                const count = chunksPerDoc.get(docIdStr) || 0;
+
+                if (count < 6 && !finalSelection.includes(c)) {
+                  finalSelection.push(c);
+                  chunksPerDoc.set(docIdStr, count + 1);
+                }
+              }
+
+              summaryChunks = finalSelection.map((c, index) => {
+                const docData = docNameMap[c.documentId] || {};
+                return {
+                  chunkId: c.chunkId || `chunk-${index}`,
+                  documentId: c.documentId,
+                  sectionTitle: c.sectionTitle,
+                  content: c.content,
+                  score: 1.0,
+                  sourceType: c.sourceType || "document",
+                  docData: docData,
+                };
+              });
+
+              // Structured Logging
+              const coverageObj = {};
+              finalDocumentIds.forEach((id) => {
+                coverageObj[id] = Array.from(entitiesFoundPerDoc.get(String(id)) || []);
+              });
+              const chunksPerDocLog = Object.fromEntries(chunksPerDoc);
+
+              debugLogger.info(
+                `sendMessage: [SCOPE] ${JSON.stringify({ detectedLanguage, intent, documentScope, requestedDocumentCount: finalDocumentIds.length })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [RETRIEVAL] ${JSON.stringify({ query: retrievalQuery, entities: medicalEntities, retrievedChunkCount: relevantChunks.length, duration: Date.now() - retrieveStartTime })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [COVERAGE] ${JSON.stringify({ requestedDocuments: finalDocumentIds.length, retrievedDocuments: retrievedCount, missingDocuments: finalDocumentIds.length - retrievedCount, entitiesFound: coverageObj })}`,
+              );
+              debugLogger.info(
+                `sendMessage: [SELECTION] ${JSON.stringify({ selectedChunks: summaryChunks.length, chunksPerDocument: chunksPerDocLog })}`,
+              );
+              // eslint-disable-next-line no-console
+              console.log(
+                `[STREAM DEBUG] RAG chunks retrieved: ${summaryChunks.length} chunks +${Date.now() - baseTime}ms`,
+              );
+
+              // Build coverage string for Qwen
+              if (medicalEntities.length > 0) {
+                coverageStr = finalDocumentIds
+                  .map((id) => {
+                    const docIdStr = String(id);
+                    let docLabel = `Document ${id}`;
+                    if (docNameMap[id]) docLabel = docNameMap[id].fileName || docLabel;
+
+                    const entityStatuses = medicalEntities.map((entity) => {
+                      const statusKey = `${docIdStr}_${entity}`;
+                      const status = entityStatusPerDoc.get(statusKey) || "NOT_VERIFIED";
+                      return `${entity.toUpperCase()}: ${status}`;
+                    });
+
+                    return `${docLabel}: [${entityStatuses.join(", ")}]`;
+                  })
+                  .join("\n");
+              }
+            }
+          }
+        } catch (err) {
+          debugLogger.error("sendMessage: Failed to fetch chunks via vector search", {
+            error: err.message,
+          });
+        }
+
+        if (!summaryChunks.length) {
+          assistantText = NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
+        } else {
+          try {
+            debugLogger.info(
+              "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
+            );
+            // eslint-disable-next-line no-console
+            console.log(
+              `[STREAM DEBUG] Calling Qwen LLM (DOCUMENT_RAG) +${Date.now() - baseTime}ms`,
+            );
+            const qwenStartTime = Date.now();
+            const aiResponse = await this.qwenHealthChat(
+              history,
+              "DOCUMENT_RAG",
+              summaryChunks,
+              patientContextStr,
+              detectedLanguage,
+              coverageStr,
+              onChunk,
+              abortSignal,
+            );
+            debugLogger.info(
+              `sendMessage: [QWEN] ${JSON.stringify({ model: env.chatModel, language: detectedLanguage, contextChunks: summaryChunks.length, generationDuration: Date.now() - qwenStartTime })}`,
+            );
+            assistantText = aiResponse.answer;
+            isEmergency = !!aiResponse.emergency;
+          } catch {
+            assistantText =
+              NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
+          }
         }
       }
-    }
 
-    // Save assistant message to DB
-    const aiMessage = await chatSessionRepository.appendMessage({
-      citations: (Array.isArray(citations) ? citations : []).map((chunk) => ({
-        chunkId: chunk.chunkId || chunk.id || null,
-        documentId: doc ? doc.id : null,
-        score: chunk.score ?? null,
-        sectionTitle: chunk.sectionTitle || null,
-      })),
-      content: assistantText,
-      metadata: {
-        mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
+      const aiMessage = await chatSessionRepository.appendMessage({
+        citations: [],
+        content: assistantText,
+        metadata: {
+          mode,
+          emergency: isEmergency,
+          documentId: finalDocumentIds || [],
+          task: intent,
+        },
+        role: "assistant",
+        sessionId,
+        userId,
+      });
+
+      debugLogger.info("sendMessage: Total request execution time", {
+        durationSec: ((Date.now() - _reqStartTime) / 1000).toFixed(2),
+      });
+
+      return {
+        ai: aiMessage,
+        citations: [],
+        reply: assistantText,
+        user: userMessage,
+        mode,
         emergency: isEmergency,
-      },
-      role: "assistant",
-      sessionId,
-      userId,
-    });
-
-    return {
-      ai: aiMessage,
-      citations,
-      reply: assistantText,
-      user: userMessage,
-      mode: isGeneralHealth ? "GENERAL_HEALTH" : "DOCUMENT_RAG",
-      emergency: isEmergency,
-    };
+      };
+    } finally {
+      if (reqSessionId) processingSessions.delete(reqSessionId);
+    }
   }
 
   async deleteSession({ sessionId, userId }) {
@@ -731,6 +1345,7 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
       metadata,
     });
   }
+
   //update document id
   async attachDocumentToSession({ sessionId, userId, documentId }) {
     return chatSessionRepository.attachDocument(sessionId, userId, documentId);
@@ -740,6 +1355,5 @@ Blood Group: ${p.bloodGroup || "Unknown"}`;
 const chatService = new ChatService();
 
 module.exports = {
-  ChatService,
   chatService,
 };

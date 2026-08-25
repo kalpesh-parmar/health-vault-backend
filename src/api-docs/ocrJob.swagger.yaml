@@ -80,6 +80,68 @@ components:
               items: { type: object }
 
 paths:
+  /ocr/jobs/batch-start:
+    post:
+      tags: [OCR Jobs]
+      summary: Start background OCR processing for multiple QUEUED jobs in a single request
+      description: |
+        Claims and triggers pipeline execution for an array of `jobIds`. Returns 202 Accepted with a breakdown of `started` and `failed` jobs.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jobIds]
+              properties:
+                jobIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  example:
+                    ["550e8400-e29b-41d4-a716-446655440000", "671e8400-e29b-41d4-a716-446655440001"]
+      responses:
+        "202":
+          description: Batch OCR jobs initiated successfully
+        "400":
+          description: Bad request (Invalid request body or array empty/exceeding 50 items)
+        "401":
+          description: Unauthorized
+
+  /ocr/jobs/batch-status:
+    post:
+      tags: [OCR Jobs]
+      summary: Fetch status and extracted results for multiple OCR jobs in a single request
+      description: |
+        Returns an array containing status, stage, progress, error, and extracted results (if completed) for each specified jobId.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jobIds]
+              properties:
+                jobIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  example:
+                    ["550e8400-e29b-41d4-a716-446655440000", "671e8400-e29b-41d4-a716-446655440001"]
+      responses:
+        "200":
+          description: Batch OCR job statuses fetched successfully
+        "400":
+          description: Bad request
+        "401":
+          description: Unauthorized
+
   /ocr/jobs/{jobId}/start:
     post:
       tags: [OCR Jobs]

@@ -1,49 +1,18 @@
 const { db } = require("../configs/db");
 const { env } = require("../configs/env");
 const { normalizeDocumentType } = require("../enums/documentType");
-const { fileTypeValue } = require("../enums/fileType");
+// const { fileTypeValue } = require("../enums/fileType");
 const { messageConstants } = require("../constants/messageConstants");
 const { ocrStatus } = require("../enums/ocrStatus");
 const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
 const DocumentArtifactsRepository = require("../repositories/documentArtifactsRepository");
 const documentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const patientRepository = require("../repositories/patientRepository");
-const medicationMapper = require("./ai/helpers/medicationMapper");
+const medicationMapper = require("../helpers/medicationMapper.helper");
 const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
 const { embeddingService } = require("./ai/chat/embedding.service");
-
-function inferFileType(mimeType) {
-  if (!mimeType) return fileTypeValue[0];
-  if (fileTypeValue.includes(mimeType)) return mimeType;
-  return fileTypeValue[0];
-}
-
-function buildPatientSuggestions(extracted, patient) {
-  const suggestions = {};
-  if (extracted?.bloodGroup && extracted.bloodGroup !== patient?.bloodGroup) {
-    suggestions.bloodGroup = extracted.bloodGroup;
-  }
-  const extAllergies = Array.isArray(extracted?.allergies) ? extracted.allergies : [];
-  const patAllergies = Array.isArray(patient?.allergies) ? patient.allergies : [];
-  const newAllergies = extAllergies.filter(
-    (allergy) =>
-      allergy &&
-      !patAllergies.some(
-        (existing) => String(existing).toLowerCase() === String(allergy).toLowerCase(),
-      ),
-  );
-  if (newAllergies.length) suggestions.allergies = newAllergies;
-  return suggestions;
-}
-
-function asText(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join("\n");
-  }
-  if (value && typeof value === "object") return JSON.stringify(value);
-  return value || null;
-}
+const { inferFileType, buildPatientSuggestions, asText } = require("../helpers/document.helper");
 
 class DocumentPersistenceService {
   async addDocument({ userId, payload }) {

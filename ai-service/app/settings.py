@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     chat_concurrency: int = Field(default=4, alias="CHAT_CONCURRENCY")
     embedding_batch_size: int = Field(default=32, alias="EMBEDDING_BATCH_SIZE")
     voice_concurrency: int = Field(default=2, alias="VOICE_CONCURRENCY")
-    rag_top_k: int = Field(default=8, alias="RAG_TOP_K")
+    rag_top_k: int = Field(default=4, alias="RAG_TOP_K")
 
     whisper_model: str = Field(default="small", alias="WHISPER_MODEL")
     tts_model_name: str = Field(

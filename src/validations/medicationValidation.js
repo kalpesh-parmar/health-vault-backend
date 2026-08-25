@@ -32,7 +32,6 @@ const doseField = z
     required_error: errorConstants.DOSE_REQUIRED,
     invalid_type_error: errorConstants.INVALID_NUMBER,
   })
-  .int()
   .positive(errorConstants.DOSE_POSITIVE);
 
 const dateField = z.coerce.date({
@@ -198,6 +197,8 @@ const createMedicationSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    replaceMedicationId: z.string().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -224,6 +225,14 @@ const createMedicationSchema = z
       }
     }
 
+    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["replaceMedicationId"],
+        message: "replaceMedicationId is required when resolution is REPLACE",
+      });
+    }
+
     validateMedicationSelections(data, ctx);
   });
 
@@ -247,6 +256,8 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    replaceMedicationId: z.string().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -261,6 +272,14 @@ const updateMedicationSchema = z
         code: z.ZodIssueCode.custom,
         path: ["dosePerIntake"],
         message: errorConstants.DOSE_GREATER_THAN_PILLS,
+      });
+    }
+
+    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["replaceMedicationId"],
+        message: "replaceMedicationId is required when resolution is REPLACE",
       });
     }
 
@@ -392,7 +411,7 @@ const medicationOnboardingSchema = z
       } else {
         const allowedUnits = {
           SYRUP: ["ml", "tsp", "tbsp"],
-          INJECTION: ["ml", "IU"],
+          INJECTION: ["ml", "IU", "iu"],
           DROPS: ["drops", "ml"],
           SPRAY: ["puff"],
           INHALER: ["puff"],
@@ -409,10 +428,23 @@ const medicationOnboardingSchema = z
     }
   });
 
+const checkDuplicateMedicationSchema = z.object({
+  medicationName: medicationNameField,
+  medicationType: z
+    .string()
+    .trim()
+    .refine((val) => medicationTypeValues.includes(val), {
+      message: errorConstants.INVALID_MEDICATION_TYPE,
+    })
+    .optional()
+    .nullable(),
+});
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
   listMedicationQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
+  checkDuplicateMedicationSchema,
 };

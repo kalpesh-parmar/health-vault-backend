@@ -1,9 +1,8 @@
 const { and, desc, eq, inArray, sql } = require("drizzle-orm");
-
 const { db } = require("../configs/db");
 const {
   aiContextCache,
-  chatHistory,
+  // chatHistory,
   documentChunk,
   embedding,
   medicalEntity,
@@ -12,6 +11,7 @@ const {
 const { medication } = require("../models/medication");
 const { notification } = require("../models/notification");
 const { patient } = require("../models/patient");
+const { expandSynonyms } = require("../utils/synonyms");
 
 function toVectorLiteral(values) {
   return `[${values.map((value) => Number(value).toFixed(8)).join(",")}]`;
@@ -72,11 +72,23 @@ class DocumentIntelligenceRepository {
     return result[0] || null;
   }
 
-  async searchSimilarChunks({ userId, queryEmbedding, limit, documentId }) {
+  async searchSimilarChunks({ userId, queryEmbedding, limit, documentIds, sectionType, keywords }) {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
     const conditions = [eq(embedding.userId, userId)];
-    if (documentId) {
-      conditions.push(eq(documentChunk.documentId, documentId));
+    if (documentIds && documentIds.length > 0) {
+      conditions.push(inArray(documentChunk.documentId, documentIds));
+    }
+    if (sectionType) {
+      conditions.push(
+        sql`(${documentChunk.sourceType} = ${sectionType} OR ${documentChunk.metadata}->>'kind' = ${sectionType})`,
+      );
+    }
+    if (keywords && keywords.length > 0) {
+      const expandedKeywords = expandSynonyms(keywords);
+      const keywordConditions = expandedKeywords.map(
+        (kw) => sql`${documentChunk.content} ILIKE ${"%" + kw + "%"}`,
+      );
+      conditions.push(sql`(${sql.join(keywordConditions, sql` OR `)})`);
     }
     return this.client
       .select({
@@ -95,23 +107,23 @@ class DocumentIntelligenceRepository {
       .limit(limit);
   }
 
-  async createChatHistory(data) {
-    const result = await this.client.insert(chatHistory).values(data).returning();
-    return result[0] || null;
-  }
+  // async createChatHistory(data) {
+  //   const result = await this.client.insert(chatHistory).values(data).returning();
+  //   return result[0] || null;
+  // }
 
-  async getRecentChatHistory({ userId, sessionId, limit = 8 }) {
-    const conditions = [eq(chatHistory.userId, userId)];
-    if (sessionId) {
-      conditions.push(eq(chatHistory.sessionId, sessionId));
-    }
-    return this.client
-      .select()
-      .from(chatHistory)
-      .where(and(...conditions))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(limit);
-  }
+  // async getRecentChatHistory({ userId, sessionId, limit = 8 }) {
+  //   const conditions = [eq(chatHistory.userId, userId)];
+  //   if (sessionId) {
+  //     conditions.push(eq(chatHistory.sessionId, sessionId));
+  //   }
+  //   return this.client
+  //     .select()
+  //     .from(chatHistory)
+  //     .where(and(...conditions))
+  //     .orderBy(desc(chatHistory.createdAt))
+  //     .limit(limit);
+  // }
 
   async getPatientContext(userId) {
     const result = await this.client

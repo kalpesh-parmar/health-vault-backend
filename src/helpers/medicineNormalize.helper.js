@@ -1,6 +1,6 @@
-const { medictationType } = require("../../../enums/medicationType");
-const { frequencyType } = require("../../../enums/frequencyType");
-const { foodType } = require("../../../enums/foodType");
+const { medictationType } = require("../enums/medicationType");
+const { frequencyType } = require("../enums/frequencyType");
+const { foodType } = require("../enums/foodType");
 
 // Type prefix rules for deriving medicationType from name prefixes
 const TYPE_PREFIXES = [
@@ -18,6 +18,10 @@ const FREQUENCY_TO_DB_MAP = {
   ONCE: frequencyType.ONCE_DAILY,
   TWICE: frequencyType.TWICE_DAILY,
   THRICE: frequencyType.THREE_TIMES_DAILY,
+  ONCE_DAILY: frequencyType.ONCE_DAILY,
+  TWICE_DAILY: frequencyType.TWICE_DAILY,
+  THREE_TIMES_DAILY: frequencyType.THREE_TIMES_DAILY,
+  AS_NEEDED: frequencyType.AS_NEEDED,
   "Once Daily": frequencyType.ONCE_DAILY,
   "Twice Daily": frequencyType.TWICE_DAILY,
   "Three Times Daily": frequencyType.THREE_TIMES_DAILY,
@@ -283,14 +287,21 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
       needsReview.dose = true;
     }
 
-    const matchUnit = rawDosageLower.match(/(ml|tsp|tbsp|drops|puff|iu)/i);
-    unit = matchUnit
-      ? matchUnit[1].toLowerCase()
-      : derivedType === medictationType.SYRUP
-        ? "ml"
-        : derivedType === medictationType.DROPS || derivedType === medictationType.DROP
-          ? "drops"
-          : "puff";
+    const matchUnit = rawDosageLower.match(/(ml|tsp|tbsp|drops?|puff|iu)/i);
+    if (matchUnit) {
+      const matched = matchUnit[1].toLowerCase();
+      unit = matched === "iu" ? "IU" : matched.startsWith("drop") ? "drops" : matched;
+    } else {
+      if (derivedType === medictationType.SYRUP || derivedType === medictationType.INJECTION) {
+        unit = "ml";
+      } else if (derivedType === medictationType.DROPS || derivedType === medictationType.DROP) {
+        unit = "drops";
+      } else if (derivedType === medictationType.SPRAY || derivedType === medictationType.INHALER) {
+        unit = "puff";
+      } else {
+        unit = "ml";
+      }
+    }
   }
 
   // 4. Resolve Food Context / foodFrequency
@@ -362,10 +373,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     bestTaken: [foodFrequency],
     dailyConsumption,
     dosePerIntake: hasTabletType
-      ? Number.isInteger(count)
+      ? typeof count === "number" && count > 0
         ? count
         : null
-      : Number.isInteger(value)
+      : typeof value === "number" && value > 0
         ? value
         : null,
     doseReminders: false,
@@ -417,8 +428,85 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   return { row, onboardingMed };
 }
 
+/**
+ * Normalizes shorthand payload (e.g. from chat actions or mobile forms)
+ * into the strict schema shape required by createMedicationSchema.
+ */
+function normalizeCreateMedicationInput(payload = {}) {
+  const input = { ...payload };
+
+  if (input.name && !input.medicationName) {
+    input.medicationName = input.name;
+  }
+  if (input.type && !input.medicationType) {
+    input.medicationType = String(input.type).toUpperCase();
+  }
+  if (input.instructions && !input.notes) {
+    input.notes = String(input.instructions).slice(0, 1000);
+  }
+  if (input.dose && input.dosePerIntake === undefined) {
+    input.dosePerIntake =
+      typeof input.dose === "object"
+        ? input.dose.count || input.dose.value || 1
+        : Number(input.dose) || 1;
+  }
+  if (input.frequency && FREQUENCY_TO_DB_MAP[input.frequency]) {
+    input.frequency = FREQUENCY_TO_DB_MAP[input.frequency];
+  } else if (input.frequency && FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()]) {
+    input.frequency = FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()];
+  }
+  if (!input.medicationSchedule && input.frequency) {
+    if (input.frequency === frequencyType.ONCE_DAILY) {
+      input.medicationSchedule = { Morning: "09:00:00" };
+    } else if (input.frequency === frequencyType.TWICE_DAILY) {
+      input.medicationSchedule = { Morning: "09:00:00", Night: "21:00:00" };
+    } else if (input.frequency === frequencyType.THREE_TIMES_DAILY) {
+      input.medicationSchedule = { Morning: "09:00:00", Noon: "14:00:00", Night: "21:00:00" };
+    }
+  }
+  if (input.totalQuantity === undefined || input.totalQuantity === null) {
+    input.totalQuantity = 30;
+  }
+  if (!input.startDate) {
+    input.startDate = new Date().toISOString().split("T")[0];
+  }
+  if (!input.foodFrequency) {
+    input.foodFrequency = "AFTER_FOOD";
+  }
+
+  // Whitelist ONLY allowed schema keys so Zod .strict() validation passes without unrecognized key errors
+  const allowedKeys = [
+    "medicationName",
+    "medicationType",
+    "prescribedBy",
+    "dosePerIntake",
+    "frequency",
+    "medicationSchedule",
+    "foodFrequency",
+    "startDate",
+    "endDate",
+    "ongoing",
+    "totalQuantity",
+    "reminderBeforeMinutes",
+    "notes",
+  ];
+
+  const sanitized = {};
+  for (const key of allowedKeys) {
+    if (input[key] !== undefined) {
+      sanitized[key] = input[key];
+    }
+  }
+
+  return sanitized;
+}
+
 module.exports = {
   parseIndianDosing,
   deriveTypeFromName,
+  parseDurationDays,
+  matchTypeHint,
+  matchFrequencyHint,
   normalizeMedicine,
+  normalizeCreateMedicationInput,
 };

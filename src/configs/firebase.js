@@ -47,7 +47,12 @@ async function verifyFirebaseToken(firebaseToken) {
   }
 
   // Verify ID Token and return decoded payload
-  return admin.auth(app).verifyIdToken(firebaseToken);
+  const decoded = await admin.auth(app).verifyIdToken(firebaseToken);
+  console.log(
+    "[FIREBASE SDK LOG] Decoded Firebase ID Token Payload:",
+    JSON.stringify(decoded, null, 2),
+  );
+  return decoded;
 }
 
 async function findOrCreateFirebaseUser(email, name, providerUid) {
@@ -106,10 +111,22 @@ async function createCustomFirebaseToken(uid) {
   return admin.auth(app).createCustomToken(uid);
 }
 
+async function getFirebaseUser(uid) {
+  const app = initializeFirebase();
+  if (!app) return null;
+  try {
+    return await admin.auth(app).getUser(uid);
+  } catch (error) {
+    console.warn("[FirebaseConfig] getUser failed for uid:", uid, error.message);
+    return null;
+  }
+}
+
 module.exports = {
   getFirebaseMessaging,
   verifyFirebaseToken,
   initializeFirebase,
   findOrCreateFirebaseUser,
   createCustomFirebaseToken,
+  getFirebaseUser,
 };

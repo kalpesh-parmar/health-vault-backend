@@ -358,11 +358,12 @@ class MedicalDocumentClassifierService {
         },
       },
     ];
-
     const parseErrors = [];
+
     for (const strategy of strategies) {
       try {
         const parsed = strategy.fn();
+
         if (parsed && typeof parsed === "object") {
           return {
             isMedicalDocument: !!parsed.isMedicalDocument,
@@ -377,10 +378,15 @@ class MedicalDocumentClassifierService {
     }
 
     console.error(
-      `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${responseObj?.content?.length || 0}, Thinking length: ${responseObj?.thinking?.length || 0}`,
+      `[MedicalDocumentClassifierService] Failed to parse classification. Content length: ${
+        responseObj?.content?.length || 0
+      }, Thinking length: ${responseObj?.thinking?.length || 0}`,
     );
+
     console.error(
-      `[MedicalDocumentClassifierService] All parsing strategies failed. Content length: ${raw.length}, doneReason: ${doneReason}. Errors: ${parseErrors.join("; ")}`,
+      `[MedicalDocumentClassifierService] All parsing strategies failed. Content length: ${
+        raw.length
+      }, doneReason: ${doneReason}. Errors: ${parseErrors.join("; ")}`,
     );
 
     return {
@@ -390,8 +396,7 @@ class MedicalDocumentClassifierService {
     };
   }
 }
-
+const medicalClassifier = new MedicalDocumentClassifierService();
 module.exports = {
-  MedicalDocumentClassifierService,
-  medicalDocumentClassifierService: new MedicalDocumentClassifierService(),
+  medicalClassifier,
 };

@@ -49,29 +49,9 @@ const userOnboardingRepository = require("../repositories/userOnboardingReposito
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
+const { inferMimeType } = require("../helpers/document.helper");
 
 const RUNNING_LOCKS = new Set();
-const MIME_BY_EXTENSION = new Map([
-  [".pdf", "application/pdf"],
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".tif", "image/tiff"],
-  [".tiff", "image/tiff"],
-  [".webp", "image/webp"],
-]);
-
-function inferMimeType(fileKey, explicitMimeType) {
-  if (explicitMimeType) return explicitMimeType;
-  const cleanKey = String(fileKey || "")
-    .split("?")[0]
-    .toLowerCase();
-  const dot = cleanKey.lastIndexOf(".");
-  if (dot >= 0) {
-    return MIME_BY_EXTENSION.get(cleanKey.slice(dot)) || "application/pdf";
-  }
-  return "application/pdf";
-}
 
 async function ensureFileExists(fileKey) {
   try {
@@ -96,6 +76,7 @@ async function emitAndPersist(jobId, fileKey, stage, payload = {}) {
     })
     .catch((error) => {
       // Persistence failure must never abort the pipeline; log only.
+      // eslint-disable-next-line no-console
       console.warn("[ocr-job] progress write failed", { error: error.message, fileKey, jobId });
     });
 }
@@ -128,15 +109,18 @@ class DocumentOcrJobService {
       }
 
       setImmediate(() => {
-        this._runPipeline({
-          fileKey: claimedJob.fileKey,
-          jobId: claimedJob.id,
-          mimeType,
-          patientContext,
-          userId,
-        }).catch((error) => {
+        Promise.resolve(
+          this._runPipeline({
+            fileKey: claimedJob.fileKey,
+            jobId: claimedJob.id,
+            mimeType,
+            patientContext,
+            userId,
+          }),
+        ).catch((error) => {
+          // eslint-disable-next-line no-console
           console.error("[ocr-job] uncaught pipeline error", {
-            error: error.message,
+            error: error?.message || String(error),
             fileKey: claimedJob.fileKey,
             jobId: claimedJob.id,
           });
@@ -202,6 +186,127 @@ class DocumentOcrJobService {
     };
   }
 
+  async startBatchJobs(jobIds, userId) {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      throw new InvalidRequestException("jobIds array is required");
+    }
+
+    const uniqueJobIds = [...new Set(jobIds)];
+    const started = [];
+    const failed = [];
+
+    let patientContext = null;
+    try {
+      patientContext = await intelligenceRepository.getPatientContext(userId);
+    } catch {
+      patientContext = null;
+    }
+
+    for (const jobId of uniqueJobIds) {
+      try {
+        const claimedJob = await documentProcessingJobRepository.claimQueuedJob(jobId, userId);
+        if (claimedJob) {
+          const mimeType = claimedJob.metadata?.mimeType || null;
+          setImmediate(() => {
+            Promise.resolve(
+              this._runPipeline({
+                fileKey: claimedJob.fileKey,
+                jobId: claimedJob.id,
+                mimeType,
+                patientContext,
+                userId,
+              }),
+            ).catch((error) => {
+              // eslint-disable-next-line no-console
+              console.error("[ocr-job] uncaught pipeline error", {
+                error: error?.message || String(error),
+                fileKey: claimedJob.fileKey,
+                jobId: claimedJob.id,
+              });
+            });
+          });
+          started.push({
+            jobId: claimedJob.id,
+            fileKey: claimedJob.fileKey,
+            status: "OCR_STARTED",
+            stage: claimedJob.stage,
+          });
+        } else {
+          const existingJob = await documentProcessingJobRepository.findByIdAndUserId(
+            jobId,
+            userId,
+          );
+          if (!existingJob) {
+            failed.push({ jobId, reason: "OCR job not found" });
+          } else {
+            failed.push({
+              jobId,
+              status: existingJob.status,
+              reason: `Job cannot be started because its current status is '${existingJob.status}'.`,
+            });
+          }
+        }
+      } catch (err) {
+        failed.push({ jobId, reason: err.message || "Failed to start job" });
+      }
+    }
+
+    return { started, failed };
+  }
+
+  async getBatchJobStatuses(jobIds, userId) {
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      throw new InvalidRequestException("jobIds array is required");
+    }
+
+    const uniqueJobIds = [...new Set(jobIds)];
+    const jobs = await documentProcessingJobRepository.findManyByIdsAndUserId(uniqueJobIds, userId);
+
+    const jobsMap = new Map();
+    for (const job of jobs) {
+      jobsMap.set(job.id, job);
+    }
+
+    return uniqueJobIds.map((jobId) => {
+      const job = jobsMap.get(jobId);
+      if (!job) {
+        return {
+          jobId,
+          found: false,
+          status: "NOT_FOUND",
+          message: "OCR job not found",
+        };
+      }
+
+      const item = {
+        jobId: job.id,
+        found: true,
+        fileKey: job.fileKey,
+        status: job.status,
+        stage: job.stage,
+        percentage: job.percentage,
+        currentStep: job.currentStep,
+        completedSteps: job.completedSteps,
+        pendingSteps: job.pendingSteps,
+        message: job.message,
+        error: job.error,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+      };
+
+      if (job.status === "COMPLETED") {
+        item.extractedStructuredData = job.extractedStructuredData;
+        item.summaries = {
+          summaryEnglish: job.extractedStructuredData?.summaryEnglish || "",
+          summaryInPreferredLanguage: job.extractedStructuredData?.summaryInPreferredLanguage || "",
+        };
+        item.graphs = job.graphs || [];
+      }
+
+      return item;
+    });
+  }
+
   /**
    * Schedule an OCR + AI extraction run for a previously uploaded file.
    *
@@ -228,6 +333,7 @@ class DocumentOcrJobService {
     setImmediate(() => {
       this._runPipeline({ fileKey, jobId: job.id, mimeType, patientContext, userId }).catch(
         (error) => {
+          // eslint-disable-next-line no-console
           console.error("[ocr-job] uncaught pipeline error", {
             error: error.message,
             fileKey,
@@ -254,22 +360,28 @@ class DocumentOcrJobService {
 
     try {
       //print timing in teminal or console for each steps
+      // eslint-disable-next-line no-console
       console.time("[OCR]: starting process");
+
       // console.log(`[ocr-job] OCR job started at ${new Date(startTime).toISOString()}`);
       await documentProcessingJobRepository.markRunning(jobId);
       await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 1. Uploading File / Download check stage
       await emitAndPersist(jobId, fileKey, STAGES.UPLOADING_FILE);
       await ensureFileExists(fileKey);
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 2. Medical Document Validation stage
       await emitAndPersist(jobId, fileKey, STAGES.VALIDATING);
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 3. Extracting Text stage
       await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrResponse = await ocrOrchestrator.runFromStorage({
         bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
@@ -277,12 +389,14 @@ class DocumentOcrJobService {
         mimeType: inferMimeType(fileKey, mimeType),
         traceId: `ocr_job_${jobId}`,
       });
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrPayload = ocrResponse?.structuredDocument || ocrResponse?.ocr || ocrResponse || {};
       const pageCount =
         ocrPayload?.pageCount ||
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 4. Analyzing Report stage
       await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
@@ -297,10 +411,12 @@ class DocumentOcrJobService {
           fallbackUsed: false,
         },
       });
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
 
       // 5. Generating Summary stage
       await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
+
       // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const { rawOcrData, structured, normalized, summary } = await ocrService.normalizeExtraction({
         patientContext,
@@ -316,39 +432,53 @@ class DocumentOcrJobService {
           }
         }
       } catch (err) {
+        // eslint-disable-next-line no-console
         console.warn("[ocr-job] failed to fetch preferred language", err);
       }
 
-      let summaryEnglish = structured?.medicalExtraction?.summary || structured?.summary || "";
-      let summaryPreferredLanguage = "";
       const rawTextToSummarize = rawOcrData.fullText || "";
-      if (rawTextToSummarize) {
+      let summaryEnglish =
+        ocrResponse?.summaryEnglish ||
+        structured?.summaryEnglish ||
+        structured?.medicalExtraction?.summary ||
+        structured?.summary ||
+        "";
+      let summaryPreferredLanguage =
+        ocrResponse?.summaryGujarati || structured?.summaryInPreferredLanguage || "";
+
+      if (rawTextToSummarize && (!summaryEnglish || !summaryPreferredLanguage)) {
         if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
           if (!summaryEnglish) {
             summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
           } else {
+            // eslint-disable-next-line no-console
             console.log(
               "[OCR] => Reusing structured extraction summary for English (0ms extra latency)",
             );
           }
           summaryPreferredLanguage = summaryEnglish;
         } else {
-          if (!summaryEnglish) {
+          if (!summaryEnglish && !summaryPreferredLanguage) {
             const [sumEng, sumPref] = await Promise.all([
               ocrService.generateSummary(rawTextToSummarize, "english"),
               ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
             ]);
             summaryEnglish = sumEng;
             summaryPreferredLanguage = sumPref;
-          } else {
+          } else if (!summaryPreferredLanguage) {
             summaryPreferredLanguage = await ocrService.generateSummary(
               rawTextToSummarize,
               preferredLanguage,
             );
+            // eslint-disable-next-line no-console
+            console.log("[SC]>>>> pref summary", summaryPreferredLanguage);
+            // eslint-disable-next-line no-console
+            console.log("[SC]>>>>>language", preferredLanguage);
           }
         }
       }
 
+      structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
 
@@ -357,6 +487,7 @@ class DocumentOcrJobService {
       try {
         // graphs = await aiServiceClient.extractGraphs(normalized);
       } catch (error) {
+        // eslint-disable-next-line no-console
         console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
       }
 
@@ -385,9 +516,10 @@ class DocumentOcrJobService {
         rawOcrData,
       });
       const analyzedDocumentType = normalizeDocumentType(
-        structured?.documentType || structured?.reportType,
+        ocrResponse?.documentType || structured?.documentType || structured?.reportType,
       );
-
+      // eslint-disable-next-line no-console
+      console.time("[OCR]: updateOcrStatusByFileKey");
       const updatedDoc = await documentRepository
         .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
           documentType: analyzedDocumentType,
@@ -396,12 +528,15 @@ class DocumentOcrJobService {
           structuredExtractedData: finalPayload.extractedStructuredData,
         })
         .catch((err) => {
+          // eslint-disable-next-line no-console
           console.warn("[ocr-job] sync to documents.ocrStatus failed", {
             error: err.message,
             fileKey,
           });
           return null;
         });
+      // eslint-disable-next-line no-console
+      console.timeEnd("[OCR]: updateOcrStatusByFileKey");
       ocrProgressBus.publish(
         fileKey,
         buildStageEvent(STAGES.COMPLETED, {
@@ -415,6 +550,8 @@ class DocumentOcrJobService {
         }),
       );
       ocrProgressBus.complete(fileKey);
+      // eslint-disable-next-line no-console
+      console.timeEnd("[OCR]: starting process");
 
       // Non-blocking fire-and-forget background embedding pipeline
       setImmediate(async () => {
@@ -432,12 +569,14 @@ class DocumentOcrJobService {
                 summary: summaryEnglish || summaryPreferredLanguage || "",
                 observations: Array.isArray(structured?.diagnosis) ? structured.diagnosis : [],
                 medications: structured?.medications || [],
-                labResults: structured?.labResults || [],
+                testResults: structured?.testResults || structured?.labResults || [],
               },
             });
+            // eslint-disable-next-line no-console
             console.log(`[ocr-job] Chunks & embeddings persisted in background for docId ${docId}`);
           }
         } catch (embedErr) {
+          // eslint-disable-next-line no-console
           console.warn(
             `[ocr-job] Background embedding generation failed for ${fileKey}:`,
             embedErr.message,
@@ -446,13 +585,19 @@ class DocumentOcrJobService {
       });
     } catch (error) {
       await documentProcessingJobRepository.markFailed(jobId, error).catch(() => {});
-      await documentRepository.updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED).catch((err) => {
-        console.warn("[ocr-job] sync to documents.ocrStatus failed", {
-          error: err.message,
-          fileKey,
+      await documentRepository
+        .updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED, {
+          remarks: `Processing failed: ${error.message}`,
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.warn("[ocr-job] sync to documents.ocrStatus failed", {
+            error: err.message,
+            fileKey,
+          });
         });
-      });
       ocrProgressBus.fail(fileKey, error);
+      // eslint-disable-next-line no-console
       console.error("[ocr-job] pipeline failed", { error: error.message, fileKey, jobId, userId });
     } finally {
       RUNNING_LOCKS.delete(fileKey);
