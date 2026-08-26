@@ -1,4 +1,4 @@
-const { and, eq, inArray, lt, ne, sql } = require("drizzle-orm");
+const { and, eq, lt, ne, sql } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
@@ -6,24 +6,6 @@ const { documentProcessingJob } = require("../models/documentProcessingJob");
 const DEFAULT_TTL_HOURS = 24;
 
 class DocumentProcessingJobRepository {
-  async findById(jobId) {
-    const [row] = await db
-      .select()
-      .from(documentProcessingJob)
-      .where(eq(documentProcessingJob.id, jobId))
-      .limit(1);
-    return row || null;
-  }
-
-  async findByIdAndUserId(jobId, userId) {
-    const [row] = await db
-      .select()
-      .from(documentProcessingJob)
-      .where(and(eq(documentProcessingJob.id, jobId), eq(documentProcessingJob.userId, userId)))
-      .limit(1);
-    return row || null;
-  }
-
   async createQueuedJob(
     { fileKey, userId, mimeType, originalName, ttlHours = DEFAULT_TTL_HOURS },
     tx = null,
@@ -92,30 +74,6 @@ class DocumentProcessingJobRepository {
     return this.createQueuedJob({ fileKey, userId, mimeType, ttlHours });
   }
 
-  /**
-   * Atomically claims a QUEUED job by updating its status to RUNNING in a single SQL operation.
-   * Prevents race conditions from rapid concurrent start requests.
-   */
-  async claimQueuedJob(jobId, userId) {
-    const [row] = await db
-      .update(documentProcessingJob)
-      .set({
-        startedAt: new Date(),
-        status: "RUNNING",
-        stage: "OCR_STARTED",
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(documentProcessingJob.id, jobId),
-          eq(documentProcessingJob.userId, userId),
-          eq(documentProcessingJob.status, "QUEUED"),
-        ),
-      )
-      .returning();
-    return row || null;
-  }
-
   async markRunning(jobId, patch = {}) {
     const [row] = await db
       .update(documentProcessingJob)
@@ -175,18 +133,6 @@ class DocumentProcessingJobRepository {
       )
       .limit(1);
     return row || null;
-  }
-
-  async findManyByIdsAndUserId(jobIds, userId) {
-    if (!Array.isArray(jobIds) || jobIds.length === 0) {
-      return [];
-    }
-    return db
-      .select()
-      .from(documentProcessingJob)
-      .where(
-        and(inArray(documentProcessingJob.id, jobIds), eq(documentProcessingJob.userId, userId)),
-      );
   }
 
   async claimJobForRetry(fileKey, userId) {

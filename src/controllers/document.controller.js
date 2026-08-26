@@ -59,7 +59,7 @@ async function updateDocument(req, res) {
 
 async function getDocumentSummaryList(req, res) {
   const result = await documentService.getDocumentSummaryList(req.auth.userId, req.query);
-  return successResponse(res, result, "Document summaries fetched successfully");
+  return successResponse(res, result, messageConstants.DOCUMENT_SUMMARIES_FETCHED_SUCCESSFULLY);
 }
 
 async function uploadDocuments(req, res) {
@@ -68,14 +68,17 @@ async function uploadDocuments(req, res) {
 }
 
 async function retryDocument(req, res) {
-  const fileKey = req?.query?.fileKey;
-  const file = req.files?.[0] || req.file || null;
   const result = await documentService.retryDocument({
-    fileKey,
+    fileKey: req?.query?.fileKey,
     userId: req.auth.userId,
-    file,
+    file: req.files?.[0] || req.file || null,
   });
-  return successResponse(res, result, "Document retry initiated", StatusCodes.ACCEPTED);
+  return successResponse(
+    res,
+    result,
+    messageConstants.DOCUMENT_RETRY_INITIATED,
+    StatusCodes.ACCEPTED,
+  );
 }
 
 module.exports = {

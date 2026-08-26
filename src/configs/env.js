@@ -127,7 +127,7 @@ const env = Object.freeze({
   aiMaxOutputTokens: numberFromEnv("AI_MAX_OUTPUT_TOKENS", 8192),
 
   ocrMaxFileBytes: numberFromEnv("OCR_MAX_FILE_BYTES", 150 * 1024 * 1024),
-  ocrConcurrency: numberFromEnv("OCR_BATCH_CONCURRENCY", 3),
+  ocrConcurrency: numberFromEnv("OCR_BATCH_CONCURRENCY", 5),
 
   ocrInlineMaxBytes: numberFromEnv("OCR_INLINE_MAX_BYTES", 500 * 1024),
   stageTimeoutMs: numberFromEnv("STAGE_TIMEOUT_MS", 120 * 1000),

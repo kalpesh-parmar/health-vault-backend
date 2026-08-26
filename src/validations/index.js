@@ -47,11 +47,6 @@ const {
   validateProfileUpload,
   validateDocumentUpload,
 } = require("./uploadValidation");
-const {
-  jobIdParamSchema,
-  validateJobIdParam,
-  validateBatchJobIdsBody,
-} = require("./ocrJobValidation");
 
 function formatZodIssues(error) {
   return error.issues.map((issue) => ({
@@ -112,8 +107,5 @@ module.exports = {
   documentUploadMulter,
   validateProfileUpload,
   validateDocumentUpload,
-  jobIdParamSchema,
-  validateJobIdParam,
-  validateBatchJobIdsBody,
   retryDocumentSchema,
 };

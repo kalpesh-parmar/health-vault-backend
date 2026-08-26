@@ -159,22 +159,22 @@ components:
               minimum: 1
               maximum: 100
               example: 10
-  DocumentStage:
-    type: string
-    description: Mirrors DOCUMENT_STAGES in src/constants/documentProgress.constants.js
-    enum:
-      - QUEUED
-      - VALIDATING
-      - UPLOADING
-      - OCR_RUNNING
-      - PARSING
-      - FIELD_EXTRACTION
-      - ANALYZING
-      - SUMMARIZING
-      - GRAPH_EXTRACTION
-      - PERSISTING
-      - CHUNKING
-      - EMBEDDING
+    DocumentStage:
+      type: string
+      description: Mirrors DOCUMENT_STAGES in src/constants/documentProgress.constants.js
+      enum:
+        - QUEUED
+        - VALIDATING
+        - UPLOADING
+        - OCR_RUNNING
+        - PARSING
+        - FIELD_EXTRACTION
+        - ANALYZING
+        - SUMMARIZING
+        - GRAPH_EXTRACTION
+        - PERSISTING
+        - CHUNKING
+        - EMBEDDING
 
     StageStatus:
       type: string

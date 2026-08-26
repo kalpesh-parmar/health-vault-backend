@@ -148,9 +148,7 @@ const STAGES_PIPELINE = [
         ctx.file,
         FileCategory.DOCUMENT,
         ctx.patientId,
-        { fileKey: ctx.fileKey },
       );
-
       const fileKey = uploadResult?.fileKey || uploadResult?.s3Key || ctx.fileKey;
       const bucket =
         uploadResult?.s3Bucket ||
@@ -642,7 +640,8 @@ class DocumentService {
         patientId,
         total: jobs.length,
         batchUrl: `/sse/batches/${batchId}/stream`,
-        documents: jobs.map(({ record }) => ({
+        documents: jobs.map(({ record, job }) => ({
+          jobId: record.jobId || job?.id || null,
           fileKey: record.fileKey,
           fileName: record.fileName,
           status: record.status,
@@ -757,6 +756,7 @@ class DocumentService {
     const progress = STAGE_WEIGHTS[resumeStage]?.[0] ?? claimed.percentage ?? 0;
 
     return {
+      jobId: claimed.id,
       fileKey,
       status: "RUNNING",
       resumeStage,

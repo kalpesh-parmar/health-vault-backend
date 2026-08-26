@@ -74,8 +74,6 @@ const messageConstants = Object.freeze({
   NO_FILE_UPLOAD: "No file uploaded",
   UNAUTHORIZED_ACCESS: "Unauthorized access",
   UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
-  BATCH_OCR_JOBS_STARTED: "Batch OCR jobs started successfully",
-  BATCH_OCR_JOBS_STATUS_FETCHED: "Batch OCR job statuses fetched successfully",
   DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (fileName, count) =>
     `Document '${fileName}' has been processed. Found ${count} medication${count > 1 ? "s" : ""} in your document. Please review and confirm to add them to your active medications:`,
   MEDICATIONS_CONFIRMED_SUCCESS:
@@ -92,6 +90,10 @@ const messageConstants = Object.freeze({
   //SSE Emitter
   SSE_STATS_FETCHED: "SSE stats fetched successfully",
   QUEUE_FOR_EXTRACTION: "Queued for extraction",
+
+  //DOCUMENT MESSAGE
+  DOCUMENT_RETRY_INITIATED: "Document retry initiated",
+  DOCUMENT_SUMMARIES_FETCHED_SUCCESSFULLY: "Document summaries fetched successfully",
 });
 
 module.exports = { messageConstants };

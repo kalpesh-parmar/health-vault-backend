@@ -18,6 +18,7 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
+const { toDbDate } = require("../../../utils/dateUtils");
 
 const {
   cleanAndParseJson,
@@ -909,9 +910,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         const rollbackData = {
           firstName: state.loginData?.firstName?.value || null,
           lastName: state.loginData?.lastName?.value || null,
-          dateOfBirth: state.loginData?.dateOfBirth?.value
-            ? new Date(state.loginData.dateOfBirth.value)
-            : null,
+          dateOfBirth: toDbDate(state.loginData?.dateOfBirth?.value),
           gender: state.loginData?.gender?.value || null,
           mobile: state.loginData?.phoneNumber?.value || null,
         };
@@ -1057,7 +1056,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         if (userId) {
           try {
-            await patientRepository.updateById(userId, { dateOfBirth: new Date(dob) });
+            await patientRepository.updateById(userId, { dateOfBirth: toDbDate(dob) });
           } catch (err) {
             console.warn(
               "[OnboardingService] Immediate DB update for dateOfBirth failed:",

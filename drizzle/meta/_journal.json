@@ -183,6 +183,13 @@
       "when": 1787238186090,
       "tag": "0024_abnormal_the_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787657949682,
+      "tag": "0025_slimy_sleeper",
+      "breakpoints": true
     }
   ]
 }
