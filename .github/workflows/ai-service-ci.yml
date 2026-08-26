@@ -42,7 +42,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgrespassword@localhost:5432/health_vault
           AI_MODEL: qwen3-vl:latest
-          AI_BASE_URL: http://122.174.67.117:11434/v1
+          AI_BASE_URL: http://192.168.21.176:11434/api/tags/v1
           STORAGE_PROVIDER: s3
           PATIENT_DOCUMENTS_BUCKET: patient-documents
           AWS_REGION: us-east-1
