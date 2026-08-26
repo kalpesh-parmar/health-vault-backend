@@ -17,7 +17,6 @@ const refillRoutes = require("./refillCount.route");
 const chatSessionRoutes = require("./chatSession.route");
 const { ocrService } = require("../services/ai");
 const v1Routes = require("./ocr.route");
-const ocrJobRoutes = require("./ocrJob.route");
 const sseRoutes = require("./sse.route");
 
 const router = express.Router();
@@ -73,7 +72,6 @@ router.use("/chat", chatSessionRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/file", fileRoutes);
 router.use("/v1", v1Routes);
-router.use("/ocr/jobs", ocrJobRoutes);
 router.use("/sse", sseRoutes);
 
 // Export router

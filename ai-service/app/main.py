@@ -8,13 +8,13 @@ from app.api.v1.routes import (
     embeddings,
     extraction,
     health,
+    language,
     ocr,
     rag,
     summary,
     translation,
     validation,
     voice,
-    language,
 )
 from app.core.errors import install_exception_handlers
 from app.core.lifecycle import lifespan

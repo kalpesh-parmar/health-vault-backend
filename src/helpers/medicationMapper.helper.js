@@ -18,6 +18,7 @@
  */
 
 const { normalizeMedicine } = require("./medicineNormalize.helper");
+const { toDbTimestamp } = require("../utils/dateUtils");
 
 class MedicationMapper {
   /**
@@ -50,8 +51,11 @@ class MedicationMapper {
         skipped.push({ raw: med, reason: "missing name" });
         continue;
       }
-
       const { row } = normalizeMedicine(med, i, patientCode, normDefaults);
+      // Coerce at the database boundary without mutating domain normalizer helpers
+      row.startDate = toDbTimestamp(row.startDate) ?? defaults.startDate;
+      row.endDate = toDbTimestamp(row.endDate);
+
       rows.push(row);
     }
 

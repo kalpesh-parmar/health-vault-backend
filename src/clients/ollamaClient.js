@@ -2,10 +2,6 @@ const { createHttpClient } = require("../configs/http.config");
 const apiConfig = require("../configs/api.config");
 const { env } = require("../configs/env");
 
-// const axiosInstance = axios.create({
-//   httpAgent: new http.Agent({ keepAlive: true, maxSockets: 50 }),
-// });
-
 class OllamaClient {
   constructor() {
     this.client = createHttpClient({

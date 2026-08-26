@@ -34,13 +34,28 @@ const FREQUENCY_TO_DB_MAP = {
  * @returns {null|{frequencyCount: number, times: string[], dosePerIntake: number, frequency: string, foodContext: string|null}}
  */
 function parseIndianDosing(text) {
-  if (!text || typeof text !== "string") return null;
+  if (!text || typeof text !== "string") {
+    return null;
+  }
 
-  // Normalize fractions and spaces
-  let normalized = text.replace(/½/g, "0.5").replace(/1\/2/g, "0.5").trim();
+  // Normalize input
+  let normalized = text
+    .replace(/½/g, "0.5")
+    .replace(/¼/g, "0.25")
+    .replace(/¾/g, "0.75")
+    .replace(/1\/2/g, "0.5")
+    .replace(/1\/4/g, "0.25")
+    .replace(/3\/4/g, "0.75")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  // Parse food context suffix
+  if (!normalized) {
+    return null;
+  }
+
+  // Detect food context
   let foodContext = null;
+
   if (/\b(?:a\/f|af|after food|after meal|after meals)\b/i.test(normalized)) {
     foodContext = "AFTER_FOOD";
   } else if (
@@ -49,51 +64,129 @@ function parseIndianDosing(text) {
     foodContext = "BEFORE_FOOD";
   }
 
-  // Remove suffixes to clean the dosing notation match
+  // Remove food/context suffixes
   normalized = normalized
-    .replace(/\s*\([^)]*\)/g, "")
-    .replace(/\b(?:a\/f|af|b\/f|bf)\b/gi, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(
+      /\b(?:a\/f|af|b\/f|bf|after food|after meal|after meals|before food|before meal|before meals|empty stomach)\b/gi,
+      "",
+    )
+    .replace(/\s+/g, " ")
     .trim();
 
-  // Match 3 or 4 slots separated by hyphens (e.g. 1-0-1, 1-1-1-1)
-  const regex = /^([0-9.]+)\s*-\s*([0-9.]+)\s*-\s*([0-9.]+)(?:\s*-\s*([0-9.]+))?$/;
-  const match = normalized.match(regex);
-  if (!match) return null;
+  // Match Indian dosage pattern
+  //
+  // Supported:
+  // 1-0-0
+  // 1-1-1
+  // 1-0-1
+  // 0-1-0
+  // 1-0-1-0
+  // 0.5-0-0.5
+  const regex =
+    /^([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)\s*-\s*([0-9]+(?:\.[0-9]+)?)(?:\s*-\s*([0-9]+(?:\.[0-9]+)?))?$/;
 
-  const parts = [match[1], match[2], match[3]];
-  if (match[4]) {
-    parts.push(match[4]);
+  const match = normalized.match(regex);
+
+  if (!match) {
+    return null;
   }
 
-  const values = parts.map((p) => {
-    const val = parseFloat(p);
-    return isNaN(val) ? 0 : val;
-  });
+  // Extract dosage slots
+  const values = [Number(match[1]), Number(match[2]), Number(match[3])];
 
-  const nonZero = values.filter((v) => v > 0);
-  const frequencyCount = nonZero.length;
-  if (frequencyCount === 0) return null;
+  // Add 4th slot only when it exists
+  if (match[4] !== undefined) {
+    values.push(Number(match[4]));
+  }
 
-  const timesMap = ["08:00", "14:00", "20:00", "22:00"];
-  const times = [];
-  values.forEach((v, idx) => {
-    if (v > 0 && idx < timesMap.length) {
-      times.push(timesMap[idx]);
-    }
-  });
+  // Validate numbers
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+    return null;
+  }
 
-  const dosePerIntake = nonZero[0] || 1;
+  // Time mapping
+  //
+  // 3-slot:
+  // 1st = Morning
+  // 2nd = Afternoon
+  // 3rd = Night
+  //
+  // 4-slot:
+  // 1st = Morning
+  // 2nd = Afternoon
+  // 3rd = Evening
+  // 4th = Night
+  const slotMap =
+    values.length === 4
+      ? [
+          { period: "MORNING", time: "08:00" },
+          { period: "AFTERNOON", time: "14:00" },
+          { period: "EVENING", time: "20:00" },
+          { period: "NIGHT", time: "22:00" },
+        ]
+      : [
+          { period: "MORNING", time: "08:00" },
+          { period: "AFTERNOON", time: "14:00" },
+          { period: "NIGHT", time: "20:00" },
+        ];
 
-  let frequency = "ONCE";
-  if (frequencyCount === 2) frequency = "TWICE";
-  else if (frequencyCount >= 3) frequency = "THRICE";
+  // Build complete dosage schedule
+  const doses = slotMap.map((slot, index) => ({
+    period: slot.period,
+    time: slot.time,
+    dose: values[index],
+  }));
 
+  // Get only active doses
+  const activeDoses = doses.filter((item) => item.dose > 0);
+
+  if (activeDoses.length === 0) {
+    return null;
+  }
+
+  // Frequency
+  const frequencyCount = activeDoses.length;
+
+  let frequency;
+
+  switch (frequencyCount) {
+    case 1:
+      frequency = "ONCE";
+      break;
+
+    case 2:
+      frequency = "TWICE";
+      break;
+
+    case 3:
+      frequency = "THRICE";
+      break;
+
+    default:
+      frequency = "FOUR_TIMES";
+      break;
+  }
+
+  // Times containing a dose
+  const times = activeDoses.map((item) => item.time);
+
+  // Dose per intake (for backwards compatibility)
+  // 1-0-0 => 1
+  // 0.5-0-0 => 0.5
+  const dosePerIntake = activeDoses[0].dose;
+
+  // Return result
   return {
+    rawDosage: text,
+    normalizedDosage: normalized,
     frequencyCount,
-    times,
-    dosePerIntake,
     frequency,
     foodContext,
+    dosePerIntake,
+    times,
+    doses,
+    activeDoses,
   };
 }
 
@@ -398,6 +491,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     unit: String(unit).toUpperCase(),
     userId: defaults.userId || null,
     clientMedId,
+    medicationSchedule,
     softDelete: false,
   };
 

@@ -9,7 +9,7 @@ class GcpStorageService {
     this.bucket = env.gcpStorageBucket;
   }
 
-  async uploadFile(file, category, patientId) {
+  async uploadFile(file, category, patientId, options = {}) {
     if (!file) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
     }
@@ -17,14 +17,21 @@ class GcpStorageService {
       throw new InvalidRequestException("Category is required");
     }
 
-    const uuid = crypto.randomUUID();
-    const sanitizedName = file.originalname.replace(/\s+/g, "_");
+    const opts = typeof patientId === "object" && patientId !== null ? patientId : options;
+    const actualPatientId = typeof patientId === "string" ? patientId : opts.patientId;
+    const pinnedKey = opts?.fileKey || opts?.key;
 
     let fileKey;
-    if (patientId) {
-      fileKey = `${category}/${patientId}/${uuid}-${sanitizedName}`;
+    if (pinnedKey) {
+      fileKey = pinnedKey;
     } else {
-      fileKey = `${category}/${uuid}-${sanitizedName}`;
+      const uuid = crypto.randomUUID();
+      const sanitizedName = file.originalname.replace(/\s+/g, "_");
+      if (actualPatientId) {
+        fileKey = `${category}/${actualPatientId}/${uuid}-${sanitizedName}`;
+      } else {
+        fileKey = `${category}/${uuid}-${sanitizedName}`;
+      }
     }
 
     const bucket = gcpStorage.bucket(this.bucket);

@@ -145,6 +145,13 @@
     {
       "idx": 20,
       "version": "7",
+      "when": 1785414833076,
+      "tag": "0020_sloppy_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
       "when": 1785413215725,
       "tag": "0020_perpetual_bill_hollister",
       "breakpoints": true
@@ -173,15 +180,22 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1787215085297,
-      "tag": "0024_tough_deadpool",
+      "when": 1787238186090,
+      "tag": "0024_abnormal_the_phantom",
       "breakpoints": true
     },
     {
       "idx": 25,
       "version": "7",
-      "when": 1787655766546,
-      "tag": "0025_lazy_sister_grimm",
+      "when": 1787657949682,
+      "tag": "0025_slimy_sleeper",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787736029476,
+      "tag": "0026_special_diamondback",
       "breakpoints": true
     }
   ]

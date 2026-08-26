@@ -133,11 +133,19 @@ const downloadFileQuerySchema = z
   })
   .strict();
 
+const retryDocumentSchema = z
+  .object({
+    fileKey: z.string().trim().min(1, errorConstants.FILE_KEY_REQUIRED),
+    batchId: z.string().trim().optional().nullable(),
+  })
+  .passthrough();
+
 module.exports = {
   createDocumentSchema,
   listDocumentsFilterSortSchema,
   listDocumentsPaginatedSchema,
   downloadFileQuerySchema,
   listDocumentsQuerySchema,
+  retryDocumentSchema,
   updateDocumentSchema,
 };

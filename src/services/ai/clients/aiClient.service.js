@@ -52,19 +52,10 @@ class AiServiceClientWrapper {
     );
     try {
       const startTime = Date.now();
-      const response = await aiServiceClient.postWithRetry(
-        aiServiceClient.endpoints.translate,
-        {
-          text,
-          src_lang: srcLang,
-          tgt_lang: tgtLang,
-        },
-        { timeout: 300000, retries: 0 },
-      );
+      const response = await aiServiceClient.translate({ text, srcLang, tgtLang });
       const endTime = Date.now();
       // eslint-disable-next-line no-console
       console.log(`[AiServiceClient] Translation API call took ${endTime - startTime}ms`);
-
       const translatedText = response?.translated_text || text;
       this.translationCache.set(cacheKey, translatedText);
       return translatedText;
@@ -75,26 +66,6 @@ class AiServiceClientWrapper {
         err.message,
       );
       return text;
-    }
-  }
-
-  async validateMedicalDocument(params) {
-    try {
-      return await aiServiceClient.validateMedicalDocument(params);
-    } catch (error) {
-      if (
-        error.statusCode === 503 ||
-        error.errorCode === "MEDGEMMA_UNAVAILABLE" ||
-        error.response?.status === 503
-      ) {
-        const err = new InternalServerException(
-          "MedGemma medical validation service is unavailable",
-        );
-        err.errorCode = "MEDGEMMA_UNAVAILABLE";
-        err.statusCode = 503;
-        throw err;
-      }
-      throw error;
     }
   }
 
@@ -135,19 +106,38 @@ class AiServiceClientWrapper {
     return translatedChunks.join("\n\n");
   }
 
-  async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
-    // eslint-disable-next-line no-console
-    console.log("running ocr from storage", bucket, fileKey, mimeType, mode);
+  async validateMedicalDocument(params) {
+    try {
+      return await aiServiceClient.validateMedicalDocument(params);
+    } catch (error) {
+      if (
+        error.statusCode === 503 ||
+        error.errorCode === "MEDGEMMA_UNAVAILABLE" ||
+        error.response?.status === 503
+      ) {
+        const err = new InternalServerException(
+          "MedGemma medical validation service is unavailable",
+        );
+        err.errorCode = "MEDGEMMA_UNAVAILABLE";
+        err.statusCode = 503;
+        throw err;
+      }
+      throw error;
+    }
+  }
 
-    const response = await aiServiceClient.runOcrFromStorage({
-      bucket,
-      fileKey,
-      mimeType,
-      mode,
-    });
-
+  async runOcrFromStorage(params) {
     // eslint-disable-next-line no-console
-    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500)); // Log first 500 chars to avoid huge logs
+    console.log(
+      "running ocr from storage",
+      params.bucket,
+      params.fileKey,
+      params.mimeType,
+      params.mode,
+    );
+    const response = await aiServiceClient.runOcrFromStorage(params);
+    // eslint-disable-next-line no-console
+    console.log("runOcrFromStorage response:", JSON.stringify(response).substring(0, 500));
     return response;
   }
 
@@ -198,11 +188,7 @@ class AiServiceClientWrapper {
   async detectLanguage(text) {
     if (!text || !text.trim()) return "english";
     try {
-      const response = await aiServiceClient.postWithRetry(
-        "/api/v1/language/detect",
-        { text },
-        { timeout: 5000, retries: 1 },
-      );
+      const response = await aiServiceClient.detectLanguage({ text });
       return response?.language || "english";
     } catch (err) {
       // eslint-disable-next-line no-console

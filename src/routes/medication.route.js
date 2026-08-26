@@ -1,18 +1,10 @@
 const express = require("express");
 const medicationController = require("../controllers/medication.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
-const { validateRequest } = require("../middlewares/validateRequest");
-const { checkDuplicateMedicationSchema } = require("../validations");
-
 const router = express.Router();
 
 // check duplicate
-router.post(
-  "/check-duplicate",
-  verifyToken,
-  validateRequest({ body: checkDuplicateMedicationSchema }),
-  medicationController.checkDuplicateMedication,
-);
+router.post("/check-duplicate", verifyToken, medicationController.checkDuplicateMedication);
 
 // create
 router.post("/create", verifyToken, medicationController.createMedication);

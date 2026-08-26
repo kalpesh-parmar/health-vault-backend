@@ -1,4 +1,4 @@
-const { and, eq, inArray, lt } = require("drizzle-orm");
+const { and, eq, lt, ne, sql } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
@@ -6,24 +6,6 @@ const { documentProcessingJob } = require("../models/documentProcessingJob");
 const DEFAULT_TTL_HOURS = 24;
 
 class DocumentProcessingJobRepository {
-  async findById(jobId) {
-    const [row] = await db
-      .select()
-      .from(documentProcessingJob)
-      .where(eq(documentProcessingJob.id, jobId))
-      .limit(1);
-    return row || null;
-  }
-
-  async findByIdAndUserId(jobId, userId) {
-    const [row] = await db
-      .select()
-      .from(documentProcessingJob)
-      .where(and(eq(documentProcessingJob.id, jobId), eq(documentProcessingJob.userId, userId)))
-      .limit(1);
-    return row || null;
-  }
-
   async createQueuedJob(
     { fileKey, userId, mimeType, originalName, ttlHours = DEFAULT_TTL_HOURS },
     tx = null,
@@ -92,30 +74,6 @@ class DocumentProcessingJobRepository {
     return this.createQueuedJob({ fileKey, userId, mimeType, ttlHours });
   }
 
-  /**
-   * Atomically claims a QUEUED job by updating its status to RUNNING in a single SQL operation.
-   * Prevents race conditions from rapid concurrent start requests.
-   */
-  async claimQueuedJob(jobId, userId) {
-    const [row] = await db
-      .update(documentProcessingJob)
-      .set({
-        startedAt: new Date(),
-        status: "RUNNING",
-        stage: "OCR_STARTED",
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(documentProcessingJob.id, jobId),
-          eq(documentProcessingJob.userId, userId),
-          eq(documentProcessingJob.status, "QUEUED"),
-        ),
-      )
-      .returning();
-    return row || null;
-  }
-
   async markRunning(jobId, patch = {}) {
     const [row] = await db
       .update(documentProcessingJob)
@@ -177,16 +135,67 @@ class DocumentProcessingJobRepository {
     return row || null;
   }
 
-  async findManyByIdsAndUserId(jobIds, userId) {
-    if (!Array.isArray(jobIds) || jobIds.length === 0) {
-      return [];
-    }
+  async claimJobForRetry(fileKey, userId) {
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        status: "RUNNING",
+        stageStatus: "IN_PROGRESS",
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        attemptCount: sql`${documentProcessingJob.attemptCount} + 1`,
+        error: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documentProcessingJob.fileKey, fileKey),
+          eq(documentProcessingJob.userId, userId),
+          ne(documentProcessingJob.status, "RUNNING"),
+        ),
+      )
+      .returning();
+    return row || null;
+  }
+
+  async checkpointStage(jobId, patch = {}) {
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        ...patch,
+        lastHeartbeatAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(documentProcessingJob.id, jobId))
+      .returning();
+    return row || null;
+  }
+
+  async findStalledRunningJobs(cutoffDate) {
     return db
       .select()
       .from(documentProcessingJob)
       .where(
-        and(inArray(documentProcessingJob.id, jobIds), eq(documentProcessingJob.userId, userId)),
+        and(
+          eq(documentProcessingJob.status, "RUNNING"),
+          lt(documentProcessingJob.lastHeartbeatAt, cutoffDate),
+        ),
       );
+  }
+
+  async reconcileRunningJobsOnBoot() {
+    return db
+      .update(documentProcessingJob)
+      .set({
+        status: "FAILED",
+        stageStatus: "FAILED",
+        retryable: true,
+        error: "Server restarted during document processing",
+        requiresReupload: sql`CASE WHEN ${documentProcessingJob.stage} IN ('QUEUED', 'VALIDATING', 'UPLOADING') THEN true ELSE false END`,
+        updatedAt: new Date(),
+      })
+      .where(eq(documentProcessingJob.status, "RUNNING"))
+      .returning();
   }
 
   async sweepExpired() {

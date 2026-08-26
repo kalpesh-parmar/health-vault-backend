@@ -7,6 +7,7 @@ const {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
   jsonb,
@@ -47,6 +48,7 @@ const document = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
+    uniqueIndex("documents_s3_key_key").on(table.s3Key),
     index("documents_user_id_idx").on(table.userId),
     index("documents_type_idx").on(table.documentType),
     index("documents_soft_delete_idx").on(table.softDelete),

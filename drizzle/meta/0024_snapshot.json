@@ -1,5 +1,5 @@
 {
-  "id": "54265e6d-09cf-400e-ac4e-206d51c8027a",
+  "id": "fb22e2bc-f20d-4d27-841e-47ea8a252d52",
   "prevId": "8fcabea8-0da0-40ca-bf75-40b9907d5a3f",
   "version": "7",
   "dialect": "postgresql",
@@ -523,6 +523,21 @@
         }
       },
       "indexes": {
+        "documents_s3_key_key": {
+          "name": "documents_s3_key_key",
+          "columns": [
+            {
+              "expression": "s3_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "documents_user_id_idx": {
           "name": "documents_user_id_idx",
           "columns": [
@@ -2178,6 +2193,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "stage_status": {
+          "name": "stage_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "percentage": {
           "name": "percentage",
           "type": "integer",
@@ -2205,6 +2233,26 @@
           "notNull": false,
           "default": 0
         },
+        "completed_stages": {
+          "name": "completed_stages",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "retryable": {
+          "name": "retryable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requires_reupload": {
+          "name": "requires_reupload",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "message": {
           "name": "message",
           "type": "text",
@@ -2213,6 +2261,13 @@
         },
         "metadata": {
           "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "checkpoint_data": {
+          "name": "checkpoint_data",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
@@ -2240,6 +2295,12 @@
         "error": {
           "name": "error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_heartbeat_at": {
+          "name": "last_heartbeat_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -2327,6 +2388,21 @@
           "columns": [
             {
               "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "document_processing_jobs_heartbeat_idx": {
+          "name": "document_processing_jobs_heartbeat_idx",
+          "columns": [
+            {
+              "expression": "last_heartbeat_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2541,7 +2617,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "double precision",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -2748,7 +2824,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "double precision",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -3807,19 +3883,15 @@
       "name": "document_type",
       "schema": "public",
       "values": [
-        "family",
-        "medical_document",
-        "medication",
-        "insurance",
-        "prescription",
-        "lab report",
-        "imaging report",
-        "discharge summary",
-        "consultation report",
-        "surgery procedure report",
-        "vaccination record",
-        "medical certificate",
-        "other medical document"
+        "PRESCERIPTION",
+        "LAB_REPORT",
+        "IMAGING_REPORT",
+        "DISCHARGE_SUMMARY",
+        "CONSULTATION_REPORT",
+        "SURGERY_PROCEDURE_REPORT",
+        "VACCINATION_RECORD",
+        "MEDICAL_CERTIFICATE",
+        "OTHER_MEDICAL_DOCUMENT"
       ]
     },
     "public.file_type": {

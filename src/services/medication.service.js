@@ -681,14 +681,14 @@ class MedicationService {
 
     const activeMedications = await medicationRepository.findAll(userId);
 
-    const incomingRaw = validData.medicationName;
+    const incomingRaw = validData?.medicationName;
     const incomingNorm = normalizeMedicationName(incomingRaw);
 
     const exactMatches = [];
     const similarMatches = [];
 
     for (const med of activeMedications) {
-      const existingRaw = med.medicationName || "";
+      const existingRaw = med?.medicationName || "";
       const existingNorm = normalizeMedicationName(existingRaw);
 
       if (!existingNorm && !existingRaw) continue;

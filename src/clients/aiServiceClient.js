@@ -64,6 +64,14 @@ class AiServiceClient {
     );
   }
 
+  async detectLanguage({ text }) {
+    return this.postWithRetry(
+      this.endpoints.detectLanguage,
+      { text },
+      { timeout: 5000, retries: 1 },
+    );
+  }
+
   async validateMedicalDocument({ file, fileName, mimeType }) {
     const formData = new FormData();
 

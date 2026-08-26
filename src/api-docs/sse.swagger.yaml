@@ -319,7 +319,7 @@ components:
           example: null
 
 paths:
-  /sse/{fileKey}/stream:
+  /sse/files/{fileKey}/stream:
     get:
       tags:
         - SSE

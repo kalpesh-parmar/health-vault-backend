@@ -30,6 +30,7 @@ module.exports = {
       summarize: "/v1/extraction/summarize",
       embeddings: "/v1/embeddings",
       graphs: "/v1/extraction/graphs",
+      detectLanguage: "/api/v1/language/detect",
     },
     timeout: env.aiTimeoutMs || 300000,
   },

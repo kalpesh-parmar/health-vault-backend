@@ -117,6 +117,7 @@ const errorConstants = Object.freeze({
   UPLOADED_FILE_NOT_A_VALID_MEDICAL_DOCUMENT: "Uploaded file is not a valid medical document",
   MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED: (maxFilesPerUpload = env.maxFilesPerUpload) =>
     `Maximum ${maxFilesPerUpload} document files allowed.`,
+  FILE_BUFFER_REQUIRED_FOR_UPLOADING_STAGE: "File buffer required for uploading stage",
 
   // SSE Emitter Error
   CHANNEL_KEY_IS_REQUIRED: "Channel Key is required",

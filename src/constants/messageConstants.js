@@ -95,6 +95,10 @@ const messageConstants = Object.freeze({
   MEDICATIONS_CONFIRMED_SUCCESS:
     "Selected medications have been added to your active list successfully.",
   MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",
+
+  //DOCUMENT MESSAGE
+  DOCUMENT_RETRY_INITIATED: "Document retry initiated",
+  DOCUMENT_SUMMARIES_FETCHED_SUCCESSFULLY: "Document summaries fetched successfully",
 });
 
 module.exports = { messageConstants };

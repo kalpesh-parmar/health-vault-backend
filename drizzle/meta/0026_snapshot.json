@@ -1,6 +1,6 @@
 {
-  "id": "40127670-43a4-48b9-b7f4-7517ad5bf48b",
-  "prevId": "34887dec-92ef-4548-b14e-3c4fac388862",
+  "id": "5376f481-9b2d-4650-91d5-d35767bba3de",
+  "prevId": "e612022d-9575-4d60-bc7c-beb9bed0357d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -157,7 +157,7 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
@@ -274,12 +274,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "varchar(255)",
@@ -343,21 +337,6 @@
           "method": "btree",
           "with": {}
         },
-        "chat_sessions_document_id_idx": {
-          "name": "chat_sessions_document_id_idx",
-          "columns": [
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "chat_sessions_last_message_at_idx": {
           "name": "chat_sessions_last_message_at_idx",
           "columns": [
@@ -408,19 +387,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "chat_sessions_document_id_documents_id_fk": {
-          "name": "chat_sessions_document_id_documents_id_fk",
-          "tableFrom": "chat_sessions",
-          "tableTo": "documents",
-          "columnsFrom": [
-            "document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -459,12 +425,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "file_path": {
-          "name": "file_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "s3_bucket": {
           "name": "s3_bucket",
           "type": "varchar(255)",
@@ -475,7 +435,7 @@
           "name": "s3_key",
           "type": "varchar(500)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "file_type": {
           "name": "file_type",
@@ -540,24 +500,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "summary_in_preferred_language": {
-          "name": "summary_in_preferred_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "soft_delete": {
           "name": "soft_delete",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -575,6 +523,21 @@
         }
       },
       "indexes": {
+        "documents_s3_key_key": {
+          "name": "documents_s3_key_key",
+          "columns": [
+            {
+              "expression": "s3_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "documents_user_id_idx": {
           "name": "documents_user_id_idx",
           "columns": [
@@ -1500,165 +1463,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.chat_history": {
-      "name": "chat_history",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_message": {
-          "name": "user_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ai_response": {
-          "name": "ai_response",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "citations": {
-          "name": "citations",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "chat_history_user_id_idx": {
-          "name": "chat_history_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "chat_history_document_id_idx": {
-          "name": "chat_history_document_id_idx",
-          "columns": [
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "chat_history_session_id_idx": {
-          "name": "chat_history_session_id_idx",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "chat_history_created_at_idx": {
-          "name": "chat_history_created_at_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "chat_history_user_id_patients_id_fk": {
-          "name": "chat_history_user_id_patients_id_fk",
-          "tableFrom": "chat_history",
-          "tableTo": "patients",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "chat_history_document_id_documents_id_fk": {
-          "name": "chat_history_document_id_documents_id_fk",
-          "tableFrom": "chat_history",
-          "tableTo": "documents",
-          "columnsFrom": [
-            "document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.document_chunks": {
       "name": "document_chunks",
       "schema": "",
@@ -2389,6 +2193,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "stage_status": {
+          "name": "stage_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempt_count": {
+          "name": "attempt_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "percentage": {
           "name": "percentage",
           "type": "integer",
@@ -2416,6 +2233,26 @@
           "notNull": false,
           "default": 0
         },
+        "completed_stages": {
+          "name": "completed_stages",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "retryable": {
+          "name": "retryable",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requires_reupload": {
+          "name": "requires_reupload",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "message": {
           "name": "message",
           "type": "text",
@@ -2424,6 +2261,13 @@
         },
         "metadata": {
           "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "checkpoint_data": {
+          "name": "checkpoint_data",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
@@ -2451,6 +2295,12 @@
         "error": {
           "name": "error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_heartbeat_at": {
+          "name": "last_heartbeat_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -2538,6 +2388,21 @@
           "columns": [
             {
               "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "document_processing_jobs_heartbeat_idx": {
+          "name": "document_processing_jobs_heartbeat_idx",
+          "columns": [
+            {
+              "expression": "last_heartbeat_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2752,7 +2617,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "integer",
+          "type": "double precision",
           "primaryKey": false,
           "notNull": false
         },
@@ -2959,7 +2824,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "integer",
+          "type": "double precision",
           "primaryKey": false,
           "notNull": false
         },
@@ -3349,52 +3214,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.otp_verifications": {
-      "name": "otp_verifications",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "mobile": {
-          "name": "mobile",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "otp": {
-          "name": "otp",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_verified": {
-          "name": "is_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.patients": {
       "name": "patients",
       "schema": "",
@@ -3450,13 +3269,6 @@
           "notNull": true,
           "default": "'ACTIVE'"
         },
-        "is_verified": {
-          "name": "is_verified",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "gender": {
           "name": "gender",
           "type": "gender",
@@ -3481,13 +3293,6 @@
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "last_login_at": {
           "name": "last_login_at",
@@ -3538,12 +3343,6 @@
         "blood_group": {
           "name": "blood_group",
           "type": "varchar(8)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "blood_type": {
-          "name": "blood_type",
-          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
         },
@@ -4084,11 +3883,15 @@
       "name": "document_type",
       "schema": "public",
       "values": [
-        "family",
-        "medical_document",
-        "medication",
-        "insurance",
-        "other"
+        "PRESCERIPTION",
+        "LAB_REPORT",
+        "IMAGING_REPORT",
+        "DISCHARGE_SUMMARY",
+        "CONSULTATION_REPORT",
+        "SURGERY_PROCEDURE_REPORT",
+        "VACCINATION_RECORD",
+        "MEDICAL_CERTIFICATE",
+        "OTHER_MEDICAL_DOCUMENT"
       ]
     },
     "public.file_type": {

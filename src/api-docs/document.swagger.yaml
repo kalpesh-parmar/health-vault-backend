@@ -159,6 +159,98 @@ components:
               minimum: 1
               maximum: 100
               example: 10
+    DocumentStage:
+      type: string
+      description: Mirrors DOCUMENT_STAGES in src/constants/documentProgress.constants.js
+      enum:
+        - QUEUED
+        - VALIDATING
+        - UPLOADING
+        - OCR_RUNNING
+        - PARSING
+        - FIELD_EXTRACTION
+        - ANALYZING
+        - SUMMARIZING
+        - GRAPH_EXTRACTION
+        - PERSISTING
+        - CHUNKING
+        - EMBEDDING
+
+    StageStatus:
+      type: string
+      description: Mirrors StageType in src/enums/stageStatus.js
+      enum: [QUEUED, CONNECTED, STARTED, IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+
+    JobStatus:
+      type: string
+      description: Mirrors JOB_STATUSES in src/models/documentProcessingJob.js
+      enum: [QUEUED, RUNNING, COMPLETED, FAILED, REJECTED, CANCELLED]
+
+    DocumentRetryResult:
+      type: object
+      properties:
+        fileKey:
+          type: string
+          example: documents/usr_123/123e4567-e89b-12d3-a456-426614174000/report.pdf
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        stage:
+          $ref: "#/components/schemas/DocumentStage"
+        stageStatus:
+          $ref: "#/components/schemas/StageStatus"
+        resumeStage:
+          allOf:
+            - $ref: "#/components/schemas/DocumentStage"
+          description: The stage processing will resume from.
+        progress:
+          type: integer
+          description: Progress percentage at the resume point (lower weight bound of resumeStage).
+          example: 10
+        attemptCount:
+          type: integer
+          description: Attempt number for this run, after increment.
+          example: 2
+        maxAttempts:
+          type: integer
+          description: Configured retry ceiling (env-driven).
+          example: 3
+        streamUrl:
+          type: string
+          description: |
+            SSE stream to subscribe to for this retry. The previous channel became
+            terminal on failure, so clients must attach to this URL.
+          example: /sse/documents%2Fusr_123%2F123e4567.../stream
+        alreadyRunning:
+          type: boolean
+          description: True when the job was already running and this call was a no-op.
+          example: false
+
+    SuccessEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        statusCode:
+          type: integer
+          example: 202
+        message:
+          type: string
+          example: Document retry initiated
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        statusCode:
+          type: integer
+          example: 409
+        message:
+          type: string
+        errorCode:
+          type: string
 
 paths:
   /documents/add:
@@ -390,3 +482,87 @@ paths:
           description: Invalid request
         "404":
           description: Document not found
+
+  /documents/retry:
+    post:
+      tags:
+        - Document
+      security:
+        - bearerAuth: []
+      summary: Retry failed document processing
+      description: Retry processing from the failed stage.
+
+      parameters:
+        - in: query
+          name: fileKey
+          required: true
+          schema:
+            type: string
+          description: Document file key.
+          example: doc_123456789.pdf
+      requestBody:
+        required: false
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Required when re-upload is needed.
+
+      responses:
+        "202":
+          description: Retry initiated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DocumentRetryResult"
+
+        "400":
+          description: Invalid retry request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+        "404":
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+        "409":
+          description: Retry not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"

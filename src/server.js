@@ -19,6 +19,7 @@ const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes/index.route");
 const cronService = require("./services/cron.service");
 const cronRegisterHandler = require("./configs/cronConfig");
+// const { ollamaClient } = require("./clients/ollamaClient");
 const sseConnectionService = require("./services/sseConnection.service");
 
 const app = express();
