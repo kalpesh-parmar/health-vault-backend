@@ -1497,6 +1497,21 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         state.activeMedicine = newMed;
         state.currentMedicineIndex = undefined;
+
+        if (userId && Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0) {
+          try {
+            state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+              userId,
+              state.medicinesToAdd,
+            );
+          } catch (batchErr) {
+            console.warn(
+              "[OnboardingService] Failed to check batch duplicates after ADD_MEDICINE:",
+              batchErr.message,
+            );
+          }
+        }
+
         // Direct transition to REVIEW_MEDICINES_LIST with updated list
         state.currentStep = "REVIEW_MEDICINES_LIST";
       }
@@ -2135,6 +2150,29 @@ class OnboardingService {
     if (state.medicinesSavedToDb === undefined || state.medicinesSavedToDb === null)
       state.medicinesSavedToDb = false;
     if (state.activeMedicine === undefined) state.activeMedicine = null;
+    if (
+      state.activeMedicine &&
+      (state.activeMedicine.name || state.activeMedicine.medicationName)
+    ) {
+      const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
+      const activeName = (state.activeMedicine.name || state.activeMedicine.medicationName || "")
+        .trim()
+        .toLowerCase();
+      const exists = (state.medicinesToAdd || []).some(
+        (m) =>
+          (activeId && (m.id === activeId || m.client_med_id === activeId)) ||
+          ((m.name || m.medicationName || "").trim().toLowerCase() === activeName &&
+            activeName.length > 0),
+      );
+      if (!exists) {
+        state.medicinesToAdd.push({
+          ...state.activeMedicine,
+          selected:
+            state.activeMedicine.selected !== undefined ? state.activeMedicine.selected : true,
+          isSaved: false,
+        });
+      }
+    }
     if (state.confirmMode === undefined) state.confirmMode = null;
     if (state.pendingQueue === undefined || state.pendingQueue === null) state.pendingQueue = [];
     if (state.validMedsToBulkCreate === undefined || state.validMedsToBulkCreate === null)
@@ -2222,9 +2260,12 @@ class OnboardingService {
 
           if (docRow && docRow.ocrStatus === "completed" && docRow.structuredExtractedData) {
             const structured = docRow.structuredExtractedData;
+            state.loadedDocumentId = docRow.id;
+            state.documentId = docRow.id;
+            state.documentUploaded = true;
+            state.documentExtracted = true;
             if (Array.isArray(structured.medications) && structured.medications.length > 0) {
               state.foundMedicines = structured.medications;
-              state.loadedDocumentId = docRow.id;
               console.log(
                 `[OnboardingService] Loaded ${state.foundMedicines.length} medications from DB document ${docRow.id}`,
               );
@@ -2589,13 +2630,78 @@ class OnboardingService {
           if (Array.isArray(extracted.medications) && extracted.medications.length > 0) {
             state.foundMedicines = extracted.medications;
             const builtMeds = medicationService.buildFromDocument(state.foundMedicines);
+            const existingMeds = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd : [];
+            const existingManualMeds = existingMeds.filter(
+              (m) =>
+                m &&
+                (m.source === "MANUAL" ||
+                  m.isManual ||
+                  m.source !== "OCR" ||
+                  (m.id &&
+                    (String(m.id).startsWith("med_") || String(m.id).startsWith("client_"))) ||
+                  (m.client_med_id &&
+                    (String(m.client_med_id).startsWith("med_") ||
+                      String(m.client_med_id).startsWith("client_")))),
+            );
+
+            if (
+              state.activeMedicine &&
+              (state.activeMedicine.name || state.activeMedicine.medicationName)
+            ) {
+              const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
+              const activeName = (
+                state.activeMedicine.name ||
+                state.activeMedicine.medicationName ||
+                ""
+              )
+                .trim()
+                .toLowerCase();
+              const isAlreadyPresent = existingManualMeds.some(
+                (m) =>
+                  (activeId && (m.id === activeId || m.client_med_id === activeId)) ||
+                  ((m.name || m.medicationName || "").trim().toLowerCase() === activeName &&
+                    activeName.length > 0),
+              );
+              if (!isAlreadyPresent) {
+                existingManualMeds.push({
+                  ...state.activeMedicine,
+                  selected:
+                    state.activeMedicine.selected !== undefined
+                      ? state.activeMedicine.selected
+                      : true,
+                  isSaved: false,
+                });
+              }
+            }
+
+            const combinedMeds = [...builtMeds];
+            const builtIdSet = new Set(
+              builtMeds.map((b) => b.id || b.client_med_id).filter(Boolean),
+            );
+            const builtNameSet = new Set(
+              builtMeds
+                .map((b) => (b.name || b.medicationName || "").trim().toLowerCase())
+                .filter(Boolean),
+            );
+
+            for (const manualMed of existingManualMeds) {
+              const medId = manualMed.id || manualMed.client_med_id;
+              const medName = (manualMed.name || manualMed.medicationName || "")
+                .trim()
+                .toLowerCase();
+              if ((medId && builtIdSet.has(medId)) || (medName && builtNameSet.has(medName))) {
+                continue;
+              }
+              combinedMeds.push(manualMed);
+            }
+
             if (userId) {
               state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
                 userId,
-                builtMeds,
+                combinedMeds,
               );
             } else {
-              state.medicinesToAdd = builtMeds;
+              state.medicinesToAdd = combinedMeds;
             }
           } else {
             state.foundMedicines = [];

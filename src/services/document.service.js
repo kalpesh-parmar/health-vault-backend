@@ -314,6 +314,7 @@ const STAGES_PIPELINE = [
           extractedStructuredData: ctx.structured,
           graphs: ctx.graphs || [],
           embeddingsGenerated: false,
+          skipMedications: true,
         },
       });
 

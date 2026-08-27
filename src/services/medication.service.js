@@ -18,11 +18,16 @@ const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGene
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
-const { normalizeMedicationName } = require("../helpers/medication.helper");
+const {
+  findMedicationDuplicates,
+  mapOnboardingMedicationToDb,
+  normalizeMedicationName,
+  throwDuplicateConflict,
+} = require("../helpers/medication.helper");
 
 class MedicationService {
   // CREATE MEDICATION
-  async createMedication(userId, payload) {
+  async createMedication(userId, payload, options = {}) {
     /*
     // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
     const normalizedInput = normalizeCreateMedicationInput(payload);
@@ -34,11 +39,34 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
-    const { endDate, dailyConsumption, unit, startDate } = calculateMedicationValues(validData);
+    if (!options.skipDuplicateCheck) {
+      const { resolution, replaceMedicationId } = validData;
+      if (resolution === "REPLACE" && replaceMedicationId) {
+        try {
+          await this.deleteMedication(replaceMedicationId, userId);
+        } catch (delErr) {
+          console.warn(
+            `[MedicationService] Soft-delete warning for replaced med ${replaceMedicationId}:`,
+            delErr.message,
+          );
+        }
+      } else {
+        const dupCheck = await this.checkDuplicateMedication(userId, validData);
+        if (dupCheck.hasDuplicate) {
+          throwDuplicateConflict(dupCheck);
+        }
+      }
+    }
+    const { resolution, replaceMedicationId, ...medicationPayload } = validData;
+    console.log("resolution", resolution);
+    console.log("replaceMedicationId", replaceMedicationId);
+
+    const { endDate, dailyConsumption, unit, startDate } =
+      calculateMedicationValues(medicationPayload);
     const medication = await medicationRepository.create({
       userId,
       patientCode: patient.patientCode,
-      ...validData,
+      ...medicationPayload,
       endDate,
       dailyConsumption,
       unit,
@@ -48,7 +76,7 @@ class MedicationService {
   }
 
   // UPDATE MEDICATION
-  async updateMedication(id, userId, payload) {
+  async updateMedication(id, userId, payload, options = {}) {
     // Validate request payload
     const validData = await validateSchema(updateMedicationSchema, payload);
 
@@ -58,6 +86,32 @@ class MedicationService {
     if (!existingMedication || String(existingMedication.userId) !== String(userId)) {
       throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
     }
+    if (!options.skipDuplicateCheck && validData.medicationName) {
+      const { resolution, replaceMedicationId } = validData;
+      if (
+        resolution === "REPLACE" &&
+        replaceMedicationId &&
+        String(replaceMedicationId) !== String(id)
+      ) {
+        try {
+          await this.deleteMedication(replaceMedicationId, userId);
+        } catch (delErr) {
+          console.warn(
+            `[MedicationService] Soft-delete warning for replaced med ${replaceMedicationId} on update:`,
+            delErr.message,
+          );
+        }
+      } else {
+        const activeMedications = await medicationRepository.findAll(userId);
+        const dupCheck = findMedicationDuplicates(activeMedications, validData.medicationName, id);
+        if (dupCheck.hasDuplicate) {
+          throwDuplicateConflict(dupCheck);
+        }
+      }
+    }
+    const { resolution, replaceMedicationId, ...updatePayload } = validData;
+    console.log("resolution", resolution);
+    console.log("replaceMedicationId", replaceMedicationId);
 
     // Find reminder
     const reminder = await medicationReminderRepository.findByMedicationId(id);
@@ -69,23 +123,23 @@ class MedicationService {
     );
 
     // If total quantity is updated, recalculate remaining quantity
-    if (validData.totalQuantity !== undefined) {
+    if (updatePayload.totalQuantity !== undefined) {
       const completedCount =
         await medicationReminderOccurrenceRepository.countCompletedOccurrencesByMedicationId(id);
       const consumedQuantity = completedCount * Number(existingMedication.dosePerIntake || 1);
-      remainingQuantity = Math.max(0, Number(validData.totalQuantity) - consumedQuantity);
+      remainingQuantity = Math.max(0, Number(updatePayload.totalQuantity) - consumedQuantity);
     }
 
     // Merge existing medication with incoming updates
     const updatedPayload = {
       ...existingMedication,
-      ...validData,
+      ...updatePayload,
     };
 
     // Use updated total quantity if provided
     const totalQuantity =
-      validData.totalQuantity !== undefined
-        ? Number(validData.totalQuantity)
+      updatePayload.totalQuantity !== undefined
+        ? Number(updatePayload.totalQuantity)
         : Number(existingMedication.totalQuantity);
 
     const medicationDataForCalculation = {
@@ -349,76 +403,10 @@ class MedicationService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    const frequencyDb = this._mapFrequencyToDb(payload.frequency);
     const defaults = this.applyDefaults(payload.frequency);
-
-    let value = undefined;
-    let unit = undefined;
-
-    if (payload.type === "TABLET" || payload.type === "CAPSULE") {
-      value = payload.dose.count;
-      unit = payload.type.toLowerCase();
-    } else {
-      value = payload.dose.value;
-      unit = payload.dose.unit;
-    }
-
-    const dosePerIntake = Number.isInteger(value) ? value : null;
-    const unitDb = unit.toUpperCase();
-
-    const foodContext = payload.foodContext || defaults.food_context;
-    const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
-
-    const frequencyCount = this._getFrequencyCount(payload.frequency);
-    const dailyConsumption = Math.ceil(value) * frequencyCount;
-
-    let timeSchedule;
-    if (
-      payload.medicationSchedule &&
-      (payload.medicationSchedule.Morning ||
-        payload.medicationSchedule.Noon ||
-        payload.medicationSchedule.Night ||
-        payload.medicationSchedule.Custom)
-    ) {
-      timeSchedule = {
-        Morning: payload.medicationSchedule.Morning,
-        Noon: payload.medicationSchedule.Noon,
-        Night: payload.medicationSchedule.Night,
-        Custom: payload.medicationSchedule.Custom,
-      };
-    } else {
-      timeSchedule = defaults.medicationSchedule;
-    }
-
-    const medicationSchedule = {
-      ...timeSchedule,
-      dose: { value, unit },
-      source: payload.source || "MANUAL",
-      refillAlert: !!payload.refill_alert,
-      foodContext: foodFrequency,
-    };
-
-    const mappedData = {
-      userId,
-      patientCode: patient.patientCode,
-      medicationName: payload.name,
-      medicationType: payload.type,
-      prescribedBy: payload.prescribed_by || null,
-      dosePerIntake,
-      frequency: frequencyDb,
-      medicationSchedule,
-      foodFrequency,
-      startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
-      endDate: null,
+    const mappedData = mapOnboardingMedicationToDb(payload, patient, userId, defaults, {
       ongoing: false,
-      totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
-      unit: unitDb,
-      dailyConsumption,
-      reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
-      notes: payload.notes || null,
-      clientMedId: payload.client_med_id,
-      softDelete: false,
-    };
+    });
 
     return await medicationRepository.insert(mappedData);
   }
@@ -431,76 +419,10 @@ class MedicationService {
     }
 
     const mappedList = payloadList.map((payload) => {
-      const frequencyDb = this._mapFrequencyToDb(payload.frequency);
       const defaults = this.applyDefaults(payload.frequency);
-
-      let value = undefined;
-      let unit = undefined;
-
-      if (payload.type === "TABLET" || payload.type === "CAPSULE") {
-        value = payload.dose.count;
-        unit = payload.type.toLowerCase();
-      } else {
-        value = payload.dose.value;
-        unit = payload.dose.unit;
-      }
-
-      const dosePerIntake = Number.isInteger(value) ? value : null;
-      const unitDb = unit.toUpperCase();
-
-      const foodContext = payload.foodContext || defaults.food_context;
-      const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
-
-      const frequencyCount = this._getFrequencyCount(payload.frequency);
-      const dailyConsumption = Math.ceil(value) * frequencyCount;
-
-      let timeSchedule;
-      if (
-        payload.medicationSchedule &&
-        (payload.medicationSchedule.Morning ||
-          payload.medicationSchedule.Noon ||
-          payload.medicationSchedule.Night ||
-          payload.medicationSchedule.Custom)
-      ) {
-        timeSchedule = {
-          Morning: payload.medicationSchedule.Morning,
-          Noon: payload.medicationSchedule.Noon,
-          Night: payload.medicationSchedule.Night,
-          Custom: payload.medicationSchedule.Custom,
-        };
-      } else {
-        timeSchedule = defaults.medicationSchedule;
-      }
-
-      const medicationSchedule = {
-        ...timeSchedule,
-        dose: { value, unit },
-        source: payload.source || "MANUAL",
-        refillAlert: !!payload.refill_alert,
-        foodContext: foodFrequency,
-      };
-
-      return {
-        userId,
-        patientCode: patient.patientCode,
-        medicationName: payload.name,
-        medicationType: payload.type,
-        prescribedBy: payload.prescribed_by || null,
-        dosePerIntake,
-        frequency: frequencyDb,
-        medicationSchedule,
-        foodFrequency,
-        startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
-        endDate: null,
+      return mapOnboardingMedicationToDb(payload, patient, userId, defaults, {
         ongoing: true,
-        totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
-        unit: unitDb,
-        dailyConsumption,
-        reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
-        notes: payload.notes || null,
-        clientMedId: payload.client_med_id,
-        softDelete: false,
-      };
+      });
     });
 
     return await medicationRepository.bulkInsert(mappedList);
@@ -515,73 +437,7 @@ class MedicationService {
     }
 
     const activeMedications = await medicationRepository.findAll(userId);
-
-    const incomingRaw = validData?.medicationName;
-    const incomingNorm = normalizeMedicationName(incomingRaw);
-
-    const exactMatches = [];
-    const similarMatches = [];
-
-    for (const med of activeMedications) {
-      const existingRaw = med?.medicationName || "";
-      const existingNorm = normalizeMedicationName(existingRaw);
-
-      if (!existingNorm && !existingRaw) continue;
-
-      if (
-        incomingNorm === existingNorm ||
-        incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
-      ) {
-        exactMatches.push(med);
-      } else if (
-        incomingNorm.length >= 3 &&
-        existingNorm.length >= 3 &&
-        (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
-      ) {
-        similarMatches.push(med);
-      }
-    }
-
-    const hasDuplicate = exactMatches.length > 0 || similarMatches.length > 0;
-    let conflictType = null;
-    let matchedMedications = [];
-
-    if (exactMatches.length > 0) {
-      conflictType = "EXACT_DUPLICATE";
-      matchedMedications = exactMatches;
-    } else if (similarMatches.length > 0) {
-      conflictType = "SIMILAR_NAME";
-      matchedMedications = similarMatches;
-    }
-
-    const suggestedActions = hasDuplicate
-      ? [
-          {
-            action: "KEEP EXISTING",
-            label: "keep previous medication",
-          },
-          {
-            action: "REPLACE",
-            label: "replace previous medication",
-          },
-          {
-            action: "EDIT",
-            label: "edit previous medication",
-          },
-          {
-            action: "REMOVE NEW",
-            label: "remove incoming new medication",
-          },
-        ]
-      : [];
-
-    return {
-      hasDuplicate,
-      conflictType,
-      matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
-      matchedMedications,
-      suggestedActions,
-    };
+    return findMedicationDuplicates(activeMedications, validData?.medicationName);
   }
 
   // CHECK DUPLICATE MEDICATIONS BATCH

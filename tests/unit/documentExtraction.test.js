@@ -113,7 +113,6 @@ describe("runExtraction Unit Tests", () => {
       dummyFile,
       "documents",
       "patient-789",
-      { fileKey: "doc-key-123" },
     );
     expect(aiServiceClient.validateMedicalDocument).toHaveBeenCalledWith({
       file: dummyFile.buffer,
