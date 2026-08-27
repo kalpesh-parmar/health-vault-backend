@@ -14,7 +14,7 @@ const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const { onboardingService } = require("./ai");
+const { onboardingService } = require("./ai/chat/onboarding.service");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
@@ -778,6 +778,60 @@ class V1Service {
           null,
           displayLabel,
         );
+
+        const cleanMsg = String(message || "")
+          .trim()
+          .toUpperCase();
+        let parsedKey = "";
+        try {
+          const parsed = typeof message === "string" ? JSON.parse(message) : message;
+          parsedKey = parsed?.key || parsed?.value || parsed?.action || "";
+        } catch {
+          console.log("Message is not in JSON format");
+        }
+        const isAskReport =
+          cleanMsg === "ASK_REPORT" || String(parsedKey).toUpperCase() === "ASK_REPORT";
+
+        if (isAskReport && onboardingResult?.state?.isOnboardingCompleted) {
+          console.log(
+            `[UnifiedChat] Onboarding completed via ASK_REPORT. Triggering summary flow...`,
+          );
+
+          let activeSessionId = sessionId;
+          if (!activeSessionId) {
+            const newSession = await chatService.createSession({
+              userId,
+              title: "Health Chat",
+            });
+            activeSessionId = newSession?.id || null;
+          }
+
+          const chatResult = await chatService.sendMessage({
+            userId,
+            question: "tell me about my report",
+            sessionId: activeSessionId,
+            documentId: onboardingResult?.state?.documentId
+              ? [onboardingResult.state.documentId]
+              : undefined,
+            preferredLanguage:
+              onboardingResult?.state?.preferredLanguage || patient?.preferredLanguage || "english",
+            onChunk,
+            abortSignal,
+          });
+
+          return buildUnifiedResponse({
+            mode: "NORMAL_CHAT",
+            actionType: "NORMAL_CHAT",
+            reply: chatResult?.reply || "",
+            sessionId: activeSessionId,
+            citations: chatResult?.citations || [],
+            options: chatResult?.options || [],
+            requireSelection: false,
+            reports: [],
+            allowMultiSelect: false,
+            selectionType: null,
+          });
+        }
 
         return buildUnifiedResponse({
           mode: "ONBOARDING",

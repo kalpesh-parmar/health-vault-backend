@@ -681,6 +681,144 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     jest.restoreAllMocks();
   });
 
+  test("chatService sendMessage should return report summary, calculate age, translate summary, stream response, and return predefined questions", async () => {
+    const patientRepository = require("../src/repositories/patientRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const aiClient = require("../src/services/ai/clients/aiClient.service");
+    const { db } = require("../src/configs/db");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-777",
+      firstName: "Shraddha",
+      lastName: "Chauhan",
+      preferredLanguage: "gujarati",
+    });
+
+    const mockReportDate = new Date();
+    mockReportDate.setDate(mockReportDate.getDate() - 10); // 10 days ago
+
+    const mockDocumentRecord = {
+      id: "doc-777",
+      userId: "patient-777",
+      fileName: "report.pdf",
+      ocrStatus: "completed",
+      summaryEnglish: "Patient has normal hemoglobin levels.",
+      reportDate: mockReportDate,
+      createdAt: new Date(),
+      structuredExtractedData: {
+        patient: { name: "Shraddha Chauhan" },
+      },
+    };
+
+    const mockSelect = {
+      from: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue([mockDocumentRecord]),
+    };
+    jest.spyOn(db, "select").mockReturnValue(mockSelect);
+
+    jest.spyOn(aiClient, "translate").mockImplementation(async (text, src, tgt) => {
+      if (tgt === "gujarati") {
+        return "દર્દી પાસે સામાન્ય હિમોગ્લોબિન સ્તર છે.";
+      }
+      return text;
+    });
+
+    jest
+      .spyOn(chatSessionRepository, "listSessions")
+      .mockResolvedValue({ items: [{ id: "session-777" }] });
+    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-777" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
+      id: "msg-777",
+      ...msg,
+    }));
+
+    const streamedChunks = [];
+    const onChunk = (chunk) => {
+      streamedChunks.push(chunk);
+    };
+
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    const result = await chatService.sendMessage({
+      userId: "patient-777",
+      question: "tell me about my report",
+      sessionId: "session-777",
+      onChunk,
+    });
+
+    expect(result.reply).toContain("Shraddha Chauhan");
+    expect(result.reply).toContain("10 દિવસ જૂનો");
+    expect(result.reply).toContain("દર્દી પાસે સામાન્ય હિમોગ્લોબિન સ્તર છે.");
+    expect(result.options).toHaveLength(3);
+    expect(result.options[0].label).toBe("મુખ્ય તારણો શું છે?");
+    expect(result.options[0].value).toBe("મુખ્ય તારણો શું છે?");
+    expect(result.options[0].actionType).toBe("CHAT");
+
+    expect(streamedChunks.length).toBeGreaterThan(0);
+    expect(streamedChunks.join("")).toContain("10 દિવસ જૂનો");
+
+    jest.restoreAllMocks();
+  });
+
+  test("ocrService onboardingChat should complete onboarding and return report summary when user sends ASK_REPORT", async () => {
+    const patientRepository = require("../src/repositories/patientRepository");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+    const ocrService = require("../src/services/ocr.service");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-777",
+      firstName: "Shraddha",
+      lastName: "Chauhan",
+      preferredLanguage: "gujarati",
+    });
+
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: { isOnboardingCompleted: false, currentStep: "MEDICINE_OPTIONS" },
+    });
+
+    jest.spyOn(onboardingService, "chat").mockResolvedValue({
+      action: "COMPLETE",
+      state: {
+        isOnboardingCompleted: true,
+        currentStep: "COMPLETE",
+        preferredLanguage: "gujarati",
+        documentId: "doc-777",
+      },
+    });
+
+    jest.spyOn(chatService, "createSession").mockResolvedValue({
+      id: "session-777",
+    });
+
+    jest.spyOn(chatService, "sendMessage").mockResolvedValue({
+      reply: "Mocked Report Summary",
+      options: [{ label: "Findings?", value: "Findings?", actionType: "CHAT" }],
+    });
+
+    const result = await ocrService.onboardingChat("patient-777", {
+      message: "ASK_REPORT",
+    });
+
+    expect(result.mode).toBe("NORMAL_CHAT");
+    expect(result.actionType).toBe("NORMAL_CHAT");
+    expect(result.reply).toBe("Mocked Report Summary");
+    expect(result.options).toHaveLength(1);
+    expect(result.options[0].label).toBe("Findings?");
+
+    expect(chatService.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: ["doc-777"],
+      }),
+    );
+
+    jest.restoreAllMocks();
+  });
+
   test("onboardingService should preserve activeMedicine and manual medicines when merging document extracted medicines", async () => {
     const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
 
