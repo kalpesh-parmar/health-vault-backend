@@ -541,16 +541,18 @@ ${chunksContent}`;
           },
           {
             temperature: 0.2,
-            maxTokens: 1024,
-            rawOptions: { num_ctx: 8192 },
+            maxTokens: 4096,
+            think: false,
+            rawOptions: { num_ctx: env.ollamaNumCtx },
             signal: abortSignal,
           },
         );
       } else {
         answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
           temperature: 0.2,
-          maxTokens: 1024,
-          rawOptions: { num_ctx: 8192 },
+          maxTokens: 4096,
+          think: false,
+          rawOptions: { num_ctx: env.ollamaNumCtx },
           signal: abortSignal,
         });
       }
@@ -590,16 +592,18 @@ ${chunksContent}`;
         },
         {
           temperature: 0.2,
-          maxTokens: 2048,
-          rawOptions: { num_ctx: 16384 },
+          maxTokens: 4096,
+          think: false,
+          rawOptions: { num_ctx: env.ollamaNumCtx },
           signal: abortSignal,
         },
       );
     } else {
       answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
-        maxTokens: 2048,
-        rawOptions: { num_ctx: 16384 },
+        maxTokens: 4096,
+        think: false,
+        rawOptions: { num_ctx: env.ollamaNumCtx },
         signal: abortSignal,
       });
     }

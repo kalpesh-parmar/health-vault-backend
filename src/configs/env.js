@@ -144,8 +144,10 @@ const env = Object.freeze({
   chatbotAPIKey: stringFromEnv("CHATBOT_API_KEY"),
 
   ollamaUrl: stringFromEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
+  ollamaNumCtx: numberFromEnv("OLLAMA_NUM_CTX", 16384),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
+  chatModel: stringFromEnv("CHAT_MODEL") || "medgemma:4b",
+  // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
   // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
