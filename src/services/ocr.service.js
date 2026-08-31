@@ -144,10 +144,26 @@ class V1Service {
       status = "failed";
     }
 
+    let structData = docRow.structuredExtractedData;
+    if (typeof structData === "string") {
+      try {
+        structData = JSON.parse(structData);
+      } catch {
+        structData = {};
+      }
+    }
+    const summary =
+      docRow.summaryInPreferredLanguage ||
+      docRow.summaryEnglish ||
+      structData?.summaryEnglish ||
+      structData?.summary ||
+      structData?.remarks ||
+      "";
+
     return {
       documentId: docRow.id,
       status,
-      summary: docRow.summaryInPreferredLanguage || docRow.summaryEnglish || "",
+      summary,
       document: {
         id: docRow.id,
         fileName: docRow.fileName,

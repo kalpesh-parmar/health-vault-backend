@@ -30,6 +30,16 @@ const debugLogger = {
 const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
 // const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
 
+async function streamTextLikeChat(text, onChunk, abortSignal, delayMs = 15) {
+  if (!text || !onChunk) return;
+  const words = text.split(/(\s+)/);
+  for (const word of words) {
+    if (abortSignal?.aborted) break;
+    onChunk(word);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 const NO_CONTEXT_REPLY_I18N = {
   english: "Information not found in uploaded reports.",
   gujarati: "અપલોડ કરેલા અહેવાલોમાં આ માહિતી મળી નથી.",
@@ -869,6 +879,9 @@ ${chunksContent}`;
 
         if (!targetDoc) {
           replyText = NO_REPORT_FOUND_I18N[patientPreferredLang] || NO_REPORT_FOUND_I18N.english;
+          if (onChunk) {
+            onChunk(replyText);
+          }
         } else if (
           targetDoc.ocrStatus === ocrStatus.PENDING ||
           targetDoc.ocrStatus === ocrStatus.IN_PROGRESS ||
@@ -876,6 +889,9 @@ ${chunksContent}`;
         ) {
           replyText =
             REPORT_PROCESSING_I18N[patientPreferredLang] || REPORT_PROCESSING_I18N.english;
+          if (onChunk) {
+            onChunk(replyText);
+          }
         } else {
           const patientName =
             targetDoc.structuredExtractedData?.patient?.name ||
@@ -887,53 +903,83 @@ ${chunksContent}`;
             patientPreferredLang,
           );
 
-          let translatedSummary = targetDoc.summaryEnglish || "";
-          if (patientPreferredLang !== "english" && translatedSummary) {
+          let structData = targetDoc.structuredExtractedData;
+          if (typeof structData === "string") {
             try {
-              translatedSummary = await aiClient.translate(
-                translatedSummary,
-                "english",
-                patientPreferredLang,
-              );
-            } catch (err) {
-              debugLogger.error("sendMessage: Summary translation failed", { error: err.message });
+              structData = JSON.parse(structData);
+            } catch {
+              structData = {};
             }
           }
-          if (!translatedSummary) {
-            translatedSummary =
-              NO_SUMMARY_AVAILABLE_I18N[patientPreferredLang] || NO_SUMMARY_AVAILABLE_I18N.english;
-          }
+          let rawSummary =
+            targetDoc.summaryEnglish ||
+            structData?.summaryEnglish ||
+            structData?.summary ||
+            structData?.remarks ||
+            "";
 
           const labels = SUMMARY_LABELS_I18N[patientPreferredLang] || SUMMARY_LABELS_I18N.english;
           const questions =
             PREDEFINED_QUESTIONS_I18N[patientPreferredLang] || PREDEFINED_QUESTIONS_I18N.english;
 
-          const formattedResponse =
+          const formattedHeader =
             `**${labels.patientName}:** ${patientName}\n` +
             `**${labels.reportAge}:** ${reportAgeStr}\n\n` +
-            `### ${labels.summaryTitle}\n` +
-            `${translatedSummary}`;
+            `### ${labels.summaryTitle}\n`;
 
-          const questionsList = questions.map((q, idx) => `${idx + 1}. ${q}`).join("\n");
-          replyText = `${formattedResponse}\n\n${questionsList}`;
+          if (onChunk) {
+            await streamTextLikeChat(formattedHeader, onChunk, abortSignal, 10);
+          }
+
+          let translatedSummaryParts = [];
+          if (!rawSummary) {
+            const noSummary =
+              NO_SUMMARY_AVAILABLE_I18N[patientPreferredLang] || NO_SUMMARY_AVAILABLE_I18N.english;
+            translatedSummaryParts.push(noSummary);
+            if (onChunk) {
+              await streamTextLikeChat(noSummary, onChunk, abortSignal, 15);
+            }
+          } else {
+            // Split by double newline first to get paragraphs
+            const rawParagraphs = rawSummary.split("\n\n");
+            for (let i = 0; i < rawParagraphs.length; i++) {
+              if (abortSignal?.aborted) break;
+              const rawPara = rawParagraphs[i];
+              if (!rawPara.trim()) continue;
+
+              let translatedPara = rawPara;
+              if (patientPreferredLang !== "english") {
+                try {
+                  translatedPara = await aiClient.translate(
+                    rawPara,
+                    "english",
+                    patientPreferredLang,
+                  );
+                } catch (err) {
+                  debugLogger.error("sendMessage: Paragraph translation failed", {
+                    error: err.message,
+                  });
+                }
+              }
+
+              translatedSummaryParts.push(translatedPara);
+              if (onChunk) {
+                // If it is not the first paragraph of the summary, prefix with double newline
+                if (i > 0) {
+                  onChunk("\n\n");
+                }
+                await streamTextLikeChat(translatedPara, onChunk, abortSignal, 15);
+              }
+            }
+          }
+
+          replyText = formattedHeader + translatedSummaryParts.join("\n\n");
 
           options = questions.map((q) => ({
             label: q,
             value: q,
             actionType: "CHAT",
           }));
-        }
-
-        // Stream via onChunk in paragraphs
-        const paragraphs = replyText.split("\n\n");
-        if (onChunk) {
-          for (let i = 0; i < paragraphs.length; i++) {
-            if (abortSignal?.aborted) break;
-            const para = paragraphs[i];
-            const textToStream = i === 0 ? para : `\n\n${para}`;
-            onChunk(textToStream);
-            await new Promise((resolve) => setTimeout(resolve, 50));
-          }
         }
 
         const aiMessage = await chatSessionRepository.appendMessage({

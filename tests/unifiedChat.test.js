@@ -763,6 +763,79 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     jest.restoreAllMocks();
   });
 
+  test("chatService sendMessage should fallback to structuredExtractedData when summaryEnglish is missing", async () => {
+    const patientRepository = require("../src/repositories/patientRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const aiClient = require("../src/services/ai/clients/aiClient.service");
+    const { db } = require("../src/configs/db");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-777",
+      firstName: "Shraddha",
+      lastName: "Chauhan",
+      preferredLanguage: "gujarati",
+    });
+
+    const mockReportDate = new Date();
+    mockReportDate.setDate(mockReportDate.getDate() - 5);
+
+    const mockDocumentRecord = {
+      id: "doc-777",
+      userId: "patient-777",
+      fileName: "report.pdf",
+      ocrStatus: "completed",
+      summaryEnglish: null,
+      reportDate: mockReportDate,
+      createdAt: new Date(),
+      structuredExtractedData: {
+        patient: { name: "Shraddha Chauhan" },
+        summaryEnglish: "Patient report shows general fatigue but normal blood parameters.",
+      },
+    };
+
+    const mockSelect = {
+      from: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue([mockDocumentRecord]),
+    };
+    jest.spyOn(db, "select").mockReturnValue(mockSelect);
+
+    jest.spyOn(aiClient, "translate").mockImplementation(async (text, src, tgt) => {
+      if (tgt === "gujarati" && text.includes("fatigue")) {
+        return "દર્દીના રિપોર્ટમાં સામાન્ય થાક પરંતુ સામાન્ય રક્ત પરિમાણો દર્શાવે છે.";
+      }
+      return text;
+    });
+
+    jest
+      .spyOn(chatSessionRepository, "listSessions")
+      .mockResolvedValue({ items: [{ id: "session-777" }] });
+    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-777" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
+      id: "msg-777",
+      ...msg,
+    }));
+
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    const result = await chatService.sendMessage({
+      userId: "patient-777",
+      question: "tell me about my report",
+      sessionId: "session-777",
+    });
+
+    expect(result.reply).toContain("Shraddha Chauhan");
+    expect(result.reply).toContain(
+      "દર્દીના રિપોર્ટમાં સામાન્ય થાક પરંતુ સામાન્ય રક્ત પરિમાણો દર્શાવે છે.",
+    );
+    expect(result.reply).not.toContain("મુખ્ય તારણો શું છે?");
+    expect(result.options).toHaveLength(3);
+
+    jest.restoreAllMocks();
+  });
+
   test("ocrService onboardingChat should complete onboarding and return report summary when user sends ASK_REPORT", async () => {
     const patientRepository = require("../src/repositories/patientRepository");
     const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
