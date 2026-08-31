@@ -14,12 +14,13 @@ const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const { onboardingService } = require("./ai");
+const { onboardingService, canSkipOnboarding } = require("./ai/chat/onboarding.service");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
+const { errorConstants } = require("../constants/errorConstants");
 const { inferFileType } = require("../helpers/document.helper");
 const documentPersistenceService = require("./documentPersistence.service");
 const documentOcrJobService = require("./documentOcrJob.service");
@@ -316,7 +317,8 @@ class V1Service {
       }
 
       const isActiveOnboardingStep =
-        !isOnboardingCompleted &&
+        (!isOnboardingCompleted ||
+          (isOnboardingCompleted && !effectiveState?.medicationFlowDone)) &&
         ((Boolean(currentOnboardingStep) &&
           currentOnboardingStep !== "COMPLETE" &&
           currentOnboardingStep !== "POST_ONBOARDING" &&
@@ -530,12 +532,27 @@ class V1Service {
       const isCompletedStep =
         effectiveState?.currentStep === "COMPLETE" ||
         effectiveState?.currentStep === "POST_ONBOARDING";
+
+      const data = dbState?.existingUserData || inputState?.existingUserData || {};
+      const bloodGroup = patient?.bloodGroup || data?.bloodGroup;
+      const allergies = patient?.allergies || data?.allergies;
+      const bloodGroupSkipped =
+        dbState?.bloodGroupSkipped === true || inputState?.bloodGroupSkipped === true;
+      const allergiesSkipped =
+        dbState?.allergiesSkipped === true || inputState?.allergiesSkipped === true;
+
+      const hasUnansweredOptional =
+        isOnboardingCompleted &&
+        ((!bloodGroup && !bloodGroupSkipped) ||
+          ((!allergies || allergies.length === 0) && !allergiesSkipped));
+
       const isNormalChat =
-        actionType === "NORMAL_CHAT" ||
-        ((isOnboardingCompleted || isCompletedStep) &&
-          !isActiveOnboardingStep &&
-          (actionType !== "ONBOARDING" || isCompletedStep) &&
-          actionType !== "OTHER_ACTIONS");
+        !hasUnansweredOptional &&
+        (actionType === "NORMAL_CHAT" ||
+          ((isOnboardingCompleted || isCompletedStep) &&
+            !isActiveOnboardingStep &&
+            (actionType !== "ONBOARDING" || isCompletedStep) &&
+            actionType !== "OTHER_ACTIONS"));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
@@ -602,6 +619,31 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+        }
+
+        if (hasUnansweredOptional && actionType !== "SKIP_ONBOARDING") {
+          state.currentStep = null;
+        }
+
+        if (actionType === "SKIP_ONBOARDING") {
+          if (!canSkipOnboarding(state)) {
+            throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
+          }
+          state.isOnboardingCompleted = true;
+          //   state.medicationFlowDone = true;
+          //   state.medicinesConfirmed = true;
+          //   state.currentStep = "COMPLETE";
+          //   state.medicinesToAdd = [];
+          //   state.foundMedicines = [];
+          // }
+          const hasMeds =
+            (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
+            (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
+          if (!hasMeds) {
+            state.medicationFlowDone = true;
+            state.medicinesConfirmed = true;
+          }
+          state.currentStep = null;
         }
 
         const onboardingResult = await onboardingService.chat(

@@ -121,6 +121,9 @@ const errorConstants = Object.freeze({
 
   // SSE Emitter Error
   CHANNEL_KEY_IS_REQUIRED: "Channel Key is required",
+
+  // Onboarding Error
+  REQUIRED_PROFILE_DETAILS_MISSING: "Cannot skip onboarding: required profile details are missing.",
 });
 
 module.exports = { errorConstants };

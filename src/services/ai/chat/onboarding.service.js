@@ -414,6 +414,25 @@ function getNextRequiredOrOptionalStep(state) {
   return "REGISTER_USER";
 }
 
+function canSkipOnboarding(state) {
+  const missingRequired = getMissingRequiredStep(state);
+  if (missingRequired) {
+    return false;
+  }
+
+  const useDoc =
+    state.useDocumentData !== false &&
+    state.flowMode === "UPLOAD" &&
+    state.documentConfirmed !== false &&
+    (!!state.documentData || !!state.documentId);
+
+  if (state.flowMode === "UPLOAD" && useDoc && !state.profileConfirmed) {
+    return false;
+  }
+
+  return true;
+}
+
 function getProfileMismatches(state) {
   console.log("[RAW LOGIN DATA] loginData:", JSON.stringify(state.loginData, null, 2));
   console.log("[RAW DOCUMENT DATA] documentData:", JSON.stringify(state.documentData, null, 2));
@@ -622,6 +641,17 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
 
 function computeCurrentStep(state) {
   if (state.isOnboardingCompleted && state.medicationFlowDone) {
+    if (state.currentStep === "COMPLETE" || state.currentStep === "POST_ONBOARDING") {
+      return state.currentStep;
+    }
+    const data = state.existingUserData || {};
+    const hasUnansweredOptional =
+      ((data.bloodGroup === undefined || data.bloodGroup === null || data.bloodGroup === "") &&
+        !state.bloodGroupSkipped) ||
+      ((!Array.isArray(data.allergies) || data.allergies.length === 0) && !state.allergiesSkipped);
+    if (hasUnansweredOptional) {
+      return getNextRequiredOrOptionalStep(state);
+    }
     return state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
   }
   if (!state.preferredLanguage) return "ASK_LANGUAGE";
@@ -803,12 +833,14 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (payload && payload.confirmed) {
         mergeAndApplyProfile(state);
         state.profileConfirmed = true;
+        state.isOnboardingCompleted = true;
         state.profileManuallyEdited = false;
         state.stepClarificationNeeded = false;
         state.currentStep = computeCurrentStep(state);
       } else if (payload && payload.source) {
         mergeAndApplyProfile(state, payload.source);
         state.profileConfirmed = true;
+        state.isOnboardingCompleted = true;
         state.profileManuallyEdited = false;
         state.stepClarificationNeeded = false;
         state.currentStep = computeCurrentStep(state);
@@ -826,6 +858,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           mergeAndApplyProfile(state, null, payload.edited);
           state.profileManuallyEdited = true;
           state.profileConfirmed = true;
+          state.isOnboardingCompleted = true;
           state.stepClarificationNeeded = false;
           state.currentStep = computeCurrentStep(state);
         } else {
@@ -852,12 +885,37 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_UPLOAD_DOCUMENT_FAILED": {
-      if (msg === "RETRY_UPLOAD" || msg.toUpperCase() === "RETRY_UPLOAD") {
+      const msgUpper = String(msg || "")
+        .toUpperCase()
+        .trim();
+      const lower = String(msg || "")
+        .toLowerCase()
+        .trim();
+      if (
+        msgUpper === "RETRY_UPLOAD" ||
+        msgUpper === "RETRY" ||
+        lower.includes("retry") ||
+        lower.includes("ફરી પ્રયાસ")
+      ) {
         state.ocrFailed = false;
+        state.documentId = null;
+        state.documentUploaded = false;
+        state.uploadedMedicalDocument = false;
+        state.documentExtracted = false;
         state.currentStep = "ASK_UPLOAD_DOCUMENT";
-      } else if (msg === "MANUAL" || msg.toUpperCase() === "MANUAL") {
+      } else if (
+        msgUpper === "MANUAL" ||
+        msgUpper === "ENTER DETAILS MANUALLY" ||
+        lower.includes("manual") ||
+        lower.includes("મેન્યુઅલી")
+      ) {
         state.flowMode = "MANUAL";
         state.ocrFailed = false;
+        state.documentId = null;
+        state.documentUploaded = false;
+        state.uploadedMedicalDocument = false;
+        state.documentExtracted = false;
+        state.useDocumentData = false;
         state.currentStep = getNextRequiredOrOptionalStep(state);
       }
       break;
@@ -2078,19 +2136,19 @@ async function getLocalizedResponse(step, state) {
             primary: true,
           },
           {
-            key: "DASHBOARD",
+            key: "ASK_REPORT",
             label: await getLocalizedText(
-              "onboarding.medicineOptions.goToDashboard",
-              "Go to Dashboard",
+              "onboarding.medicineOptions.askAboutReport",
+              "Ask About My Report",
               state.preferredLanguage,
             ),
             primary: false,
           },
           {
-            key: "ASK_REPORT",
+            key: "DASHBOARD",
             label: await getLocalizedText(
-              "onboarding.medicineOptions.askAboutReport",
-              "Ask About My Report",
+              "onboarding.medicineOptions.goToDashboard",
+              "Go to Dashboard",
               state.preferredLanguage,
             ),
             primary: false,
@@ -2117,6 +2175,127 @@ async function getLocalizedResponse(step, state) {
         action: step,
         message: "Processing...",
       };
+  }
+}
+
+async function saveOnboardingState(userId, state) {
+  if (!userId) return;
+
+  if (state.existingUserData) {
+    const shouldWritePatientProfile =
+      state.flowMode === "MANUAL" ||
+      state.flowMode === "SKIP" ||
+      (state.flowMode === "UPLOAD" &&
+        state.documentOwnershipConfirmed === true &&
+        (state.profileConfirmed === true || !state.hasLoginData));
+
+    const updateData = {};
+    if (shouldWritePatientProfile) {
+      if (
+        state.existingUserData.firstName !== undefined &&
+        state.existingUserData.firstName !== null
+      )
+        updateData.firstName = state.existingUserData.firstName;
+      if (state.existingUserData.lastName !== undefined && state.existingUserData.lastName !== null)
+        updateData.lastName = state.existingUserData.lastName;
+      if (state.existingUserData.dateOfBirth)
+        updateData.dateOfBirth = new Date(state.existingUserData.dateOfBirth);
+      if (state.existingUserData.gender !== undefined && state.existingUserData.gender !== null)
+        updateData.gender = state.existingUserData.gender || null;
+      if (state.existingUserData.email) updateData.email = state.existingUserData.email;
+      if (
+        state.existingUserData.phoneNumber !== undefined &&
+        state.existingUserData.phoneNumber !== null
+      )
+        updateData.mobile = state.existingUserData.phoneNumber;
+
+      if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
+        const existingPatient = await patientRepository.findById(userId);
+        if (existingPatient) {
+          const mergedFirstName =
+            updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
+          const mergedLastName =
+            updateData.lastName !== undefined ? updateData.lastName : existingPatient.lastName;
+          updateData.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
+        }
+      }
+    }
+    if (state.existingUserData.bloodGroup)
+      updateData.bloodGroup = state.existingUserData.bloodGroup;
+    if (Array.isArray(state.existingUserData.allergies))
+      updateData.allergies = state.existingUserData.allergies;
+
+    if (state.isOnboardingCompleted) {
+      updateData.status = "ACTIVE";
+      updateData.onboardingCompleted = true;
+    }
+
+    if (state.preferredLanguage) {
+      updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await patientRepository.updateById(userId, updateData);
+    }
+  }
+
+  // Persist onboarding state to database for resumption on app reopen
+  const existingRecord = await userOnboardingRepository.findByUserId(userId);
+  const stateToSave = {
+    preferredLanguage: state.preferredLanguage,
+    flowMode: state.flowMode,
+    currentStep: state.currentStep,
+    documentUploaded: state.documentUploaded,
+    documentConfirmed: state.documentConfirmed,
+    documentOwnershipConfirmed: state.documentOwnershipConfirmed,
+    documentExtracted: state.documentExtracted,
+    isOnboardingCompleted: state.isOnboardingCompleted,
+    existingUserData: state.existingUserData,
+    bloodGroupSkipped: state.bloodGroupSkipped,
+    allergiesSkipped: state.allergiesSkipped,
+    uploadedMedicalDocument: state.uploadedMedicalDocument,
+    medicinesToAdd: state.medicinesToAdd,
+    foundMedicines: state.foundMedicines,
+    medicinesFlowStarted: state.medicinesFlowStarted,
+    medicinesConfirmed: state.medicinesConfirmed,
+    currentMedicineIndex: state.currentMedicineIndex,
+    medicinesSkipped: state.medicinesSkipped,
+    medicinesSavedToDb: state.medicinesSavedToDb,
+    hasSocialData: state.hasSocialData,
+    socialData: state.socialData,
+    hasLoginData: state.hasLoginData,
+    loginData: state.loginData,
+    profileConfirmed: state.profileConfirmed,
+    selectedProfileSource: state.selectedProfileSource || null,
+    useSocialData: state.useSocialData || false,
+    useDocumentData: state.useDocumentData || false,
+    profileManuallyEdited: state.profileManuallyEdited || false,
+    documentText: state.documentText,
+    documentData: state.documentData,
+    loginProvider: state.loginProvider,
+    documentId: state.documentId || null,
+    loadedDocumentId: state.loadedDocumentId || null,
+    chatSessionId: state.chatSessionId || null,
+    documentAttachedToChat: state.documentAttachedToChat || false,
+    activeMedicine: state.activeMedicine || null,
+    confirmMode: state.confirmMode || null,
+    pendingQueue: state.pendingQueue || [],
+    validMedsToBulkCreate: state.validMedsToBulkCreate || [],
+    medicationFlowDone: state.medicationFlowDone || false,
+  };
+
+  if (existingRecord) {
+    await userOnboardingRepository.updateByUserId(userId, {
+      data: stateToSave,
+      isCompleted: state.isOnboardingCompleted,
+    });
+  } else {
+    await userOnboardingRepository.create({
+      userId,
+      data: stateToSave,
+      isCompleted: state.isOnboardingCompleted,
+      step: 1,
+    });
   }
 }
 
@@ -2460,12 +2639,18 @@ class OnboardingService {
       state.currentStep = "RESOLVE_PROFILE_SOURCE";
     }
     // 1. If onboarding is completed and medication flow is done, return completed status immediately
-    if (state.isOnboardingCompleted && state.medicationFlowDone) {
+    const data = state.existingUserData || {};
+    const hasUnansweredOptional =
+      ((data.bloodGroup === undefined || data.bloodGroup === null || data.bloodGroup === "") &&
+        !state.bloodGroupSkipped) ||
+      ((!Array.isArray(data.allergies) || data.allergies.length === 0) && !state.allergiesSkipped);
+    if (state.isOnboardingCompleted && state.medicationFlowDone && !hasUnansweredOptional) {
       if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
         // Let it pass through to updateStateFromMessage
       } else {
         state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
         const step = getNextStep(state);
+        await saveOnboardingState(userId, state);
         return createResponse(step, state);
       }
     }
@@ -2521,7 +2706,12 @@ class OnboardingService {
       });
     }
     // 2. If Medical Document uploaded in UPLOAD flow, fetch extracted data from DB BEFORE updating state from message
-    if (state.flowMode === "UPLOAD" && state.documentId && !state.documentExtracted) {
+    if (
+      state.flowMode === "UPLOAD" &&
+      state.documentId &&
+      !state.documentExtracted &&
+      state.currentStep !== "ASK_UPLOAD_DOCUMENT_FAILED"
+    ) {
       console.log(
         `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
       );
@@ -2784,128 +2974,7 @@ class OnboardingService {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
-    if (userId && state.existingUserData) {
-      const shouldWritePatientProfile =
-        state.flowMode === "MANUAL" ||
-        state.flowMode === "SKIP" ||
-        (state.flowMode === "UPLOAD" &&
-          state.documentOwnershipConfirmed === true &&
-          (state.profileConfirmed === true || !state.hasLoginData));
-
-      const updateData = {};
-      if (shouldWritePatientProfile) {
-        if (
-          state.existingUserData.firstName !== undefined &&
-          state.existingUserData.firstName !== null
-        )
-          updateData.firstName = state.existingUserData.firstName;
-        if (
-          state.existingUserData.lastName !== undefined &&
-          state.existingUserData.lastName !== null
-        )
-          updateData.lastName = state.existingUserData.lastName;
-        if (state.existingUserData.dateOfBirth)
-          updateData.dateOfBirth = new Date(state.existingUserData.dateOfBirth);
-        if (state.existingUserData.gender !== undefined && state.existingUserData.gender !== null)
-          updateData.gender = state.existingUserData.gender || null;
-        if (state.existingUserData.email) updateData.email = state.existingUserData.email;
-        if (
-          state.existingUserData.phoneNumber !== undefined &&
-          state.existingUserData.phoneNumber !== null
-        )
-          updateData.mobile = state.existingUserData.phoneNumber;
-
-        if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
-          const existingPatient = await patientRepository.findById(userId);
-          if (existingPatient) {
-            const mergedFirstName =
-              updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
-            const mergedLastName =
-              updateData.lastName !== undefined ? updateData.lastName : existingPatient.lastName;
-            updateData.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
-          }
-        }
-      }
-      if (state.existingUserData.bloodGroup)
-        updateData.bloodGroup = state.existingUserData.bloodGroup;
-      if (Array.isArray(state.existingUserData.allergies))
-        updateData.allergies = state.existingUserData.allergies;
-
-      if (state.isOnboardingCompleted) {
-        updateData.status = "ACTIVE";
-        // updateData.isVerified = true;
-        updateData.onboardingCompleted = true;
-      }
-
-      if (state.preferredLanguage) {
-        updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
-      }
-
-      if (Object.keys(updateData).length > 0) {
-        await patientRepository.updateById(userId, updateData);
-      }
-    }
-
-    // Persist onboarding state to database for resumption on app reopen
-    if (userId) {
-      const existingRecord = await userOnboardingRepository.findByUserId(userId);
-      const stateToSave = {
-        preferredLanguage: state.preferredLanguage,
-        flowMode: state.flowMode,
-        currentStep: state.currentStep,
-        documentUploaded: state.documentUploaded,
-        documentConfirmed: state.documentConfirmed,
-        documentOwnershipConfirmed: state.documentOwnershipConfirmed,
-        documentExtracted: state.documentExtracted,
-        isOnboardingCompleted: state.isOnboardingCompleted,
-        existingUserData: state.existingUserData,
-        bloodGroupSkipped: state.bloodGroupSkipped,
-        allergiesSkipped: state.allergiesSkipped,
-        uploadedMedicalDocument: state.uploadedMedicalDocument,
-        medicinesToAdd: state.medicinesToAdd,
-        foundMedicines: state.foundMedicines,
-        medicinesFlowStarted: state.medicinesFlowStarted,
-        medicinesConfirmed: state.medicinesConfirmed,
-        currentMedicineIndex: state.currentMedicineIndex,
-        medicinesSkipped: state.medicinesSkipped,
-        medicinesSavedToDb: state.medicinesSavedToDb,
-        hasSocialData: state.hasSocialData,
-        socialData: state.socialData,
-        hasLoginData: state.hasLoginData,
-        loginData: state.loginData,
-        profileConfirmed: state.profileConfirmed,
-        selectedProfileSource: state.selectedProfileSource || null,
-        useSocialData: state.useSocialData || false,
-        useDocumentData: state.useDocumentData || false,
-        profileManuallyEdited: state.profileManuallyEdited || false,
-        documentText: state.documentText,
-        documentData: state.documentData,
-        loginProvider: state.loginProvider,
-        documentId: state.documentId || null,
-        loadedDocumentId: state.loadedDocumentId || null,
-        chatSessionId: state.chatSessionId || null,
-        documentAttachedToChat: state.documentAttachedToChat || false,
-        activeMedicine: state.activeMedicine || null,
-        confirmMode: state.confirmMode || null,
-        pendingQueue: state.pendingQueue || [],
-        validMedsToBulkCreate: state.validMedsToBulkCreate || [],
-        medicationFlowDone: state.medicationFlowDone || false,
-      };
-
-      if (existingRecord) {
-        await userOnboardingRepository.updateByUserId(userId, {
-          data: stateToSave,
-          isCompleted: state.isOnboardingCompleted,
-        });
-      } else {
-        await userOnboardingRepository.create({
-          userId,
-          data: stateToSave,
-          isCompleted: state.isOnboardingCompleted,
-          step: 1,
-        });
-      }
-    }
+    await saveOnboardingState(userId, state);
 
     const nextStep = getNextStep(state);
     const response = await createResponse(nextStep, state);
@@ -2976,4 +3045,5 @@ module.exports = {
   validateEditedFields,
   extractFieldFromMessage,
   OnboardingStep,
+  canSkipOnboarding,
 };

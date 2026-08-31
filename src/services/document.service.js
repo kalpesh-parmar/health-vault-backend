@@ -901,7 +901,11 @@ async function runExtraction({
       }
     }
 
-    emitter.done();
+    // emitter.done();
+    emitter.done(undefined, {
+      documentId: ctx.savedResult?.document?.id || ctx.checkpointData?.documentId || null,
+      document: ctx.savedResult?.document || null,
+    });
 
     if (jobId) {
       await documentProcessingJobRepository

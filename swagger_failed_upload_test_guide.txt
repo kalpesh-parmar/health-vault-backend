@@ -1,0 +1,148 @@
+================================================================================
+  SWAGGER TEST GUIDE: FAILED DOCUMENT UPLOAD & MANUAL RECOVERY FLOW
+  Endpoint: POST /v1/onboarding-chat
+================================================================================
+
+--------------------------------------------------------------------------------
+STEP 1: User Selects Upload Flow
+--------------------------------------------------------------------------------
+REQUEST PAYLOAD:
+{
+  "message": "{\"value\":\"UPLOAD\"}"
+}
+
+EXPECTED RESPONSE:
+{
+  "data": {
+    "action": "ASK_UPLOAD_DOCUMENT",
+    "message": "Please upload your medical document (Prescription, Lab Report, etc.).",
+    "onboardingState": {
+      "flowMode": "UPLOAD",
+      "currentStep": "ASK_UPLOAD_DOCUMENT"
+    }
+  },
+  "status": {
+    "description": "Success",
+    "status": "SUCCESS",
+    "statusCode": 200
+  }
+}
+
+--------------------------------------------------------------------------------
+STEP 2: Document Processing Fails (Trigger Failure)
+--------------------------------------------------------------------------------
+(Simulate upload/OCR failure from client)
+
+REQUEST PAYLOAD:
+{
+  "message": "OCR_FAILED"
+}
+
+EXPECTED RESPONSE:
+{
+  "data": {
+    "action": "ASK_UPLOAD_DOCUMENT_FAILED",
+    "message": "Document processing failed. Please try again or enter details manually.",
+    "options": [
+      {
+        "label": "Retry Upload",
+        "value": "RETRY_UPLOAD"
+      },
+      {
+        "label": "Enter Details Manually",
+        "value": "MANUAL"
+      }
+    ],
+    "onboardingState": {
+      "flowMode": "UPLOAD",
+      "ocrFailed": true,
+      "currentStep": "ASK_UPLOAD_DOCUMENT_FAILED"
+    }
+  },
+  "status": {
+    "description": "Success",
+    "status": "SUCCESS",
+    "statusCode": 200
+  }
+}
+
+================================================================================
+RECOVERY PATH A: User Chooses "Enter Details Manually" (MANUAL)
+================================================================================
+
+REQUEST PAYLOAD:
+{
+  "message": "{\"value\":\"MANUAL\"}"
+}
+
+EXPECTED RESPONSE (Switches to Manual flow & asks First Name):
+{
+  "data": {
+    "action": "ASK_FIRST_NAME",
+    "message": "What is your first name?",
+    "onboardingState": {
+      "flowMode": "MANUAL",
+      "ocrFailed": false,
+      "currentStep": "ASK_FIRST_NAME"
+    }
+  },
+  "status": {
+    "description": "Success",
+    "status": "SUCCESS",
+    "statusCode": 200
+  }
+}
+
+--------------------------------------------------------------------------------
+STEP 4A: User Answers First Name in Manual Flow
+--------------------------------------------------------------------------------
+REQUEST PAYLOAD:
+{
+  "message": "Dharmik"
+}
+
+EXPECTED RESPONSE:
+{
+  "data": {
+    "action": "ASK_LAST_NAME",
+    "message": "What is your last name?",
+    "onboardingState": {
+      "flowMode": "MANUAL",
+      "currentStep": "ASK_LAST_NAME"
+    }
+  },
+  "status": {
+    "description": "Success",
+    "status": "SUCCESS",
+    "statusCode": 200
+  }
+}
+
+
+================================================================================
+RECOVERY PATH B: User Chooses "Retry Upload" (RETRY_UPLOAD)
+================================================================================
+
+REQUEST PAYLOAD:
+{
+  "message": "{\"value\":\"RETRY_UPLOAD\"}"
+}
+
+EXPECTED RESPONSE (Returns to Upload Document screen):
+{
+  "data": {
+    "action": "ASK_UPLOAD_DOCUMENT",
+    "message": "Please upload your medical document (Prescription, Lab Report, etc.).",
+    "onboardingState": {
+      "flowMode": "UPLOAD",
+      "ocrFailed": false,
+      "currentStep": "ASK_UPLOAD_DOCUMENT"
+    }
+  },
+  "status": {
+    "description": "Success",
+    "status": "SUCCESS",
+    "statusCode": 200
+  }
+}
+================================================================================

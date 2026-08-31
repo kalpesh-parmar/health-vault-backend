@@ -680,4 +680,105 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     jest.restoreAllMocks();
   });
+
+  test("onboardingService should export canSkipOnboarding and validate skip permission", () => {
+    const { canSkipOnboarding } = require("../src/services/ai/chat/onboarding.service");
+
+    const invalidState = {
+      flowMode: "MANUAL",
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: null,
+        dateOfBirth: "1995-05-15",
+        gender: "female",
+      },
+    };
+    expect(canSkipOnboarding(invalidState)).toBe(false);
+
+    const validState = {
+      flowMode: "MANUAL",
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "1995-05-15",
+        gender: "female",
+      },
+    };
+    expect(canSkipOnboarding(validState)).toBe(true);
+  });
+
+  test("ocrService onboardingChat should allow SKIP_ONBOARDING if required details are present", async () => {
+    const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-111",
+      onboardingCompleted: false,
+      bloodGroup: "O+",
+      allergies: ["none"],
+    });
+    jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        medicationFlowDone: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          bloodGroup: "O+",
+          allergies: ["none"],
+        },
+      },
+    });
+    jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+    const res = await ocrService.onboardingChat("patient-111", {
+      actionType: "SKIP_ONBOARDING",
+    });
+
+    expect(res.mode).toBe("ONBOARDING");
+    expect(res.actionType).toBe("COMPLETE");
+    expect(res.onboardingState.isOnboardingCompleted).toBe(true);
+    expect(res.onboardingState.medicationFlowDone).toBe(true);
+
+    jest.restoreAllMocks();
+  }, 15000);
+
+  test("ocrService onboardingChat should throw BadRequestException/InvalidRequestException on SKIP_ONBOARDING if required details are missing", async () => {
+    const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const { InvalidRequestException } = require("../src/exceptions/appError");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-111",
+      onboardingCompleted: false,
+    });
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        existingUserData: {
+          firstName: "John",
+          lastName: null,
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      },
+    });
+
+    await expect(
+      ocrService.onboardingChat("patient-111", {
+        actionType: "SKIP_ONBOARDING",
+      }),
+    ).rejects.toThrow(InvalidRequestException);
+
+    jest.restoreAllMocks();
+  });
 });
