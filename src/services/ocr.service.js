@@ -750,15 +750,19 @@ class V1Service {
         isOnboardingCompleted: true,
         currentStep,
         chatSessionId: resumableState?.chatSessionId || null,
-        resumableState,
+        resumableState: resumableState ? { ...resumableState, canSkip: false } : null,
+        canSkip: false,
       };
     }
+
+    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
 
     return {
       isOnboardingCompleted: false,
       currentStep,
       chatSessionId: resumableState?.chatSessionId || null,
-      resumableState,
+      resumableState: resumableState ? { ...resumableState, canSkip } : null,
+      canSkip,
     };
   }
 
@@ -785,11 +789,14 @@ class V1Service {
       messages = result.items || [];
     }
 
+    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
+
     return {
       chatSessionId,
       messages,
       currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
-      resumableState,
+      resumableState: resumableState ? { ...resumableState, canSkip } : null,
+      canSkip,
     };
   }
 }

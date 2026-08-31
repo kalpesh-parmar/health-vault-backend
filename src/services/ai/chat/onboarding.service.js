@@ -360,15 +360,18 @@ function getNextRequiredOrOptionalStep(state) {
     return missingRequired;
   }
 
-  // MATRIX RULE: In MANUAL or SKIP flow (or when no document data exists to compare against),
-  // auto-confirm profile and strictly BAN RESOLVE_PROFILE_SOURCE for both Social and Mobile logins.
-  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc) {
-    state.profileConfirmed = true;
+  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow when there is a Social login profile to compare with the document
+  const isSocial =
+    state.hasSocialData === true ||
+    ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
+
+  if (state.flowMode === "UPLOAD" && useDoc && isSocial && !state.profileConfirmed) {
+    return "RESOLVE_PROFILE_SOURCE";
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow with valid documentData
-  if (state.flowMode === "UPLOAD" && useDoc && !state.profileConfirmed) {
-    return "RESOLVE_PROFILE_SOURCE";
+  // In Mobile + Upload flow (no social profile to compare against), or in MANUAL/SKIP flow: auto-confirm profile
+  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc || !isSocial) {
+    state.profileConfirmed = true;
   }
 
   // HARD RULE: Once state.profileConfirmed === true, REQUIRED questions and RESOLVE_PROFILE_SOURCE must NEVER be returned again.
@@ -833,14 +836,12 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (payload && payload.confirmed) {
         mergeAndApplyProfile(state);
         state.profileConfirmed = true;
-        state.isOnboardingCompleted = true;
         state.profileManuallyEdited = false;
         state.stepClarificationNeeded = false;
         state.currentStep = computeCurrentStep(state);
       } else if (payload && payload.source) {
         mergeAndApplyProfile(state, payload.source);
         state.profileConfirmed = true;
-        state.isOnboardingCompleted = true;
         state.profileManuallyEdited = false;
         state.stepClarificationNeeded = false;
         state.currentStep = computeCurrentStep(state);
@@ -858,7 +859,6 @@ async function updateStateFromMessage(state, message, userId = null) {
           mergeAndApplyProfile(state, null, payload.edited);
           state.profileManuallyEdited = true;
           state.profileConfirmed = true;
-          state.isOnboardingCompleted = true;
           state.stepClarificationNeeded = false;
           state.currentStep = computeCurrentStep(state);
         } else {
@@ -953,7 +953,54 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.documentOwnershipConfirmed = true;
         state.documentConfirmed = true;
         state.useDocumentData = true;
-        state.profileConfirmed = false;
+
+        // Auto-populate existingUserData and persist document patient details to DB
+        if (state.documentData) {
+          if (!state.existingUserData) state.existingUserData = {};
+          const d = state.documentData;
+          if (d.firstName) state.existingUserData.firstName = d.firstName;
+          if (d.lastName) state.existingUserData.lastName = d.lastName;
+          if (d.dateOfBirth) state.existingUserData.dateOfBirth = d.dateOfBirth;
+          if (d.gender) state.existingUserData.gender = d.gender;
+          if (d.bloodGroup) state.existingUserData.bloodGroup = d.bloodGroup;
+          if (Array.isArray(d.allergies) && d.allergies.length > 0) {
+            state.existingUserData.allergies = d.allergies;
+          }
+
+          if (userId) {
+            try {
+              const fn = state.existingUserData.firstName || "";
+              const ln = state.existingUserData.lastName || "";
+              const fullName = [fn, ln].filter(Boolean).join(" ");
+              await patientRepository.updateById(userId, {
+                ...(fn ? { firstName: fn } : {}),
+                ...(ln ? { lastName: ln } : {}),
+                ...(fullName ? { fullName } : {}),
+                ...(state.existingUserData.dateOfBirth
+                  ? { dateOfBirth: toDbDate(state.existingUserData.dateOfBirth) }
+                  : {}),
+                ...(state.existingUserData.gender ? { gender: state.existingUserData.gender } : {}),
+                ...(state.existingUserData.bloodGroup
+                  ? { bloodGroup: state.existingUserData.bloodGroup }
+                  : {}),
+                ...(Array.isArray(state.existingUserData.allergies) &&
+                state.existingUserData.allergies.length > 0
+                  ? { allergies: state.existingUserData.allergies }
+                  : {}),
+              });
+            } catch (dbErr) {
+              console.warn(
+                "[OnboardingService] Failed to auto-save document details to patient DB:",
+                dbErr.message,
+              );
+            }
+          }
+        }
+
+        const isSocial =
+          state.hasSocialData === true ||
+          ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
+        state.profileConfirmed = !isSocial;
         state.currentStep = computeCurrentStep(state);
       } else if (answer === "NO") {
         state.documentOwnershipConfirmed = false;
@@ -2136,19 +2183,19 @@ async function getLocalizedResponse(step, state) {
             primary: true,
           },
           {
-            key: "ASK_REPORT",
+            key: "DASHBOARD",
             label: await getLocalizedText(
-              "onboarding.medicineOptions.askAboutReport",
-              "Ask About My Report",
+              "onboarding.medicineOptions.goToDashboard",
+              "Go to Dashboard",
               state.preferredLanguage,
             ),
             primary: false,
           },
           {
-            key: "DASHBOARD",
+            key: "ASK_REPORT",
             label: await getLocalizedText(
-              "onboarding.medicineOptions.goToDashboard",
-              "Go to Dashboard",
+              "onboarding.medicineOptions.askAboutReport",
+              "Ask About My Report",
               state.preferredLanguage,
             ),
             primary: false,
@@ -2549,16 +2596,21 @@ class OnboardingService {
             (field) => field && field.value !== null && field.value !== "",
           );
 
-          // Backward compatibility aliases
-          state.hasSocialData = state.hasLoginData;
-          state.socialData = {
-            firstName: state.loginData.firstName.value,
-            lastName: state.loginData.lastName.value,
-            email: state.loginData.email.value,
-            gender: state.loginData.gender.value,
-            dateOfBirth: state.loginData.dateOfBirth.value,
-            phoneNumber: state.loginData.phoneNumber.value,
-          };
+          const isSocialProvider = ["google", "facebook", "microsoft", "apple"].includes(
+            primaryProvider,
+          );
+
+          state.hasSocialData = isSocialProvider;
+          state.socialData = isSocialProvider
+            ? {
+                firstName: state.loginData.firstName.value,
+                lastName: state.loginData.lastName.value,
+                email: state.loginData.email.value,
+                gender: state.loginData.gender.value,
+                dateOfBirth: state.loginData.dateOfBirth.value,
+                phoneNumber: state.loginData.phoneNumber.value,
+              }
+            : null;
         } else {
           state.hasLoginData = false;
           state.loginData = null;
@@ -2709,7 +2761,9 @@ class OnboardingService {
     if (
       state.flowMode === "UPLOAD" &&
       state.documentId &&
-      !state.documentExtracted &&
+      (!state.documentExtracted ||
+        !state.documentData ||
+        Object.keys(state.documentData).length === 0) &&
       state.currentStep !== "ASK_UPLOAD_DOCUMENT_FAILED"
     ) {
       console.log(
@@ -2974,6 +3028,7 @@ class OnboardingService {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
+    state.canSkip = canSkipOnboarding(state);
     await saveOnboardingState(userId, state);
 
     const nextStep = getNextStep(state);
