@@ -1,4 +1,4 @@
-const { toDbDate, toDbTimestamp } = require("../../src/utils/dbDate");
+const { toDbDate, toDbTimestamp } = require("../../src/utils/dateUtils");
 
 describe("dbDate Utility Unit Tests", () => {
   let warnSpy;

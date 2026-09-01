@@ -1345,7 +1345,13 @@ ${chunksContent}`;
           );
           assistantText = aiResponse.answer;
           isEmergency = !!aiResponse.emergency;
-        } catch {
+        } catch (llmErr) {
+          debugLogger.error("sendMessage: LLM Generation failed for GENERAL intent", {
+            error: llmErr.message,
+            stack: llmErr.stack,
+          });
+          // eslint-disable-next-line no-console
+          console.error(`[ChatService] LLM Generation failed for GENERAL: ${llmErr.message}`);
           assistantText =
             detectedLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
@@ -1660,7 +1666,15 @@ ${chunksContent}`;
             );
             assistantText = aiResponse.answer;
             isEmergency = !!aiResponse.emergency;
-          } catch {
+          } catch (ragErr) {
+            debugLogger.error("sendMessage: LLM Generation failed for DOCUMENT_RAG intent", {
+              error: ragErr.message,
+              stack: ragErr.stack,
+            });
+            // eslint-disable-next-line no-console
+            console.error(
+              `[ChatService] LLM Generation failed for DOCUMENT_RAG: ${ragErr.message}`,
+            );
             assistantText =
               NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
           }
