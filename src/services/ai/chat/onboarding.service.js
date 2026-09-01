@@ -418,18 +418,38 @@ function getNextRequiredOrOptionalStep(state) {
 }
 
 function canSkipOnboarding(state) {
-  const missingRequired = getMissingRequiredStep(state);
-  if (missingRequired) {
+  if (!state || typeof state !== "object") {
     return false;
   }
 
-  const useDoc =
-    state.useDocumentData !== false &&
-    state.flowMode === "UPLOAD" &&
-    state.documentConfirmed !== false &&
-    (!!state.documentData || !!state.documentId);
+  // S1: state.preferredLanguage is a non-empty value
+  if (
+    !state.preferredLanguage ||
+    typeof state.preferredLanguage !== "string" ||
+    state.preferredLanguage.trim().length === 0
+  ) {
+    return false;
+  }
 
-  if (state.flowMode === "UPLOAD" && useDoc && !state.profileConfirmed) {
+  // S2: state.flowMode is "UPLOAD" or "MANUAL"
+  if (state.flowMode !== "UPLOAD" && state.flowMode !== "MANUAL") {
+    return false;
+  }
+
+  // S3: if state.flowMode === "UPLOAD": state.documentOwnershipConfirmed is strictly true or strictly false (not null/undefined)
+  if (state.flowMode === "UPLOAD") {
+    if (state.documentOwnershipConfirmed !== true && state.documentOwnershipConfirmed !== false) {
+      return false;
+    }
+  }
+
+  // S4: getMissingRequiredStep(state) === null
+  if (getMissingRequiredStep(state) !== null) {
+    return false;
+  }
+
+  // S5: state.profileConfirmed === true
+  if (state.profileConfirmed !== true) {
     return false;
   }
 
@@ -1639,11 +1659,16 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (key === "ADD") {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
-      } else if (key === "DASHBOARD" || key === "ASK_REPORT") {
+      } else if (key === "DASHBOARD") {
         state.medicationFlowDone = true;
         state.isOnboardingCompleted = true;
         state.medicinesConfirmed = true;
-        state.currentStep = computeCurrentStep(state);
+        state.currentStep = "COMPLETE";
+      } else if (key === "ASK_REPORT") {
+        state.medicationFlowDone = true;
+        state.isOnboardingCompleted = true;
+        state.medicinesConfirmed = true;
+        state.currentStep = "COMPLETE";
       }
       break;
     }
@@ -2164,7 +2189,41 @@ async function getLocalizedResponse(step, state) {
         medicine: med || emptyMedTemplate,
       };
     }
-    case "MEDICINE_OPTIONS":
+    case "MEDICINE_OPTIONS": {
+      const options = [
+        {
+          key: "ADD",
+          label: await getLocalizedText(
+            "onboarding.medicineOptions.addAnother",
+            "Add Another Medicine",
+            state.preferredLanguage,
+          ),
+          primary: true,
+        },
+      ];
+
+      if (state.fromScreen !== "AIChat" && state.fromScreen !== "AIChatScreen") {
+        options.push({
+          key: "DASHBOARD",
+          label: await getLocalizedText(
+            "onboarding.medicineOptions.goToDashboard",
+            "Go to Dashboard",
+            state.preferredLanguage,
+          ),
+          primary: false,
+        });
+      }
+
+      options.push({
+        key: "ASK_REPORT",
+        label: await getLocalizedText(
+          "onboarding.medicineOptions.askAboutReport",
+          "Ask About My Report",
+          state.preferredLanguage,
+        ),
+        primary: false,
+      });
+
       return {
         action: "MEDICINE_OPTIONS",
         message: await getLocalizedText(
@@ -2172,37 +2231,10 @@ async function getLocalizedResponse(step, state) {
           "What would you like to do next?",
           state.preferredLanguage,
         ),
-        options: [
-          {
-            key: "ADD",
-            label: await getLocalizedText(
-              "onboarding.medicineOptions.addAnother",
-              "Add Another Medicine",
-              state.preferredLanguage,
-            ),
-            primary: true,
-          },
-          {
-            key: "DASHBOARD",
-            label: await getLocalizedText(
-              "onboarding.medicineOptions.goToDashboard",
-              "Go to Dashboard",
-              state.preferredLanguage,
-            ),
-            primary: false,
-          },
-          {
-            key: "ASK_REPORT",
-            label: await getLocalizedText(
-              "onboarding.medicineOptions.askAboutReport",
-              "Ask About My Report",
-              state.preferredLanguage,
-            ),
-            primary: false,
-          },
-        ],
+        options,
         medicines: state.medicinesToAdd || [],
       };
+    }
 
     case "COMPLETE":
     case "POST_ONBOARDING": {
@@ -2272,7 +2304,7 @@ async function saveOnboardingState(userId, state) {
     if (Array.isArray(state.existingUserData.allergies))
       updateData.allergies = state.existingUserData.allergies;
 
-    if (state.isOnboardingCompleted) {
+    if (state.isOnboardingCompleted || state.hasSkipped) {
       updateData.status = "ACTIVE";
       updateData.onboardingCompleted = true;
     }
@@ -2298,8 +2330,9 @@ async function saveOnboardingState(userId, state) {
     documentExtracted: state.documentExtracted,
     isOnboardingCompleted: state.isOnboardingCompleted,
     existingUserData: state.existingUserData,
-    bloodGroupSkipped: state.bloodGroupSkipped,
-    allergiesSkipped: state.allergiesSkipped,
+    bloodGroupSkipped: state.bloodGroupSkipped ?? false,
+    allergiesSkipped: state.allergiesSkipped ?? false,
+    hasSkipped: state.hasSkipped || false,
     uploadedMedicalDocument: state.uploadedMedicalDocument,
     medicinesToAdd: state.medicinesToAdd,
     foundMedicines: state.foundMedicines,
@@ -3082,6 +3115,7 @@ class OnboardingService {
       createdAt: assistantMsgCreatedAt,
       timestamp: new Date(assistantMsgCreatedAt).getTime(),
       state: state,
+      canSkip: state.canSkip,
     };
   }
 }
@@ -3090,6 +3124,7 @@ const onboardingService = new OnboardingService();
 
 module.exports = {
   onboardingService,
+  saveOnboardingState,
   splitName,
   normalizeDOB,
   normalizeFlowModeLocally,

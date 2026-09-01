@@ -696,7 +696,9 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(canSkipOnboarding(invalidState)).toBe(false);
 
     const validState = {
+      preferredLanguage: "english",
       flowMode: "MANUAL",
+      profileConfirmed: true,
       existingUserData: {
         firstName: "Shraddha",
         lastName: "Chauhan",
@@ -724,6 +726,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       data: {
         preferredLanguage: "english",
         flowMode: "MANUAL",
+        profileConfirmed: true,
         medicationFlowDone: true,
         existingUserData: {
           firstName: "John",
@@ -735,7 +738,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         },
       },
     });
-    jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
     jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
 
     const res = await ocrService.onboardingChat("patient-111", {
@@ -743,9 +746,15 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     });
 
     expect(res.mode).toBe("ONBOARDING");
-    expect(res.actionType).toBe("COMPLETE");
-    expect(res.onboardingState.isOnboardingCompleted).toBe(true);
-    expect(res.onboardingState.medicationFlowDone).toBe(true);
+    expect(res.actionType).toBe("SKIP_ONBOARDING");
+    expect(res.onboardingState.hasSkipped).toBe(true);
+    expect(updatePatientSpy).toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        status: "ACTIVE",
+        onboardingCompleted: true,
+      }),
+    );
 
     jest.restoreAllMocks();
   }, 15000);
@@ -781,4 +790,80 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
     jest.restoreAllMocks();
   });
+
+  // Deliberate semantics change: top-right Skip leaves pending questions and step untouched, recording hasSkipped=true without advancing or emitting a new question
+  test("ocrService onboardingChat SKIP_ONBOARDING at ASK_BLOOD_GROUP should leave pending question untouched, persist hasSkipped true, set onboarding_completed true, and not append message", async () => {
+    const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const authProviderRepository = require("../src/repositories/authProviderRepository");
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-111",
+      onboardingCompleted: false,
+      bloodGroup: null,
+      allergies: null,
+    });
+    jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        currentStep: "ASK_BLOOD_GROUP",
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          bloodGroup: null,
+          allergies: [],
+        },
+      },
+    });
+    const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    const updateOnboardingSpy = jest
+      .spyOn(userOnboardingRepository, "updateByUserId")
+      .mockResolvedValue({});
+    const appendMsgSpy = jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({});
+
+    const res = await ocrService.onboardingChat("patient-111", {
+      actionType: "SKIP_ONBOARDING",
+    });
+
+    expect(res.mode).toBe("ONBOARDING");
+    expect(res.actionType).toBe("SKIP_ONBOARDING");
+    expect(res.onboardingState.currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(res.onboardingState.bloodGroupSkipped).toBeFalsy();
+    expect(res.onboardingState.allergiesSkipped).toBeFalsy();
+    expect(res.onboardingState.hasSkipped).toBe(true);
+
+    // Assert no assistant message was appended for next step
+    expect(appendMsgSpy).not.toHaveBeenCalled();
+
+    // Assert patients.onboarding_completed was set to true
+    expect(updatePatientSpy).toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        status: "ACTIVE",
+        onboardingCompleted: true,
+      }),
+    );
+
+    // Assert user_onboarding state was persisted with hasSkipped: true and currentStep: "ASK_BLOOD_GROUP"
+    expect(updateOnboardingSpy).toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        data: expect.objectContaining({
+          hasSkipped: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          bloodGroupSkipped: false,
+          allergiesSkipped: false,
+        }),
+      }),
+    );
+
+    jest.restoreAllMocks();
+  }, 15000);
 });
