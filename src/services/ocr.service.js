@@ -204,6 +204,7 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
+        fromScreen,
       } = normalizedInput;
 
       // Fetch user profile and existing onboarding state
@@ -246,6 +247,9 @@ class V1Service {
             )
           : {};
       const effectiveState = { ...(dbState || {}), ...cleanedInputState };
+      if (fromScreen && !effectiveState.fromScreen) {
+        effectiveState.fromScreen = fromScreen;
+      }
 
       let isMedicineSelectionMsg = false;
       if (message) {
@@ -393,7 +397,33 @@ class V1Service {
               : null;
 
         if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
-          for (const medData of medsToProcess) {
+          const availableStateMeds = [
+            ...(effectiveState?.medicinesToAdd || []),
+            ...(effectiveState?.foundMedicines || []),
+            ...(dbState?.medicinesToAdd || []),
+            ...(dbState?.foundMedicines || []),
+          ];
+
+          for (const rawMedData of medsToProcess) {
+            let medData = rawMedData;
+
+            if (typeof rawMedData === "string") {
+              const matchedStateMed = availableStateMeds.find(
+                (m) =>
+                  m &&
+                  (m.id === rawMedData ||
+                    m.client_med_id === rawMedData ||
+                    m.clientMedId === rawMedData ||
+                    m.name === rawMedData ||
+                    m.medicationName === rawMedData),
+              );
+              if (matchedStateMed) {
+                medData = matchedStateMed;
+              } else {
+                medData = { name: rawMedData };
+              }
+            }
+
             if (
               medData.selected === false ||
               medData.resolution === "KEEP_EXISTING" ||
@@ -472,6 +502,7 @@ class V1Service {
           if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicationFlowDone = true;
+            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           } else {
             stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           }
@@ -555,7 +586,6 @@ class V1Service {
           inputState?.hasSkipped === true ||
           effectiveState?.hasSkipped === true) &&
         canSkipOnboarding(effectiveState || dbState || inputState);
-
       const hasUnansweredOptional =
         isOnboardingCompleted &&
         ((!bloodGroup && !bloodGroupSkipped) ||
@@ -634,6 +664,9 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+          if (fromScreen && !state.fromScreen) state.fromScreen = fromScreen;
+          if (effectiveState?.fromScreen && !state.fromScreen)
+            state.fromScreen = effectiveState.fromScreen;
         }
 
         if (hasUnansweredOptional && actionType !== "SKIP_ONBOARDING") {
@@ -645,6 +678,7 @@ class V1Service {
             throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
           }
           state.hasSkipped = true;
+          state.isOnboardingCompleted = true;
           if (!state.currentStep && dbState && dbState.currentStep) {
             state.currentStep = dbState.currentStep;
           }

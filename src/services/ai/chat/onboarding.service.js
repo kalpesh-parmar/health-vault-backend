@@ -2202,7 +2202,14 @@ async function getLocalizedResponse(step, state) {
         },
       ];
 
-      if (state.fromScreen !== "AIChat" && state.fromScreen !== "AIChatScreen") {
+      const isDashboardChat =
+        state.fromScreen === "AIChat" ||
+        state.fromScreen === "AIChatScreen" ||
+        state.fromScreen === "DASHBOARD" ||
+        state.isOnboardingCompleted === true ||
+        state.hasSkipped === true;
+
+      if (!isDashboardChat) {
         options.push({
           key: "DASHBOARD",
           label: await getLocalizedText(

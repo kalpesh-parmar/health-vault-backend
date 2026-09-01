@@ -21,6 +21,7 @@ function normalizeUnifiedChatInput(body = {}) {
     history = [],
     displayLabel = null,
     preferredLanguage,
+    fromScreen = null,
   } = body || {};
 
   const normalizedMessage =
@@ -44,6 +45,7 @@ function normalizeUnifiedChatInput(body = {}) {
     history: Array.isArray(history) ? history : [],
     displayLabel: displayLabel || null,
     preferredLanguage: preferredLanguage ? normalizeLanguage(preferredLanguage) : null,
+    fromScreen: fromScreen || (state && state.fromScreen) || null,
   };
 }
 

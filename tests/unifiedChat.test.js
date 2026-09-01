@@ -696,7 +696,9 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(canSkipOnboarding(invalidState)).toBe(false);
 
     const validState = {
+      preferredLanguage: "english",
       flowMode: "MANUAL",
+      profileConfirmed: true,
       existingUserData: {
         firstName: "Shraddha",
         lastName: "Chauhan",
@@ -724,6 +726,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       data: {
         preferredLanguage: "english",
         flowMode: "MANUAL",
+        profileConfirmed: true,
         medicationFlowDone: true,
         existingUserData: {
           firstName: "John",
@@ -743,7 +746,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     });
 
     expect(res.mode).toBe("ONBOARDING");
-    expect(res.actionType).toBe("COMPLETE");
+    expect(res.actionType).toBe("SKIP_ONBOARDING");
     expect(res.onboardingState.isOnboardingCompleted).toBe(true);
     expect(res.onboardingState.medicationFlowDone).toBe(true);
 

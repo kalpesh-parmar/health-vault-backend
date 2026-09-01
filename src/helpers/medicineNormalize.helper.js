@@ -542,13 +542,63 @@ function normalizeCreateMedicationInput(payload = {}) {
   } else if (input.frequency && FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()]) {
     input.frequency = FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()];
   }
-  if (!input.medicationSchedule && input.frequency) {
-    if (input.frequency === frequencyType.ONCE_DAILY) {
+  function formatHHMMSS(t) {
+    if (!t || typeof t !== "string") return "09:00:00";
+    const parts = t.trim().split(":");
+    const hh = parts[0].padStart(2, "0");
+    const mm = (parts[1] || "00").padStart(2, "0");
+    const ss = (parts[2] || "00").padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  const hasValidScheduleKeys =
+    input.medicationSchedule &&
+    typeof input.medicationSchedule === "object" &&
+    (input.medicationSchedule.Morning ||
+      input.medicationSchedule.morning ||
+      input.medicationSchedule.Noon ||
+      input.medicationSchedule.noon ||
+      input.medicationSchedule.Night ||
+      input.medicationSchedule.night ||
+      input.medicationSchedule.Custom ||
+      input.medicationSchedule.custom);
+
+  if (!hasValidScheduleKeys) {
+    const rawTimes =
+      Array.isArray(input.medicationSchedule?.times) && input.medicationSchedule.times.length > 0
+        ? input.medicationSchedule.times
+        : Array.isArray(input.medicationSchedule?.reminderTimes) &&
+            input.medicationSchedule.reminderTimes.length > 0
+          ? input.medicationSchedule.reminderTimes
+          : Array.isArray(input.reminderTimes) && input.reminderTimes.length > 0
+            ? input.reminderTimes
+            : null;
+
+    if (Array.isArray(rawTimes) && rawTimes.length > 0) {
+      const newSched = {};
+      rawTimes.forEach((t) => {
+        const timeStr = formatHHMMSS(t);
+        const hour = parseInt(timeStr.split(":")[0], 10);
+        if (hour < 12 && !newSched.Morning) {
+          newSched.Morning = timeStr;
+        } else if (hour >= 12 && hour < 17 && !newSched.Noon) {
+          newSched.Noon = timeStr;
+        } else if (hour >= 17 && !newSched.Night) {
+          newSched.Night = timeStr;
+        } else {
+          if (!newSched.Custom) newSched.Custom = [];
+          newSched.Custom.push(timeStr);
+        }
+      });
+      input.medicationSchedule = newSched;
+    } else if (input.frequency === frequencyType.ONCE_DAILY || input.frequency === "ONCE") {
       input.medicationSchedule = { Morning: "09:00:00" };
     } else if (input.frequency === frequencyType.TWICE_DAILY) {
       input.medicationSchedule = { Morning: "09:00:00", Night: "21:00:00" };
     } else if (input.frequency === frequencyType.THREE_TIMES_DAILY) {
       input.medicationSchedule = { Morning: "09:00:00", Noon: "14:00:00", Night: "21:00:00" };
+    } else {
+      input.medicationSchedule = { Morning: "09:00:00" };
     }
   }
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
@@ -562,6 +612,7 @@ function normalizeCreateMedicationInput(payload = {}) {
   }
 
   // Strip non-schema properties so Zod .strict() validation passes
+  delete input.id;
   delete input.name;
   delete input.type;
   delete input.dose;
@@ -577,6 +628,10 @@ function normalizeCreateMedicationInput(payload = {}) {
   delete input.subtitle;
   delete input.duration;
   delete input.needsReview;
+  delete input.refill_alert;
+  delete input.refillAlert;
+  delete input.prescribed_by;
+  delete input.total_quantity;
 
   return input;
 }
