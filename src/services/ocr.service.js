@@ -14,7 +14,11 @@ const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const { onboardingService, canSkipOnboarding } = require("./ai/chat/onboarding.service");
+const {
+  onboardingService,
+  canSkipOnboarding,
+  saveOnboardingState,
+} = require("./ai/chat/onboarding.service");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
@@ -481,7 +485,7 @@ class V1Service {
             displayLabel,
           );
 
-          return buildUnifiedResponse({
+          const responsePayload = buildUnifiedResponse({
             mode: "ONBOARDING",
             actionType: onboardingResult?.action || "MEDICINE_OPTIONS",
             reply: onboardingResult?.message || onboardingResult?.reply || "",
@@ -489,6 +493,11 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
           });
+          responsePayload.canSkip =
+            onboardingResult?.canSkip !== undefined
+              ? onboardingResult.canSkip
+              : canSkipOnboarding(onboardingResult?.state || stateToUpdate);
+          return responsePayload;
         }
 
         // Post-Onboarding (Dashboard Chat Stream): return confirmation response
@@ -541,6 +550,12 @@ class V1Service {
       const allergiesSkipped =
         dbState?.allergiesSkipped === true || inputState?.allergiesSkipped === true;
 
+      const isSkippedValid =
+        (dbState?.hasSkipped === true ||
+          inputState?.hasSkipped === true ||
+          effectiveState?.hasSkipped === true) &&
+        canSkipOnboarding(effectiveState || dbState || inputState);
+
       const hasUnansweredOptional =
         isOnboardingCompleted &&
         ((!bloodGroup && !bloodGroupSkipped) ||
@@ -549,9 +564,9 @@ class V1Service {
       const isNormalChat =
         !hasUnansweredOptional &&
         (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted || isCompletedStep) &&
+          ((isOnboardingCompleted || isCompletedStep || isSkippedValid) &&
             !isActiveOnboardingStep &&
-            (actionType !== "ONBOARDING" || isCompletedStep) &&
+            (actionType !== "ONBOARDING" || isCompletedStep || isSkippedValid) &&
             actionType !== "OTHER_ACTIONS"));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
@@ -629,21 +644,23 @@ class V1Service {
           if (!canSkipOnboarding(state)) {
             throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
           }
-          state.isOnboardingCompleted = true;
-          //   state.medicationFlowDone = true;
-          //   state.medicinesConfirmed = true;
-          //   state.currentStep = "COMPLETE";
-          //   state.medicinesToAdd = [];
-          //   state.foundMedicines = [];
-          // }
-          const hasMeds =
-            (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
-            (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
-          if (!hasMeds) {
-            state.medicationFlowDone = true;
-            state.medicinesConfirmed = true;
+          state.hasSkipped = true;
+          if (!state.currentStep && dbState && dbState.currentStep) {
+            state.currentStep = dbState.currentStep;
           }
-          state.currentStep = null;
+
+          await saveOnboardingState(userId, state);
+
+          const responsePayload = buildUnifiedResponse({
+            mode: "ONBOARDING",
+            actionType: "SKIP_ONBOARDING",
+            reply: "",
+            onboardingState: state,
+            options: [],
+            medicines: [],
+          });
+          responsePayload.canSkip = true;
+          return responsePayload;
         }
 
         const onboardingResult = await onboardingService.chat(
@@ -655,7 +672,7 @@ class V1Service {
           displayLabel,
         );
 
-        return buildUnifiedResponse({
+        const responsePayload = buildUnifiedResponse({
           mode: "ONBOARDING",
           actionType: onboardingResult?.action || "ONBOARDING_STEP",
           reply: onboardingResult?.message || onboardingResult?.reply || "",
@@ -663,6 +680,11 @@ class V1Service {
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
         });
+        responsePayload.canSkip =
+          onboardingResult?.canSkip !== undefined
+            ? onboardingResult.canSkip
+            : canSkipOnboarding(onboardingResult?.state || state);
+        return responsePayload;
       }
 
       // CASE 4: NORMAL_CHAT (Post-onboarding RAG Chat)
