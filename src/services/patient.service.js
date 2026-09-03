@@ -617,6 +617,8 @@ class PatientService {
 
     const onboardingState = await userOnboardingRepository.findByUserId(patientUser.id);
 
+    // IMPORTANT: Keep the existing || behavior unchanged.
+    // WARNING: Do NOT simplify this into a direct assignment as that could cause onboarding regression.
     const isOnboardingCompleted = !!(
       patientUser.onboardingCompleted ||
       onboardingState?.isCompleted ||

@@ -364,23 +364,44 @@ You MUST return a STRICT JSON response matching this schema:
 const STRUCTURED_EXTRACTION_PROMPT = (rawText) => `You are a precise medical data extraction engine.
 Analyze the provided transcribed text from a medical document and convert it into the exact JSON format specified below.
 
-Rules:
-1. You MUST return a STRICT JSON response only.
-2. Do NOT include markdown code blocks (such as \`\`\`json) in your response.
-3. Do NOT include any reasoning, thinking, explanations, or notes.
-4. Set fields to null if they are not found.
-5. Ensure the response is a valid, parseable JSON object matching the schema.
-6. Implement strict field mapping:
-   - Extract 'Birth Date', 'DOB', or 'Date of Birth' as 'dateOfBirth' under patient. Do NOT confuse this with visit or report date.
-   - Extract 'Visit Date' as 'visitDate' at root level.
-   - Extract 'Report Date' as 'reportDate' at root level.
+CRITICAL EXTRACTION RULES:
+1. Determine Document Type from actual content:
+   - "PRESCRIPTION" (Doctor prescriptions, Rx, clinic visit prescriptions, medication charts)
+   - "LAB_REPORT" (Blood test, CBC, urine, lipid profile, pathology, lab tests)
+   - "IMAGING_REPORT" (X-ray, MRI, CT scan, Ultrasound, Sonography)
+   - "DISCHARGE_SUMMARY" (Hospital discharge summaries)
+   - "CONSULTATION_REPORT" (Clinical notes, doctor consultation notes)
+   - "OTHER_MEDICAL_DOCUMENT" (Any other valid medical document)
+   If the document contains doctor prescription details, prescribed medicines, dosage, or clinic visit Rx, set documentType to "PRESCRIPTION".
 
-JSON format schema:
+2. Extract ONLY information explicitly visible in the document. NEVER hallucinate or infer missing medical information.
+   - Patient info: name, firstName, middleName, lastName, age, gender (male/female), dateOfBirth (YYYY-MM-DD), address, email, phoneNumber, bloodGroup.
+   - Doctor info: doctor name (e.g. "BAKUL PATEL").
+   - Hospital / clinic info: clinic/hospital name (e.g. "Uma Clinic").
+   - Report / Prescription Date: format as YYYY-MM-DD when possible.
+   - Medications:
+     - name: exact medicine name (e.g. "TAB. MBSON SL", "Tab. Caldison D3")
+     - dosage: exact dosage notation as written in document (e.g. "1-0-0"). Preserve dosage EXACTLY as written; do NOT convert "1-0-0" to "morning" or words.
+     - duration: duration as written (e.g. "30 Days", "4 Days")
+     - qty / quantity: total count/units (e.g. "30", "4").
+     - instructions: specific intake instructions (e.g. "After food") ONLY if explicitly written. Do NOT put quantity or number of tablets into instructions (e.g. quantity 30 means 30 tablets, NOT "take 30 times").
+     - type: tablet, capsule, syrup, etc.
+   - Do NOT populate diagnosis, labTests, allergies, bloodGroup, visitDate, observations, or recommendations unless explicitly present in the text. Return empty arrays [] or null if not present.
+
+3. Summary Guidelines:
+   - Generate summaryEn and summary strictly from extracted document facts.
+   - Clearly state the document type and summarize the prescribed medications, dosages (e.g. 1-0-0), durations, and quantities.
+   - NEVER include prompt instructions, schema descriptions, or meta-commentary (e.g. "as per schema", "the schema requires", "The schema is incorrect").
+   - Do NOT repeat sentences or leave incomplete/truncated sentences.
+
+4. Return ONLY a single valid JSON object. Do NOT wrap in markdown code blocks (\`\`\`json). Do NOT output <think> or any text before/after the JSON.
+
+JSON Schema:
 If the text is NOT a medical document:
 {
   "success": false,
   "isMedicalDocument": false,
-  "reason": "Brief rejection reason (e.g. 'Document is a bank statement')",
+  "reason": "Brief rejection reason",
   "rawText": ""
 }
 
@@ -389,57 +410,47 @@ If the text IS a medical document:
   "success": true,
   "isMedicalDocument": true,
   "reason": null,
-  "documentType": "LAB_REPORT",
+  "documentType": "PRESCRIPTION",
   "patient": {
-    "name": "Patient Name",
-    "firstName": "First Name",
-    "middleName": "middle name",
-    "lastName": "Last Name",
-    "age": 25,
-    "gender": "Gender",
-    "dateOfBirth": "YYYY-MM-DD",
-    "email": "Email address",
-    "phoneNumber": "Phone number",
-    "bloodGroup": "Blood group (A+/A-/B+/B-/AB+/AB-/O+/O-)",
-    "allergies": ["allergy1", "allergy2"],
-    "medicalConditions": ["condition1", "condition2"],
-    "address": "Postal address"
+    "name": "Patient Name or null",
+    "firstName": "First Name or null",
+    "middleName": "Middle Name or null",
+    "lastName": "Last Name or null",
+    "age": 45,
+    "gender": "female or male or null",
+    "dateOfBirth": "YYYY-MM-DD or null",
+    "email": null,
+    "phoneNumber": null,
+    "bloodGroup": null,
+    "allergies": [],
+    "medicalConditions": [],
+    "address": "Address or null"
   },
   "hospital": {
-    "name": "Hospital/Clinic Name"
+    "name": "Hospital/Clinic Name or null"
   },
   "doctor": {
-    "name": "Doctor Name"
+    "name": "Doctor Name or null"
   },
-  "reportDate": "YYYY-MM-DD",
-  "visitDate": "YYYY-MM-DD",
-  "diagnosis": [
-    "Diagnosis 1",
-    "Diagnosis 2"
-  ],
+  "reportDate": "YYYY-MM-DD or null",
+  "visitDate": null,
+  "diagnosis": [],
   "medications": [
     {
-      "name": "Medicine Name",
-      "dosage": "Dosage/Strength",
-      "timeOfDay": "Time/Day",
-      "duration": "Duration",
-      "qty": "Quantity",
-      "instructions": "Instructions",
-      "type": "Type (tablet, syrup, injection, etc.)"
+      "name": "TAB. MBSON SL",
+      "dosage": "1-0-0",
+      "timeOfDay": "1-0-0",
+      "duration": "30 Days",
+      "qty": "30",
+      "quantity": "30",
+      "instructions": null,
+      "type": "tablet"
     }
   ],
-  "labTests": [
-    {
-      "name": "Test Name",
-      "value": "Test Value",
-      "unit": "Unit",
-      "referenceRange": "Reference Range",
-      "status": "NORMAL"
-    }
-  ],
-  "remarks": "General advice or remarks or null",
-  "summaryEn": "Clear 150-200 word layperson summary of the report in simple English, keeping common medical terms, numbers, and units in English.",
-  "summary": "Clear 150-200 word layperson summary of the report in simple English, keeping common medical terms in English.",
+  "labTests": [],
+  "remarks": null,
+  "summaryEn": "Clear summary of the prescription/report grounded strictly in document facts.",
+  "summary": "Clear summary of the prescription/report grounded strictly in document facts.",
   "rawText": ""
 }
 

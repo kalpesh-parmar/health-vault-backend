@@ -18,7 +18,7 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
-const { toDbDate } = require("../../../utils/dateUtils");
+const { toDbDate, toDbDateOnlyString } = require("../../../utils/dateUtils");
 
 const {
   cleanAndParseJson,
@@ -297,6 +297,57 @@ const OnboardingStep = {
   COMPLETE: "COMPLETE",
 };
 
+const REQUIRED_PROFILE_FIELDS = ["firstName", "lastName", "dateOfBirth", "gender"];
+
+function isProfileComplete(patient) {
+  if (!patient || typeof patient !== "object") return false;
+
+  for (const field of REQUIRED_PROFILE_FIELDS) {
+    const val = patient[field];
+    if (val === undefined || val === null || (typeof val === "string" && val.trim().length === 0)) {
+      return false;
+    }
+  }
+
+  if (!isValidFirstName(patient.firstName) || !isValidLastName(patient.lastName)) {
+    return false;
+  }
+
+  const dobStr =
+    typeof patient.dateOfBirth === "string"
+      ? patient.dateOfBirth
+      : patient.dateOfBirth instanceof Date
+        ? patient.dateOfBirth.toISOString().split("T")[0]
+        : String(patient.dateOfBirth);
+
+  const normDob = normalizeDOB(dobStr);
+  if (!normDob) return false;
+
+  const dobDate = new Date(normDob);
+  if (isNaN(dobDate.getTime())) return false;
+
+  const today = new Date();
+  if (dobDate > today) return false;
+
+  const ageYears = (today.getTime() - dobDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+  if (ageYears < 0 || ageYears > 120) return false;
+
+  const normGender = normalizeGenderLocally(String(patient.gender));
+  if (!normGender || !isValidGender(normGender)) {
+    return false;
+  }
+
+  const contact = patient.mobile || patient.email || patient.phoneNumber;
+  if (!contact) {
+    console.error(
+      "[OnboardingService] Contact assertion failed: patient has neither mobile nor email:",
+      patient,
+    );
+  }
+
+  return true;
+}
+
 function getMissingRequiredStep(state) {
   const data = state.existingUserData || {};
   const isSocial = state.useSocialData === true || state.selectedProfileSource === "SOCIAL";
@@ -325,23 +376,38 @@ function getMissingRequiredStep(state) {
     if (isDoc) {
       return docData[key] !== undefined && docData[key] !== null && docData[key] !== ""
         ? docData[key]
-        : key === "phoneNumber"
-          ? docData.mobile || docData.phoneNumber
-          : null;
+        : null;
     }
-    return (
-      socialData[key] ||
-      loginData[key]?.value ||
-      docData[key] ||
-      (key === "phoneNumber" ? docData.mobile || docData.phoneNumber : null) ||
-      null
-    );
+    return socialData[key] || loginData[key]?.value || docData[key] || null;
   };
 
-  if (!getVal("firstName")) return "ASK_FIRST_NAME";
-  if (!getVal("lastName")) return "ASK_LAST_NAME";
-  if (!getVal("dateOfBirth")) return "ASK_DOB";
-  if (!getVal("gender")) return "ASK_GENDER";
+  const fieldToStep = {
+    firstName: "ASK_FIRST_NAME",
+    lastName: "ASK_LAST_NAME",
+    dateOfBirth: "ASK_DOB",
+    gender: "ASK_GENDER",
+  };
+
+  for (const field of REQUIRED_PROFILE_FIELDS) {
+    const val = getVal(field);
+    if (val === undefined || val === null || (typeof val === "string" && val.trim().length === 0)) {
+      return fieldToStep[field];
+    }
+    if (field === "firstName" && !isValidFirstName(String(val))) return "ASK_FIRST_NAME";
+    if (field === "lastName" && !isValidLastName(String(val))) return "ASK_LAST_NAME";
+    if (field === "dateOfBirth") {
+      const normDob = normalizeDOB(String(val));
+      if (!normDob) return "ASK_DOB";
+      const dobDate = new Date(normDob);
+      if (isNaN(dobDate.getTime()) || dobDate > new Date()) return "ASK_DOB";
+      const ageYears = (new Date().getTime() - dobDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+      if (ageYears < 0 || ageYears > 120) return "ASK_DOB";
+    }
+    if (field === "gender") {
+      const normGen = normalizeGenderLocally(String(val));
+      if (!normGen || !isValidGender(normGen)) return "ASK_GENDER";
+    }
+  }
 
   return null;
 }
@@ -419,6 +485,10 @@ function getNextRequiredOrOptionalStep(state) {
 
 function canSkipOnboarding(state) {
   if (!state || typeof state !== "object") {
+    return false;
+  }
+
+  if (state.pendingProfileConflict === true) {
     return false;
   }
 
@@ -1648,14 +1718,20 @@ async function updateStateFromMessage(state, message, userId = null) {
       try {
         payload = JSON.parse(msg);
       } catch {
-        if (msg === "ADD" || msg === "DASHBOARD" || msg === "ASK_REPORT") {
-          payload = { key: msg };
+        if (
+          msg === "ADD" ||
+          msg === "DASHBOARD" ||
+          msg === "ASK_REPORT" ||
+          msg === "ASK_ABOUT_REPORT"
+        ) {
+          payload = { key: msg === "ASK_ABOUT_REPORT" ? "ASK_REPORT" : msg };
         } else {
           payload = {};
         }
       }
 
-      const key = payload.key || msg;
+      const rawKey = payload.key || msg;
+      const key = rawKey === "ASK_ABOUT_REPORT" ? "ASK_REPORT" : rawKey;
       if (key === "ADD") {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
@@ -1666,13 +1742,14 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.currentStep = "COMPLETE";
       } else if (key === "ASK_REPORT") {
         state.medicationFlowDone = true;
-        state.isOnboardingCompleted = true;
+        state.isOnboardingCompleted = false;
         state.medicinesConfirmed = true;
-        state.currentStep = "COMPLETE";
+        state.currentStep = "ASK_REPORT";
       }
       break;
     }
 
+    case "ASK_REPORT":
     case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {
@@ -1684,13 +1761,13 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.currentMedicineIndex = 0;
         state.currentStep = "ASK_MEDICINE_NAME";
         break;
-      } else if (msg === "GO_TO_DASHBOARD") {
+      } else if (msg === "GO_TO_DASHBOARD" || msg === "DASHBOARD") {
         state.isOnboardingCompleted = true;
         state.currentStep = "COMPLETE";
         break;
       }
 
-      state.currentStep = computeCurrentStep(state);
+      state.currentStep = "ASK_REPORT";
       break;
     }
   }
@@ -1739,7 +1816,7 @@ async function getLocalizedResponse(step, state) {
           },
           {
             label: await getLocalizedText(
-              "onboarding.askUploadOrSkip.manual",
+              "onboarding.manual",
               "Enter Details Manually",
               state.preferredLanguage,
             ),
@@ -2236,6 +2313,195 @@ async function getLocalizedResponse(step, state) {
       };
     }
 
+    case "ASK_REPORT": {
+      let docRecord = null;
+      const targetDocId = Array.isArray(state.documentId) ? state.documentId[0] : state.documentId;
+      if (targetDocId) {
+        try {
+          const [doc] = await db.select().from(document).where(eq(document.id, targetDocId));
+          docRecord = doc;
+        } catch (err) {
+          console.warn("[OnboardingService] Failed to fetch document for ASK_REPORT:", err.message);
+        }
+      }
+
+      const effectiveUserId = state.userId || state.existingUserData?.id;
+      if (!docRecord && effectiveUserId) {
+        try {
+          const docs = await db
+            .select()
+            .from(document)
+            .where(eq(document.userId, effectiveUserId))
+            .orderBy(desc(document.createdAt))
+            .limit(1);
+          if (docs && docs.length > 0) {
+            docRecord = docs[0];
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to fetch latest document for ASK_REPORT:",
+            err.message,
+          );
+        }
+      }
+
+      if (!docRecord && !targetDocId) {
+        return {
+          action: "NORMAL_CHAT",
+          message: await getLocalizedText(
+            "chat.noReportsUploaded",
+            "You haven't uploaded any medical reports yet.",
+            state.preferredLanguage,
+          ),
+          document: null,
+          suggestedQuestions: [],
+          options: [],
+        };
+      }
+
+      const structured = docRecord?.structuredExtractedData || {};
+      const patientInfo = structured.patientInfo || structured.patient || {};
+      const tests =
+        Array.isArray(structured.tests) && structured.tests.length > 0
+          ? structured.tests
+          : Array.isArray(structured.labResults) && structured.labResults.length > 0
+            ? structured.labResults
+            : [];
+
+      const lang = state.preferredLanguage || "english";
+      let docSummary =
+        (lang !== "english" &&
+          (structured.summaryInPreferredLanguage || docRecord?.summaryInPreferredLanguage)) ||
+        docRecord?.summaryEnglish ||
+        structured.summaryEnglish ||
+        structured.summary ||
+        structured.summaryInPreferredLanguage ||
+        docRecord?.remarks ||
+        "";
+
+      const isPrescription =
+        docRecord?.documentType === "PRESCERIPTION" ||
+        docRecord?.documentType === "PRESCRIPTION" ||
+        structured.documentType === "PRESCRIPTION" ||
+        structured.documentType === "PRESCERIPTION" ||
+        (Array.isArray(structured.medications) &&
+          structured.medications.length > 0 &&
+          tests.length === 0);
+
+      const REPORT_QUESTIONS_I18N = {
+        english: [
+          "What does my report mean?",
+          "Are there any abnormal values?",
+          "What should I discuss with my doctor?",
+          "Can you explain this report in simple language?",
+        ],
+        gujarati: [
+          "મારા રિપોર્ટનો અર્થ શું છે?",
+          "શું કોઈ અસામાન્ય મૂલ્યો છે?",
+          "મારે મારા ડૉક્ટર સાથે શું ચર્ચા કરવી જોઈએ?",
+          "શું તમે આ રિપોર્ટ સરળ ભાષામાં સમજાવી શકો છો?",
+        ],
+        hindi: [
+          "मेरी रिपोर्ट का क्या मतलब है?",
+          "क्या कोई असामान्य मूल्य हैं?",
+          "मुझे अपने डॉक्टर से क्या चर्चा करनी चाहिए?",
+          "क्या आप इस रिपोर्ट को सरल भाषा में समझा सकते हैं?",
+        ],
+        marathi: [
+          "माझ्या रिपोर्टचा अर्थ काय आहे?",
+          "काही असामान्य मूल्ये आहेत का?",
+          "मी माझ्या डॉक्टरांशी काय चर्चा करावी?",
+          "तुम्ही हा रिपोर्ट सोप्या भाषेत समजावून सांगू शकता का?",
+        ],
+        tamil: [
+          "எனது அறிக்கையின் அர்த்தம் என்ன?",
+          "ஏதேனும் அசாதாரண மதிப்புகள் உள்ளதா?",
+          "எனது மருத்துவரிடம் நான் என்ன விவாதிக்க வேண்டும்?",
+          "இந்த அறிக்கையை எளிய மொழியில் விளக்க முடியுமா?",
+        ],
+      };
+
+      if (!docSummary) {
+        if (isPrescription) {
+          docSummary = `Prescription from ${docRecord?.doctorName || structured.doctorName || "Doctor"} at ${docRecord?.hospitalName || structured.hospitalName || "Clinic"}.`;
+        } else {
+          docSummary = "Medical report summary.";
+        }
+      }
+
+      const suggestedQuestions = REPORT_QUESTIONS_I18N[lang] || REPORT_QUESTIONS_I18N.english;
+
+      const labFindings =
+        tests.length > 0
+          ? tests.map((t) => ({
+              name: t.name || t.testName || t.parameter || "Test",
+              value: t.value || t.result || "",
+              unit: t.unit || "",
+              status: t.status || (t.isAbnormal ? "Abnormal" : "Normal"),
+              referenceRange: t.normalRange || t.referenceRange || t.range || "",
+            }))
+          : [];
+
+      const medicationFindings = Array.isArray(structured.medications)
+        ? structured.medications.map((m) => ({
+            name: m.name || "Medicine",
+            dosage: m.dosage || m.dose || "",
+            timeOfDay: m.timeOfDay || m.timing || "",
+            frequency: m.frequency || "",
+            duration: m.duration || "",
+            quantity: m.quantity || m.qty || "",
+            instructions: m.instructions || m.notes || "",
+            type: m.type || "",
+            foodContext: m.food_context || "",
+          }))
+        : [];
+
+      const docTypeResolved = isPrescription
+        ? "PRESCRIPTION"
+        : docRecord?.documentType || structured.documentType || "MEDICAL_REPORT";
+
+      const resolvedDoctor =
+        docRecord?.doctorName ||
+        structured.doctorName ||
+        structured.doctorInfo?.name ||
+        structured.doctor?.name ||
+        patientInfo.doctorName ||
+        null;
+
+      const resolvedHospital =
+        docRecord?.hospitalName ||
+        structured.hospitalName ||
+        structured.hospitalInfo?.name ||
+        structured.hospital?.name ||
+        patientInfo.hospitalName ||
+        patientInfo.clinicName ||
+        null;
+
+      const dateOnlyStr =
+        toDbDateOnlyString(docRecord?.reportDate) ||
+        toDbDateOnlyString(structured.reportDate) ||
+        toDbDateOnlyString(new Date());
+
+      return {
+        action: "ASK_REPORT",
+        message: "",
+        document: {
+          id: docRecord?.id || targetDocId,
+          fileName: docRecord?.fileName || (isPrescription ? "Prescription" : "Medical Report"),
+          documentType: docTypeResolved,
+          reportDate: dateOnlyStr,
+          hospitalName: resolvedHospital,
+          doctorName: resolvedDoctor,
+          summary: docSummary,
+          labFindings,
+          medicationFindings,
+          keyFindings: labFindings.length > 0 ? labFindings : medicationFindings,
+        },
+        suggestedQuestions,
+        options: [],
+      };
+    }
+
     case "COMPLETE":
     case "POST_ONBOARDING": {
       return {
@@ -2305,7 +2571,6 @@ async function saveOnboardingState(userId, state) {
       updateData.allergies = state.existingUserData.allergies;
 
     if (state.isOnboardingCompleted || state.hasSkipped) {
-      updateData.status = "ACTIVE";
       updateData.onboardingCompleted = true;
     }
 
@@ -2333,6 +2598,8 @@ async function saveOnboardingState(userId, state) {
     bloodGroupSkipped: state.bloodGroupSkipped ?? false,
     allergiesSkipped: state.allergiesSkipped ?? false,
     hasSkipped: state.hasSkipped || false,
+    completionMessageSent: state.completionMessageSent || false,
+    pendingProfileConflict: state.pendingProfileConflict || false,
     uploadedMedicalDocument: state.uploadedMedicalDocument,
     medicinesToAdd: state.medicinesToAdd,
     foundMedicines: state.foundMedicines,
@@ -2390,6 +2657,9 @@ class OnboardingService {
   ) {
     if (!state) {
       state = {};
+    }
+    if (userId && !state.userId) {
+      state.userId = userId;
     }
 
     if (state.preferredLanguage) {
@@ -2730,7 +3000,13 @@ class OnboardingService {
         !state.bloodGroupSkipped) ||
       ((!Array.isArray(data.allergies) || data.allergies.length === 0) && !state.allergiesSkipped);
     if (state.isOnboardingCompleted && state.medicationFlowDone && !hasUnansweredOptional) {
-      if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
+      if (
+        msg === "ADD_MORE_MEDICINES" ||
+        msg.toLowerCase().includes("add more medicines") ||
+        msg === "ASK_REPORT" ||
+        msg === "ASK_ABOUT_REPORT" ||
+        state.currentStep === "ASK_REPORT"
+      ) {
         // Let it pass through to updateStateFromMessage
       } else {
         state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
@@ -3061,7 +3337,36 @@ class OnboardingService {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
     }
 
-    state.canSkip = canSkipOnboarding(state);
+    const canSkipNow = canSkipOnboarding(state);
+    let completionMessage = null;
+    if (canSkipNow && !state.completionMessageSent) {
+      state.completionMessageSent = true;
+      completionMessage = await getLocalizedText(
+        "onboarding.complete.message",
+        "Thank you! Onboarding is complete.",
+        state.preferredLanguage,
+      );
+      if (state.chatSessionId) {
+        try {
+          await chatService.appendChatMessage({
+            sessionId: state.chatSessionId,
+            userId,
+            role: "assistant",
+            content: completionMessage,
+            metadata: {
+              action: "ONBOARDING_COMPLETED_NOTICE",
+            },
+          });
+        } catch (msgErr) {
+          console.warn(
+            "[OnboardingService] Failed to append completion notice message:",
+            msgErr.message,
+          );
+        }
+      }
+    }
+
+    state.canSkip = canSkipNow;
     await saveOnboardingState(userId, state);
 
     const nextStep = getNextStep(state);
@@ -3089,6 +3394,9 @@ class OnboardingService {
           medicine: response.medicine || null,
           summary: response.summary || null,
           medicines: response.medicines || null,
+          document: response.document || null,
+          suggestedQuestions: response.suggestedQuestions || null,
+          keyFindings: response.document?.keyFindings || null,
         },
       });
       if (savedMsg && savedMsg.createdAt) {
@@ -3115,7 +3423,8 @@ class OnboardingService {
       createdAt: assistantMsgCreatedAt,
       timestamp: new Date(assistantMsgCreatedAt).getTime(),
       state: state,
-      canSkip: state.canSkip,
+      canSkip: canSkipNow,
+      ...(completionMessage ? { completionMessage } : {}),
     };
   }
 }
@@ -3136,4 +3445,6 @@ module.exports = {
   extractFieldFromMessage,
   OnboardingStep,
   canSkipOnboarding,
+  isProfileComplete,
+  REQUIRED_PROFILE_FIELDS,
 };

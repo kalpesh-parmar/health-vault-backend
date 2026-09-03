@@ -219,8 +219,8 @@ const STAGES_PIPELINE = [
         patientContext: ctx.record?.patientContext || null,
         rawOcr,
       });
-
       const { rawOcrData: updatedRawOcr, structured } = normalizedData || {};
+
       if (updatedRawOcr) {
         ctx.rawOcrData = updatedRawOcr;
       }

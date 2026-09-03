@@ -561,12 +561,29 @@ class V1Service {
         ((!bloodGroup && !bloodGroupSkipped) ||
           ((!allergies || allergies.length === 0) && !allergiesSkipped));
 
+      const isForcedOnboardingAction =
+        message === "ASK_REPORT" ||
+        message === "ASK_ABOUT_REPORT" ||
+        actionType === "ASK_REPORT" ||
+        inputState?.currentStep === "ASK_REPORT";
+
       const isNormalChat =
+        !isForcedOnboardingAction &&
+        actionType !== "SKIP_ONBOARDING" &&
         !hasUnansweredOptional &&
         (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted || isCompletedStep || isSkippedValid) &&
+          ((isOnboardingCompleted ||
+            isCompletedStep ||
+            isSkippedValid ||
+            dbState?.currentStep === "ASK_REPORT" ||
+            inputState?.currentStep === "ASK_REPORT") &&
             !isActiveOnboardingStep &&
-            (actionType !== "ONBOARDING" || isCompletedStep || isSkippedValid) &&
+            message !== "ASK_REPORT" &&
+            (actionType !== "ONBOARDING" ||
+              isCompletedStep ||
+              isSkippedValid ||
+              dbState?.currentStep === "ASK_REPORT" ||
+              inputState?.currentStep === "ASK_REPORT") &&
             actionType !== "OTHER_ACTIONS"));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
@@ -679,7 +696,12 @@ class V1Service {
           onboardingState: onboardingResult?.state || state,
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
+          document: onboardingResult?.document || null,
         });
+        if (onboardingResult?.completionMessage) {
+          responsePayload.completionMessage = onboardingResult.completionMessage;
+        }
+        responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
         responsePayload.canSkip =
           onboardingResult?.canSkip !== undefined
             ? onboardingResult.canSkip
@@ -725,6 +747,7 @@ class V1Service {
     }
   }
 
+  // TODO: move onboarding status/history out of ocr.service.js
   async getOnboardingStatus(userId) {
     if (!userId) {
       throw new UnauthorizedException("Unauthorized access");
@@ -763,6 +786,8 @@ class V1Service {
       isOnboardingCompleted = patient.onboardingCompleted || isBasicProfileComplete;
     }
 
+    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
+
     // If onboarding is considered complete, return completed status
     if (isOnboardingCompleted) {
       if (currentStep !== "POST_ONBOARDING") {
@@ -772,12 +797,10 @@ class V1Service {
         isOnboardingCompleted: true,
         currentStep,
         chatSessionId: resumableState?.chatSessionId || null,
-        resumableState: resumableState ? { ...resumableState, canSkip: false } : null,
-        canSkip: false,
+        resumableState: resumableState ? { ...resumableState, canSkip } : null,
+        canSkip,
       };
     }
-
-    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
 
     return {
       isOnboardingCompleted: false,
