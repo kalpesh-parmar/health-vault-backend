@@ -1,5 +1,3 @@
-const { eq, and } = require("drizzle-orm");
-
 const { env } = require("../configs/env");
 const { db } = require("../configs/db");
 // const { fileTypeValue } = require("../enums/fileType");
@@ -14,11 +12,7 @@ const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const {
-  onboardingService,
-  canSkipOnboarding,
-  saveOnboardingState,
-} = require("./ai/chat/onboarding.service");
+const { onboardingService, canSkipOnboarding } = require("./ai/chat/onboarding.service");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
@@ -37,6 +31,7 @@ const {
   executeAddDocumentAction,
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
+const { and, eq } = require("drizzle-orm");
 
 class V1Service {
   async ocrExtract(userId, file) {
@@ -204,7 +199,6 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
-        fromScreen,
       } = normalizedInput;
 
       // Fetch user profile and existing onboarding state
@@ -247,9 +241,6 @@ class V1Service {
             )
           : {};
       const effectiveState = { ...(dbState || {}), ...cleanedInputState };
-      if (fromScreen && !effectiveState.fromScreen) {
-        effectiveState.fromScreen = fromScreen;
-      }
 
       let isMedicineSelectionMsg = false;
       if (message) {
@@ -397,33 +388,7 @@ class V1Service {
               : null;
 
         if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
-          const availableStateMeds = [
-            ...(effectiveState?.medicinesToAdd || []),
-            ...(effectiveState?.foundMedicines || []),
-            ...(dbState?.medicinesToAdd || []),
-            ...(dbState?.foundMedicines || []),
-          ];
-
-          for (const rawMedData of medsToProcess) {
-            let medData = rawMedData;
-
-            if (typeof rawMedData === "string") {
-              const matchedStateMed = availableStateMeds.find(
-                (m) =>
-                  m &&
-                  (m.id === rawMedData ||
-                    m.client_med_id === rawMedData ||
-                    m.clientMedId === rawMedData ||
-                    m.name === rawMedData ||
-                    m.medicationName === rawMedData),
-              );
-              if (matchedStateMed) {
-                medData = matchedStateMed;
-              } else {
-                medData = { name: rawMedData };
-              }
-            }
-
+          for (const medData of medsToProcess) {
             if (
               medData.selected === false ||
               medData.resolution === "KEEP_EXISTING" ||
@@ -502,7 +467,6 @@ class V1Service {
           if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicationFlowDone = true;
-            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           } else {
             stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           }
@@ -516,7 +480,7 @@ class V1Service {
             displayLabel,
           );
 
-          const responsePayload = buildUnifiedResponse({
+          return buildUnifiedResponse({
             mode: "ONBOARDING",
             actionType: onboardingResult?.action || "MEDICINE_OPTIONS",
             reply: onboardingResult?.message || onboardingResult?.reply || "",
@@ -524,11 +488,6 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
           });
-          responsePayload.canSkip =
-            onboardingResult?.canSkip !== undefined
-              ? onboardingResult.canSkip
-              : canSkipOnboarding(onboardingResult?.state || stateToUpdate);
-          return responsePayload;
         }
 
         // Post-Onboarding (Dashboard Chat Stream): return confirmation response
@@ -581,22 +540,23 @@ class V1Service {
       const allergiesSkipped =
         dbState?.allergiesSkipped === true || inputState?.allergiesSkipped === true;
 
-      const isSkippedValid =
-        (dbState?.hasSkipped === true ||
-          inputState?.hasSkipped === true ||
-          effectiveState?.hasSkipped === true) &&
-        canSkipOnboarding(effectiveState || dbState || inputState);
       const hasUnansweredOptional =
         isOnboardingCompleted &&
         ((!bloodGroup && !bloodGroupSkipped) ||
           ((!allergies || allergies.length === 0) && !allergiesSkipped));
 
+      const isMedicationFlowPending =
+        dbState?.medicationFlowDone !== true &&
+        inputState?.medicationFlowDone !== true &&
+        effectiveState?.medicationFlowDone !== true;
+
       const isNormalChat =
         !hasUnansweredOptional &&
+        !isMedicationFlowPending &&
         (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted || isCompletedStep || isSkippedValid) &&
+          ((isOnboardingCompleted || isCompletedStep) &&
             !isActiveOnboardingStep &&
-            (actionType !== "ONBOARDING" || isCompletedStep || isSkippedValid) &&
+            (actionType !== "ONBOARDING" || isCompletedStep) &&
             actionType !== "OTHER_ACTIONS"));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
@@ -664,9 +624,6 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
-          if (fromScreen && !state.fromScreen) state.fromScreen = fromScreen;
-          if (effectiveState?.fromScreen && !state.fromScreen)
-            state.fromScreen = effectiveState.fromScreen;
         }
 
         if (hasUnansweredOptional && actionType !== "SKIP_ONBOARDING") {
@@ -677,24 +634,9 @@ class V1Service {
           if (!canSkipOnboarding(state)) {
             throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
           }
-          state.hasSkipped = true;
           state.isOnboardingCompleted = true;
-          if (!state.currentStep && dbState && dbState.currentStep) {
-            state.currentStep = dbState.currentStep;
-          }
-
-          await saveOnboardingState(userId, state);
-
-          const responsePayload = buildUnifiedResponse({
-            mode: "ONBOARDING",
-            actionType: "SKIP_ONBOARDING",
-            reply: "",
-            onboardingState: state,
-            options: [],
-            medicines: [],
-          });
-          responsePayload.canSkip = true;
-          return responsePayload;
+          state.hasSkipped = true;
+          state.currentStep = null;
         }
 
         const onboardingResult = await onboardingService.chat(
@@ -706,19 +648,28 @@ class V1Service {
           displayLabel,
         );
 
-        const responsePayload = buildUnifiedResponse({
+        const replyText =
+          onboardingResult?.title && onboardingResult?.message
+            ? `${onboardingResult.title}\n\n${onboardingResult.message}`
+            : onboardingResult?.message || onboardingResult?.reply || "";
+
+        return buildUnifiedResponse({
           mode: "ONBOARDING",
-          actionType: onboardingResult?.action || "ONBOARDING_STEP",
-          reply: onboardingResult?.message || onboardingResult?.reply || "",
+          actionType:
+            actionType === "SKIP_ONBOARDING"
+              ? "SKIP_ONBOARDING"
+              : onboardingResult?.action || "ONBOARDING_STEP",
+          reply: replyText,
+          title: onboardingResult?.title || null,
+          subtitle: onboardingResult?.subtitle || null,
+          fields: onboardingResult?.fields || [],
+          explainer: onboardingResult?.explainer || null,
+          loginSummary: onboardingResult?.loginSummary || null,
+          documentSummary: onboardingResult?.documentSummary || null,
           onboardingState: onboardingResult?.state || state,
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
         });
-        responsePayload.canSkip =
-          onboardingResult?.canSkip !== undefined
-            ? onboardingResult.canSkip
-            : canSkipOnboarding(onboardingResult?.state || state);
-        return responsePayload;
       }
 
       // CASE 4: NORMAL_CHAT (Post-onboarding RAG Chat)
@@ -806,19 +757,15 @@ class V1Service {
         isOnboardingCompleted: true,
         currentStep,
         chatSessionId: resumableState?.chatSessionId || null,
-        resumableState: resumableState ? { ...resumableState, canSkip: false } : null,
-        canSkip: false,
+        resumableState,
       };
     }
-
-    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
 
     return {
       isOnboardingCompleted: false,
       currentStep,
       chatSessionId: resumableState?.chatSessionId || null,
-      resumableState: resumableState ? { ...resumableState, canSkip } : null,
-      canSkip,
+      resumableState,
     };
   }
 
@@ -845,14 +792,11 @@ class V1Service {
       messages = result.items || [];
     }
 
-    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
-
     return {
       chatSessionId,
       messages,
       currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
-      resumableState: resumableState ? { ...resumableState, canSkip } : null,
-      canSkip,
+      resumableState,
     };
   }
 }

@@ -394,7 +394,9 @@ function getNextRequiredOrOptionalStep(state) {
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
 
-    state.isOnboardingCompleted = false;
+    if (!state.hasSkipped) {
+      state.isOnboardingCompleted = false;
+    }
 
     if (!state.medicinesConfirmed && hasExtractedMedicines) {
       state.medicationFlowStarted = true;
@@ -404,13 +406,7 @@ function getNextRequiredOrOptionalStep(state) {
       return "REVIEW_MEDICINES_LIST";
     }
 
-    if (!state.medicationFlowStarted) {
-      state.medicationFlowStarted = true;
-      return "MEDICINE_OPTIONS";
-    }
-    if (state.currentStep) {
-      return state.currentStep;
-    }
+    state.medicationFlowStarted = true;
     return "MEDICINE_OPTIONS";
   }
 
@@ -437,7 +433,7 @@ function canSkipOnboarding(state) {
   }
 
   // S3: if state.flowMode === "UPLOAD": state.documentOwnershipConfirmed is strictly true or strictly false (not null/undefined)
-  if (state.flowMode === "UPLOAD") {
+  if (state.flowMode === "UPLOAD" && !state.profileConfirmed) {
     if (state.documentOwnershipConfirmed !== true && state.documentOwnershipConfirmed !== false) {
       return false;
     }
@@ -539,18 +535,30 @@ function getProfileMismatches(state) {
 function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
   const compareKeys = ["firstName", "lastName", "phoneNumber", "dateOfBirth", "gender", "email"];
 
-  const useDoc =
-    state.useDocumentData !== false &&
-    state.flowMode === "UPLOAD" &&
-    state.documentConfirmed !== false &&
-    !!state.documentData;
+  // const useDoc =
+  //   state.useDocumentData !== false &&
+  //   state.flowMode === "UPLOAD" &&
+  //   state.documentConfirmed !== false &&
+  //   !!state.documentData;
 
-  const docData = useDoc ? state.documentData || {} : {};
+  const docData = state.documentData || {};
 
   let normSource = null;
   if (typeof sourceChoice === "string" && sourceChoice.trim()) {
     const upper = sourceChoice.trim().toUpperCase();
-    if (["DOCUMENT", "DOC", "MEDICAL_DOCUMENT"].includes(upper)) {
+    if (
+      [
+        "DOCUMENT",
+        "DOC",
+        "MEDICAL_DOCUMENT",
+        "USE_DOCUMENT",
+        "USE DOCUMENT",
+        "USE_DOCUMENT_DATA",
+        "DOCUMENT_DATA",
+        "MEDICAL DOCUMENT",
+      ].includes(upper) ||
+      upper.includes("DOCUMENT")
+    ) {
       normSource = "DOCUMENT";
     } else if (
       [
@@ -562,7 +570,12 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
         "APPLE",
         "MICROSOFT",
         "MOBILE",
-      ].includes(upper)
+        "USE_SOCIAL",
+        "USE SOCIAL",
+        "USE_SOCIAL_LOGIN",
+      ].includes(upper) ||
+      upper.includes("SOCIAL") ||
+      upper.includes("LOGIN")
     ) {
       normSource = "LOGIN";
     }
@@ -660,6 +673,7 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.existingUserData.email = null;
     }
   }
+  console.log(`[PROFILE DEBUG] RESULT existingUserData=`, JSON.stringify(state.existingUserData));
 }
 
 function computeCurrentStep(state) {
@@ -817,19 +831,37 @@ async function updateStateFromMessage(state, message, userId = null) {
           "APPLE",
           "MICROSOFT",
           "MOBILE",
+          "USE_SOCIAL",
+          "USE SOCIAL",
+          "USE_SOCIAL_LOGIN",
           "YES",
         ];
-        const docOptions = ["DOCUMENT", "DOC", "MEDICAL_DOCUMENT", "NO"];
-        if (socialOptions.includes(msgUpper)) {
+        const docOptions = [
+          "DOCUMENT",
+          "DOC",
+          "MEDICAL_DOCUMENT",
+          "USE_DOCUMENT",
+          "USE DOCUMENT",
+          "USE_DOCUMENT_DATA",
+          "DOCUMENT_DATA",
+          "MEDICAL DOCUMENT",
+          "NO",
+        ];
+        if (
+          socialOptions.includes(msgUpper) ||
+          msgUpper.includes("SOCIAL") ||
+          msgUpper.includes("LOGIN")
+        ) {
           payload = { source: "LOGIN" };
-        } else if (docOptions.includes(msgUpper)) {
+        } else if (docOptions.includes(msgUpper) || msgUpper.includes("DOCUMENT")) {
           payload = { source: "DOCUMENT" };
         }
       }
 
       if (payload && typeof payload === "object") {
-        if (!payload.source && !payload.edited && !payload.confirmed) {
-          const sourceVal = payload.source || payload.value || payload.option || payload.key;
+        if (!payload.source && !payload.edited) {
+          const sourceVal =
+            payload.source || payload.value || payload.option || payload.key || payload.selected;
           if (typeof sourceVal === "string") {
             const upper = sourceVal.toUpperCase();
             if (
@@ -842,43 +874,97 @@ async function updateStateFromMessage(state, message, userId = null) {
                 "APPLE",
                 "MICROSOFT",
                 "MOBILE",
+                "USE_SOCIAL",
+                "USE SOCIAL",
+                "USE_SOCIAL_LOGIN",
                 "YES",
-              ].includes(upper)
+              ].includes(upper) ||
+              upper.includes("SOCIAL") ||
+              upper.includes("LOGIN")
             ) {
               payload.source = "LOGIN";
-            } else if (["DOCUMENT", "DOC", "MEDICAL_DOCUMENT", "NO"].includes(upper)) {
+            } else if (
+              [
+                "DOCUMENT",
+                "DOC",
+                "MEDICAL_DOCUMENT",
+                "USE_DOCUMENT",
+                "USE DOCUMENT",
+                "USE_DOCUMENT_DATA",
+                "DOCUMENT_DATA",
+                "MEDICAL DOCUMENT",
+                "NO",
+              ].includes(upper) ||
+              upper.includes("DOCUMENT")
+            ) {
               payload.source = "DOCUMENT";
+            } else if (
+              ["MANUAL", "EDIT", "EDIT_MANUALLY", "MANUAL_ENTRY"].includes(upper) ||
+              upper.includes("MANUAL") ||
+              upper.includes("EDIT")
+            ) {
+              payload.source = "MANUAL";
             }
+          }
+
+          if (
+            !payload.source &&
+            (payload.firstName || payload.lastName || payload.dateOfBirth || payload.gender)
+          ) {
+            payload.edited = {
+              firstName: payload.firstName,
+              lastName: payload.lastName,
+              dateOfBirth: payload.dateOfBirth,
+              gender: payload.gender,
+              phoneNumber: payload.phoneNumber,
+              email: payload.email,
+            };
           }
         }
       }
 
       if (payload && payload.confirmed) {
-        mergeAndApplyProfile(state);
+        const sourceToUse = payload.source || state.selectedProfileSource || null;
+        mergeAndApplyProfile(state, sourceToUse);
         state.profileConfirmed = true;
-        state.profileManuallyEdited = false;
+        state.selectedProfileSource =
+          sourceToUse === "DOCUMENT"
+            ? "DOCUMENT"
+            : sourceToUse === "LOGIN" || sourceToUse === "SOCIAL"
+              ? "SOCIAL"
+              : "MANUAL";
+        state.profileManuallyEdited = state.selectedProfileSource === "MANUAL";
         state.stepClarificationNeeded = false;
         state.currentStep = computeCurrentStep(state);
       } else if (payload && payload.source) {
-        mergeAndApplyProfile(state, payload.source);
-        state.profileConfirmed = true;
-        state.profileManuallyEdited = false;
-        state.stepClarificationNeeded = false;
-        state.currentStep = computeCurrentStep(state);
+        if (payload.source === "MANUAL") {
+          state.profileManuallyEdited = true;
+          state.selectedProfileSource = "MANUAL";
+          state.currentStep = "RESOLVE_PROFILE_SOURCE";
+        } else {
+          mergeAndApplyProfile(state, payload.source);
+          state.profileConfirmed = true;
+          state.selectedProfileSource = payload.source === "LOGIN" ? "SOCIAL" : payload.source;
+          state.profileManuallyEdited = false;
+          state.stepClarificationNeeded = false;
+          state.currentStep = computeCurrentStep(state);
+        }
       } else if (payload && payload.edited) {
+        if (payload.edited.gender) {
+          const normG = normalizeGenderLocally(String(payload.edited.gender));
+          if (normG) payload.edited.gender = normG;
+        }
+        if (payload.edited.dateOfBirth) {
+          const normD = normalizeDOB(String(payload.edited.dateOfBirth));
+          if (normD) payload.edited.dateOfBirth = normD;
+        }
+
         const isEditValid = validateEditedFields(payload.edited);
         if (isEditValid) {
-          if (payload.edited.gender) {
-            const normG = normalizeGenderLocally(String(payload.edited.gender));
-            if (normG) payload.edited.gender = normG;
-          }
-          if (payload.edited.dateOfBirth) {
-            const normD = normalizeDOB(String(payload.edited.dateOfBirth));
-            if (normD) payload.edited.dateOfBirth = normD;
-          }
           mergeAndApplyProfile(state, null, payload.edited);
           state.profileManuallyEdited = true;
           state.profileConfirmed = true;
+          state.selectedProfileSource = "MANUAL";
           state.stepClarificationNeeded = false;
           state.currentStep = computeCurrentStep(state);
         } else {
@@ -1823,6 +1909,7 @@ async function getLocalizedResponse(step, state) {
         "Use Document",
         state.preferredLanguage,
       );
+      console.log("[DOCUMENT DETAILS]====", useDocText);
 
       let loginSummary, documentSummary;
       if (loginName) {
@@ -1855,6 +1942,7 @@ async function getLocalizedResponse(step, state) {
           state.preferredLanguage,
           { provider: useDocText },
         );
+        console.log("[DOCUMENT DETAILS]====", useDocText);
       }
 
       const displayKeys = [
@@ -2080,9 +2168,32 @@ async function getLocalizedResponse(step, state) {
         ],
       };
 
-    case "ASK_BLOOD_GROUP":
+    case "ASK_BLOOD_GROUP": {
+      const shouldShowGreeting =
+        getMissingRequiredStep(state) === null &&
+        state.profileConfirmed === true &&
+        !state.profileGreetingShown;
+
+      if (shouldShowGreeting) {
+        state.profileGreetingShown = true;
+      }
+
+      const greetingTitle = shouldShowGreeting
+        ? await getLocalizedText(
+            "onboarding.complete.message",
+            "Thank you! Onboarding is complete.",
+            state.preferredLanguage,
+          )
+        : null;
+
       return {
         action: "ASK_BLOOD_GROUP",
+        title: greetingTitle,
+        subtitle: await getLocalizedText(
+          "onboarding.askBloodGroup.message",
+          "What is your blood group? You can skip this question.",
+          state.preferredLanguage,
+        ),
         message: await getLocalizedText(
           "onboarding.askBloodGroup.message",
           "What is your blood group? You can skip this question.",
@@ -2096,10 +2207,34 @@ async function getLocalizedResponse(step, state) {
           ...bloodGroupTypeValues.map((bg) => ({ label: bg, value: bg })),
         ],
       };
+    }
 
-    case "ASK_ALLERGIES":
+    case "ASK_ALLERGIES": {
+      const shouldShowGreeting =
+        getMissingRequiredStep(state) === null &&
+        state.profileConfirmed === true &&
+        !state.profileGreetingShown;
+
+      if (shouldShowGreeting) {
+        state.profileGreetingShown = true;
+      }
+
+      const greetingTitle = shouldShowGreeting
+        ? await getLocalizedText(
+            "onboarding.complete.message",
+            "Thank you! Onboarding is complete.",
+            state.preferredLanguage,
+          )
+        : null;
+
       return {
         action: "ASK_ALLERGIES",
+        title: greetingTitle,
+        subtitle: await getLocalizedText(
+          "onboarding.askAllergies.message",
+          "Do you have any allergies? You can skip this question.",
+          state.preferredLanguage,
+        ),
         message: await getLocalizedText(
           "onboarding.askAllergies.message",
           "Do you have any allergies? You can skip this question.",
@@ -2112,6 +2247,7 @@ async function getLocalizedResponse(step, state) {
           },
         ],
       };
+    }
 
     case "REVIEW_MEDICINES_LIST":
       return {
@@ -2271,6 +2407,7 @@ async function saveOnboardingState(userId, state) {
     const shouldWritePatientProfile =
       state.flowMode === "MANUAL" ||
       state.flowMode === "SKIP" ||
+      state.profileConfirmed === true ||
       (state.flowMode === "UPLOAD" &&
         state.documentOwnershipConfirmed === true &&
         (state.profileConfirmed === true || !state.hasLoginData));
