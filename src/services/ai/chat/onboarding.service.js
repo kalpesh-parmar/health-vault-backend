@@ -2496,6 +2496,8 @@ async function getLocalizedResponse(step, state) {
           labFindings,
           medicationFindings,
           keyFindings: labFindings.length > 0 ? labFindings : medicationFindings,
+          s3Key: docRecord?.s3Key || null,
+          fileUrl: docRecord?.fileUrl || null,
         },
         suggestedQuestions,
         options: [],
