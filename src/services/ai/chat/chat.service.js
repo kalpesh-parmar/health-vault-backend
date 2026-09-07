@@ -556,7 +556,6 @@ ${chunksContent}`;
           signal: abortSignal,
         });
       }
-
       return {
         answer,
         mode,
@@ -686,9 +685,7 @@ ${chunksContent}`;
       }
 
       const _reqStartTime = Date.now();
-      const baseTime = onChunk?.startTime || _reqStartTime;
-      // eslint-disable-next-line no-console
-      console.log(`[STREAM DEBUG] Chat message processing started +${Date.now() - baseTime}ms`);
+      // const baseTime = onChunk?.startTime || _reqStartTime;
 
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
@@ -765,10 +762,10 @@ ${chunksContent}`;
             previous: preferredLanguage,
           });
           detectedLanguage = normDetected;
-          // eslint-disable-next-line no-console
-          console.log(
-            `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
-          );
+
+          // console.log(
+          //   `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
+          // );
         }
       } catch (err) {
         debugLogger.error("sendMessage: Failed to detect language via ML model", {
@@ -951,29 +948,53 @@ ${chunksContent}`;
               const rawPara = rawParagraphs[i];
               if (!rawPara.trim()) continue;
 
-              let translatedPara = rawPara;
+              if (onChunk && i > 0) {
+                // If it is not the first paragraph of the summary, prefix with double newline
+                onChunk("\n\n");
+              }
+
+              let fullTranslatedPara = "";
+
               if (patientPreferredLang !== "english") {
-                try {
-                  translatedPara = await aiClient.translate(
-                    rawPara,
-                    "english",
-                    patientPreferredLang,
-                  );
-                } catch (err) {
-                  debugLogger.error("sendMessage: Paragraph translation failed", {
-                    error: err.message,
-                  });
+                // Split paragraph into sentences to stream translation faster
+                const sentences = rawPara.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [rawPara];
+
+                for (let s = 0; s < sentences.length; s++) {
+                  if (abortSignal?.aborted) break;
+                  let rawSentence = sentences[s];
+                  if (!rawSentence.trim()) continue;
+
+                  let translatedSentence = rawSentence;
+                  try {
+                    translatedSentence = await aiClient.translate(
+                      rawSentence.trim(),
+                      "english",
+                      patientPreferredLang,
+                    );
+                  } catch (err) {
+                    debugLogger.error("sendMessage: Sentence translation failed", {
+                      error: err.message,
+                    });
+                  }
+
+                  // Add space before next sentence if not first and doesn't start with space
+                  if (s > 0 && !translatedSentence.startsWith(" ")) {
+                    translatedSentence = " " + translatedSentence;
+                  }
+
+                  fullTranslatedPara += translatedSentence;
+                  if (onChunk) {
+                    await streamTextLikeChat(translatedSentence, onChunk, abortSignal, 15);
+                  }
+                }
+              } else {
+                fullTranslatedPara = rawPara;
+                if (onChunk) {
+                  await streamTextLikeChat(fullTranslatedPara, onChunk, abortSignal, 15);
                 }
               }
 
-              translatedSummaryParts.push(translatedPara);
-              if (onChunk) {
-                // If it is not the first paragraph of the summary, prefix with double newline
-                if (i > 0) {
-                  onChunk("\n\n");
-                }
-                await streamTextLikeChat(translatedPara, onChunk, abortSignal, 15);
-              }
+              translatedSummaryParts.push(fullTranslatedPara);
             }
           }
 
@@ -1104,8 +1125,6 @@ ${chunksContent}`;
         `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
         { intent, documentScope, detectedLanguage },
       );
-      // eslint-disable-next-line no-console
-      console.log(`[STREAM DEBUG] Intent analyzed: "${intent}" +${Date.now() - baseTime}ms`);
 
       let finalDocumentIds = [];
       if (intent === "DOCUMENT" || intent === "COMPARE") {
@@ -1284,6 +1303,12 @@ ${chunksContent}`;
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
+      // Prevent small models (like medgemma:4b) from mimicking previous message languages
+      // by injecting a strong reminder into the very last user message.
+      if (history.length > 0 && history[history.length - 1].role === "user") {
+        history[history.length - 1].content +=
+          `\n\n[SYSTEM REMINDER: You MUST answer strictly in ${detectedLanguage.toUpperCase()} ONLY, regardless of the language used in previous messages.]`;
+      }
       let assistantText = NO_CONTEXT_REPLY;
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
@@ -1327,8 +1352,7 @@ ${chunksContent}`;
       if (intent === "GENERAL") {
         try {
           debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for GENERAL (Qwen)");
-          // eslint-disable-next-line no-console
-          console.log(`[STREAM DEBUG] Calling Qwen LLM (GENERAL) +${Date.now() - baseTime}ms`);
+
           const qwenStartTime = Date.now();
           const aiResponse = await this.qwenHealthChat(
             history,
@@ -1608,10 +1632,6 @@ ${chunksContent}`;
               debugLogger.info(
                 `sendMessage: [SELECTION] ${JSON.stringify({ selectedChunks: summaryChunks.length, chunksPerDocument: chunksPerDocLog })}`,
               );
-              // eslint-disable-next-line no-console
-              console.log(
-                `[STREAM DEBUG] RAG chunks retrieved: ${summaryChunks.length} chunks +${Date.now() - baseTime}ms`,
-              );
 
               // Build coverage string for Qwen
               if (medicalEntities.length > 0) {
@@ -1646,10 +1666,7 @@ ${chunksContent}`;
             debugLogger.info(
               "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
             );
-            // eslint-disable-next-line no-console
-            console.log(
-              `[STREAM DEBUG] Calling Qwen LLM (DOCUMENT_RAG) +${Date.now() - baseTime}ms`,
-            );
+
             const qwenStartTime = Date.now();
             const aiResponse = await this.qwenHealthChat(
               history,

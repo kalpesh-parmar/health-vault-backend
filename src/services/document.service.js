@@ -258,6 +258,7 @@ const STAGES_PIPELINE = [
         if (rawTextToSummarize) {
           try {
             summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+            console.log("[ocrService.generateSummary] summaryEnglish", summaryEnglish);
             ctx.checkpointData.summaryEnglish = summaryEnglish;
             if (ctx.structured) {
               ctx.structured.summaryEnglish = summaryEnglish;

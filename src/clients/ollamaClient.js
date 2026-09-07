@@ -229,34 +229,15 @@ class OllamaClient {
     };
 
     try {
-      const requestStartTime = Date.now();
+      // const requestStartTime = Date.now();
       const response = await this.requestWithRetry(config);
-      const baseTime = (onChunk && onChunk.startTime) || requestStartTime;
 
-      // eslint-disable-next-line no-console
-      console.log(`[STREAM DEBUG] Ollama response received +${Date.now() - baseTime}ms`);
-
-      // STREAMING TEST ONLY
-      // eslint-disable-next-line no-console
-      console.log(`[STREAM TEST] LLM START`);
-      const startTime = Date.now();
-      let firstChunkReceived = false;
-      let totalChunks = 0;
+      // let totalChunks = 0;
       let buffer = "";
       let isCompleted = false;
 
       return new Promise((resolve, reject) => {
         response.data.on("data", (chunk) => {
-          // eslint-disable-next-line no-console
-          console.log(`[STREAM DEBUG] Ollama data +${Date.now() - baseTime}ms`);
-
-          if (!firstChunkReceived) {
-            // STREAMING TEST ONLY
-            // eslint-disable-next-line no-console
-            console.log(`[STREAM TEST] FIRST LLM CHUNK after ${Date.now() - startTime}ms`);
-            firstChunkReceived = true;
-          }
-
           buffer += chunk.toString();
           const lines = buffer.split("\n");
           // Keep the last partial line in the buffer
@@ -266,34 +247,20 @@ class OllamaClient {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
-              if (parsed.message?.content) {
-                totalChunks++;
+              const msg = parsed.message || {};
+              let chunkText = msg.content || "";
 
-                if (totalChunks === 1) {
-                  // eslint-disable-next-line no-console
-                  console.log(`[STREAM DEBUG] FIRST TOKEN GENERATED +${Date.now() - baseTime}ms`);
-                }
+              if (!chunkText && msg.thinking) {
+                chunkText = msg.thinking;
+              }
 
-                if (totalChunks % 25 === 0) {
-                  // eslint-disable-next-line no-console
-                  console.log(
-                    `[STREAM DEBUG] Progress: ${totalChunks} chunks generated +${Date.now() - baseTime}ms`,
-                  );
-                }
-
-                onChunk(parsed.message.content);
+              if (chunkText) {
+                // totalChunks++;
+                onChunk(chunkText);
               }
               if (parsed.done) {
-                // STREAMING TEST ONLY
-                // eslint-disable-next-line no-console
-                console.log(`[STREAM TEST] LLM COMPLETE after ${Date.now() - startTime}ms`);
-                // eslint-disable-next-line no-console
-                console.log(`[STREAM TEST] TOTAL CHUNKS: ${totalChunks}`);
-
                 if (!isCompleted) {
                   isCompleted = true;
-                  // eslint-disable-next-line no-console
-                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
                 }
                 resolve(parsed);
               }
@@ -311,8 +278,6 @@ class OllamaClient {
               if (parsed.done) {
                 if (!isCompleted) {
                   isCompleted = true;
-                  // eslint-disable-next-line no-console
-                  console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
                 }
                 resolve(parsed);
                 resolved = true;
@@ -324,8 +289,6 @@ class OllamaClient {
           if (!resolved) {
             if (!isCompleted) {
               isCompleted = true;
-              // eslint-disable-next-line no-console
-              console.log(`[STREAM DEBUG] stream completed +${Date.now() - baseTime}ms`);
             }
             resolve({ done: true });
           }
