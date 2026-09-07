@@ -1,5 +1,5 @@
 {
-  "id": "5376f481-9b2d-4650-91d5-d35767bba3de",
+  "id": "7a54c8e9-40ac-4d68-824a-c2ba1207d1e3",
   "prevId": "e612022d-9575-4d60-bc7c-beb9bed0357d",
   "version": "7",
   "dialect": "postgresql",
@@ -2617,7 +2617,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "double precision",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -2824,7 +2824,7 @@
         },
         "dose_per_intake": {
           "name": "dose_per_intake",
-          "type": "double precision",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

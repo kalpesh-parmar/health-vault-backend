@@ -135,6 +135,7 @@ const STAGES_PIPELINE = [
     timeoutMs: env.stageTimeoutMs || 120000,
     message: messageConstants.UPLOADING_DOCUMENT,
     isSatisfied: (ctx) =>
+      !ctx.file?.buffer &&
       Boolean(
         ctx.job?.checkpointData?.uploaded &&
         (ctx.job?.checkpointData?.s3Bucket || ctx.record?.bucket),
@@ -165,6 +166,7 @@ const STAGES_PIPELINE = [
 
       ctx.checkpointData.uploaded = true;
       ctx.checkpointData.s3Bucket = bucket;
+      ctx.checkpointData.s3Key = fileKey;
     },
   },
   {
@@ -172,13 +174,16 @@ const STAGES_PIPELINE = [
     timeoutMs: env.ocrStageTimeoutMs || 300000,
     message: messageConstants.EXTRACTING_DOCUMENT,
     isSatisfied: (ctx) =>
+      !ctx.file?.buffer &&
       Boolean(ctx.rawOcrData || ctx.job?.rawOcrData || ctx.job?.checkpointData?.ocrArtifactKey),
     run: async (ctx) => {
       const ocrEngine = ctx.ocr || defaultProvider;
       const bucket = ctx.bucket || ctx.job?.checkpointData?.s3Bucket || env.patientDocumentsBucket;
+      const s3Key =
+        ctx.s3Key || ctx.checkpointData?.s3Key || ctx.job?.checkpointData?.s3Key || ctx.fileKey;
       const ocrResponse = await ocrEngine.runFromStorage({
         bucket,
-        fileKey: ctx.fileKey,
+        fileKey: s3Key,
         mimeType: ctx.record?.mimeType,
         traceId: `ocr_job_${ctx.fileKey}`,
       });
@@ -219,8 +224,8 @@ const STAGES_PIPELINE = [
         patientContext: ctx.record?.patientContext || null,
         rawOcr,
       });
-
       const { rawOcrData: updatedRawOcr, structured } = normalizedData || {};
+
       if (updatedRawOcr) {
         ctx.rawOcrData = updatedRawOcr;
       }
@@ -315,6 +320,7 @@ const STAGES_PIPELINE = [
           extractedStructuredData: ctx.structured,
           graphs: ctx.graphs || [],
           embeddingsGenerated: false,
+          skipMedications: true,
         },
       });
 
@@ -901,7 +907,11 @@ async function runExtraction({
       }
     }
 
-    emitter.done();
+    // emitter.done();
+    emitter.done(undefined, {
+      documentId: ctx.savedResult?.document?.id || ctx.checkpointData?.documentId || null,
+      document: ctx.savedResult?.document || null,
+    });
 
     if (jobId) {
       await documentProcessingJobRepository

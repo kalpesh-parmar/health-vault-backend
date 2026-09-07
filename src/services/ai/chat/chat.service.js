@@ -18,6 +18,7 @@ const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const { containsEntity } = require("../../../utils/synonyms");
+const { toDbDateOnlyString } = require("../../../utils/dateUtils");
 
 // Debug logger
 const debugLogger = {
@@ -470,7 +471,7 @@ class ChatService {
           }
           const fileName = docData.fileName || "Unknown";
           const reportDate = docData.reportDate
-            ? new Date(docData.reportDate).toISOString().split("T")[0]
+            ? toDbDateOnlyString(docData.reportDate) || "Unknown"
             : "Unknown";
 
           // Fallback context: extract matching structured summary tests if present

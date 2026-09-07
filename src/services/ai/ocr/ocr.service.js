@@ -17,7 +17,8 @@ const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 // const { fileTypeValue } = require("../../../enums/fileType");
-const { normalizeDocumentType } = require("../../../enums/documentType");
+const { normalizeDocumentType, documentType } = require("../../../enums/documentType");
+const { normalizeToDateOnly } = require("../../../utils/dateUtils");
 const uploadFileService = require("../../uploadFile.service");
 const {
   medicalDocumentClassifierService,
@@ -940,9 +941,102 @@ Return STRICT JSON only:
       rawParsedCandidate.remarks ||
       (rawParsedCandidate.rawText ? rawParsedCandidate.rawText.slice(0, 200) : "");
 
-    const analyzedDocType = normalizeDocumentType(
-      rawParsedCandidate.documentType || rawParsedCandidate.reportType,
-    );
+    let rawCandidateDocType = rawParsedCandidate.documentType || rawParsedCandidate.reportType;
+
+    const rawCandidateText = (rawParsedCandidate.rawText || "").toLowerCase();
+    const candidateMeds = rawParsedCandidate.medications || [];
+    const candidateLab =
+      rawParsedCandidate.testResults ||
+      rawParsedCandidate.labTests ||
+      rawParsedCandidate.tests ||
+      [];
+
+    if (
+      !rawCandidateDocType ||
+      rawCandidateDocType === "LAB_REPORT" ||
+      rawCandidateDocType === "OTHER_MEDICAL_DOCUMENT"
+    ) {
+      if (
+        (candidateMeds.length > 0 ||
+          /\b(?:prescription|rx|tab\.|tabs\.|cap\.|capsule|dr\.|clinic)\b/i.test(
+            rawCandidateText,
+          )) &&
+        candidateLab.length === 0
+      ) {
+        rawCandidateDocType = "PRESCRIPTION";
+      }
+    }
+
+    const analyzedDocType = normalizeDocumentType(rawCandidateDocType);
+
+    const formattedMeds = (rawParsedCandidate.medications || []).map((m) => {
+      const qty = m.quantity || m.qty || null;
+      const duration = m.duration || null;
+      const instructions =
+        m.instructions &&
+        !/^\d+$/.test(String(m.instructions).trim()) &&
+        String(m.instructions).trim() !== String(qty).trim() &&
+        String(m.instructions).trim() !== String(duration).trim()
+          ? m.instructions
+          : null;
+      return {
+        name: m.name || null,
+        dosage: m.dosage || m.timeOfDay || null,
+        frequency: m.frequency || null,
+        duration: duration ? String(duration).trim() : null,
+        quantity: qty ? String(qty).trim() : null,
+        qty: qty ? String(qty).trim() : null,
+        instructions,
+        type: m.type || null,
+      };
+    });
+
+    let finalSummaryValue = summaryValue;
+    const isPrescriptionDoc =
+      analyzedDocType === documentType.PRESCRIPTION ||
+      analyzedDocType === "PRESCRIPTION" ||
+      analyzedDocType === "PRESCERIPTION";
+
+    if (
+      isPrescriptionDoc &&
+      (finalSummaryValue.toLowerCase().includes("cbc") ||
+        finalSummaryValue.toLowerCase().includes("blood test") ||
+        finalSummaryValue.toLowerCase().includes("hemoglobin") ||
+        !finalSummaryValue ||
+        finalSummaryValue === "No summary available.")
+    ) {
+      const parts = [];
+      const dr = rawParsedCandidate.doctorName || rawParsedCandidate.doctor?.name;
+      const hosp = rawParsedCandidate.hospitalName || rawParsedCandidate.hospital?.name;
+      const pat = name;
+      const dateStr = normalizeDate(rawParsedCandidate.reportDate);
+
+      const headerDetails = [
+        dr ? `Dr. ${dr.replace(/^Dr\.?\s*/i, "")}` : null,
+        hosp ? `at ${hosp}` : null,
+        pat ? `for ${pat}` : null,
+        dateStr ? `dated ${dateStr}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      parts.push(`Prescription ${headerDetails}.`);
+
+      if (formattedMeds.length > 0) {
+        const medDetails = formattedMeds
+          .map((m) => {
+            const medParts = [m.name];
+            if (m.dosage) medParts.push(`dosage: ${m.dosage}`);
+            if (m.duration) medParts.push(`duration: ${m.duration}`);
+            if (m.quantity || m.qty) medParts.push(`quantity: ${m.quantity || m.qty}`);
+            if (m.instructions) medParts.push(`instructions: ${m.instructions}`);
+            return medParts.join(" (") + (medParts.length > 1 ? ")" : "");
+          })
+          .join(", ");
+        parts.push(`Prescribed medications: ${medDetails}.`);
+      }
+
+      finalSummaryValue = parts.join(" ").trim();
+    }
 
     const mapped = {
       documentType: analyzedDocType,
@@ -999,13 +1093,7 @@ Return STRICT JSON only:
           : rawParsedCandidate.diagnosis
             ? [rawParsedCandidate.diagnosis]
             : [],
-        medications: (rawParsedCandidate.medications || []).map((m) => ({
-          name: m.name || null,
-          dosage: m.dosage || null,
-          frequency: m.frequency || null,
-          duration: m.duration || null,
-          instructions: m.instructions || null,
-        })),
+        medications: formattedMeds,
         labResults: (
           rawParsedCandidate.testResults ||
           rawParsedCandidate.labTests ||
@@ -1018,7 +1106,7 @@ Return STRICT JSON only:
           normalRange: t.referenceRange || t.normalRange || null,
           isAbnormal: t.status === "ABNORMAL",
         })),
-        summary: summaryValue,
+        summary: finalSummaryValue,
       },
     };
 
@@ -1164,6 +1252,7 @@ ${rawText}
     };
 
     const medications = buildMedications(normalized);
+    const labResults = buildLabResults(normalized);
 
     let summaryText = normalized.summary;
     if (!summaryText) {
@@ -1172,11 +1261,39 @@ ${rawText}
         : "No summary available.";
     }
 
-    const detectedDocumentType = normalizeDocumentType(
+    let rawDetectedType =
       ocrPayload?.documentType ||
-        ocrPayload?.medicalExtraction?.reportType ||
-        ocrPayload?.reportType,
-    );
+      ocrPayload?.medicalExtraction?.reportType ||
+      ocrPayload?.reportType;
+
+    // Content-based heuristic check: Detect PRESCRIPTION vs LAB_REPORT from actual data
+    const fullTextContent = (normalized.fullText || "").toLowerCase();
+    const hasPrescriptionIndicators =
+      medications.length > 0 ||
+      (normalized.prescriptions && normalized.prescriptions.length > 0) ||
+      /\b(?:prescription|rx|tab\.|tabs\.|cap\.|capsule|syrup|dosage|clinic|dr\.)\b/i.test(
+        fullTextContent,
+      );
+    const hasLabIndicators =
+      labResults.length > 0 ||
+      (normalized.labReports && normalized.labReports.length > 0) ||
+      /\b(?:hemoglobin|wbc|rbc|platelet|cholesterol|bilirubin|creatinine|reference range|blood test|cbc report|pathology)\b/i.test(
+        fullTextContent,
+      );
+
+    if (
+      !rawDetectedType ||
+      rawDetectedType === "LAB_REPORT" ||
+      rawDetectedType === "OTHER_MEDICAL_DOCUMENT"
+    ) {
+      if (hasPrescriptionIndicators && !hasLabIndicators) {
+        rawDetectedType = "PRESCRIPTION";
+      } else if (hasLabIndicators && !hasPrescriptionIndicators) {
+        rawDetectedType = "LAB_REPORT";
+      }
+    }
+
+    const detectedDocumentType = normalizeDocumentType(rawDetectedType);
 
     const summary = {
       summary: summaryText,
@@ -1190,7 +1307,7 @@ ${rawText}
 
     const allergyEntities = pickEntities(normalized.medicalEntities, "allergy");
     const bloodGroupEntities = pickEntities(normalized.medicalEntities, "blood_group");
-    const labResults = buildLabResults(normalized);
+
     const doctorName =
       asObject(normalized.doctorInfo).name ||
       pickFirstField(normalized.prescriptions, "doctorName") ||
@@ -1206,6 +1323,33 @@ ${rawText}
       pickEntities(normalized.medicalEntities, "patient_name")[0]?.name ||
       patientContext?.fullName ||
       null;
+    const patientAge =
+      asObject(normalized.patientInfo).age ||
+      ocrPayload?.medicalExtraction?.patientInfo?.age ||
+      ocrPayload?.patient?.age ||
+      ocrPayload?.age ||
+      null;
+    const patientGender = normalizeGender(
+      asObject(normalized.patientInfo).gender ||
+        ocrPayload?.medicalExtraction?.patientInfo?.gender ||
+        ocrPayload?.patient?.gender ||
+        ocrPayload?.gender ||
+        null,
+    );
+    const patientAddress =
+      asObject(normalized.patientInfo).address ||
+      ocrPayload?.medicalExtraction?.patientInfo?.address ||
+      ocrPayload?.patient?.address ||
+      ocrPayload?.address ||
+      null;
+    const patientDob = normalizeDate(
+      asObject(normalized.patientInfo).dateOfBirth ||
+        ocrPayload?.medicalExtraction?.patientInfo?.dateOfBirth ||
+        ocrPayload?.patient?.dateOfBirth ||
+        ocrPayload?.dateOfBirth ||
+        null,
+    );
+
     const diagnosis = buildDiagnosis(normalized, summary);
     const recommendations = uniqueStrings([
       ...asArray(normalized.recommendations).map((v) =>
@@ -1216,12 +1360,56 @@ ${rawText}
         typeof v === "string" ? v : JSON.stringify(v),
       ),
     ]);
-    const finalSummary = summary?.summary || normalized.summary || "";
+    let finalSummary = this.sanitizeMedicalSummary(summary?.summary || normalized.summary || "");
+
+    const isPrescriptionDoc =
+      detectedDocumentType === documentType.PRESCRIPTION ||
+      detectedDocumentType === "PRESCRIPTION" ||
+      detectedDocumentType === "PRESCERIPTION";
+
+    if (
+      isPrescriptionDoc &&
+      (finalSummary.toLowerCase().includes("cbc") ||
+        finalSummary.toLowerCase().includes("blood test") ||
+        finalSummary.toLowerCase().includes("hemoglobin") ||
+        !finalSummary ||
+        finalSummary === "No summary available.")
+    ) {
+      const parts = [];
+      const dr = doctorName ? `Dr. ${doctorName.replace(/^Dr\.?\s*/i, "")}` : null;
+      const hosp = hospitalName ? `at ${hospitalName}` : null;
+      const pat = patientName ? `for ${patientName}` : null;
+      const dateStr = normalized.reportDate || pickReportDate(normalized);
+      const datePart = dateStr ? `dated ${dateStr}` : null;
+
+      const headerDetails = [dr, hosp, pat, datePart].filter(Boolean).join(" ");
+      parts.push(`Prescription ${headerDetails}.`);
+
+      if (medications.length > 0) {
+        const medDetails = medications
+          .map((m) => {
+            const medParts = [m.name];
+            if (m.dosage) medParts.push(`dosage: ${m.dosage}`);
+            if (m.duration) medParts.push(`duration: ${m.duration}`);
+            if (m.quantity || m.qty) medParts.push(`quantity: ${m.quantity || m.qty}`);
+            if (m.instructions) medParts.push(`instructions: ${m.instructions}`);
+            return medParts.join(" (") + (medParts.length > 1 ? ")" : "");
+          })
+          .join(", ");
+        parts.push(`Prescribed medications: ${medDetails}.`);
+      }
+
+      finalSummary = parts.join(" ").trim();
+    }
 
     const structured = {
       patientInfo: {
         ...asObject(normalized.patientInfo),
         ...(patientName ? { name: patientName } : {}),
+        ...(patientAge ? { age: patientAge } : {}),
+        ...(patientGender ? { gender: patientGender } : {}),
+        ...(patientAddress ? { address: patientAddress } : {}),
+        ...(patientDob ? { dateOfBirth: patientDob } : {}),
       },
       hospitalInfo: {
         ...asObject(normalized.hospitalInfo),
@@ -1273,6 +1461,31 @@ ${rawText}
     };
 
     return { normalized, rawOcrData, structured, summary };
+  }
+
+  sanitizeMedicalSummary(value) {
+    if (!value || typeof value !== "string") {
+      return "";
+    }
+
+    let cleaned = value.trim();
+
+    // Remove obvious AI/schema commentary
+    cleaned = cleaned
+      .replace(/The schema is incorrect[^.]*\./gi, "")
+      .replace(/The schema requires[^.]*\./gi, "")
+      .replace(/The document type must be[^.]*\./gi, "")
+      .replace(/as per the provided schema[^.]*\./gi, "");
+
+    // Collapse repeated sentences/paragraphs
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const uniqueSentences = [...new Set(sentences)];
+
+    return uniqueSentences.join(" ").trim();
   }
 
   async extractViaExternalService(file, preferredLanguage) {
@@ -1486,7 +1699,9 @@ ${rawText}
         ocrStatus: ocrStatus.COMPLETED,
         ocrExtractedText: ocrResult.rawText,
         structuredExtractedData: structuredData,
-        reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
+        reportDate: structuredData.reportDate
+          ? new Date(`${normalizeToDateOnly(structuredData.reportDate)}T00:00:00Z`)
+          : null,
         hospitalName: structuredData.hospitalName || null,
         doctorName: structuredData.doctorName || null,
         remarks: structuredData.remarks || null,
@@ -1628,7 +1843,9 @@ ${rawText}
           ocrStatus: ocrStatus.COMPLETED,
           ocrExtractedText: ocrResult.rawText,
           structuredExtractedData: structuredData,
-          reportDate: structuredData.reportDate ? new Date(structuredData.reportDate) : null,
+          reportDate: structuredData.reportDate
+            ? new Date(`${normalizeToDateOnly(structuredData.reportDate)}T00:00:00Z`)
+            : null,
           hospitalName: structuredData.hospitalName || null,
           doctorName: structuredData.doctorName || null,
           remarks: structuredData.remarks || null,

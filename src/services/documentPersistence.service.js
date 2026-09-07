@@ -221,38 +221,41 @@ class DocumentPersistenceService {
     });
 
     const insertedMedications = [];
-    for (const row of medicationRows) {
-      if (row.clientMedId) {
-        const [savedMed] = await tx
-          .insert(medication)
-          .values(row)
-          .onConflictDoUpdate({
-            target: [medication.userId, medication.clientMedId],
-            set: {
-              patientCode: row.patientCode,
-              medicationName: row.medicationName,
-              medicationType: row.medicationType,
-              prescribedBy: row.prescribedBy,
-              dosePerIntake: row.dosePerIntake,
-              frequency: row.frequency,
-              medicationSchedule: row.medicationSchedule,
-              foodFrequency: row.foodFrequency,
-              startDate: row.startDate,
-              endDate: row.endDate,
-              ongoing: row.ongoing,
-              totalQuantity: row.totalQuantity,
-              unit: row.unit,
-              dailyConsumption: row.dailyConsumption,
-              reminderBeforeMinutes: row.reminderBeforeMinutes,
-              notes: row.notes,
-              updatedAt: new Date(),
-            },
-          })
-          .returning();
-        insertedMedications.push(savedMed);
-      } else {
-        const [savedMed] = await tx.insert(medication).values(row).returning();
-        insertedMedications.push(savedMed);
+    const skipMedications = !!payload?.skipMedications;
+    if (!skipMedications) {
+      for (const row of medicationRows) {
+        if (row.clientMedId) {
+          const [savedMed] = await tx
+            .insert(medication)
+            .values(row)
+            .onConflictDoUpdate({
+              target: [medication.userId, medication.clientMedId],
+              set: {
+                patientCode: row.patientCode,
+                medicationName: row.medicationName,
+                medicationType: row.medicationType,
+                prescribedBy: row.prescribedBy,
+                dosePerIntake: row.dosePerIntake,
+                frequency: row.frequency,
+                medicationSchedule: row.medicationSchedule,
+                foodFrequency: row.foodFrequency,
+                startDate: row.startDate,
+                endDate: row.endDate,
+                ongoing: row.ongoing,
+                totalQuantity: row.totalQuantity,
+                unit: row.unit,
+                dailyConsumption: row.dailyConsumption,
+                reminderBeforeMinutes: row.reminderBeforeMinutes,
+                notes: row.notes,
+                updatedAt: new Date(),
+              },
+            })
+            .returning();
+          insertedMedications.push(savedMed);
+        } else {
+          const [savedMed] = await tx.insert(medication).values(row).returning();
+          insertedMedications.push(savedMed);
+        }
       }
     }
 

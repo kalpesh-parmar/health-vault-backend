@@ -177,7 +177,7 @@ paths:
               properties:
                 actionType:
                   type: string
-                  description: Optional action type (e.g. ADD_DOCUMENT, ADD_MEDICINE, NORMAL_CHAT, OTHER_ACTIONS)
+                  description: Optional action type (e.g. ADD_DOCUMENT, ADD_MEDICINE, NORMAL_CHAT, OTHER_ACTIONS, SKIP_ONBOARDING)
                   example: "ADD_MEDICINE"
                 actionData:
                   type: object

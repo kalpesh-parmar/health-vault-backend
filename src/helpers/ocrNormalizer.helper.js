@@ -173,31 +173,69 @@ function pickFirstField(rows, field) {
   return null;
 }
 
+function sanitizeMedicationInstructions(instructions, quantity, duration) {
+  if (!instructions || typeof instructions !== "string") return null;
+  const trimmed = instructions.trim();
+  if (!trimmed) return null;
+  // If instructions is purely a number (e.g. "30", "4"), or matches quantity/duration
+  if (/^\d+$/.test(trimmed)) return null;
+  if (/^\d+\s*(?:tablets?|tabs?|caps?|capsules?|pills?|times?|x)$/i.test(trimmed)) {
+    return null;
+  }
+  if (quantity && String(quantity).trim().toLowerCase() === trimmed.toLowerCase()) return null;
+  if (duration && String(duration).trim().toLowerCase() === trimmed.toLowerCase()) return null;
+  return trimmed;
+}
+
 function buildMedications(normalized) {
   const medications = [];
 
   for (const med of normalized.medications || []) {
     if (!med) continue;
+    const qty = med?.quantity || med?.qty || null;
+    const duration = med?.duration || null;
+    const rawDosage = med?.dosage || med?.dose || med?.timeOfDay || null;
+    const instructions = sanitizeMedicationInstructions(
+      med?.instructions || med?.notes,
+      qty,
+      duration,
+    );
+
     medications.push({
-      dosage: med?.dosage || med?.dose || null,
-      duration: med?.duration || null,
+      dosage: rawDosage ? String(rawDosage).trim() : null,
+      duration: duration ? String(duration).trim() : null,
       frequency: med?.frequency || null,
-      instructions: med?.instructions || med?.notes || null,
+      instructions,
       name: med?.name || med?.medicineName || med?.medicationName || null,
       timing: med?.timing || med?.when || null,
+      quantity: qty ? String(qty).trim() : null,
+      qty: qty ? String(qty).trim() : null,
+      type: med?.type || null,
       prescribedBy: med?.prescribedBy || med?.doctorName || null,
     });
   }
 
   for (const prescription of normalized.prescriptions || []) {
     for (const med of prescription?.medications || []) {
+      const qty = med?.quantity || med?.qty || null;
+      const duration = med?.duration || null;
+      const rawDosage = med?.dosage || med?.dose || med?.timeOfDay || null;
+      const instructions = sanitizeMedicationInstructions(
+        med?.instructions || med?.notes,
+        qty,
+        duration,
+      );
+
       medications.push({
-        dosage: med?.dosage || null,
-        duration: med?.duration || null,
+        dosage: rawDosage ? String(rawDosage).trim() : null,
+        duration: duration ? String(duration).trim() : null,
         frequency: med?.frequency || null,
-        instructions: med?.instructions || null,
+        instructions,
         name: med?.name || med?.medicineName || null,
         timing: med?.timing || null,
+        quantity: qty ? String(qty).trim() : null,
+        qty: qty ? String(qty).trim() : null,
+        type: med?.type || null,
         prescribedBy:
           med?.prescribedBy ||
           med?.doctorName ||

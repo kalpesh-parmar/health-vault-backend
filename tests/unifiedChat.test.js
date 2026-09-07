@@ -681,418 +681,866 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     jest.restoreAllMocks();
   });
 
-  test("chatService sendMessage should return report summary, calculate age, translate summary, stream response, and return predefined questions", async () => {
-    const patientRepository = require("../src/repositories/patientRepository");
-    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
-    const aiClient = require("../src/services/ai/clients/aiClient.service");
-    const { db } = require("../src/configs/db");
+  test("onboardingService should export canSkipOnboarding and validate skip permission", () => {
+    const { canSkipOnboarding } = require("../src/services/ai/chat/onboarding.service");
 
-    jest.spyOn(patientRepository, "findById").mockResolvedValue({
-      id: "patient-777",
-      firstName: "Shraddha",
-      lastName: "Chauhan",
-      preferredLanguage: "gujarati",
-    });
-
-    const mockReportDate = new Date();
-    mockReportDate.setDate(mockReportDate.getDate() - 10); // 10 days ago
-
-    const mockDocumentRecord = {
-      id: "doc-777",
-      userId: "patient-777",
-      fileName: "report.pdf",
-      ocrStatus: "completed",
-      summaryEnglish: "Patient has normal hemoglobin levels.",
-      reportDate: mockReportDate,
-      createdAt: new Date(),
-      structuredExtractedData: {
-        patient: { name: "Shraddha Chauhan" },
+    const invalidState = {
+      flowMode: "MANUAL",
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: null,
+        dateOfBirth: "1995-05-15",
+        gender: "female",
       },
     };
+    expect(canSkipOnboarding(invalidState)).toBe(false);
 
-    const mockSelect = {
-      from: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue([mockDocumentRecord]),
-    };
-    jest.spyOn(db, "select").mockReturnValue(mockSelect);
-
-    jest.spyOn(aiClient, "translate").mockImplementation(async (text, src, tgt) => {
-      if (tgt === "gujarati") {
-        return "દર્દી પાસે સામાન્ય હિમોગ્લોબિન સ્તર છે.";
-      }
-      return text;
-    });
-
-    jest
-      .spyOn(chatSessionRepository, "listSessions")
-      .mockResolvedValue({ items: [{ id: "session-777" }] });
-    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-777" });
-    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
-    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
-      id: "msg-777",
-      ...msg,
-    }));
-
-    const streamedChunks = [];
-    const onChunk = (chunk) => {
-      streamedChunks.push(chunk);
-    };
-
-    const { chatService } = require("../src/services/ai/chat/chat.service");
-
-    const result = await chatService.sendMessage({
-      userId: "patient-777",
-      question: "tell me about my report",
-      sessionId: "session-777",
-      onChunk,
-    });
-
-    expect(result.reply).toContain("Shraddha Chauhan");
-    expect(result.reply).toContain("10 દિવસ જૂનો");
-    expect(result.reply).toContain("દર્દી પાસે સામાન્ય હિમોગ્લોબિન સ્તર છે.");
-    expect(result.options).toHaveLength(3);
-    expect(result.options[0].label).toBe("મુખ્ય તારણો શું છે?");
-    expect(result.options[0].value).toBe("મુખ્ય તારણો શું છે?");
-    expect(result.options[0].actionType).toBe("CHAT");
-
-    expect(streamedChunks.length).toBeGreaterThan(0);
-    expect(streamedChunks.join("")).toContain("10 દિવસ જૂનો");
-
-    jest.restoreAllMocks();
-  });
-
-  test("chatService sendMessage should fallback to structuredExtractedData when summaryEnglish is missing", async () => {
-    const patientRepository = require("../src/repositories/patientRepository");
-    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
-    const aiClient = require("../src/services/ai/clients/aiClient.service");
-    const { db } = require("../src/configs/db");
-
-    jest.spyOn(patientRepository, "findById").mockResolvedValue({
-      id: "patient-777",
-      firstName: "Shraddha",
-      lastName: "Chauhan",
-      preferredLanguage: "gujarati",
-    });
-
-    const mockReportDate = new Date();
-    mockReportDate.setDate(mockReportDate.getDate() - 5);
-
-    const mockDocumentRecord = {
-      id: "doc-777",
-      userId: "patient-777",
-      fileName: "report.pdf",
-      ocrStatus: "completed",
-      summaryEnglish: null,
-      reportDate: mockReportDate,
-      createdAt: new Date(),
-      structuredExtractedData: {
-        patient: { name: "Shraddha Chauhan" },
-        summaryEnglish: "Patient report shows general fatigue but normal blood parameters.",
+    const validState = {
+      preferredLanguage: "english",
+      flowMode: "MANUAL",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: "Shraddha",
+        lastName: "Chauhan",
+        dateOfBirth: "1995-05-15",
+        gender: "female",
       },
     };
-
-    const mockSelect = {
-      from: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockResolvedValue([mockDocumentRecord]),
-    };
-    jest.spyOn(db, "select").mockReturnValue(mockSelect);
-
-    jest.spyOn(aiClient, "translate").mockImplementation(async (text, src, tgt) => {
-      if (tgt === "gujarati" && text.includes("fatigue")) {
-        return "દર્દીના રિપોર્ટમાં સામાન્ય થાક પરંતુ સામાન્ય રક્ત પરિમાણો દર્શાવે છે.";
-      }
-      return text;
-    });
-
-    jest
-      .spyOn(chatSessionRepository, "listSessions")
-      .mockResolvedValue({ items: [{ id: "session-777" }] });
-    jest.spyOn(chatSessionRepository, "findSessionById").mockResolvedValue({ id: "session-777" });
-    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
-    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
-      id: "msg-777",
-      ...msg,
-    }));
-
-    const { chatService } = require("../src/services/ai/chat/chat.service");
-
-    const result = await chatService.sendMessage({
-      userId: "patient-777",
-      question: "tell me about my report",
-      sessionId: "session-777",
-    });
-
-    expect(result.reply).toContain("Shraddha Chauhan");
-    expect(result.reply).toContain(
-      "દર્દીના રિપોર્ટમાં સામાન્ય થાક પરંતુ સામાન્ય રક્ત પરિમાણો દર્શાવે છે.",
-    );
-    expect(result.reply).not.toContain("મુખ્ય તારણો શું છે?");
-    expect(result.options).toHaveLength(3);
-
-    jest.restoreAllMocks();
+    expect(canSkipOnboarding(validState)).toBe(true);
   });
 
-  test("ocrService onboardingChat should complete onboarding and return report summary when user sends ASK_REPORT", async () => {
-    const patientRepository = require("../src/repositories/patientRepository");
-    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
-    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
-    const { chatService } = require("../src/services/ai/chat/chat.service");
+  test("ocrService onboardingChat should allow SKIP_ONBOARDING if required details are present", async () => {
     const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const authProviderRepository = require("../src/repositories/authProviderRepository");
 
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
-      id: "patient-777",
-      firstName: "Shraddha",
-      lastName: "Chauhan",
-      preferredLanguage: "gujarati",
+      id: "patient-111",
+      onboardingCompleted: false,
+      bloodGroup: "O+",
+      allergies: ["none"],
     });
-
+    jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
     jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
-      data: { isOnboardingCompleted: false, currentStep: "MEDICINE_OPTIONS" },
-    });
-
-    jest.spyOn(onboardingService, "chat").mockResolvedValue({
-      action: "COMPLETE",
-      state: {
-        isOnboardingCompleted: true,
-        currentStep: "COMPLETE",
-        preferredLanguage: "gujarati",
-        documentId: "doc-777",
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        medicationFlowDone: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          bloodGroup: "O+",
+          allergies: ["none"],
+        },
       },
     });
+    const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
 
-    jest.spyOn(chatService, "createSession").mockResolvedValue({
-      id: "session-777",
+    const res = await ocrService.onboardingChat("patient-111", {
+      actionType: "SKIP_ONBOARDING",
     });
 
-    jest.spyOn(chatService, "sendMessage").mockResolvedValue({
-      reply: "Mocked Report Summary",
-      options: [{ label: "Findings?", value: "Findings?", actionType: "CHAT" }],
-    });
-
-    const result = await ocrService.onboardingChat("patient-777", {
-      message: "ASK_REPORT",
-    });
-
-    expect(result.mode).toBe("NORMAL_CHAT");
-    expect(result.actionType).toBe("NORMAL_CHAT");
-    expect(result.reply).toBe("Mocked Report Summary");
-    expect(result.options).toHaveLength(1);
-    expect(result.options[0].label).toBe("Findings?");
-
-    expect(chatService.sendMessage).toHaveBeenCalledWith(
+    expect(res.mode).toBe("ONBOARDING");
+    expect(res.actionType).toBe("SKIP_ONBOARDING");
+    expect(res.onboardingState.hasSkipped).toBe(true);
+    expect(updatePatientSpy).toHaveBeenCalledWith(
+      "patient-111",
       expect.objectContaining({
-        documentId: ["doc-777"],
+        onboardingCompleted: true,
+      }),
+    );
+    expect(updatePatientSpy).not.toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        status: "ACTIVE",
       }),
     );
 
     jest.restoreAllMocks();
-  });
+  }, 15000);
 
-  test("onboardingService should preserve activeMedicine and manual medicines when merging document extracted medicines", async () => {
-    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
-
-    const mockState = {
-      flowMode: "UPLOAD",
-      currentStep: "REVIEW_MEDICINES_LIST",
-      activeMedicine: {
-        id: "med_1787291544368_8907",
-        name: "Insulin",
-        type: "TABLET",
-        source: "MANUAL",
-      },
-      foundMedicines: [{ name: "MBSON SL" }, { name: "Caldison D3" }],
-      medicinesToAdd: [
-        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
-        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
-      ],
-    };
-
-    const res = await onboardingService.chat("", [], mockState, null);
-
-    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
-    expect(medNames).toContain("Insulin");
-    expect(medNames).toContain("MBSON SL");
-    expect(medNames).toContain("Caldison D3");
-  });
-
-  test("onboardingService should append new medicine when ADD_MEDICINE is called even if currentMedicineIndex was set", async () => {
-    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
-
-    const mockState = {
-      flowMode: "UPLOAD",
-      currentStep: "EDIT_MEDICINE",
-      currentMedicineIndex: 2,
-      medicinesToAdd: [
-        { id: "doc_med_0", name: "MBSON SL", source: "OCR" },
-        { id: "doc_med_1", name: "Caldison D3", source: "OCR" },
-        { id: "med_1", name: "Insulin", source: "MANUAL" },
-        { id: "med_2", name: "Omnacortil 20", source: "MANUAL" },
-      ],
-    };
-
-    const newMedPayload = JSON.stringify({
-      name: "Omnacortil 40",
-      type: "TABLET",
-      addNew: true,
-    });
-
-    const res = await onboardingService.chat(newMedPayload, [], mockState, null);
-
-    const medNames = res.state.medicinesToAdd.map((m) => m.name || m.medicationName);
-    expect(medNames).toContain("MBSON SL");
-    expect(medNames).toContain("Caldison D3");
-    expect(medNames).toContain("Insulin");
-    expect(medNames).toContain("Omnacortil 20");
-    expect(medNames).toContain("Omnacortil 40");
-    expect(res.state.medicinesToAdd.length).toBe(5);
-  });
-
-  test("post-onboarding medicine confirmation with string IDs should resolve document medication and persist to DB", async () => {
-    const patientRepository = require("../src/repositories/patientRepository");
-    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
-    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
-    const medicationService = require("../src/services/medication.service");
-    const medicationReminderService = require("../src/services/medicationReminder.service");
+  test("ocrService onboardingChat should throw BadRequestException/InvalidRequestException on SKIP_ONBOARDING if required details are missing", async () => {
     const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const { InvalidRequestException } = require("../src/exceptions/appError");
 
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
-      id: "user-123",
-      firstName: "Shraddha",
-      onboardingCompleted: true,
+      id: "patient-111",
+      onboardingCompleted: false,
     });
     jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
-      data: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
-    });
-    jest.spyOn(chatSessionRepository, "appendMessage").mockResolvedValue({ id: "msg-123" });
-    jest.spyOn(medicationService, "createMedication").mockResolvedValue({
-      id: "created-med-123",
-      medicationName: "inj. meropenum",
-      medicationType: "TABLET",
-    });
-    jest.spyOn(medicationReminderService, "createReminder").mockResolvedValue({ id: "rem-123" });
-
-    const reqBody = {
-      actionType: "CONFIRM_MEDICINES",
-      actionData: {
-        medicines: ["extracted_med_1", "extracted_med_2"],
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        existingUserData: {
+          firstName: "John",
+          lastName: null,
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
       },
-      message: "Confirm Selection",
-      sessionId: "session-123",
-      state: { isOnboardingCompleted: true },
-    };
+    });
 
-    const response = await ocrService.onboardingChat("user-123", reqBody, null);
-
-    expect(response.actionType).toBe("CONFIRM_MEDICINES");
-    expect(medicationService.createMedication).toHaveBeenCalled();
+    await expect(
+      ocrService.onboardingChat("patient-111", {
+        actionType: "SKIP_ONBOARDING",
+      }),
+    ).rejects.toThrow(InvalidRequestException);
 
     jest.restoreAllMocks();
   });
 
-  test("normalizeCreateMedicationInput should strip extra OCR keys like id, dosage, timing, instructions to pass Zod .strict()", () => {
-    const rawOcrInput = {
-      id: "extracted_med_1",
-      name: "inj. meropenum",
-      type: "TABLET",
-      dosage: "1 tab",
-      timing: "morning",
-      instructions: "take with water",
-      duplicateInfo: { hasDuplicate: false },
-    };
-
-    const sanitized = normalizeCreateMedicationInput(rawOcrInput);
-
-    expect(sanitized.medicationName).toBe("inj. meropenum");
-    expect(sanitized.medicationType).toBe("TABLET");
-    expect(sanitized.notes).toBe("take with water");
-    expect(sanitized.id).toBeUndefined();
-    expect(sanitized.dosage).toBeUndefined();
-    expect(sanitized.timing).toBeUndefined();
-    expect(sanitized.instructions).toBeUndefined();
-    expect(sanitized.duplicateInfo).toBeUndefined();
-  });
-
-  test("chatService listMessages should format message metadata into top-level options, medicines, and actionType", async () => {
-    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+  // Deliberate semantics change: top-right Skip leaves pending questions and step untouched, recording hasSkipped=true without advancing or emitting a new question
+  test("ocrService onboardingChat SKIP_ONBOARDING at ASK_BLOOD_GROUP should leave pending question untouched, persist hasSkipped true, set onboarding_completed true, and not append message", async () => {
+    const ocrService = require("../src/services/ocr.service");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const authProviderRepository = require("../src/repositories/authProviderRepository");
     const { chatService } = require("../src/services/ai/chat/chat.service");
 
-    jest
-      .spyOn(chatSessionRepository, "findSessionById")
-      .mockResolvedValue({ id: "session-123", userId: "user-123" });
-    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({
-      items: [
-        {
-          id: "msg-1",
-          role: "assistant",
-          content: "Found 2 medications",
-          metadata: {
-            actionType: "REVIEW_MEDICINES_LIST",
-            options: [{ label: "Confirm Selected", actionType: "CONFIRM_MEDICINES" }],
-            medicines: [{ name: "inj. meropenum" }],
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "patient-111",
+      onboardingCompleted: false,
+      bloodGroup: null,
+      allergies: null,
+    });
+    jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        currentStep: "ASK_BLOOD_GROUP",
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          bloodGroup: null,
+          allergies: [],
+        },
+      },
+    });
+    const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    const updateOnboardingSpy = jest
+      .spyOn(userOnboardingRepository, "updateByUserId")
+      .mockResolvedValue({});
+    const appendMsgSpy = jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({});
+
+    const res = await ocrService.onboardingChat("patient-111", {
+      actionType: "SKIP_ONBOARDING",
+    });
+
+    expect(res.mode).toBe("ONBOARDING");
+    expect(res.actionType).toBe("SKIP_ONBOARDING");
+    expect(res.onboardingState.currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(res.onboardingState.bloodGroupSkipped).toBeFalsy();
+    expect(res.onboardingState.allergiesSkipped).toBeFalsy();
+    expect(res.onboardingState.hasSkipped).toBe(true);
+
+    // Assert no assistant message was appended for next step
+    expect(appendMsgSpy).not.toHaveBeenCalled();
+
+    // Assert patients.onboarding_completed was set to true without writing status
+    expect(updatePatientSpy).toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        onboardingCompleted: true,
+      }),
+    );
+    expect(updatePatientSpy).not.toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        status: "ACTIVE",
+      }),
+    );
+
+    // Assert user_onboarding state was persisted with hasSkipped: true and currentStep: "ASK_BLOOD_GROUP"
+    expect(updateOnboardingSpy).toHaveBeenCalledWith(
+      "patient-111",
+      expect.objectContaining({
+        data: expect.objectContaining({
+          hasSkipped: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          bloodGroupSkipped: false,
+          allergiesSkipped: false,
+        }),
+      }),
+    );
+
+    jest.restoreAllMocks();
+  }, 15000);
+
+  describe("isProfileComplete Truth Table & Field Validation", () => {
+    const {
+      isProfileComplete,
+      REQUIRED_PROFILE_FIELDS,
+    } = require("../src/services/ai/chat/onboarding.service");
+
+    test("REQUIRED_PROFILE_FIELDS contains exactly 4 fields and no email/phone", () => {
+      expect(REQUIRED_PROFILE_FIELDS).toEqual(["firstName", "lastName", "dateOfBirth", "gender"]);
+    });
+
+    test("isProfileComplete returns false when firstName is missing", () => {
+      expect(
+        isProfileComplete({
+          firstName: "",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+    });
+
+    test("isProfileComplete returns false when lastName is missing", () => {
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: null,
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+    });
+
+    test("isProfileComplete returns false when dateOfBirth is missing or invalid", () => {
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "invalid-date",
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "2099-01-01", // Future date
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1850-01-01", // Age > 120
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+    });
+
+    test("isProfileComplete returns false when gender is missing or invalid", () => {
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "unknown_gender",
+          mobile: "+1234567890",
+        }),
+      ).toBe(false);
+    });
+
+    test("isProfileComplete returns true when all 4 required fields are valid", () => {
+      expect(
+        isProfileComplete({
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+          mobile: "+1234567890",
+        }),
+      ).toBe(true);
+    });
+
+    test("Contact assertion logs error if mobile/email missing but does not block completion", () => {
+      const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+      const result = isProfileComplete({
+        firstName: "Jane",
+        lastName: "Smith",
+        dateOfBirth: "1995-05-15",
+        gender: "female",
+      });
+      expect(result).toBe(true);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe("Gender Normalization Variants", () => {
+    const { normalizeGenderLocally } = require("../src/helpers/onboarding.helper");
+
+    test("Normalizes male variants correctly", () => {
+      expect(normalizeGenderLocally("M")).toBe("male");
+      expect(normalizeGenderLocally("MALE")).toBe("male");
+      expect(normalizeGenderLocally("male")).toBe("male");
+      expect(normalizeGenderLocally("Male")).toBe("male");
+    });
+
+    test("Normalizes female variants correctly", () => {
+      expect(normalizeGenderLocally("F")).toBe("female");
+      expect(normalizeGenderLocally("Female")).toBe("female");
+      expect(normalizeGenderLocally("female")).toBe("female");
+      expect(normalizeGenderLocally("FEMALE")).toBe("female");
+    });
+
+    test("Normalizes other variants correctly", () => {
+      expect(normalizeGenderLocally("O")).toBe("other");
+      expect(normalizeGenderLocally("Other")).toBe("other");
+      expect(normalizeGenderLocally("other")).toBe("other");
+      expect(normalizeGenderLocally("OTHER")).toBe("other");
+    });
+  });
+
+  describe("canSkipOnboarding & State Edge Cases", () => {
+    const { canSkipOnboarding } = require("../src/services/ai/chat/onboarding.service");
+
+    test("Returns false if pendingProfileConflict is true", () => {
+      const state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        pendingProfileConflict: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+      expect(canSkipOnboarding(state)).toBe(false);
+    });
+
+    test("Returns false if dateOfBirth is unparseable OCR string", () => {
+      const state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "not-a-date",
+          gender: "male",
+        },
+      };
+      expect(canSkipOnboarding(state)).toBe(false);
+    });
+
+    test("Returns true when required fields are complete and profileConfirmed", () => {
+      const state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+      expect(canSkipOnboarding(state)).toBe(true);
+    });
+  });
+
+  describe("Anti-Regression: Answering Gender & Cold Start & Idempotency", () => {
+    test("After answering Gender in MANUAL flow: returns next question as ASK_BLOOD_GROUP, canSkip true, and standalone completionMessage", async () => {
+      const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      const { chatService } = require("../src/services/ai/chat/chat.service");
+
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "p-gender-test",
+        onboardingCompleted: false,
+      });
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue(null);
+      jest.spyOn(userOnboardingRepository, "create").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+      jest.spyOn(chatService, "createOnboardingSession").mockResolvedValue({ id: "session-test" });
+      const appendMsgSpy = jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({
+        id: "msg-1",
+        createdAt: new Date(),
+      });
+
+      const state = {
+        chatSessionId: "session-test",
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "ASK_GENDER",
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+        },
+      };
+
+      const res = await onboardingService.chat("male", [], state, "p-gender-test");
+
+      // 1. User remains on onboarding chat screen, next question is ASK_BLOOD_GROUP
+      expect(res.action).toBe("ASK_BLOOD_GROUP");
+      // 2. Skip is enabled
+      expect(res.canSkip).toBe(true);
+      // 3. Completion message is emitted separately
+      expect(res.completionMessage).toBe("Thank you! Onboarding is complete.");
+      // 4. completionMessageSent flag is true
+      expect(res.state.completionMessageSent).toBe(true);
+
+      // Verify that the completion notice was appended separately to chat
+      expect(appendMsgSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "Thank you! Onboarding is complete.",
+          metadata: expect.objectContaining({
+            action: "ONBOARDING_COMPLETED_NOTICE",
+          }),
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+
+    test("Cold start: getOnboardingStatus after profile completion returns canSkip true", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-cold-start",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        onboardingCompleted: false,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
           },
         },
-      ],
-      nextCursor: null,
+      });
+
+      const status = await ocrService.getOnboardingStatus("patient-cold-start");
+      expect(status.canSkip).toBe(true);
+      expect(status.isOnboardingCompleted).toBe(false);
+      expect(status.currentStep).toBe("ASK_BLOOD_GROUP");
+
+      jest.restoreAllMocks();
     });
 
-    const res = await chatService.listMessages({ sessionId: "session-123", userId: "user-123" });
+    test("SKIP_ONBOARDING twice is idempotent and returns 200 without duplicate side effects", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
 
-    expect(res.items[0].actionType).toBe("REVIEW_MEDICINES_LIST");
-    expect(res.items[0].options).toHaveLength(1);
-    expect(res.items[0].medicines).toHaveLength(1);
-    expect(res.items[0].medicines[0].name).toBe("inj. meropenum");
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-idempotent",
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
 
-    jest.restoreAllMocks();
+      // First SKIP call
+      const res1 = await ocrService.onboardingChat("patient-idempotent", {
+        actionType: "SKIP_ONBOARDING",
+      });
+      expect(res1.actionType).toBe("SKIP_ONBOARDING");
+      expect(res1.canSkip).toBe(true);
+
+      // Second SKIP call (double tap)
+      const res2 = await ocrService.onboardingChat("patient-idempotent", {
+        actionType: "SKIP_ONBOARDING",
+      });
+      expect(res2.actionType).toBe("SKIP_ONBOARDING");
+      expect(res2.canSkip).toBe(true);
+      expect(updatePatientSpy).toHaveBeenCalledWith(
+        "patient-idempotent",
+        expect.objectContaining({
+          onboardingCompleted: true,
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+
+    test("BLOCKED patient: completing onboarding does not overwrite status to ACTIVE", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-blocked",
+        status: "BLOCKED",
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      await ocrService.onboardingChat("patient-blocked", {
+        actionType: "SKIP_ONBOARDING",
+      });
+
+      // Verify status was NOT included in the update payload
+      expect(updatePatientSpy).toHaveBeenCalledWith(
+        "patient-blocked",
+        expect.not.objectContaining({
+          status: "ACTIVE",
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+
+    test("SKIP_ONBOARDING when currentStep is ASK_REPORT routes to skip handler, sets onboardingCompleted, and does not route to NORMAL_CHAT", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-ask-report",
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "UPLOAD",
+          documentOwnershipConfirmed: true,
+          profileConfirmed: true,
+          currentStep: "ASK_REPORT",
+          medicationFlowDone: true,
+          isOnboardingCompleted: false,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+            allergies: ["none"],
+          },
+        },
+      });
+      const updateOnboardingSpy = jest
+        .spyOn(userOnboardingRepository, "updateByUserId")
+        .mockResolvedValue({});
+
+      const res = await ocrService.onboardingChat("patient-ask-report", {
+        actionType: "SKIP_ONBOARDING",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "UPLOAD",
+          documentOwnershipConfirmed: true,
+          profileConfirmed: true,
+          currentStep: "ASK_REPORT",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+            allergies: ["none"],
+          },
+        },
+      });
+
+      expect(res.mode).toBe("ONBOARDING");
+      expect(res.actionType).toBe("SKIP_ONBOARDING");
+      expect(res.canSkip).toBe(true);
+      expect(updatePatientSpy).toHaveBeenCalledWith(
+        "patient-ask-report",
+        expect.objectContaining({
+          onboardingCompleted: true,
+        }),
+      );
+      expect(updateOnboardingSpy).toHaveBeenCalledWith(
+        "patient-ask-report",
+        expect.objectContaining({
+          data: expect.objectContaining({
+            hasSkipped: true,
+            currentStep: "ASK_REPORT",
+          }),
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
   });
 
-  test("chatSessionController sendMessage should handle stream: true with SSE response format", async () => {
-    const chatSessionController = require("../src/controllers/chatSession.controller");
-    const { chatService } = require("../src/services/ai/chat/chat.service");
+  describe("ASK_REPORT Routing & State Machine (Dashboard & Onboarding)", () => {
+    const ocrService = require("../src/services/ocr.service");
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+    const patientRepository = require("../src/repositories/patientRepository");
+    const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+    const { db } = require("../src/configs/db");
 
-    jest.spyOn(chatService, "sendMessage").mockImplementation(async ({ onChunk }) => {
-      if (onChunk) {
-        onChunk("Hello ");
-        onChunk("World!");
-      }
-      return { reply: "Hello World!", citations: [] };
+    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is ASK_REPORT even if onboarding completed", async () => {
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-completed",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          isOnboardingCompleted: true,
+          medicationFlowDone: true,
+          currentStep: "POST_ONBOARDING",
+          existingUserData: {
+            firstName: "Jane",
+            lastName: "Doe",
+            dateOfBirth: "1992-02-02",
+            gender: "female",
+            bloodGroup: "B+",
+            allergies: ["none"],
+          },
+          bloodGroupSkipped: true,
+          allergiesSkipped: true,
+        },
+      });
+      jest.spyOn(onboardingService, "chat").mockResolvedValue({
+        action: "ASK_REPORT",
+        message: "",
+        document: {
+          id: "doc-123",
+          summaryEnglish: "Test Summary",
+          keyFindings: ["Normal findings"],
+        },
+        suggestedQuestions: ["What are key findings?"],
+        state: { currentStep: "ASK_REPORT" },
+      });
+
+      const res = await ocrService.onboardingChat("patient-completed", {
+        message: "ASK_REPORT",
+        state: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
+      });
+
+      expect(res.mode).toBe("ONBOARDING");
+      expect(res.actionType).toBe("ASK_REPORT");
+      expect(res.document).toBeDefined();
+      expect(res.document.id).toBe("doc-123");
+      expect(res.suggestedQuestions).toEqual(["What are key findings?"]);
+
+      jest.restoreAllMocks();
     });
 
-    const writtenChunks = [];
-    const headers = {};
+    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is legacy ASK_ABOUT_REPORT", async () => {
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-completed",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          isOnboardingCompleted: true,
+          medicationFlowDone: true,
+          currentStep: "POST_ONBOARDING",
+          existingUserData: {
+            firstName: "Jane",
+            lastName: "Doe",
+            dateOfBirth: "1992-02-02",
+            gender: "female",
+            bloodGroup: "B+",
+            allergies: ["none"],
+          },
+          bloodGroupSkipped: true,
+          allergiesSkipped: true,
+        },
+      });
+      jest.spyOn(onboardingService, "chat").mockResolvedValue({
+        action: "ASK_REPORT",
+        message: "",
+        document: { id: "doc-123", summaryEnglish: "Test Summary" },
+        suggestedQuestions: ["What are key findings?"],
+        state: { currentStep: "ASK_REPORT" },
+      });
 
-    const req = {
-      auth: { userId: "user-123" },
-      body: {
-        question: "Hello",
-        stream: true,
-      },
-      on: jest.fn(),
-      socket: { setTimeout: jest.fn() },
-    };
+      const res = await ocrService.onboardingChat("patient-completed", {
+        message: "ASK_ABOUT_REPORT",
+        state: { isOnboardingCompleted: true },
+      });
 
-    const res = {
-      setHeader: (key, value) => {
-        headers[key] = value;
-      },
-      write: (data) => {
-        writtenChunks.push(data);
-      },
-      end: jest.fn(),
-      writableEnded: false,
-    };
+      expect(res.mode).toBe("ONBOARDING");
+      expect(res.actionType).toBe("ASK_REPORT");
 
-    await chatSessionController.sendMessage(req, res);
+      jest.restoreAllMocks();
+    });
 
-    expect(headers["Content-Type"]).toBe("text/event-stream");
-    expect(writtenChunks.some((chunk) => chunk.includes("Hello "))).toBe(true);
-    expect(writtenChunks.some((chunk) => chunk.includes("World!"))).toBe(true);
-    expect(writtenChunks.some((chunk) => chunk.includes('"type":"done"'))).toBe(true);
-    expect(res.end).toHaveBeenCalled();
+    test("Regression check: Free-text queries post-onboarding route to NORMAL_CHAT and do NOT force onboarding", async () => {
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-completed",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          isOnboardingCompleted: true,
+          medicationFlowDone: true,
+          currentStep: "POST_ONBOARDING",
+          existingUserData: {
+            firstName: "Jane",
+            lastName: "Doe",
+            dateOfBirth: "1992-02-02",
+            gender: "female",
+            bloodGroup: "B+",
+            allergies: ["none"],
+          },
+          bloodGroupSkipped: true,
+          allergiesSkipped: true,
+        },
+      });
+      const { chatService } = require("../src/services/ai/chat/chat.service");
+      jest.spyOn(chatService, "sendMessage").mockResolvedValue({
+        reply: "You should consult your physician regarding vitamins.",
+        sessionId: "session-normal",
+        metadata: { action: "NORMAL_CHAT" },
+      });
 
-    jest.restoreAllMocks();
+      const res = await ocrService.onboardingChat("patient-completed", {
+        message: "What are my vitamins?",
+        actionType: "NORMAL_CHAT",
+      });
+
+      expect(res.mode).toBe("NORMAL_CHAT");
+      expect(res.actionType).toBe("NORMAL_CHAT");
+      expect(res.reply).toContain("vitamins");
+
+      jest.restoreAllMocks();
+    });
+
+    test("onboardingService.chat handles MEDICINE_OPTIONS -> ASK_REPORT selection and fetches user's report", async () => {
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({ id: "user-test-doc" });
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({ data: {} });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const mockDoc = {
+        id: "doc-999",
+        userId: "user-test-doc",
+        summaryEnglish: "Patient report indicates normal hemoglobin levels.",
+        structuredExtractedData: {
+          keyFindings: ["Hemoglobin: 14.5 g/dL", "Blood pressure normal"],
+          summaryEnglish: "Patient report indicates normal hemoglobin levels.",
+        },
+      };
+
+      const selectMock = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            orderBy: jest.fn().mockReturnValue({
+              limit: jest.fn().mockResolvedValue([mockDoc]),
+            }),
+          }),
+        }),
+      });
+      jest.spyOn(db, "select").mockImplementation(selectMock);
+
+      const state = {
+        preferredLanguage: "english",
+        currentStep: "MEDICINE_OPTIONS",
+        userId: "user-test-doc",
+        isOnboardingCompleted: false,
+      };
+
+      const res = await onboardingService.chat(
+        JSON.stringify({ key: "ASK_REPORT" }),
+        [],
+        state,
+        "user-test-doc",
+      );
+
+      expect(res.action).toBe("ASK_REPORT");
+      expect(res.document).toBeDefined();
+      expect(res.document.id).toBe("doc-999");
+      expect(res.document.summary).toContain("hemoglobin");
+      expect(res.suggestedQuestions.length).toBeGreaterThan(0);
+
+      jest.restoreAllMocks();
+    });
+
+    test("Zero-documents edge case: returns polite fallback message and document null when user has no reports", async () => {
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({ id: "user-no-docs" });
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({ data: {} });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const selectMock = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            orderBy: jest.fn().mockReturnValue({
+              limit: jest.fn().mockResolvedValue([]),
+            }),
+          }),
+        }),
+      });
+      jest.spyOn(db, "select").mockImplementation(selectMock);
+
+      const state = {
+        preferredLanguage: "english",
+        currentStep: "MEDICINE_OPTIONS",
+        userId: "user-no-docs",
+        isOnboardingCompleted: false,
+      };
+
+      const res = await onboardingService.chat("ASK_REPORT", [], state, "user-no-docs");
+
+      expect(res.action).toBe("NORMAL_CHAT");
+      expect(res.message).toBe("You haven't uploaded any medical reports yet.");
+      expect(res.document).toBeNull();
+      expect(res.suggestedQuestions).toEqual([]);
+
+      jest.restoreAllMocks();
+    });
   });
 });

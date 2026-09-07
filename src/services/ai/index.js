@@ -1,7 +1,7 @@
 const { ocrService } = require("./ocr/ocr.service");
 const { ocrOrchestrator } = require("./ocr/ocr.orchestrator");
 const { chatService } = require("./chat/chat.service");
-const { onboardingService } = require("./chat/onboarding.service");
+const { onboardingService, canSkipOnboarding } = require("./chat/onboarding.service");
 const { embeddingService } = require("./chat/embedding.service");
 const {
   medicalDocumentClassifierService,
@@ -16,6 +16,7 @@ module.exports = {
   ocrOrchestrator,
   chatService,
   onboardingService,
+  canSkipOnboarding,
   embeddingService,
   medicalDocumentClassifierService,
   aiClient,

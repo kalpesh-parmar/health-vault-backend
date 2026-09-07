@@ -91,6 +91,7 @@ class SessionExpiredException extends AppError {
 class ConflictException extends AppError {
   constructor(message = "Resource conflict", details = null, errorCode = "CONFLICT") {
     super(StatusCodes.CONFLICT, message, errorCode, details);
+    this.details = details;
   }
 }
 

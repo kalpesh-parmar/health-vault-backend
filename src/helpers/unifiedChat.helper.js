@@ -21,6 +21,7 @@ function normalizeUnifiedChatInput(body = {}) {
     history = [],
     displayLabel = null,
     preferredLanguage,
+    fromScreen = null,
   } = body || {};
 
   const normalizedMessage =
@@ -44,6 +45,7 @@ function normalizeUnifiedChatInput(body = {}) {
     history: Array.isArray(history) ? history : [],
     displayLabel: displayLabel || null,
     preferredLanguage: preferredLanguage ? normalizeLanguage(preferredLanguage) : null,
+    fromScreen: fromScreen || (state && state.fromScreen) || null,
   };
 }
 
@@ -66,11 +68,23 @@ function buildUnifiedResponse({
   reports = [],
   allowMultiSelect = false,
   selectionType = null,
+  title = null,
+  subtitle = null,
+  fields = [],
+  explainer = null,
+  loginSummary = null,
+  documentSummary = null,
 }) {
   return {
     mode,
     actionType,
     reply,
+    title,
+    subtitle,
+    fields,
+    explainer,
+    loginSummary,
+    documentSummary,
     sessionId,
     onboardingState,
     medicines,
@@ -225,7 +239,7 @@ async function executeAddDocumentAction({
     const createdJobs = [];
 
     let isExistingCompleted = false;
-    let isExistingProcessing = false;
+    // let isExistingProcessing = false;
 
     for (const fItem of filesList) {
       const currentS3Key = extractFileKey(fItem);
@@ -256,17 +270,24 @@ async function executeAddDocumentAction({
           existingJob.status === "in_progress"
         ) {
           normStatus = ocrStatusEnum?.IN_PROGRESS || "in_progress";
-          isExistingProcessing = true;
+          // isExistingProcessing = true;
         } else {
           normStatus = String(existingJob.status || "in_progress").toLowerCase();
         }
-
+        const jobError = existingJob.error || existingJob.message || null;
         createdDocs.push({
           id: existingJob.id,
           fileName,
           s3Key: currentS3Key,
+          currentStep: existingJob.currentStep,
+          completedSteps: existingJob.completedSteps,
+          pendingSteps: existingJob.pendingSteps,
+          status: existingJob.status,
+          stageStatus: existingJob.stageStatus,
           ocrStatus: normStatus,
+          retryable: existingJob.retryable,
           extractedStructuredData: existingJob.extractedStructuredData || null,
+          error: jobError,
         });
         createdJobs.push(existingJob);
       } else {
@@ -297,16 +318,56 @@ async function executeAddDocumentAction({
       }
     }
 
+    const completedNames = [];
+    const failedMessages = [];
+    const processingNames = [];
+
+    createdJobs.forEach((jItem, idx) => {
+      const fName = fileNames[idx] || "document";
+      const st = String(jItem?.status || "").toUpperCase();
+      if (st === "COMPLETED") {
+        completedNames.push(`'${fName}'`);
+      } else if (st === "FAILED" || st === "REJECTED") {
+        const err = jItem?.error || jItem?.message || "Processing failed";
+        failedMessages.push(`'${fName}': ${err}`);
+      } else {
+        processingNames.push(`'${fName}'`);
+      }
+    });
+
     if (filesList.length === 1 && isExistingCompleted) {
       replyText = `Document '${fileNames[0]}' has already been processed and is ready in your Health Vault.`;
-    } else if (filesList.length === 1 && isExistingProcessing) {
-      const firstJob = createdJobs[0] || {};
-      const pct = firstJob.percentage != null ? `${firstJob.percentage}%` : "in progress";
-      replyText = `Document '${fileNames[0]}' OCR processing is currently ${pct} (Stage: ${firstJob.stage || "PROCESSING"}).`;
-    } else if (filesList.length > 1) {
-      replyText = `${filesList.length} documents (${fileNames.map((n) => `'${n}'`).join(", ")}) uploaded. OCR text extraction & vector indexing started in background.`;
     } else {
-      replyText = `Document '${fileNames[0] || "file"}' uploaded. OCR text extraction & vector indexing started in background.`;
+      const summaryParts = [];
+      if (completedNames.length > 0) {
+        const countText =
+          completedNames.length === 1
+            ? `1 document completed (${completedNames[0]})`
+            : `${completedNames.length} documents completed (${completedNames.join(", ")})`;
+        summaryParts.push(countText);
+      }
+
+      if (failedMessages.length > 0) {
+        const countText =
+          failedMessages.length === 1
+            ? `1 document failed (${failedMessages[0]})`
+            : `${failedMessages.length} documents failed (${failedMessages.join("; ")})`;
+        summaryParts.push(countText);
+      }
+
+      if (processingNames.length > 0) {
+        const countText =
+          processingNames.length === 1
+            ? `1 document (${processingNames[0]}) uploaded. OCR text extraction & vector indexing started in background`
+            : `${processingNames.length} documents (${processingNames.join(", ")}) uploaded. OCR text extraction & vector indexing started in background`;
+        summaryParts.push(countText);
+      }
+
+      if (summaryParts.length > 0) {
+        replyText = summaryParts.join(". ") + ".";
+      } else {
+        replyText = `Document '${fileNames[0] || "file"}' uploaded. OCR text extraction & vector indexing started in background.`;
+      }
     }
 
     docResult = {
@@ -427,6 +488,49 @@ async function executeAddDocumentAction({
     }
   }
 
+  let activeSessionId = sessionId;
+  if (!activeSessionId && isOnboardingCompleted) {
+    const newSession = await chatService.createSession({
+      userId,
+      title: docResult?.document?.fileName || "Document Chat",
+    });
+    activeSessionId = newSession?.id || null;
+  }
+
+  if (activeSessionId) {
+    await chatSessionRepository.appendMessage({
+      sessionId: activeSessionId,
+      userId,
+      role: "assistant",
+      content: replyText,
+      metadata: { actionType: "ADD_DOCUMENT", documentId: docResult?.document?.id },
+    });
+  }
+
+  if (userId && !isOnboardingCompleted) {
+    const createdDocId =
+      docResult?.document?.id ||
+      (Array.isArray(docResult?.document) ? docResult.document[0]?.id : null);
+    if (createdDocId) {
+      try {
+        const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord) {
+          const updatedData = {
+            ...(onboardingRecord.data || {}),
+            documentId: createdDocId,
+            flowMode: "UPLOAD",
+            documentUploaded: true,
+            documentConfirmed: true,
+          };
+          await userOnboardingRepository.updateByUserId(userId, { data: updatedData });
+        }
+      } catch (repoErr) {
+        console.error("[executeAddDocumentAction] Failed to update onboarding record:", repoErr);
+      }
+    }
+  }
+
   const isPostOnboardingReview = isOnboardingCompleted && extractedMedicines.length > 0;
   const returnedActionType = isPostOnboardingReview ? "REVIEW_MEDICINES_LIST" : "ADD_DOCUMENT";
   const suggestedAction = isPostOnboardingReview
@@ -450,33 +554,6 @@ async function executeAddDocumentAction({
           },
         ]
       : [];
-
-  let activeSessionId = sessionId;
-  if (!activeSessionId && isOnboardingCompleted) {
-    const newSession = await chatService.createSession({
-      userId,
-      title: docResult?.document?.fileName || "Document Chat",
-    });
-    activeSessionId = newSession?.id || null;
-  }
-
-  if (activeSessionId) {
-    await chatSessionRepository.appendMessage({
-      sessionId: activeSessionId,
-      userId,
-      role: "assistant",
-      content: replyText,
-      metadata: {
-        mode: "ACTION",
-        actionType: returnedActionType,
-        suggestedAction,
-        options,
-        medicines: extractedMedicines,
-        document: docResult?.document,
-        documentId: docResult?.document?.id,
-      },
-    });
-  }
 
   return buildUnifiedResponse({
     mode: "ACTION",
