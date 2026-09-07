@@ -204,7 +204,7 @@ class DocumentOcrJobService {
         rawOcr: ocrResponse,
       });
 
-      let preferredLanguage = "gujarati";
+      let preferredLanguage = "english";
       try {
         if (userId) {
           const onboardingRecord = await userOnboardingRepository.findByUserId(userId);

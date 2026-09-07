@@ -91,6 +91,7 @@ function normalizeGenderLocally(rawText) {
 
   const otherSet = new Set([
     "other",
+    "o",
     "non-binary",
     "nonbinary",
     "nb",

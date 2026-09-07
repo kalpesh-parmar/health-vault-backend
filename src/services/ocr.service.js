@@ -12,7 +12,11 @@ const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
-const { onboardingService, canSkipOnboarding } = require("./ai/chat/onboarding.service");
+const {
+  onboardingService,
+  canSkipOnboarding,
+  saveOnboardingState,
+} = require("./ai/chat/onboarding.service");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
@@ -480,7 +484,7 @@ class V1Service {
             displayLabel,
           );
 
-          return buildUnifiedResponse({
+          const responsePayload = buildUnifiedResponse({
             mode: "ONBOARDING",
             actionType: onboardingResult?.action || "MEDICINE_OPTIONS",
             reply: onboardingResult?.message || onboardingResult?.reply || "",
@@ -488,6 +492,11 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
           });
+          responsePayload.canSkip =
+            onboardingResult?.canSkip !== undefined
+              ? onboardingResult.canSkip
+              : canSkipOnboarding(onboardingResult?.state || stateToUpdate);
+          return responsePayload;
         }
 
         // Post-Onboarding (Dashboard Chat Stream): return confirmation response
@@ -540,6 +549,12 @@ class V1Service {
       const allergiesSkipped =
         dbState?.allergiesSkipped === true || inputState?.allergiesSkipped === true;
 
+      const isSkippedValid =
+        (dbState?.hasSkipped === true ||
+          inputState?.hasSkipped === true ||
+          effectiveState?.hasSkipped === true) &&
+        canSkipOnboarding(effectiveState || dbState || inputState);
+
       const hasUnansweredOptional =
         isOnboardingCompleted &&
         ((!bloodGroup && !bloodGroupSkipped) ||
@@ -549,14 +564,30 @@ class V1Service {
         dbState?.medicationFlowDone !== true &&
         inputState?.medicationFlowDone !== true &&
         effectiveState?.medicationFlowDone !== true;
+      const isForcedOnboardingAction =
+        message === "ASK_REPORT" ||
+        message === "ASK_ABOUT_REPORT" ||
+        actionType === "ASK_REPORT" ||
+        inputState?.currentStep === "ASK_REPORT";
 
       const isNormalChat =
+        !isForcedOnboardingAction &&
+        actionType !== "SKIP_ONBOARDING" &&
         !hasUnansweredOptional &&
         !isMedicationFlowPending &&
         (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted || isCompletedStep) &&
+          ((isOnboardingCompleted ||
+            isCompletedStep ||
+            isSkippedValid ||
+            dbState?.currentStep === "ASK_REPORT" ||
+            inputState?.currentStep === "ASK_REPORT") &&
             !isActiveOnboardingStep &&
-            (actionType !== "ONBOARDING" || isCompletedStep) &&
+            message !== "ASK_REPORT" &&
+            (actionType !== "ONBOARDING" ||
+              isCompletedStep ||
+              isSkippedValid ||
+              dbState?.currentStep === "ASK_REPORT" ||
+              inputState?.currentStep === "ASK_REPORT") &&
             actionType !== "OTHER_ACTIONS"));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
@@ -637,6 +668,23 @@ class V1Service {
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
           state.currentStep = null;
+          state.hasSkipped = true;
+          if (!state.currentStep && dbState && dbState.currentStep) {
+            state.currentStep = dbState.currentStep;
+          }
+
+          await saveOnboardingState(userId, state);
+
+          const responsePayload = buildUnifiedResponse({
+            mode: "ONBOARDING",
+            actionType: "SKIP_ONBOARDING",
+            reply: "",
+            onboardingState: state,
+            options: [],
+            medicines: [],
+          });
+          responsePayload.canSkip = true;
+          return responsePayload;
         }
 
         const onboardingResult = await onboardingService.chat(
@@ -653,7 +701,8 @@ class V1Service {
             ? `${onboardingResult.title}\n\n${onboardingResult.message}`
             : onboardingResult?.message || onboardingResult?.reply || "";
 
-        return buildUnifiedResponse({
+        // return buildUnifiedResponse({
+        const responsePayload = buildUnifiedResponse({
           mode: "ONBOARDING",
           actionType:
             actionType === "SKIP_ONBOARDING"
@@ -669,7 +718,17 @@ class V1Service {
           onboardingState: onboardingResult?.state || state,
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
+          document: onboardingResult?.document || null,
         });
+        if (onboardingResult?.completionMessage) {
+          responsePayload.completionMessage = onboardingResult.completionMessage;
+        }
+        responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
+        responsePayload.canSkip =
+          onboardingResult?.canSkip !== undefined
+            ? onboardingResult.canSkip
+            : canSkipOnboarding(onboardingResult?.state || state);
+        return responsePayload;
       }
 
       // CASE 4: NORMAL_CHAT (Post-onboarding RAG Chat)
@@ -710,6 +769,7 @@ class V1Service {
     }
   }
 
+  // TODO: move onboarding status/history out of ocr.service.js
   async getOnboardingStatus(userId) {
     if (!userId) {
       throw new UnauthorizedException("Unauthorized access");
@@ -748,6 +808,8 @@ class V1Service {
       isOnboardingCompleted = patient.onboardingCompleted || isBasicProfileComplete;
     }
 
+    const canSkip = resumableState ? canSkipOnboarding(resumableState) : false;
+
     // If onboarding is considered complete, return completed status
     if (isOnboardingCompleted) {
       if (currentStep !== "POST_ONBOARDING") {
@@ -757,7 +819,8 @@ class V1Service {
         isOnboardingCompleted: true,
         currentStep,
         chatSessionId: resumableState?.chatSessionId || null,
-        resumableState,
+        resumableState: resumableState ? { ...resumableState, canSkip } : null,
+        canSkip,
       };
     }
 

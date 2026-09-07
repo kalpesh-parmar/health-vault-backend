@@ -37,6 +37,7 @@ const document = pgTable(
     ocrStatus: ocrStatusEnum("ocr_status").default(ocrStatus.PENDING),
     ocrExtractedText: text("ocr_extracted_text"),
     structuredExtractedData: jsonb("structured_extracted_data"),
+    // Strategy 3 Follow-up: Long-term migration to Postgres column type 'date' with { mode: 'string' }
     reportDate: date("report_date", { mode: "date" }),
     hospitalName: varchar("hospital_name", { length: 255 }),
     doctorName: varchar("doctor_name", { length: 255 }),
