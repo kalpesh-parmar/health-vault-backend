@@ -739,6 +739,7 @@ class V1Service {
         dbState?.medicationFlowDone !== true &&
         inputState?.medicationFlowDone !== true &&
         effectiveState?.medicationFlowDone !== true;
+
       const isForcedOnboardingAction =
         message === "ASK_REPORT" ||
         message === "ASK_ABOUT_REPORT" ||
@@ -847,9 +848,6 @@ class V1Service {
           if (!canSkipOnboarding(state)) {
             throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
           }
-          state.isOnboardingCompleted = true;
-          state.hasSkipped = true;
-          state.currentStep = null;
           state.hasSkipped = true;
           if (!state.currentStep && dbState && dbState.currentStep) {
             state.currentStep = dbState.currentStep;
@@ -883,7 +881,6 @@ class V1Service {
             ? `${onboardingResult.title}\n\n${onboardingResult.message}`
             : onboardingResult?.message || onboardingResult?.reply || "";
 
-        // return buildUnifiedResponse({
         const responsePayload = buildUnifiedResponse({
           mode: "ONBOARDING",
           actionType:
@@ -1010,7 +1007,8 @@ class V1Service {
       isOnboardingCompleted: false,
       currentStep,
       chatSessionId: resumableState?.chatSessionId || null,
-      resumableState,
+      resumableState: resumableState ? { ...resumableState, canSkip } : null,
+      canSkip,
     };
   }
 

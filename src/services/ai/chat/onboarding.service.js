@@ -2836,7 +2836,6 @@ async function saveOnboardingState(userId, state) {
       updateData.allergies = state.existingUserData.allergies;
 
     if (state.isOnboardingCompleted || state.hasSkipped) {
-      updateData.status = "ACTIVE";
       updateData.onboardingCompleted = true;
     }
 
