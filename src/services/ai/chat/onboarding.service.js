@@ -18,6 +18,7 @@ const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 const { toDbDate, toDbDateOnlyString } = require("../../../utils/dateUtils");
+const aiClient = require("../clients/aiClient.service");
 
 const {
   cleanAndParseJson,
@@ -2688,6 +2689,25 @@ async function getLocalizedResponse(step, state) {
           docSummary = `Prescription from ${docRecord?.doctorName || structured.doctorName || "Doctor"} at ${docRecord?.hospitalName || structured.hospitalName || "Clinic"}.`;
         } else {
           docSummary = "Medical report summary.";
+        }
+      }
+
+      if (
+        lang !== "english" &&
+        docSummary &&
+        !structured.summaryInPreferredLanguage &&
+        !docRecord?.summaryInPreferredLanguage
+      ) {
+        try {
+          const translatedSummary = await aiClient.translate(docSummary, "english", lang);
+          if (translatedSummary) {
+            docSummary = translatedSummary;
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to translate docSummary for ASK_REPORT:",
+            err.message,
+          );
         }
       }
 
