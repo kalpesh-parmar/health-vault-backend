@@ -241,10 +241,16 @@ class V1Service {
       // CASE 1: ADD_DOCUMENT ACTION
       if (actionType === "ADD_DOCUMENT") {
         console.log(`[UnifiedChat] Executing ADD_DOCUMENT action for userId=${userId}`);
+        const userPrefLang =
+          patient?.preferredLanguage ||
+          inputState?.preferredLanguage ||
+          dbState?.preferredLanguage ||
+          "english";
         return executeAddDocumentAction({
           userId,
           actionData,
           sessionId,
+          preferredLanguage: userPrefLang,
           isOnboardingCompleted,
           documentPersistenceService,
           documentOcrJobService,
