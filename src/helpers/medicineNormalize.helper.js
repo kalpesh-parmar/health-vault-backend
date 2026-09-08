@@ -311,8 +311,23 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   // 1. Clean Name and Extract Type
   let { name, type: derivedType, inferred: derivedTypeInferred } = deriveTypeFromName(rawName);
   if (!derivedType) {
+    let rawType = med.type ? String(med.type).trim().toUpperCase() : null;
+    const validEnums = [
+      medictationType.TABLET,
+      medictationType.CAPSULE,
+      medictationType.SYRUP,
+      medictationType.INJECTION,
+      medictationType.DROPS,
+      medictationType.SPRAY,
+      medictationType.INHALER,
+    ];
+    if (rawType && !validEnums.includes(rawType)) {
+      if (rawType.includes("SHOT")) rawType = medictationType.SYRUP;
+      else if (rawType.includes("DROP")) rawType = medictationType.DROPS;
+      else rawType = matchTypeHint(name, rawDosage, rawInstructions) || medictationType.TABLET;
+    }
     derivedType =
-      med.type || matchTypeHint(name, rawDosage, rawInstructions) || medictationType.TABLET;
+      rawType || matchTypeHint(name, rawDosage, rawInstructions) || medictationType.TABLET;
     needsReview.type = true; // Flag as low confidence if we fell back
   } else if (derivedTypeInferred) {
     needsReview.type = false; // We successfully derived it from name prefix
@@ -362,6 +377,12 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     const matchNum = rawDosageLower.match(/([0-9.]+)/);
     if (matchNum) {
       count = parseFloat(matchNum[1]);
+    } else if (
+      typeof med.dose === "object" &&
+      med.dose !== null &&
+      (med.dose.count !== undefined || med.dose.value !== undefined)
+    ) {
+      count = parseFloat(med.dose.count || med.dose.value) || 1;
     } else if (parsedDose !== null) {
       count = parsedDose;
     } else {
@@ -371,7 +392,19 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     unit = derivedType.toLowerCase();
   } else {
     const matchNum = rawDosageLower.match(/([0-9.]+)/);
-    value = matchNum ? parseFloat(matchNum[1]) : parsedDose !== null ? parsedDose : 1;
+    const doseObjVal =
+      typeof med.dose === "object" && med.dose !== null
+        ? med.dose.value !== undefined
+          ? med.dose.value
+          : med.dose.count
+        : null;
+    value = matchNum
+      ? parseFloat(matchNum[1])
+      : doseObjVal !== null && doseObjVal !== undefined
+        ? parseFloat(doseObjVal)
+        : parsedDose !== null
+          ? parsedDose
+          : 1;
     if (!matchNum && parsedDose === null) {
       needsReview.dose = true;
     }

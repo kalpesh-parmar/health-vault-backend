@@ -52,6 +52,13 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     if (fastDob) {
       return fastDob;
     }
+  } else if (fieldType === "firstName" || fieldType === "lastName") {
+    const trimmed = text.trim();
+    if (trimmed && trimmed.length < 50 && !/[0-9?!=@#$%^&*()]/.test(trimmed)) {
+      if (isValidFirstName(trimmed) || isValidLastName(trimmed)) {
+        return trimmed;
+      }
+    }
   } else if (fieldType === "flowMode") {
     const fastFm = normalizeFlowModeLocally(text);
     if (fastFm !== null) {
@@ -471,7 +478,6 @@ function getNextRequiredOrOptionalStep(state) {
       }
       return "REVIEW_MEDICINES_LIST";
     }
-
     state.medicationFlowStarted = true;
     return "MEDICINE_OPTIONS";
   }
@@ -651,6 +657,14 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     }
   }
 
+  const effectiveSource =
+    normSource ||
+    (state.selectedProfileSource === "DOCUMENT"
+      ? "DOCUMENT"
+      : state.selectedProfileSource === "SOCIAL" || state.selectedProfileSource === "LOGIN"
+        ? "LOGIN"
+        : null);
+
   for (const key of compareKeys) {
     const loginField = state.loginData?.[key] || { value: null, verified: false };
     const rawLogin = loginField.value;
@@ -683,14 +697,14 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       } else {
         state.existingUserData[key] = shownValue;
       }
-    } else if (normSource === "DOCUMENT") {
+    } else if (effectiveSource === "DOCUMENT") {
       const docVal = state.documentData?.[key] !== undefined ? state.documentData[key] : rawDoc;
       const validDocVal = docVal !== undefined && docVal !== null && docVal !== "" ? docVal : null;
       state.existingUserData[key] = validDocVal || existingVal || rawLogin || null;
       state.selectedProfileSource = "DOCUMENT";
       state.useDocumentData = true;
       state.useSocialData = false;
-    } else if (normSource === "LOGIN") {
+    } else if (effectiveSource === "LOGIN") {
       const socialVal = state.socialData?.[key] !== undefined ? state.socialData[key] : rawLogin;
       const validSocialVal =
         socialVal !== undefined && socialVal !== null && socialVal !== "" ? socialVal : null;
@@ -700,8 +714,8 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.useDocumentData = false;
     } else if (loginField.verified) {
       state.existingUserData[key] = rawLogin;
-    } else if (isMismatch && normSource) {
-      const chosenVal = normSource === "DOCUMENT" ? rawDoc : rawLogin;
+    } else if (isMismatch && effectiveSource) {
+      const chosenVal = effectiveSource === "DOCUMENT" ? rawDoc : rawLogin;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
       state.existingUserData[key] = rawLogin || rawDoc || existingVal || null;
@@ -1129,6 +1143,8 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.documentOwnershipConfirmed = true;
         state.documentConfirmed = true;
         state.useDocumentData = true;
+        state.selectedProfileSource = "DOCUMENT";
+        mergeAndApplyProfile(state, "DOCUMENT");
 
         // Auto-populate existingUserData and persist document patient details to DB
         if (state.documentData) {
@@ -2415,7 +2431,11 @@ async function getLocalizedResponse(step, state) {
         },
       ];
 
-      if (state.fromScreen !== "AIChat" && state.fromScreen !== "AIChatScreen") {
+      if (
+        state.fromScreen !== "AIChat" &&
+        state.fromScreen !== "AIChatScreen" &&
+        !state.hasSkipped
+      ) {
         options.push({
           key: "DASHBOARD",
           label: await getLocalizedText(
@@ -2669,9 +2689,10 @@ async function saveOnboardingState(userId, state) {
       state.flowMode === "MANUAL" ||
       state.flowMode === "SKIP" ||
       state.profileConfirmed === true ||
-      (state.flowMode === "UPLOAD" &&
-        state.documentOwnershipConfirmed === true &&
-        (state.profileConfirmed === true || !state.hasLoginData));
+      state.selectedProfileSource === "DOCUMENT" ||
+      state.selectedProfileSource === "SOCIAL" ||
+      state.selectedProfileSource === "LOGIN" ||
+      (state.flowMode === "UPLOAD" && state.documentOwnershipConfirmed === true);
 
     const updateData = {};
     if (shouldWritePatientProfile) {
@@ -2693,9 +2714,9 @@ async function saveOnboardingState(userId, state) {
       )
         updateData.mobile = state.existingUserData.phoneNumber;
 
-      if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
-        const existingPatient = await patientRepository.findById(userId);
-        if (existingPatient) {
+      const existingPatient = await patientRepository.findById(userId);
+      if (existingPatient) {
+        if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
           const mergedFirstName =
             updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
           const mergedLastName =
@@ -2709,8 +2730,13 @@ async function saveOnboardingState(userId, state) {
     if (Array.isArray(state.existingUserData.allergies))
       updateData.allergies = state.existingUserData.allergies;
 
+    if (state.isOnboardingCompleted && !state.hasSkipped) {
+      const existingPatient = await patientRepository.findById(userId);
+      if (!existingPatient || existingPatient.status !== "BLOCKED") {
+        updateData.status = "ACTIVE";
+      }
+    }
     if (state.isOnboardingCompleted || state.hasSkipped) {
-      updateData.status = "ACTIVE";
       updateData.onboardingCompleted = true;
     }
 

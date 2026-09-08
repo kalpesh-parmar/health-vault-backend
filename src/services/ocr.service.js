@@ -561,6 +561,7 @@ class V1Service {
           ((!allergies || allergies.length === 0) && !allergiesSkipped));
 
       const isMedicationFlowPending =
+        !isOnboardingCompleted &&
         dbState?.medicationFlowDone !== true &&
         inputState?.medicationFlowDone !== true &&
         effectiveState?.medicationFlowDone !== true;
@@ -666,8 +667,6 @@ class V1Service {
             throw new InvalidRequestException(errorConstants.REQUIRED_PROFILE_DETAILS_MISSING);
           }
           state.isOnboardingCompleted = true;
-          state.hasSkipped = true;
-          state.currentStep = null;
           state.hasSkipped = true;
           if (!state.currentStep && dbState && dbState.currentStep) {
             state.currentStep = dbState.currentStep;
@@ -829,6 +828,7 @@ class V1Service {
       currentStep,
       chatSessionId: resumableState?.chatSessionId || null,
       resumableState,
+      canSkip,
     };
   }
 
@@ -863,5 +863,4 @@ class V1Service {
     };
   }
 }
-
 module.exports = new V1Service();
