@@ -336,7 +336,7 @@ async function executeAddDocumentAction({
     });
 
     if (filesList.length === 1 && isExistingCompleted) {
-      replyText = `Document '${fileNames[0]}' has already been processed and is ready in your Health Vault.`;
+      replyText = `Your document has been processed and is ready in your Vault. What can I help you next with ?`;
     } else {
       const summaryParts = [];
       if (completedNames.length > 0) {
@@ -555,10 +555,56 @@ async function executeAddDocumentAction({
         ]
       : [];
 
+  let totalUploads = filesList.length || 0;
+  let completedCount = 0;
+  let failedCount = 0;
+  let rejectedCount = 0;
+
+  const summaryJobsList = Array.isArray(docResult?.job)
+    ? docResult.job
+    : docResult?.job
+      ? [docResult.job]
+      : [];
+
+  if (summaryJobsList.length > 0) {
+    totalUploads = Math.max(totalUploads, summaryJobsList.length);
+    summaryJobsList.forEach((jItem) => {
+      const st = String(jItem?.status || jItem?.ocrStatus || "").toUpperCase();
+      if (st === "COMPLETED") {
+        completedCount++;
+      } else if (st === "FAILED") {
+        failedCount++;
+      } else if (st === "REJECTED") {
+        rejectedCount++;
+      }
+    });
+  } else if (docResult?.document) {
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    totalUploads = Math.max(totalUploads, docs.length);
+    docs.forEach((d) => {
+      const st = String(d?.ocrStatus || d?.status || "").toUpperCase();
+      if (st === "COMPLETED") {
+        completedCount++;
+      } else if (st === "FAILED") {
+        failedCount++;
+      } else if (st === "REJECTED") {
+        rejectedCount++;
+      }
+    });
+  }
+
+  const documentSummary = {
+    totalUploads,
+    completed: completedCount,
+    failed: failedCount,
+    rejected: rejectedCount,
+  };
+
   return buildUnifiedResponse({
     mode: "ACTION",
     actionType: returnedActionType,
     reply: replyText,
+    documentSummary,
     sessionId: activeSessionId,
     document: docResult.document,
     medicines: extractedMedicines,

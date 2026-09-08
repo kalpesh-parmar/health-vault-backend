@@ -142,7 +142,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(mockDocumentOcrJobService.enqueue).not.toHaveBeenCalled();
     expect(response.mode).toBe("ACTION");
     expect(response.document.ocrStatus).toBe("completed");
-    expect(response.reply).toContain("already been processed");
+    expect(response.reply).toContain("has been processed");
   });
 
   test("executeAddDocumentAction should return REVIEW_MEDICINES_LIST action post-onboarding when medications are extracted", async () => {
@@ -237,6 +237,45 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(response.actionType).toBe("REVIEW_MEDICINES_LIST");
     expect(response.medicines).toHaveLength(2);
     expect(response.medicines.map((m) => m.medicationName)).toEqual(["Aspirin", "Lipitor"]);
+    expect(response.documentSummary).toEqual({
+      totalUploads: 2,
+      completed: 2,
+      failed: 0,
+      rejected: 0,
+    });
+  });
+
+  test("executeAddDocumentAction should populate documentSummary structured object on ADD_DOCUMENT", async () => {
+    const mockDocumentOcrJobService = { enqueue: jest.fn() };
+    const mockDocumentPersistenceService = {
+      addDocument: jest.fn().mockResolvedValue({
+        document: { id: "doc-999", fileName: "lab_report.pdf", ocrStatus: "COMPLETED" },
+      }),
+    };
+    const mockChatService = { createSession: jest.fn() };
+    const mockChatSessionRepository = { appendMessage: jest.fn() };
+
+    const actionData = {
+      fileName: "lab_report.pdf",
+    };
+
+    const response = await executeAddDocumentAction({
+      userId: "user-123",
+      actionData,
+      sessionId: "session-123",
+      isOnboardingCompleted: true,
+      documentPersistenceService: mockDocumentPersistenceService,
+      documentOcrJobService: mockDocumentOcrJobService,
+      chatService: mockChatService,
+      chatSessionRepository: mockChatSessionRepository,
+    });
+
+    expect(response.documentSummary).toEqual({
+      totalUploads: 1,
+      completed: 1,
+      failed: 0,
+      rejected: 0,
+    });
   });
 
   test("onboardingService should mark isOnboardingCompleted = true upon reaching MEDICINE_OPTIONS step", async () => {
