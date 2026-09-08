@@ -204,6 +204,58 @@ class DocumentProcessingJobRepository {
       .where(lt(documentProcessingJob.expiresAt, new Date()))
       .returning({ id: documentProcessingJob.id });
   }
+
+  async getUserJobSummary(userId) {
+    if (!userId) {
+      return { totalUploads: 0, completed: 0, failed: 0, rejected: 0, processing: 0 };
+    }
+
+    const rows = await db
+      .select({
+        status: documentProcessingJob.status,
+        count: sql`count(*)`.mapWith(Number),
+      })
+      .from(documentProcessingJob)
+      .where(eq(documentProcessingJob.userId, userId))
+      .groupBy(documentProcessingJob.status);
+
+    let completed = 0;
+    let failed = 0;
+    let rejected = 0;
+    let processing = 0;
+    let totalUploads = 0;
+
+    for (const row of rows) {
+      const st = String(row.status || "").toUpperCase();
+      const cnt = Number(row.count || 0);
+      totalUploads += cnt;
+      if (st === "COMPLETED") {
+        completed += cnt;
+      } else if (st === "FAILED") {
+        failed += cnt;
+      } else if (st === "REJECTED") {
+        rejected += cnt;
+      } else {
+        processing += cnt;
+      }
+    }
+
+    return { totalUploads, completed, failed, rejected, processing };
+  }
+
+  async findUserJobDocumentNames(userId) {
+    if (!userId) return [];
+    const rows = await db
+      .select({
+        fileKey: documentProcessingJob.fileKey,
+        metadata: documentProcessingJob.metadata,
+      })
+      .from(documentProcessingJob)
+      .where(eq(documentProcessingJob.userId, userId))
+      .orderBy(documentProcessingJob.createdAt);
+
+    return rows.map((r) => r.metadata?.originalName || r.fileKey?.split("/").pop()).filter(Boolean);
+  }
 }
 
 module.exports = new DocumentProcessingJobRepository();

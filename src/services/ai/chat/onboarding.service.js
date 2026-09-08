@@ -2273,8 +2273,8 @@ async function getLocalizedResponse(step, state) {
 
       const greetingTitle = shouldShowGreeting
         ? await getLocalizedText(
-            "onboarding.complete.message",
-            "Thank you! Onboarding is complete.",
+            "onboarding.canSkip.message",
+            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
             state.preferredLanguage,
           )
         : null;
@@ -2314,8 +2314,8 @@ async function getLocalizedResponse(step, state) {
 
       const greetingTitle = shouldShowGreeting
         ? await getLocalizedText(
-            "onboarding.complete.message",
-            "Thank you! Onboarding is complete.",
+            "onboarding.canSkip.message",
+            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
             state.preferredLanguage,
           )
         : null;
@@ -2431,6 +2431,14 @@ async function getLocalizedResponse(step, state) {
         },
       ];
 
+      const hasDocument =
+        state.flowMode === "UPLOAD" ||
+        state.documentUploaded === true ||
+        state.uploadedMedicalDocument === true ||
+        !!state.documentId ||
+        !!state.loadedDocumentId ||
+        (state.documentData && Object.keys(state.documentData).length > 0);
+
       if (
         state.fromScreen !== "AIChat" &&
         state.fromScreen !== "AIChatScreen" &&
@@ -2447,15 +2455,17 @@ async function getLocalizedResponse(step, state) {
         });
       }
 
-      options.push({
-        key: "ASK_REPORT",
-        label: await getLocalizedText(
-          "onboarding.medicineOptions.askAboutReport",
-          "Ask About My Report",
-          state.preferredLanguage,
-        ),
-        primary: false,
-      });
+      if (hasDocument) {
+        options.push({
+          key: "ASK_REPORT",
+          label: await getLocalizedText(
+            "onboarding.medicineOptions.askAboutReport",
+            "Ask About My Report",
+            state.preferredLanguage,
+          ),
+          primary: false,
+        });
+      }
 
       return {
         action: "MEDICINE_OPTIONS",
@@ -3508,8 +3518,8 @@ class OnboardingService {
     if (canSkipNow && !state.completionMessageSent) {
       state.completionMessageSent = true;
       completionMessage = await getLocalizedText(
-        "onboarding.complete.message",
-        "Thank you! Onboarding is complete.",
+        "onboarding.canSkip.message",
+        "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
         state.preferredLanguage,
       );
       if (state.chatSessionId) {

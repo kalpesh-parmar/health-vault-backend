@@ -473,20 +473,71 @@ async function executeAddDocumentAction({
     } else {
       extractedMedicines = rawList;
     }
-
-    const docFileName =
-      fileNames.length > 0
-        ? fileNames.join(", ")
-        : actionData?.fileName || docResult?.document?.fileName || "prescription";
-    if (isOnboardingCompleted) {
-      replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW(
-        docFileName,
-        extractedMedicines.length,
-      );
-    } else {
-      replyText = `Document '${docFileName}' has been processed. Found ${extractedMedicines.length} medications in your documents.`;
-    }
   }
+
+  const batchDocumentsName =
+    fileNames.length > 0
+      ? fileNames
+      : [actionData?.fileName || docResult?.document?.fileName || "prescription"].filter(Boolean);
+
+  let totalUploads = filesList.length || 0;
+  let completedCount = 0;
+  let failedCount = 0;
+  let rejectedCount = 0;
+
+  const summaryJobsList = Array.isArray(docResult?.job)
+    ? docResult.job
+    : docResult?.job
+      ? [docResult.job]
+      : [];
+
+  if (summaryJobsList.length > 0) {
+    totalUploads = Math.max(totalUploads, summaryJobsList.length);
+    summaryJobsList.forEach((jItem) => {
+      const st = String(jItem?.status || jItem?.ocrStatus || "").toUpperCase();
+      if (st === "COMPLETED") {
+        completedCount++;
+      } else if (st === "FAILED") {
+        failedCount++;
+      } else if (st === "REJECTED") {
+        rejectedCount++;
+      }
+    });
+  } else if (docResult?.document) {
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    totalUploads = Math.max(totalUploads, docs.length);
+    docs.forEach((d) => {
+      const st = String(d?.ocrStatus || d?.status || "").toUpperCase();
+      if (st === "COMPLETED") {
+        completedCount++;
+      } else if (st === "FAILED") {
+        failedCount++;
+      } else if (st === "REJECTED") {
+        rejectedCount++;
+      }
+    });
+  }
+
+  if (completedCount === 0 && (docResult?.document || docResult?.job)) {
+    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 1);
+  }
+  if (totalUploads === 0) {
+    totalUploads = Math.max(batchDocumentsName.length, 1);
+  }
+
+  const documentSummary = {
+    totalUploads,
+    completed: completedCount,
+    failed: failedCount,
+    rejected: rejectedCount,
+  };
+
+  replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
+    successfulCount: completedCount,
+    totalCount: totalUploads,
+    medicationCount: extractedMedicines.length,
+    failedCount,
+  });
 
   let activeSessionId = sessionId;
   if (!activeSessionId && isOnboardingCompleted) {
@@ -503,7 +554,12 @@ async function executeAddDocumentAction({
       userId,
       role: "assistant",
       content: replyText,
-      metadata: { actionType: "ADD_DOCUMENT", documentId: docResult?.document?.id },
+      metadata: {
+        actionType: "ADD_DOCUMENT",
+        documentId: docResult?.document?.id,
+        documentSummary,
+        documentsName: batchDocumentsName,
+      },
     });
   }
 
@@ -554,51 +610,6 @@ async function executeAddDocumentAction({
           },
         ]
       : [];
-
-  let totalUploads = filesList.length || 0;
-  let completedCount = 0;
-  let failedCount = 0;
-  let rejectedCount = 0;
-
-  const summaryJobsList = Array.isArray(docResult?.job)
-    ? docResult.job
-    : docResult?.job
-      ? [docResult.job]
-      : [];
-
-  if (summaryJobsList.length > 0) {
-    totalUploads = Math.max(totalUploads, summaryJobsList.length);
-    summaryJobsList.forEach((jItem) => {
-      const st = String(jItem?.status || jItem?.ocrStatus || "").toUpperCase();
-      if (st === "COMPLETED") {
-        completedCount++;
-      } else if (st === "FAILED") {
-        failedCount++;
-      } else if (st === "REJECTED") {
-        rejectedCount++;
-      }
-    });
-  } else if (docResult?.document) {
-    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
-    totalUploads = Math.max(totalUploads, docs.length);
-    docs.forEach((d) => {
-      const st = String(d?.ocrStatus || d?.status || "").toUpperCase();
-      if (st === "COMPLETED") {
-        completedCount++;
-      } else if (st === "FAILED") {
-        failedCount++;
-      } else if (st === "REJECTED") {
-        rejectedCount++;
-      }
-    });
-  }
-
-  const documentSummary = {
-    totalUploads,
-    completed: completedCount,
-    failed: failedCount,
-    rejected: rejectedCount,
-  };
 
   return buildUnifiedResponse({
     mode: "ACTION",
