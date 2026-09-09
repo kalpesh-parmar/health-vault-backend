@@ -384,6 +384,10 @@ class DocumentOcrJobService {
       RUNNING_LOCKS.delete(fileKey);
     }
   }
+
+  async getUserJobSummary(userId) {
+    return documentProcessingJobRepository.getUserJobSummary(userId);
+  }
 }
 
 module.exports = new DocumentOcrJobService();

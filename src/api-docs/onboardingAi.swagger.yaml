@@ -298,6 +298,38 @@ paths:
                     type: string
                     example: SUCCESS
                   data:
-                    type: array
-                    items:
-                      type: object
+                    type: object
+                    properties:
+                      chatSessionId:
+                        type: string
+                        nullable: true
+                      documentsName:
+                        type: array
+                        items:
+                          type: string
+                        example: ["blood_report.pdf", "prescription.png"]
+                      documentSummary:
+                        type: object
+                        properties:
+                          totalUploads:
+                            type: integer
+                            example: 3
+                          completed:
+                            type: integer
+                            example: 2
+                          failed:
+                            type: integer
+                            example: 0
+                          rejected:
+                            type: integer
+                            example: 1
+                      currentStep:
+                        type: string
+                        example: ASK_LANGUAGE
+                      messages:
+                        type: array
+                        items:
+                          type: object
+                      resumableState:
+                        type: object
+                        nullable: true

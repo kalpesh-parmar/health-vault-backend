@@ -49,6 +49,7 @@
   "onboarding.medicineOptions.goToDashboard": "Go to Dashboard",
   "onboarding.medicineOptions.askAboutReport": "Ask About My Report",
   "onboarding.complete.message": "Thank you! Onboarding is complete.",
+  "onboarding.canSkip.message": "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
   "onboarding.complete.addMoreMedicines": "Add More Medicines",
   "onboarding.complete.viewMyMedicines": "View My Medicines",
   "onboarding.upload.failed": "Document processing failed. Please try again or enter details manually.",

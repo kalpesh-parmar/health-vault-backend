@@ -10,6 +10,7 @@ const {
 const { document } = require("../models/document");
 const chatSessionRepository = require("../repositories/chatSessionRepository");
 const documentRepository = require("../repositories/documentRepository");
+const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const {
@@ -888,6 +889,7 @@ class V1Service {
           onboardingResult?.title && onboardingResult?.message
             ? `${onboardingResult.title}\n\n${onboardingResult.message}`
             : onboardingResult?.message || onboardingResult?.reply || "";
+        console.log(replyText);
 
         const responsePayload = buildUnifiedResponse({
           mode: "ONBOARDING",
@@ -895,7 +897,7 @@ class V1Service {
             actionType === "SKIP_ONBOARDING"
               ? "SKIP_ONBOARDING"
               : onboardingResult?.action || "ONBOARDING_STEP",
-          reply: replyText,
+          reply: onboardingResult.message,
           title: onboardingResult?.title || null,
           subtitle: onboardingResult?.subtitle || null,
           fields: onboardingResult?.fields || [],
@@ -1043,9 +1045,41 @@ class V1Service {
       messages = result.items || [];
     }
 
+    let documentsName = [];
+    let documentSummary = { totalUploads: 0, completed: 0, failed: 0, rejected: 0 };
+    try {
+      const jobNames = await documentProcessingJobRepository.findUserJobDocumentNames(userId);
+      if (jobNames && jobNames.length > 0) {
+        documentsName = jobNames;
+      } else {
+        const userDocs = await documentRepository.findAllByFilterAndSort({
+          filter: {},
+          sort: { sortBy: "createdAt", sortOrder: "desc" },
+          userId,
+        });
+        documentsName = (userDocs || []).map((doc) => doc.fileName).filter(Boolean);
+      }
+
+      const summaryFromDb = await documentProcessingJobRepository.getUserJobSummary(userId);
+      if (summaryFromDb) {
+        documentSummary = {
+          totalUploads: summaryFromDb.totalUploads || 0,
+          completed: summaryFromDb.completed || 0,
+          failed: summaryFromDb.failed || 0,
+          rejected: summaryFromDb.rejected || 0,
+        };
+      }
+    } catch (_err) {
+      console.log(_err);
+
+      documentsName = [];
+    }
+
     return {
       chatSessionId,
       messages,
+      documentsName,
+      documentSummary,
       currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
       resumableState,
     };
