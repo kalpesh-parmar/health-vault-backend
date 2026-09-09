@@ -49,6 +49,11 @@ function attachLoggingInterceptors(instance = axios) {
       const duration = Date.now() - startTime;
       const fullUrl = config.baseURL ? `${config.baseURL}${config.url || ""}` : config.url;
 
+      const isStream =
+        config.responseType === "stream" ||
+        config.responseType === "arraybuffer" ||
+        (response.data && typeof response.data.pipe === "function");
+
       const resLog = {
         type: "OUTGOING_RESPONSE",
         timestamp: new Date().toISOString(),
@@ -56,7 +61,9 @@ function attachLoggingInterceptors(instance = axios) {
         url: fullUrl,
         statusCode: response.status,
         responseTimeMs: `${duration}ms`,
-        responseBody: truncatePayload(maskSensitiveData(response.data)),
+        responseBody: isStream
+          ? `[${(config.responseType || "stream").toUpperCase()} Response]`
+          : truncatePayload(maskSensitiveData(response.data)),
       };
 
       console.log(`[API LOG] OUTGOING RESPONSE:\n${JSON.stringify(resLog, null, 2)}`);
@@ -68,6 +75,11 @@ function attachLoggingInterceptors(instance = axios) {
       const duration = Date.now() - startTime;
       const fullUrl = config.baseURL ? `${config.baseURL}${config.url || ""}` : config.url;
 
+      const isStream =
+        config.responseType === "stream" ||
+        config.responseType === "arraybuffer" ||
+        (error.response?.data && typeof error.response.data.pipe === "function");
+
       const errorLog = {
         type: "OUTGOING_RESPONSE_ERROR",
         timestamp: new Date().toISOString(),
@@ -77,7 +89,9 @@ function attachLoggingInterceptors(instance = axios) {
         responseTimeMs: `${duration}ms`,
         message: error.message,
         responseBody: error.response
-          ? truncatePayload(maskSensitiveData(error.response.data))
+          ? isStream
+            ? `[${(config.responseType || "stream").toUpperCase()} Error Response]`
+            : truncatePayload(maskSensitiveData(error.response.data))
           : undefined,
       };
 

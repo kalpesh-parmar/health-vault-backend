@@ -13,12 +13,12 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
-const medicationReminderService = require("../../medicationReminder.service");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 const { toDbDate, toDbDateOnlyString } = require("../../../utils/dateUtils");
+const aiClient = require("../clients/aiClient.service");
 
 const {
   cleanAndParseJson,
@@ -51,13 +51,6 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     const fastDob = normalizeDOB(text);
     if (fastDob) {
       return fastDob;
-    }
-  } else if (fieldType === "firstName" || fieldType === "lastName") {
-    const trimmed = text.trim();
-    if (trimmed && trimmed.length < 50 && !/[0-9?!=@#$%^&*()]/.test(trimmed)) {
-      if (isValidFirstName(trimmed) || isValidLastName(trimmed)) {
-        return trimmed;
-      }
     }
   } else if (fieldType === "flowMode") {
     const fastFm = normalizeFlowModeLocally(text);
@@ -478,6 +471,7 @@ function getNextRequiredOrOptionalStep(state) {
       }
       return "REVIEW_MEDICINES_LIST";
     }
+
     state.medicationFlowStarted = true;
     return "MEDICINE_OPTIONS";
   }
@@ -657,14 +651,6 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     }
   }
 
-  const effectiveSource =
-    normSource ||
-    (state.selectedProfileSource === "DOCUMENT"
-      ? "DOCUMENT"
-      : state.selectedProfileSource === "SOCIAL" || state.selectedProfileSource === "LOGIN"
-        ? "LOGIN"
-        : null);
-
   for (const key of compareKeys) {
     const loginField = state.loginData?.[key] || { value: null, verified: false };
     const rawLogin = loginField.value;
@@ -697,14 +683,14 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       } else {
         state.existingUserData[key] = shownValue;
       }
-    } else if (effectiveSource === "DOCUMENT") {
+    } else if (normSource === "DOCUMENT") {
       const docVal = state.documentData?.[key] !== undefined ? state.documentData[key] : rawDoc;
       const validDocVal = docVal !== undefined && docVal !== null && docVal !== "" ? docVal : null;
       state.existingUserData[key] = validDocVal || existingVal || rawLogin || null;
       state.selectedProfileSource = "DOCUMENT";
       state.useDocumentData = true;
       state.useSocialData = false;
-    } else if (effectiveSource === "LOGIN") {
+    } else if (normSource === "LOGIN") {
       const socialVal = state.socialData?.[key] !== undefined ? state.socialData[key] : rawLogin;
       const validSocialVal =
         socialVal !== undefined && socialVal !== null && socialVal !== "" ? socialVal : null;
@@ -714,8 +700,8 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.useDocumentData = false;
     } else if (loginField.verified) {
       state.existingUserData[key] = rawLogin;
-    } else if (isMismatch && effectiveSource) {
-      const chosenVal = effectiveSource === "DOCUMENT" ? rawDoc : rawLogin;
+    } else if (isMismatch && normSource) {
+      const chosenVal = normSource === "DOCUMENT" ? rawDoc : rawLogin;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
       state.existingUserData[key] = rawLogin || rawDoc || existingVal || null;
@@ -1113,24 +1099,66 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "CONFIRM_DOCUMENT_OWNERSHIP": {
       let answer = null;
-      try {
-        const payload = JSON.parse(msg);
-        if (payload && payload.value) {
-          answer = String(payload.value).toUpperCase();
-        } else if (payload && payload.confirm !== undefined) {
-          answer = payload.confirm ? "YES" : "NO";
+      let rawObj = null;
+
+      if (typeof message === "object" && message !== null) {
+        rawObj = message;
+      } else {
+        try {
+          const parsed = JSON.parse(rawText);
+          if (parsed && typeof parsed === "object") {
+            rawObj = parsed;
+          }
+        } catch {
+          // Plain string
         }
-      } catch {
-        const msgUpper = msg.toUpperCase();
-        if (msgUpper === "YES" || msgUpper === "Y") {
+      }
+
+      if (rawObj) {
+        const val = String(
+          rawObj.value ||
+            rawObj.answer ||
+            rawObj.confirm ||
+            rawObj.action ||
+            rawObj.actionType ||
+            rawObj.key ||
+            rawObj.label ||
+            "",
+        ).toUpperCase();
+        if (
+          ["YES", "Y", "TRUE", "CONFIRM", "CONFIRMED", "ACCEPT", "ACCEPT_DOCUMENT"].includes(val) ||
+          rawObj.confirm === true ||
+          rawObj.documentConfirmed === true
+        ) {
           answer = "YES";
-        } else if (msgUpper === "NO" || msgUpper === "N") {
+        } else if (
+          ["NO", "N", "FALSE", "REJECT", "DECLINE"].includes(val) ||
+          rawObj.confirm === false ||
+          rawObj.documentConfirmed === false
+        ) {
           answer = "NO";
         }
       }
 
       if (!answer) {
-        const extractedConf = await extractFieldFromMessage("yesNo", msg, state.preferredLanguage);
+        const msgUpper = String(msg || "")
+          .trim()
+          .toUpperCase();
+        if (["YES", "Y", "TRUE", "HA", "હાં", "હા", "સાચું", "हाँ", "1"].includes(msgUpper)) {
+          answer = "YES";
+        } else if (
+          ["NO", "N", "FALSE", "NA", "ના", "નથી", "ખોટું", "नहीं", "0"].includes(msgUpper)
+        ) {
+          answer = "NO";
+        }
+      }
+
+      if (!answer) {
+        const extractedConf = await extractFieldFromMessage(
+          "yesNo",
+          rawText,
+          state.preferredLanguage,
+        );
         if (extractedConf && typeof extractedConf === "string") {
           const confNorm = extractedConf.toUpperCase();
           if (confNorm === "YES" || confNorm === "NO") {
@@ -1139,12 +1167,35 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
+      if (!answer) {
+        const lowerStr = rawText.toLowerCase().trim();
+        const yesPhrases = [
+          "yes",
+          "y",
+          "ha",
+          "હા",
+          "હાં",
+          "સાચું",
+          "हाँ",
+          "true",
+          "mine",
+          "my document",
+          "આ મારી",
+          "મારું છે",
+          "હા મારી છે",
+        ];
+        const noPhrases = ["no", "n", "na", "ના", "નથી", "नहीं", "ખોટું", "false", "not mine"];
+        if (yesPhrases.some((p) => lowerStr === p || lowerStr.includes(p))) {
+          answer = "YES";
+        } else if (noPhrases.some((p) => lowerStr === p || lowerStr.includes(p))) {
+          answer = "NO";
+        }
+      }
+
       if (answer === "YES") {
         state.documentOwnershipConfirmed = true;
         state.documentConfirmed = true;
         state.useDocumentData = true;
-        state.selectedProfileSource = "DOCUMENT";
-        mergeAndApplyProfile(state, "DOCUMENT");
 
         // Auto-populate existingUserData and persist document patient details to DB
         if (state.documentData) {
@@ -1523,10 +1574,31 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (isYes) {
         state.medicinesFlowStarted = true;
         if (state.currentStep === "ASK_FOUND_MEDICINES") {
-          state.medicinesToAdd = (state.foundMedicines || []).map((m, index) => {
+          const docMeds = (state.foundMedicines || []).map((m, index) => {
             const { onboardingMed } = normalizeMedicine(m, index);
+            if (m.isSaved) onboardingMed.isSaved = true;
+            if (m.dbId) onboardingMed.dbId = m.dbId;
             return onboardingMed;
           });
+          const existingManualMeds = (state.medicinesToAdd || []).filter(
+            (m) =>
+              m &&
+              (m.source === "MANUAL" ||
+                m.isManual ||
+                m.source !== "OCR" ||
+                (m.id && (String(m.id).startsWith("med_") || String(m.id).startsWith("client_"))) ||
+                (m.client_med_id &&
+                  (String(m.client_med_id).startsWith("med_") ||
+                    String(m.client_med_id).startsWith("client_")))),
+          );
+          const combined = [...docMeds];
+          for (const manualMed of existingManualMeds) {
+            const medId = manualMed.id || manualMed.client_med_id;
+            if (!combined.some((c) => (c.id || c.client_med_id) === medId)) {
+              combined.push(manualMed);
+            }
+          }
+          state.medicinesToAdd = combined;
           // so the user is routed to REVIEW_MEDICINES_LIST to delete unwanted medicines.
         } else {
           state.medicinesToAdd = [{ isConfirmed: false }];
@@ -1554,6 +1626,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       const val = String(payload.value || payload.action || payload.key || msg || "")
         .trim()
         .toUpperCase();
+
       const isConfirm =
         val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
       const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
@@ -1586,6 +1659,12 @@ async function updateStateFromMessage(state, message, userId = null) {
                 resolution: "EDIT",
               };
             }
+            if (state.medicinesToAdd[idx]) {
+              state.medicinesToAdd[idx].duplicateInfo = {
+                ...(state.medicinesToAdd[idx].duplicateInfo || {}),
+                hasDuplicate: false,
+              };
+            }
           }
         });
       }
@@ -1614,15 +1693,27 @@ async function updateStateFromMessage(state, message, userId = null) {
           });
         }
 
-        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => ({
-          ...m,
-          selected:
+        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => {
+          const isSelected =
             m.resolution === "KEEP_EXISTING" || m.resolution === "REMOVE_NEW"
               ? false
               : selectedIds.length > 0
                 ? selectedIds.includes(m.id || m.client_med_id)
-                : true,
-        }));
+                : true;
+
+          return {
+            ...m,
+            selected: isSelected,
+            duplicateInfo: {
+              hasDuplicate: false,
+              conflictType: null,
+              matchedMedication: null,
+              matchedMedications: [],
+              suggestedActions: [],
+              isAlreadySaved: Boolean(m.isSaved || m.dbId),
+            },
+          };
+        });
 
         let nextIncompleteIndex = -1;
         for (let i = 0; i < state.medicinesToAdd.length; i++) {
@@ -1678,16 +1769,16 @@ async function updateStateFromMessage(state, message, userId = null) {
               if (matchIdx >= 0 && created) {
                 state.medicinesToAdd[matchIdx].isSaved = true;
                 state.medicinesToAdd[matchIdx].dbId = created.id;
-                try {
-                  await medicationReminderService.createReminder(userId, {
-                    medicationId: created.id,
-                  });
-                } catch (err) {
-                  console.error(
-                    `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
-                    err,
-                  );
-                }
+                // try {
+                //   await medicationReminderService.createReminder(userId, {
+                //     medicationId: created.id,
+                //   });
+                // } catch (err) {
+                //   console.error(
+                //     `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
+                //     err,
+                //   );
+                // }
               }
             }
           }
@@ -1718,20 +1809,47 @@ async function updateStateFromMessage(state, message, userId = null) {
         (payload.name || payload.medicationName || payload.medication_name ? payload : null);
 
       if (medObj) {
-        const isEditing =
-          state.currentStep === "EDIT_MEDICINE" &&
-          state.currentMedicineIndex !== undefined &&
-          state.currentMedicineIndex !== null &&
-          state.currentMedicineIndex >= 0;
+        if (!state.medicinesToAdd) state.medicinesToAdd = [];
+
+        const isExplicitAddNew =
+          payload.addNew === true ||
+          payload.action === "ADD" ||
+          payload.action === "ADD_NEW" ||
+          payload.mode === "ADD" ||
+          payload.isEditing === false ||
+          state.currentStep === "ADD_MEDICINE";
+
+        const payloadMedId = payload.clientMedId || medObj.client_med_id || medObj.id;
+        let matchedIndex = -1;
+        if (!isExplicitAddNew && payloadMedId && Array.isArray(state.medicinesToAdd)) {
+          matchedIndex = state.medicinesToAdd.findIndex(
+            (m) =>
+              (m.id && m.id === payloadMedId) ||
+              (m.client_med_id && m.client_med_id === payloadMedId),
+          );
+        }
+
+        let existingIdx = -1;
+        if (!isExplicitAddNew) {
+          if (matchedIndex >= 0) {
+            existingIdx = matchedIndex;
+          } else if (
+            state.currentStep === "EDIT_MEDICINE" &&
+            state.currentMedicineIndex !== undefined &&
+            state.currentMedicineIndex !== null &&
+            state.currentMedicineIndex >= 0 &&
+            state.currentMedicineIndex < state.medicinesToAdd.length
+          ) {
+            existingIdx = state.currentMedicineIndex;
+          }
+        }
 
         let clientMedId;
-        if (isEditing && state.medicinesToAdd && state.medicinesToAdd[state.currentMedicineIndex]) {
+        if (existingIdx >= 0 && state.medicinesToAdd[existingIdx]) {
           clientMedId =
-            payload.clientMedId ||
-            medObj.client_med_id ||
-            medObj.id ||
-            state.medicinesToAdd[state.currentMedicineIndex].client_med_id ||
-            state.medicinesToAdd[state.currentMedicineIndex].id ||
+            payloadMedId ||
+            state.medicinesToAdd[existingIdx].client_med_id ||
+            state.medicinesToAdd[existingIdx].id ||
             `med_${Date.now()}`;
         } else {
           // When adding a new medicine, generate a fresh unique ID so it never overwrites existing items
@@ -1774,14 +1892,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           console.warn("[OnboardingService] Medicine validation issue:", valErr.message);
         }
 
-        if (!state.medicinesToAdd) state.medicinesToAdd = [];
-
-        let existingIdx = -1;
-        if (isEditing && state.currentMedicineIndex < state.medicinesToAdd.length) {
-          existingIdx = state.currentMedicineIndex;
-        }
-
-        if (existingIdx >= 0) {
+        if (existingIdx >= 0 && existingIdx < state.medicinesToAdd.length) {
           state.medicinesToAdd[existingIdx] = {
             ...state.medicinesToAdd[existingIdx],
             ...newMed,
@@ -2595,6 +2706,25 @@ async function getLocalizedResponse(step, state) {
         }
       }
 
+      if (
+        lang !== "english" &&
+        docSummary &&
+        !structured.summaryInPreferredLanguage &&
+        !docRecord?.summaryInPreferredLanguage
+      ) {
+        try {
+          const translatedSummary = await aiClient.translate(docSummary, "english", lang);
+          if (translatedSummary) {
+            docSummary = translatedSummary;
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to translate docSummary for ASK_REPORT:",
+            err.message,
+          );
+        }
+      }
+
       const suggestedQuestions = REPORT_QUESTIONS_I18N[lang] || REPORT_QUESTIONS_I18N.english;
 
       const labFindings =
@@ -2699,10 +2829,9 @@ async function saveOnboardingState(userId, state) {
       state.flowMode === "MANUAL" ||
       state.flowMode === "SKIP" ||
       state.profileConfirmed === true ||
-      state.selectedProfileSource === "DOCUMENT" ||
-      state.selectedProfileSource === "SOCIAL" ||
-      state.selectedProfileSource === "LOGIN" ||
-      (state.flowMode === "UPLOAD" && state.documentOwnershipConfirmed === true);
+      (state.flowMode === "UPLOAD" &&
+        state.documentOwnershipConfirmed === true &&
+        (state.profileConfirmed === true || !state.hasLoginData));
 
     const updateData = {};
     if (shouldWritePatientProfile) {
@@ -2724,9 +2853,9 @@ async function saveOnboardingState(userId, state) {
       )
         updateData.mobile = state.existingUserData.phoneNumber;
 
-      const existingPatient = await patientRepository.findById(userId);
-      if (existingPatient) {
-        if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
+      if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
+        const existingPatient = await patientRepository.findById(userId);
+        if (existingPatient) {
           const mergedFirstName =
             updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
           const mergedLastName =
@@ -2740,12 +2869,6 @@ async function saveOnboardingState(userId, state) {
     if (Array.isArray(state.existingUserData.allergies))
       updateData.allergies = state.existingUserData.allergies;
 
-    if (state.isOnboardingCompleted && !state.hasSkipped) {
-      const existingPatient = await patientRepository.findById(userId);
-      if (!existingPatient || existingPatient.status !== "BLOCKED") {
-        updateData.status = "ACTIVE";
-      }
-    }
     if (state.isOnboardingCompleted || state.hasSkipped) {
       updateData.onboardingCompleted = true;
     }
@@ -3040,7 +3163,13 @@ class OnboardingService {
 
           let fullMobile = null;
           if (patient.mobile) {
-            fullMobile = (patient.countryCode || "") + patient.mobile;
+            const rawMob = String(patient.mobile).trim();
+            const rawCode = patient.countryCode ? String(patient.countryCode).trim() : "";
+            fullMobile =
+              rawMob.startsWith("+") || (rawCode && rawMob.startsWith(rawCode))
+                ? rawMob
+                : rawCode + rawMob;
+            fullMobile = normalizePhone(fullMobile) || fullMobile;
           }
 
           state.loginData = {
@@ -3131,7 +3260,13 @@ class OnboardingService {
             if (patientRec.gender && !uData.gender) uData.gender = patientRec.gender;
             if (patientRec.email && !uData.email) uData.email = patientRec.email;
             if (patientRec.mobile && !uData.phoneNumber) {
-              uData.phoneNumber = (patientRec.countryCode || "") + patientRec.mobile;
+              const rawMob = String(patientRec.mobile).trim();
+              const rawCode = patientRec.countryCode ? String(patientRec.countryCode).trim() : "";
+              const combined =
+                rawMob.startsWith("+") || (rawCode && rawMob.startsWith(rawCode))
+                  ? rawMob
+                  : rawCode + rawMob;
+              uData.phoneNumber = normalizePhone(combined) || combined;
             }
             if (patientRec.bloodGroup && !uData.bloodGroup) {
               uData.bloodGroup = patientRec.bloodGroup;

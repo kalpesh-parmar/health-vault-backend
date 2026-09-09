@@ -4,6 +4,7 @@ const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
+const aiClient = require("../services/ai/clients/aiClient.service");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -211,6 +212,7 @@ async function executeAddDocumentAction({
   userId,
   actionData,
   sessionId,
+  preferredLanguage = "english",
   isOnboardingCompleted,
   documentPersistenceService,
   documentOcrJobService,
@@ -531,7 +533,28 @@ async function executeAddDocumentAction({
     failed: failedCount,
     rejected: rejectedCount,
   };
-
+  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
+    const prefLang = preferredLanguage.toLowerCase();
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    for (const docItem of docs) {
+      if (!docItem) continue;
+      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
+      if (struct && typeof struct === "object") {
+        if (struct.summaryInPreferredLanguage) {
+          struct.summary = struct.summaryInPreferredLanguage;
+        } else if (struct.summary) {
+          try {
+            const translated = await aiClient.translate(struct.summary, "english", prefLang);
+            if (translated) {
+              struct.summary = translated;
+            }
+          } catch (err) {
+            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
+          }
+        }
+      }
+    }
+  }
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,

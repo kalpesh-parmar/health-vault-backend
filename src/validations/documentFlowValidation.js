@@ -77,6 +77,12 @@ const sendChatMessageSchema = z
     question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
     preferredLanguage: z.string().optional(),
+    stream: z
+      .preprocess(
+        (val) => (val === "true" ? true : val === "false" ? false : val),
+        z.boolean().optional().default(false),
+      )
+      .optional(),
   })
   .strict();
 

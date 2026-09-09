@@ -6,7 +6,8 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
-const { eq, desc, inArray } = require("drizzle-orm");
+const { eq, desc, inArray, and } = require("drizzle-orm");
+const { ocrStatus } = require("../../../enums/ocrStatus");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
@@ -29,6 +30,16 @@ const debugLogger = {
 
 const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
 // const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
+
+async function streamTextLikeChat(text, onChunk, abortSignal, delayMs = 15) {
+  if (!text || !onChunk) return;
+  const words = text.split(/(\s+)/);
+  for (const word of words) {
+    if (abortSignal?.aborted) break;
+    onChunk(word);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
 
 const NO_CONTEXT_REPLY_I18N = {
   english: "Information not found in uploaded reports.",
@@ -114,6 +125,196 @@ const AGE_KEYWORDS = [
   "எனக்கு என்ன வயது",
   "என் வயது எவ்வளவு",
 ];
+
+const SUMMARY_KEYWORDS = [
+  // English
+  "ask_report",
+  "ask report",
+  "tell me about my report",
+  "summary of my report",
+  "report summary",
+  "summarize my report",
+  "explain my report",
+  "tell me about report",
+  "give me report summary",
+  // Gujarati
+  "રિપોર્ટ નો સારાંશ",
+  "મને મારા રિપોર્ટ વિશે કહો",
+  "મારો રિપોર્ટ સમજાવો",
+  "રિપોર્ટ સમજાવો",
+  "રિપોર્ટ નો સારાંશ આપો",
+  "મારા રિપોર્ટ વિશે જણાવો",
+  // Hindi
+  "मेरी रिपोर्ट का सारांश",
+  "मुझे मेरी रिपोर्ट के बारे में बताएं",
+  "रिपोर्ट का सारांश",
+  "मेरी रिपोर्ट समझाएं",
+  "मेरी रिपोर्ट का सारांश दें",
+  "मुझे रिपोर्ट के बारे में बताएं",
+  // Marathi
+  "माझ्या अहवालाचा सारांश",
+  "मला माझ्या अहवालाबद्दल सांगा",
+  "अहवालाचा सारांश",
+  "माझा अहवाल स्पष्ट करा",
+  "माझ्या अहवालाचा सारांश द्या",
+  // Tamil
+  "என் அறிக்கையின் சுருக்கம்",
+  "என் அறிக்கை பற்றி சொல்லுங்கள்",
+  "அறிக்கையின் சுருக்கம்",
+  "என் அறிக்கையை விளக்குங்கள்",
+  "என் அறிக்கையின் சுருக்கத்தை கொடுங்கள்",
+];
+
+const SUMMARY_LABELS_I18N = {
+  english: {
+    patientName: "Patient Name",
+    reportAge: "Report Age",
+    summaryTitle: "Report Summary",
+  },
+  gujarati: {
+    patientName: "દર્દીનું નામ",
+    reportAge: "રિપોર્ટનો સમય",
+    summaryTitle: "રિપોર્ટનો સારાંશ",
+  },
+  hindi: {
+    patientName: "मरीज का नाम",
+    reportAge: "रिपोर्ट की अवधि",
+    summaryTitle: "रिपोर्ट का सारांश",
+  },
+  marathi: {
+    patientName: "रुग्णाचे नाव",
+    reportAge: "अहवालाचा कालावधी",
+    summaryTitle: "अहवालाचा सारांश",
+  },
+  tamil: {
+    patientName: "நோயாளி பெயர்",
+    reportAge: "அறிக்கையின் வயது",
+    summaryTitle: "அறிக்கையின் சுருக்கம்",
+  },
+};
+
+const REPORT_PROCESSING_I18N = {
+  english: "Your report is currently being processed. Please wait a moment.",
+  gujarati: "તમારો રિપોર્ટ હાલમાં પ્રક્રિયા હેઠળ છે. કૃપા કરીને થોડી રાહ જુઓ.",
+  hindi: "आपकी रिपोर्ट पर अभी प्रक्रिया चल रही है। कृपया कुछ समय प्रतीक्षा करें।",
+  marathi: "तुमच्या अहवालावर सध्या प्रक्रिया सुरू आहे. कृपया काही वेळ थांबा.",
+  tamil:
+    "உங்கள் அறிக்கை தற்போது செயலாக்கப்பட்டு வருகிறது. தயவுசெய்து சிறிது நேரம் காத்திருக்கவும்.",
+};
+
+const NO_REPORT_FOUND_I18N = {
+  english: "No active medical reports found in your profile.",
+  gujarati: "તમારી પ્રોફાઇલમાં કોઈ સક્રિય તબીબી રિપોર્ટ મળ્યા નથી.",
+  hindi: "आपकी प्रोफ़ाइल में कोई सक्रिय मेडिकल रिपोर्ट नहीं मिली।",
+  marathi: "तुमच्या प्रोफाइलमध्ये कोणताही सक्रिय वैद्यकीय अहवाल आढळला नाही.",
+  tamil: "உங்கள் சுயவிவரத்தில் செயலில் உள்ள மருத்துவ அறிக்கைகள் எதுவும் காணப்படவில்லை.",
+};
+
+const NO_SUMMARY_AVAILABLE_I18N = {
+  english: "No summary details were found in this report.",
+  gujarati: "આ રિપોર્ટમાં કોઈ સારાંશ વિગતો મળી નથી.",
+  hindi: "इस रिपोर्ट में कोई सारांश विवरण नहीं मिला।",
+  marathi: "या अहवालात कोणताही सारांश तपशील आढळला नाही.",
+  tamil: "இந்த அறிக்கையில் சுருக்க விவரங்கள் எதுவும் காணப்படவில்லை.",
+};
+
+const PREDEFINED_QUESTIONS_I18N = {
+  english: [
+    "What are the key findings?",
+    "Are there any abnormal values?",
+    "What are the next steps or recommendations?",
+  ],
+  gujarati: [
+    "મુખ્ય તારણો શું છે?",
+    "શું કોઈ અસામાન્ય મૂલ્યો છે?",
+    "આગળના પગલાં અથવા ભલામણો શું છે?",
+  ],
+  hindi: [
+    "मुख्य निष्कर्ष क्या हैं?",
+    "क्या कोई असामान्य मूल्य हैं?",
+    "आगे के कदम या सिफारिशें क्या हैं?",
+  ],
+  marathi: [
+    "मुख्य निष्कर्ष काय आहेत?",
+    "काही असामान्य मूल्ये आहेत का?",
+    "पुढील पावले किंवा शिफारसी काय आहेत?",
+  ],
+  tamil: [
+    "முக்கிய கண்டுபிடிப்புகள் யாவை?",
+    "ஏதேனும் அசாதாரண மதிப்புகள் உள்ளதா?",
+    "அடுத்த படிகள் அல்லது பரிந்துரைகள் யாவை?",
+  ],
+};
+
+function getReportAgeString(reportDate, language) {
+  if (!reportDate) return "";
+  const date = new Date(reportDate);
+  if (isNaN(date.getTime())) return "";
+
+  const today = new Date();
+  const d1 = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const d2 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  const diffTime = d2.getTime() - d1.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  const normLang = normalizeLanguage(language);
+
+  if (diffDays <= 0) {
+    const todayLabels = {
+      english: "Today",
+      gujarati: "આજનો",
+      hindi: "आज का",
+      marathi: "आजचा",
+      tamil: "இன்றைய",
+    };
+    return todayLabels[normLang] || todayLabels.english;
+  }
+
+  if (diffDays < 30) {
+    if (normLang === "english") {
+      return diffDays === 1 ? "1 day old" : `${diffDays} days old`;
+    } else if (normLang === "gujarati") {
+      return `${diffDays} દિવસ જૂનો`;
+    } else if (normLang === "hindi") {
+      return `${diffDays} दिन पुराना`;
+    } else if (normLang === "marathi") {
+      return `${diffDays} दिवस जुना`;
+    } else if (normLang === "tamil") {
+      return `${diffDays} நாள் பழமையானது`;
+    }
+  }
+
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffDays < 365) {
+    if (normLang === "english") {
+      return diffMonths === 1 ? "1 month old" : `${diffMonths} months old`;
+    } else if (normLang === "gujarati") {
+      return `${diffMonths} મહિના જૂનો`;
+    } else if (normLang === "hindi") {
+      return `${diffMonths} महीने पुराना`;
+    } else if (normLang === "marathi") {
+      return `${diffMonths} महिने जुना`;
+    } else if (normLang === "tamil") {
+      return `${diffMonths} மாதங்கள் பழமையானது`;
+    }
+  }
+
+  const diffYears = Math.floor(diffDays / 365);
+  if (normLang === "english") {
+    return diffYears === 1 ? "1 year old" : `${diffYears} years old`;
+  } else if (normLang === "gujarati") {
+    return `${diffYears} વર્ષ જૂનો`;
+  } else if (normLang === "hindi") {
+    return `${diffYears} साल पुराना`;
+  } else if (normLang === "marathi") {
+    return `${diffYears} वर्षे जुना`;
+  } else if (normLang === "tamil") {
+    return `${diffYears} ஆண்டுகள் பழமையானது`;
+  }
+
+  return "";
+}
 
 /**
  * Smart context builder for patient profile active medications.
@@ -341,20 +542,21 @@ ${chunksContent}`;
           },
           {
             temperature: 0.2,
-            maxTokens: 1024,
-            rawOptions: { num_ctx: 8192 },
+            maxTokens: 4096,
+            think: false,
+            rawOptions: { num_ctx: env.ollamaNumCtx },
             signal: abortSignal,
           },
         );
       } else {
         answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
           temperature: 0.2,
-          maxTokens: 1024,
-          rawOptions: { num_ctx: 8192 },
+          maxTokens: 4096,
+          think: false,
+          rawOptions: { num_ctx: env.ollamaNumCtx },
           signal: abortSignal,
         });
       }
-
       return {
         answer,
         mode,
@@ -390,16 +592,18 @@ ${chunksContent}`;
         },
         {
           temperature: 0.2,
-          maxTokens: 2048,
-          rawOptions: { num_ctx: 16384 },
+          maxTokens: 4096,
+          think: false,
+          rawOptions: { num_ctx: env.ollamaNumCtx },
           signal: abortSignal,
         },
       );
     } else {
       answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
         temperature: 0.2,
-        maxTokens: 2048,
-        rawOptions: { num_ctx: 16384 },
+        maxTokens: 4096,
+        think: false,
+        rawOptions: { num_ctx: env.ollamaNumCtx },
         signal: abortSignal,
       });
     }
@@ -432,7 +636,29 @@ ${chunksContent}`;
         messageConstants.SESSION_FETCHED ? "Chat session not found" : "Not found",
       );
     }
-    return chatSessionRepository.listMessages({ cursor, direction, limit, sessionId, userId });
+    const result = await chatSessionRepository.listMessages({
+      cursor,
+      direction,
+      limit,
+      sessionId,
+      userId,
+    });
+
+    const items = (result.items || []).map((msg) => {
+      const meta = msg.metadata || {};
+      return {
+        ...msg,
+        actionType: meta.actionType || msg.actionType || null,
+        options: meta.options || msg.options || [],
+        medicines: meta.medicines || msg.medicines || [],
+        document: meta.document || msg.document || null,
+        suggestedAction: meta.suggestedAction || msg.suggestedAction || null,
+        mode: meta.mode || msg.mode || null,
+        medication: meta.medication || msg.medication || null,
+      };
+    });
+
+    return { ...result, items };
   }
 
   async sendMessage({
@@ -440,6 +666,7 @@ ${chunksContent}`;
     documentId,
     question,
     sessionId: reqSessionId,
+    preferredLanguage: passedLang,
     onChunk,
     abortSignal,
   }) {
@@ -459,6 +686,8 @@ ${chunksContent}`;
       }
 
       const _reqStartTime = Date.now();
+      // const baseTime = onChunk?.startTime || _reqStartTime;
+
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
         documentId,
@@ -497,26 +726,29 @@ ${chunksContent}`;
         throw new InvalidRequestException("Question is required");
       }
 
-      // Resolve and normalize preferred language
-      let preferredLanguage = "english";
       const p = await patientRepository.findById(userId);
-      if (p) {
-        preferredLanguage = p.preferredLanguage || "english";
-      }
-      if (!preferredLanguage || preferredLanguage === "english") {
-        try {
-          const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
-          const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-          if (onboardingRecord?.data?.preferredLanguage) {
-            preferredLanguage = onboardingRecord.data.preferredLanguage;
+      // Resolve and normalize preferred language
+      let preferredLanguage = passedLang || "english";
+      if (!passedLang) {
+        if (p) {
+          preferredLanguage = p.preferredLanguage || "english";
+        }
+        if (!preferredLanguage || preferredLanguage === "english") {
+          try {
+            const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
+            const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+            if (onboardingRecord?.data?.preferredLanguage) {
+              preferredLanguage = onboardingRecord.data.preferredLanguage;
+            }
+          } catch (err) {
+            debugLogger.error("sendMessage: Failed to get onboarding preferredLanguage", {
+              error: err.message,
+            });
           }
-        } catch (err) {
-          debugLogger.error("sendMessage: Failed to get onboarding preferredLanguage", {
-            error: err.message,
-          });
         }
       }
       preferredLanguage = normalizeLanguage(preferredLanguage);
+      const patientPreferredLang = preferredLanguage;
 
       // --- ML LANGUAGE DETECTION ---
       let detectedLanguage = preferredLanguage;
@@ -531,6 +763,10 @@ ${chunksContent}`;
             previous: preferredLanguage,
           });
           detectedLanguage = normDetected;
+
+          // console.log(
+          //   `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
+          // );
         }
       } catch (err) {
         debugLogger.error("sendMessage: Failed to detect language via ML model", {
@@ -599,6 +835,202 @@ ${chunksContent}`;
           user: userMsg,
           mode: "GENERAL_HEALTH",
           emergency: false,
+        };
+      }
+
+      const isSummaryRequest = SUMMARY_KEYWORDS.some((kw) => cleanQuestion.includes(kw));
+      if (isSummaryRequest) {
+        let targetDoc = null;
+        if (documentId && documentId.length > 0) {
+          const docs = await db
+            .select()
+            .from(document)
+            .where(
+              and(
+                eq(document.id, documentId[0]),
+                eq(document.userId, userId),
+                eq(document.softDelete, false),
+              ),
+            )
+            .limit(1);
+          if (docs.length > 0) {
+            targetDoc = docs[0];
+          }
+        } else {
+          const docs = await db
+            .select()
+            .from(document)
+            .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+            .orderBy(desc(document.createdAt))
+            .limit(1);
+          if (docs.length > 0) {
+            targetDoc = docs[0];
+          }
+        }
+
+        const userMessage = await chatSessionRepository.appendMessage({
+          content: question.trim(),
+          role: "user",
+          sessionId,
+          userId,
+        });
+
+        let replyText = "";
+        let options = [];
+        let taskMode = "DOCUMENT_RAG";
+
+        if (!targetDoc) {
+          replyText = NO_REPORT_FOUND_I18N[patientPreferredLang] || NO_REPORT_FOUND_I18N.english;
+          if (onChunk) {
+            onChunk(replyText);
+          }
+        } else if (
+          targetDoc.ocrStatus === ocrStatus.PENDING ||
+          targetDoc.ocrStatus === ocrStatus.IN_PROGRESS ||
+          targetDoc.ocrStatus === "processing"
+        ) {
+          replyText =
+            REPORT_PROCESSING_I18N[patientPreferredLang] || REPORT_PROCESSING_I18N.english;
+          if (onChunk) {
+            onChunk(replyText);
+          }
+        } else {
+          const patientName =
+            targetDoc.structuredExtractedData?.patient?.name ||
+            targetDoc.structuredExtractedData?.patientName ||
+            (p ? `${p.firstName || ""} ${p.lastName || ""}`.trim() : "Unknown");
+
+          const reportAgeStr = getReportAgeString(
+            targetDoc.reportDate || targetDoc.createdAt,
+            patientPreferredLang,
+          );
+
+          let structData = targetDoc.structuredExtractedData;
+          if (typeof structData === "string") {
+            try {
+              structData = JSON.parse(structData);
+            } catch {
+              structData = {};
+            }
+          }
+          let rawSummary =
+            targetDoc.summaryEnglish ||
+            structData?.summaryEnglish ||
+            structData?.summary ||
+            structData?.remarks ||
+            "";
+
+          const labels = SUMMARY_LABELS_I18N[patientPreferredLang] || SUMMARY_LABELS_I18N.english;
+          const questions =
+            PREDEFINED_QUESTIONS_I18N[patientPreferredLang] || PREDEFINED_QUESTIONS_I18N.english;
+
+          const formattedHeader =
+            `**${labels.patientName}:** ${patientName}\n` +
+            `**${labels.reportAge}:** ${reportAgeStr}\n\n` +
+            `### ${labels.summaryTitle}\n`;
+
+          if (onChunk) {
+            await streamTextLikeChat(formattedHeader, onChunk, abortSignal, 10);
+          }
+
+          let translatedSummaryParts = [];
+          if (!rawSummary) {
+            const noSummary =
+              NO_SUMMARY_AVAILABLE_I18N[patientPreferredLang] || NO_SUMMARY_AVAILABLE_I18N.english;
+            translatedSummaryParts.push(noSummary);
+            if (onChunk) {
+              await streamTextLikeChat(noSummary, onChunk, abortSignal, 15);
+            }
+          } else {
+            // Split by double newline first to get paragraphs
+            const rawParagraphs = rawSummary.split("\n\n");
+            for (let i = 0; i < rawParagraphs.length; i++) {
+              if (abortSignal?.aborted) break;
+              const rawPara = rawParagraphs[i];
+              if (!rawPara.trim()) continue;
+
+              if (onChunk && i > 0) {
+                // If it is not the first paragraph of the summary, prefix with double newline
+                onChunk("\n\n");
+              }
+
+              let fullTranslatedPara = "";
+
+              if (patientPreferredLang !== "english") {
+                // Split paragraph into sentences to stream translation faster
+                const sentences = rawPara.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [rawPara];
+
+                for (let s = 0; s < sentences.length; s++) {
+                  if (abortSignal?.aborted) break;
+                  let rawSentence = sentences[s];
+                  if (!rawSentence.trim()) continue;
+
+                  let translatedSentence = rawSentence;
+                  try {
+                    translatedSentence = await aiClient.translate(
+                      rawSentence.trim(),
+                      "english",
+                      patientPreferredLang,
+                    );
+                  } catch (err) {
+                    debugLogger.error("sendMessage: Sentence translation failed", {
+                      error: err.message,
+                    });
+                  }
+
+                  // Add space before next sentence if not first and doesn't start with space
+                  if (s > 0 && !translatedSentence.startsWith(" ")) {
+                    translatedSentence = " " + translatedSentence;
+                  }
+
+                  fullTranslatedPara += translatedSentence;
+                  if (onChunk) {
+                    await streamTextLikeChat(translatedSentence, onChunk, abortSignal, 15);
+                  }
+                }
+              } else {
+                fullTranslatedPara = rawPara;
+                if (onChunk) {
+                  await streamTextLikeChat(fullTranslatedPara, onChunk, abortSignal, 15);
+                }
+              }
+
+              translatedSummaryParts.push(fullTranslatedPara);
+            }
+          }
+
+          replyText = formattedHeader + translatedSummaryParts.join("\n\n");
+
+          options = questions.map((q) => ({
+            label: q,
+            value: q,
+            actionType: "CHAT",
+          }));
+        }
+
+        const aiMessage = await chatSessionRepository.appendMessage({
+          citations: [],
+          content: replyText,
+          metadata: {
+            mode: taskMode,
+            emergency: false,
+            documentId: targetDoc ? [targetDoc.id] : [],
+            task: "SUMMARY",
+            options,
+          },
+          role: "assistant",
+          sessionId,
+          userId,
+        });
+
+        return {
+          ai: aiMessage,
+          citations: [],
+          reply: replyText,
+          user: userMessage,
+          mode: taskMode,
+          emergency: false,
+          options,
         };
       }
 
@@ -872,6 +1304,12 @@ ${chunksContent}`;
       const items = recent && Array.isArray(recent.items) ? recent.items : [];
       const history = items.map((msg) => ({ content: msg.content, role: msg.role }));
 
+      // Prevent small models (like medgemma:4b) from mimicking previous message languages
+      // by injecting a strong reminder into the very last user message.
+      if (history.length > 0 && history[history.length - 1].role === "user") {
+        history[history.length - 1].content +=
+          `\n\n[SYSTEM REMINDER: You MUST answer strictly in ${detectedLanguage.toUpperCase()} ONLY, regardless of the language used in previous messages.]`;
+      }
       let assistantText = NO_CONTEXT_REPLY;
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
@@ -915,6 +1353,7 @@ ${chunksContent}`;
       if (intent === "GENERAL") {
         try {
           debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for GENERAL (Qwen)");
+
           const qwenStartTime = Date.now();
           const aiResponse = await this.qwenHealthChat(
             history,
@@ -931,11 +1370,17 @@ ${chunksContent}`;
           );
           assistantText = aiResponse.answer;
           isEmergency = !!aiResponse.emergency;
-        } catch {
+        } catch (llmErr) {
+          debugLogger.error("sendMessage: LLM Generation failed for GENERAL intent", {
+            error: llmErr.message,
+            stack: llmErr.stack,
+          });
+          // eslint-disable-next-line no-console
+          console.error(`[ChatService] LLM Generation failed for GENERAL: ${llmErr.message}`);
           assistantText =
             detectedLanguage === "english"
               ? "Sorry, I am currently unable to process your request."
-              : "Sorry, error occurred.";
+              : "Please try again later.";
         }
       } else {
         // DATA RETRIEVER (Vector Search)
@@ -1222,6 +1667,7 @@ ${chunksContent}`;
             debugLogger.info(
               "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
             );
+
             const qwenStartTime = Date.now();
             const aiResponse = await this.qwenHealthChat(
               history,
@@ -1238,7 +1684,15 @@ ${chunksContent}`;
             );
             assistantText = aiResponse.answer;
             isEmergency = !!aiResponse.emergency;
-          } catch {
+          } catch (ragErr) {
+            debugLogger.error("sendMessage: LLM Generation failed for DOCUMENT_RAG intent", {
+              error: ragErr.message,
+              stack: ragErr.stack,
+            });
+            // eslint-disable-next-line no-console
+            console.error(
+              `[ChatService] LLM Generation failed for DOCUMENT_RAG: ${ragErr.message}`,
+            );
             assistantText =
               NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
           }

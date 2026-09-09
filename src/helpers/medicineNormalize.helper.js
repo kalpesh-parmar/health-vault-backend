@@ -18,6 +18,10 @@ const FREQUENCY_TO_DB_MAP = {
   ONCE: frequencyType.ONCE_DAILY,
   TWICE: frequencyType.TWICE_DAILY,
   THRICE: frequencyType.THREE_TIMES_DAILY,
+  ONCE_DAILY: frequencyType.ONCE_DAILY,
+  TWICE_DAILY: frequencyType.TWICE_DAILY,
+  THREE_TIMES_DAILY: frequencyType.THREE_TIMES_DAILY,
+  AS_NEEDED: frequencyType.AS_NEEDED,
   "Once Daily": frequencyType.ONCE_DAILY,
   "Twice Daily": frequencyType.TWICE_DAILY,
   "Three Times Daily": frequencyType.THREE_TIMES_DAILY,
@@ -495,10 +499,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     bestTaken: [foodFrequency],
     dailyConsumption,
     dosePerIntake: hasTabletType
-      ? Number.isInteger(count)
+      ? typeof count === "number" && count > 0
         ? count
         : null
-      : Number.isInteger(value)
+      : typeof value === "number" && value > 0
         ? value
         : null,
     doseReminders: false,
@@ -563,6 +567,9 @@ function normalizeCreateMedicationInput(payload = {}) {
   }
   if (input.type && !input.medicationType) {
     input.medicationType = String(input.type).toUpperCase();
+  }
+  if (input.instructions && !input.notes) {
+    input.notes = String(input.instructions).slice(0, 1000);
   }
   if (input.dose && input.dosePerIntake === undefined) {
     input.dosePerIntake =

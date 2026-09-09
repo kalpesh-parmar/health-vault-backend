@@ -190,6 +190,20 @@
       "when": 1787657949682,
       "tag": "0025_slimy_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787736029476,
+      "tag": "0026_special_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788931125615,
+      "tag": "0027_smiling_marauders",
+      "breakpoints": true
     }
   ]
 }

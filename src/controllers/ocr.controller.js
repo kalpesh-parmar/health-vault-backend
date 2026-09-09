@@ -38,24 +38,8 @@ async function onboardingChat(req, res) {
     });
 
     //seend token to frontend for streaming
-    // STREAMING TEST ONLY
-    const sseStartTime = Date.now();
-    let sseChunkCount = 0;
-
     const onChunk = (chunk) => {
       if (!res.writableEnded) {
-        sseChunkCount++;
-        // STREAMING TEST ONLY
-        if (sseChunkCount === 1) {
-          // eslint-disable-next-line no-console
-          console.log(`[STREAM TEST] FIRST SSE CHUNK SENT after ${Date.now() - sseStartTime}ms`);
-        } else if (sseChunkCount % 50 === 0) {
-          // eslint-disable-next-line no-console
-          console.log(
-            `[STREAM TEST] SSE CHUNK #${sseChunkCount} SENT after ${Date.now() - sseStartTime}ms`,
-          );
-        }
-
         res.write(`data: ${JSON.stringify({ type: "chunk", text: chunk })}\n\n`);
         if (typeof res.flush === "function") res.flush(); //foorce the data to go the frontend imediately
       }
@@ -71,9 +55,6 @@ async function onboardingChat(req, res) {
       if (!res.writableEnded) {
         res.write(`data: ${JSON.stringify({ type: "final", data: result })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-        // STREAMING TEST ONLY
-        // eslint-disable-next-line no-console
-        console.log(`[STREAM TEST] SSE STREAM COMPLETE after ${Date.now() - sseStartTime}ms`);
       }
       return res.end();
     } catch (error) {
