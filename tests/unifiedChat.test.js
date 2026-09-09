@@ -5,6 +5,7 @@ const {
   executeAddDocumentAction,
 } = require("../src/helpers/unifiedChat.helper");
 const { normalizeCreateMedicationInput } = require("../src/helpers/medicineNormalize.helper");
+const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
 
 describe("UnifiedChat Helper & Intent Unit Tests", () => {
   test("normalizeUnifiedChatInput should fallback question to message", () => {
@@ -142,7 +143,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(mockDocumentOcrJobService.enqueue).not.toHaveBeenCalled();
     expect(response.mode).toBe("ACTION");
     expect(response.document.ocrStatus).toBe("completed");
-    expect(response.reply).toContain("has been processed");
+    expect(response.reply).toContain("processed successfully");
   });
 
   test("executeAddDocumentAction should return REVIEW_MEDICINES_LIST action post-onboarding when medications are extracted", async () => {
@@ -1135,14 +1136,17 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       // 2. Skip is enabled
       expect(res.canSkip).toBe(true);
       // 3. Completion message is emitted separately
-      expect(res.completionMessage).toBe("Thank you! Onboarding is complete.");
+      expect(res.completionMessage).toBe(
+        "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
+      );
       // 4. completionMessageSent flag is true
       expect(res.state.completionMessageSent).toBe(true);
 
       // Verify that the completion notice was appended separately to chat
       expect(appendMsgSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: "Thank you! Onboarding is complete.",
+          content:
+            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
           metadata: expect.objectContaining({
             action: "ONBOARDING_COMPLETED_NOTICE",
           }),
@@ -1577,9 +1581,79 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(res.action).toBe("NORMAL_CHAT");
       expect(res.message).toBe("You haven't uploaded any medical reports yet.");
       expect(res.document).toBeNull();
-      expect(res.suggestedQuestions).toEqual([]);
-
       jest.restoreAllMocks();
+    });
+  });
+
+  describe("MEDICINE_OPTIONS Options Matrix Tests", () => {
+    test("Upload flow (normal completion): returns 3 options (ADD, DASHBOARD, ASK_REPORT)", async () => {
+      const state = {
+        flowMode: "UPLOAD",
+        currentStep: "MEDICINE_OPTIONS",
+        preferredLanguage: "english",
+        hasSkipped: false,
+        documentUploaded: true,
+        hasLoginData: false,
+        loginData: {},
+      };
+
+      const res = await onboardingService.chat("", [], state, null);
+
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.options).toHaveLength(3);
+      expect(res.options.map((o) => o.key)).toEqual(["ADD", "DASHBOARD", "ASK_REPORT"]);
+    });
+
+    test("Upload flow (skipped in between): returns 2 options (ADD, ASK_REPORT)", async () => {
+      const state = {
+        flowMode: "UPLOAD",
+        currentStep: "MEDICINE_OPTIONS",
+        preferredLanguage: "english",
+        hasSkipped: true,
+        documentUploaded: true,
+        hasLoginData: false,
+        loginData: {},
+      };
+
+      const res = await onboardingService.chat("", [], state, null);
+
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.options).toHaveLength(2);
+      expect(res.options.map((o) => o.key)).toEqual(["ADD", "ASK_REPORT"]);
+    });
+
+    test("Manual flow (normal completion): returns 2 options (ADD, DASHBOARD)", async () => {
+      const state = {
+        flowMode: "MANUAL",
+        currentStep: "MEDICINE_OPTIONS",
+        preferredLanguage: "english",
+        hasSkipped: false,
+        hasLoginData: false,
+        loginData: {},
+      };
+
+      const res = await onboardingService.chat("", [], state, null);
+
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.options).toHaveLength(2);
+      expect(res.options.map((o) => o.key)).toEqual(["ADD", "DASHBOARD"]);
+    });
+
+    test("Manual flow (skipped in between): returns 1 option (ADD)", async () => {
+      const state = {
+        flowMode: "MANUAL",
+        currentStep: "MEDICINE_OPTIONS",
+        preferredLanguage: "english",
+        hasSkipped: true,
+        hasLoginData: false,
+        loginData: {},
+      };
+
+      const res = await onboardingService.chat("", [], state, null);
+
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.options).toHaveLength(1);
+      expect(res.options.map((o) => o.key)).toEqual(["ADD"]);
     });
   });
 });

@@ -228,7 +228,7 @@ class TranslationService:
                         with torch.no_grad():
                             return model_arg.generate(
                                 **inputs_arg,
-                                use_cache=True,
+                                use_cache=False,
                                 min_length=0,
                                 max_length=256,
                                 num_beams=self.settings.translation_num_beams,
