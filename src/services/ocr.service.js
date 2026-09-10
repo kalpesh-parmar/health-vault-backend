@@ -782,14 +782,14 @@ class V1Service {
           state = dbState;
         } else {
           const incomingStateCleaned = Object.fromEntries(
-            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
+            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined && v !== ""),
           );
 
           const dbExistingUserData = dbState?.existingUserData || {};
           const incomingExistingUserData = incomingStateCleaned.existingUserData || {};
           const incomingUserDataCleaned = Object.fromEntries(
             Object.entries(incomingExistingUserData).filter(
-              ([_, v]) => v !== null && v !== undefined,
+              ([_, v]) => v !== null && v !== undefined && v !== "",
             ),
           );
 
@@ -814,16 +814,33 @@ class V1Service {
             incomingStateCleaned.useDocumentData === true ||
             (documentConfirmed && dbState?.useDocumentData !== false);
 
-          const mergedUserData = {
-            ...dbExistingUserData,
-            ...incomingUserDataCleaned,
-            bloodGroup: incomingUserDataCleaned.bloodGroup || dbExistingUserData.bloodGroup || null,
-            allergies:
-              Array.isArray(incomingUserDataCleaned.allergies) &&
-              incomingUserDataCleaned.allergies.length > 0
-                ? incomingUserDataCleaned.allergies
-                : dbExistingUserData.allergies || [],
-          };
+          const isProfileConfirmedInDb =
+            dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
+
+          const mergedUserData =
+            isProfileConfirmedInDb && !incomingStateCleaned.edited
+              ? {
+                  ...incomingUserDataCleaned,
+                  ...dbExistingUserData,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                }
+              : {
+                  ...dbExistingUserData,
+                  ...incomingUserDataCleaned,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                };
 
           state = {
             ...dbState,

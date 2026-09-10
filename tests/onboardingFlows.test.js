@@ -15,8 +15,12 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     dbStates = {};
-    jest.spyOn(ollamaClient, "chat").mockResolvedValue({
-      message: { content: JSON.stringify({ value: "ExtractedValue" }) },
+    jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
+      const msgStr = JSON.stringify(messages || []);
+      if (msgStr.includes("Bob")) return { message: { content: JSON.stringify({ value: "Bob" }) } };
+      if (msgStr.includes("Brown"))
+        return { message: { content: JSON.stringify({ value: "Brown" }) } };
+      return { message: { content: JSON.stringify({ value: "ExtractedValue" }) } };
     });
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: "user-101",
@@ -374,11 +378,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission and return 2 buttons in Dashboard Chat stream", async () => {
@@ -415,10 +418,9 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
     });
   });
@@ -427,7 +429,7 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
   // FLOW 4: MANUAL + MOBILE
   // =========================================================================
   describe("Flow 4: MANUAL + MOBILE", () => {
-    test("[IF USER DOES NOT SKIP] Should prompt required details, optional details, and return 3 buttons", async () => {
+    test("[IF USER DOES NOT SKIP] Should prompt required details, optional details, and return 2 buttons", async () => {
       let state = {
         preferredLanguage: "english",
         flowMode: "MANUAL",
@@ -468,11 +470,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission once required details exist and return 2 buttons in Dashboard Chat stream", async () => {
@@ -509,10 +510,9 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
     });
   });

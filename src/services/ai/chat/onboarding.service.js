@@ -349,7 +349,7 @@ function isProfileComplete(patient) {
 }
 
 function getMissingRequiredStep(state) {
-  const data = state.existingUserData || {};
+  // const data = state.existingUserData || {};
   const isSocial = state.useSocialData === true || state.selectedProfileSource === "SOCIAL";
   const isDoc = state.useDocumentData === true || state.selectedProfileSource === "DOCUMENT";
 
@@ -365,6 +365,7 @@ function getMissingRequiredStep(state) {
   const loginData = state.loginData || {};
 
   const getVal = (key) => {
+    const data = state.existingUserData || {};
     if (data[key] !== undefined && data[key] !== null && data[key] !== "") {
       return data[key];
     }
@@ -651,6 +652,15 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     }
   }
 
+  if (!normSource && state.selectedProfileSource) {
+    const upperSel = String(state.selectedProfileSource).trim().toUpperCase();
+    if (upperSel === "DOCUMENT" || state.useDocumentData === true) {
+      normSource = "DOCUMENT";
+    } else if (upperSel === "SOCIAL" || upperSel === "LOGIN" || state.useSocialData === true) {
+      normSource = "LOGIN";
+    }
+  }
+
   for (const key of compareKeys) {
     const loginField = state.loginData?.[key] || { value: null, verified: false };
     const rawLogin = loginField.value;
@@ -674,15 +684,13 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     const existingVal = state.existingUserData?.[key] || null;
     const shownValue = loginField.verified ? rawLogin : rawLogin || rawDoc || existingVal || null;
 
-    if (editedData) {
-      state.selectedProfileSource = "MANUAL";
-      state.useSocialData = false;
-      state.useDocumentData = false;
-      if (editedData[key] !== undefined && editedData[key] !== null && editedData[key] !== "") {
-        state.existingUserData[key] = editedData[key];
-      } else {
-        state.existingUserData[key] = shownValue;
-      }
+    if (
+      editedData &&
+      editedData[key] !== undefined &&
+      editedData[key] !== null &&
+      editedData[key] !== ""
+    ) {
+      state.existingUserData[key] = editedData[key];
     } else if (normSource === "DOCUMENT") {
       const docVal = state.documentData?.[key] !== undefined ? state.documentData[key] : rawDoc;
       const validDocVal = docVal !== undefined && docVal !== null && docVal !== "" ? docVal : null;
@@ -698,13 +706,15 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.selectedProfileSource = "SOCIAL";
       state.useSocialData = true;
       state.useDocumentData = false;
+    } else if (editedData) {
+      state.existingUserData[key] = existingVal || shownValue;
     } else if (loginField.verified) {
-      state.existingUserData[key] = rawLogin;
+      state.existingUserData[key] = existingVal || rawLogin;
     } else if (isMismatch && normSource) {
       const chosenVal = normSource === "DOCUMENT" ? rawDoc : rawLogin;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
-      state.existingUserData[key] = rawLogin || rawDoc || existingVal || null;
+      state.existingUserData[key] = existingVal || rawLogin || rawDoc || null;
     }
   }
 
@@ -931,7 +941,14 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (payload && typeof payload === "object") {
         if (!payload.source && !payload.edited) {
           const sourceVal =
-            payload.source || payload.value || payload.option || payload.key || payload.selected;
+            payload.source ||
+            payload.value ||
+            payload.option ||
+            payload.key ||
+            payload.selected ||
+            payload.displayLabel ||
+            payload.label ||
+            payload.text;
           if (typeof sourceVal === "string") {
             const upper = sourceVal.toUpperCase();
             if (
@@ -993,54 +1010,37 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
-      if (payload && payload.confirmed) {
-        const sourceToUse = payload.source || state.selectedProfileSource || null;
-        mergeAndApplyProfile(state, sourceToUse);
-        state.profileConfirmed = true;
-        state.selectedProfileSource =
-          sourceToUse === "DOCUMENT"
-            ? "DOCUMENT"
-            : sourceToUse === "LOGIN" || sourceToUse === "SOCIAL"
-              ? "SOCIAL"
-              : "MANUAL";
-        state.profileManuallyEdited = state.selectedProfileSource === "MANUAL";
-        state.stepClarificationNeeded = false;
-        state.currentStep = computeCurrentStep(state);
-      } else if (payload && payload.source) {
-        if (payload.source === "MANUAL") {
-          state.profileManuallyEdited = true;
-          state.selectedProfileSource = "MANUAL";
-          state.currentStep = "RESOLVE_PROFILE_SOURCE";
-        } else {
-          mergeAndApplyProfile(state, payload.source);
-          state.profileConfirmed = true;
-          state.selectedProfileSource = payload.source === "LOGIN" ? "SOCIAL" : payload.source;
-          state.profileManuallyEdited = false;
-          state.stepClarificationNeeded = false;
-          state.currentStep = computeCurrentStep(state);
-        }
-      } else if (payload && payload.edited) {
-        if (payload.edited.gender) {
-          const normG = normalizeGenderLocally(String(payload.edited.gender));
-          if (normG) payload.edited.gender = normG;
-        }
-        if (payload.edited.dateOfBirth) {
-          const normD = normalizeDOB(String(payload.edited.dateOfBirth));
-          if (normD) payload.edited.dateOfBirth = normD;
+      if (payload && (payload.confirmed || payload.source || payload.edited)) {
+        if (payload.edited) {
+          if (payload.edited.gender) {
+            const normG = normalizeGenderLocally(String(payload.edited.gender));
+            if (normG) payload.edited.gender = normG;
+          }
+          if (payload.edited.dateOfBirth) {
+            const normD = normalizeDOB(String(payload.edited.dateOfBirth));
+            if (normD) payload.edited.dateOfBirth = normD;
+          }
         }
 
-        const isEditValid = validateEditedFields(payload.edited);
-        if (isEditValid) {
-          mergeAndApplyProfile(state, null, payload.edited);
+        const sourceToUse = payload.source || state.selectedProfileSource || null;
+        if (payload.source === "MANUAL" && !payload.edited && payload.confirmed === false) {
           state.profileManuallyEdited = true;
-          state.profileConfirmed = true;
           state.selectedProfileSource = "MANUAL";
+          state.currentStep = "RESOLVE_PROFILE_SOURCE";
+        } else {
+          mergeAndApplyProfile(state, sourceToUse, payload.edited || null);
+          state.profileConfirmed = true;
+          state.selectedProfileSource = payload.edited
+            ? "MANUAL"
+            : sourceToUse === "DOCUMENT"
+              ? "DOCUMENT"
+              : sourceToUse === "LOGIN" || sourceToUse === "SOCIAL"
+                ? "SOCIAL"
+                : "MANUAL";
+          state.profileManuallyEdited =
+            !!payload.edited || state.selectedProfileSource === "MANUAL";
           state.stepClarificationNeeded = false;
           state.currentStep = computeCurrentStep(state);
-        } else {
-          state.profileConfirmed = false;
-          state.stepClarificationNeeded = true;
-          state.currentStep = "RESOLVE_PROFILE_SOURCE";
         }
       } else {
         state.profileConfirmed = false;
@@ -2113,7 +2113,6 @@ async function getLocalizedResponse(step, state) {
         "Use Document",
         state.preferredLanguage,
       );
-      console.log("[DOCUMENT DETAILS]====", useDocText);
 
       let loginSummary, documentSummary;
       if (loginName) {
@@ -3144,7 +3143,7 @@ class OnboardingService {
           } else if (providerNames.includes("password")) {
             primaryProvider = "email";
           }
-          state.loginProvider = primaryProvider;
+          state.loginProvider = state.loginProvider || primaryProvider;
 
           let isPhoneVerified = false;
           let isEmailVerified = false;
@@ -3208,7 +3207,9 @@ class OnboardingService {
             primaryProvider,
           );
 
-          state.hasSocialData = isSocialProvider;
+          if (state.hasSocialData === undefined) {
+            state.hasSocialData = isSocialProvider;
+          }
           state.socialData = isSocialProvider
             ? {
                 firstName: state.loginData.firstName.value,
