@@ -86,6 +86,7 @@ const env = Object.freeze({
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 200),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  cronDisable: booleanFromEnv("CRON_DISABLE", false),
 
   // Email / SMTP
   emailEnabled: booleanFromEnv("EMAIL_ENABLED", true),
@@ -144,8 +145,10 @@ const env = Object.freeze({
   chatbotAPIKey: stringFromEnv("CHATBOT_API_KEY"),
 
   ollamaUrl: stringFromEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
+  ollamaNumCtx: numberFromEnv("OLLAMA_NUM_CTX", 16384),
   ocrModel: process.env.OCR_MODEL,
-  chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
+  chatModel: stringFromEnv("CHAT_MODEL") || "medgemma:4b",
+  // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3-vl:latest",
   // chatModel: stringFromEnv("CHAT_MODEL") || "qwen3.5:9b",
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
@@ -154,7 +157,6 @@ const env = Object.freeze({
 
   // Embedding & Reminders
   embeddingModel: stringFromEnv("AI_EMBEDDING_MODEL") || "bge-m3:latest",
-  embeddingDim: numberFromEnv("EMBEDDING_DIM", 1024),
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   ragTopK: numberFromEnv("RAG_TOP_K", 8),

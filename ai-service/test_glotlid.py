@@ -17,8 +17,6 @@ model = fasttext.load_model(model_path)
 
 print("GlotLID model loaded successfully!")
 
-
-
 # 3. Detect language
 text = "vayitru vali erpadum karanangal enna?"
 start_time = time.perf_counter()

@@ -374,11 +374,11 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
+      expect(keys).not.toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission and return 2 buttons in Dashboard Chat stream", async () => {
@@ -415,10 +415,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
+      expect(keys).not.toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
     });
   });
@@ -468,11 +468,11 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
+      expect(keys).not.toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission once required details exist and return 2 buttons in Dashboard Chat stream", async () => {
@@ -509,10 +509,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
+      expect(keys).not.toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
     });
   });

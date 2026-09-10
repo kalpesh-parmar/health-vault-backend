@@ -30,84 +30,92 @@ function shouldMask() {
  * Recursively clones and masks sensitive keys in objects, arrays, and stringified JSON.
  * If the environment is 'development', it returns a clean copy of the original values unmasked.
  * @param {any} data
+ * @param {WeakSet} [visited]
  * @returns {any}
  */
-function maskSensitiveData(data) {
+function maskSensitiveData(data, visited = new WeakSet()) {
   if (!data) return data;
+
+  if (typeof data !== "object") {
+    if (typeof data === "string") {
+      // Mask Bearer tokens
+      if (data.toLowerCase().startsWith("bearer ")) {
+        return "Bearer ***";
+      }
+      // Mask raw token or key parameters if the value looks like a secret
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === "object") {
+          return JSON.stringify(maskSensitiveData(parsed, visited));
+        }
+      } catch {
+        // not JSON
+      }
+    }
+    return data;
+  }
+
+  // Prevent infinite recursion on circular references
+  if (visited.has(data)) {
+    return "[Circular]";
+  }
+
+  // Handle special Node.js objects, Streams, and Sockets safely without recursing into them
+  if (
+    (data.constructor &&
+      [
+        "Buffer",
+        "ReadStream",
+        "WriteStream",
+        "IncomingMessage",
+        "Socket",
+        "ClientRequest",
+        "TLSSocket",
+      ].includes(data.constructor.name)) ||
+    typeof data.pipe === "function" ||
+    data._readableState ||
+    data._writableState
+  ) {
+    if (!shouldMask()) {
+      return data;
+    }
+    return `[${data.constructor?.name || "Stream"}]`;
+  }
+
+  visited.add(data);
 
   // If in local development, skip masking (log actual values)
   if (!shouldMask()) {
-    // We clone the object structure to maintain identical return type behavior
-    // without mutating the original request/response payloads
     if (Array.isArray(data)) {
-      return data.map((item) => maskSensitiveData(item));
+      return data.map((item) => maskSensitiveData(item, visited));
     }
-    if (typeof data === "object") {
-      // Special node objects do not need cloning
-      if (
-        data.constructor &&
-        ["Buffer", "ReadStream", "WriteStream"].includes(data.constructor.name)
-      ) {
-        return data;
-      }
-      const clone = {};
-      for (const key of Object.keys(data)) {
-        clone[key] = maskSensitiveData(data[key]);
-      }
-      return clone;
+    const clone = {};
+    for (const key of Object.keys(data)) {
+      clone[key] = maskSensitiveData(data[key], visited);
     }
-    return data;
+    return clone;
   }
 
   // Production/Masking flow
-  if (typeof data === "string") {
-    // Mask Bearer tokens
-    if (data.toLowerCase().startsWith("bearer ")) {
-      return "Bearer ***";
-    }
-    // Mask raw token or key parameters if the value looks like a secret
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object") {
-        return JSON.stringify(maskSensitiveData(parsed));
-      }
-    } catch {
-      // not JSON
-    }
-    return data;
-  }
-
   if (Array.isArray(data)) {
-    return data.map((item) => maskSensitiveData(item));
+    return data.map((item) => maskSensitiveData(item, visited));
   }
 
-  if (typeof data === "object") {
-    // Handle special Node.js objects safely
-    if (
-      data.constructor &&
-      ["Buffer", "ReadStream", "WriteStream"].includes(data.constructor.name)
-    ) {
-      return `[${data.constructor.name}]`;
-    }
-
-    const masked = {};
-    for (const key of Object.keys(data)) {
-      const lowerKey = key.toLowerCase();
-      if (SENSITIVE_KEYS.has(lowerKey)) {
-        const val = data[key];
-        if (typeof val === "string" && val.toLowerCase().startsWith("bearer ")) {
-          masked[key] = "Bearer ***";
-        } else {
-          masked[key] = "***";
-        }
+  const masked = {};
+  for (const key of Object.keys(data)) {
+    const lowerKey = key.toLowerCase();
+    if (SENSITIVE_KEYS.has(lowerKey)) {
+      const val = data[key];
+      if (typeof val === "string" && val.toLowerCase().startsWith("bearer ")) {
+        masked[key] = "Bearer ***";
       } else {
-        masked[key] = maskSensitiveData(data[key]);
+        masked[key] = "***";
       }
+    } else {
+      masked[key] = maskSensitiveData(data[key], visited);
     }
-    return masked;
   }
-
-  return data;
+  return masked;
 }
 
 /**

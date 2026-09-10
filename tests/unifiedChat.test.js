@@ -107,6 +107,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(mockDocumentOcrJobService.enqueue).toHaveBeenCalledWith({
       fileKey: "documents/test_report.pdf",
       mimeType: "application/pdf",
+      preferredLanguage: "english",
       userId: "user-123",
     });
     expect(response.mode).toBe("ACTION");

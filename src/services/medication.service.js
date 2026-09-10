@@ -470,6 +470,11 @@ class MedicationService {
       if (incomingNorm || incomingRaw) {
         // Check against active DB medications
         for (const med of activeMedications) {
+          // If item is already saved, ignore matching against itself in DB
+          if (item.isSaved && (item.dbId === med.id || item.id === med.id)) {
+            continue;
+          }
+
           const existingRaw = med.medicationName || "";
           const existingNorm = normalizeMedicationName(existingRaw);
 
@@ -492,6 +497,9 @@ class MedicationService {
         // Check against in-batch items (other extracted medicines in same request)
         medicineList.forEach((otherItem, otherIdx) => {
           if (otherIdx === index) return;
+          // If this item is already saved in DB, newly incoming additions do not flag this item as duplicate
+          if (item.isSaved && !otherItem.isSaved) return;
+
           const otherRaw =
             otherItem.medicationName ||
             otherItem.name ||

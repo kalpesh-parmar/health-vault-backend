@@ -229,24 +229,15 @@ class OllamaClient {
     };
 
     try {
+      // const requestStartTime = Date.now();
       const response = await this.requestWithRetry(config);
-      // STREAMING TEST ONLY
-      // eslint-disable-next-line no-console
-      console.log(`[STREAM TEST] LLM START`);
-      const startTime = Date.now();
-      let firstChunkReceived = false;
-      let totalChunks = 0;
+
+      // let totalChunks = 0;
       let buffer = "";
+      let isCompleted = false;
 
       return new Promise((resolve, reject) => {
         response.data.on("data", (chunk) => {
-          if (!firstChunkReceived) {
-            // STREAMING TEST ONLY
-            // eslint-disable-next-line no-console
-            console.log(`[STREAM TEST] FIRST LLM CHUNK after ${Date.now() - startTime}ms`);
-            firstChunkReceived = true;
-          }
-
           buffer += chunk.toString();
           const lines = buffer.split("\n");
           // Keep the last partial line in the buffer
@@ -256,25 +247,21 @@ class OllamaClient {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
-              if (parsed.message?.content) {
-                totalChunks++;
+              const msg = parsed.message || {};
+              let chunkText = msg.content || "";
 
-                // STREAMING TEST ONLY - Log every 50th chunk
-                if (totalChunks % 50 === 0) {
-                  // eslint-disable-next-line no-console
-                  console.log(
-                    `[STREAM TEST] CHUNK #${totalChunks} after ${Date.now() - startTime}ms`,
-                  );
-                }
+              if (!chunkText && msg.thinking) {
+                chunkText = msg.thinking;
+              }
 
-                onChunk(parsed.message.content);
+              if (chunkText) {
+                // totalChunks++;
+                onChunk(chunkText);
               }
               if (parsed.done) {
-                // STREAMING TEST ONLY
-                // eslint-disable-next-line no-console
-                console.log(`[STREAM TEST] LLM COMPLETE after ${Date.now() - startTime}ms`);
-                // eslint-disable-next-line no-console
-                console.log(`[STREAM TEST] TOTAL CHUNKS: ${totalChunks}`);
+                if (!isCompleted) {
+                  isCompleted = true;
+                }
                 resolve(parsed);
               }
             } catch {
@@ -284,15 +271,27 @@ class OllamaClient {
         });
         response.data.on("error", (err) => reject(err));
         response.data.on("end", () => {
+          let resolved = false;
           if (buffer.trim()) {
             try {
               const parsed = JSON.parse(buffer);
-              if (parsed.done) resolve(parsed);
+              if (parsed.done) {
+                if (!isCompleted) {
+                  isCompleted = true;
+                }
+                resolve(parsed);
+                resolved = true;
+              }
             } catch {
               // ignore
             }
           }
-          resolve({ done: true });
+          if (!resolved) {
+            if (!isCompleted) {
+              isCompleted = true;
+            }
+            resolve({ done: true });
+          }
         });
       });
     } catch (error) {

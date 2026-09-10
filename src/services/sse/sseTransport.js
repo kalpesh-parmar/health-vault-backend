@@ -14,6 +14,9 @@
 const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 
 function writeEvent(res, event, eventName = "progress") {
+  if (event?.eventId != null) {
+    res.write(`id: ${event.eventId}\n`);
+  }
   res.write(`event: ${eventName}\n`);
   res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -32,6 +35,7 @@ function attachSseStream(req, res, { onClose } = {}) {
   const heartbeat = setInterval(() => {
     res.write(": ping\n\n");
   }, HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref?.();
 
   let closed = false;
   const cleanup = () => {

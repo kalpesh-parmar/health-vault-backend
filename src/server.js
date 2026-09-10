@@ -7,7 +7,7 @@ const express = require("express");
 
 // Import background crons/jobs
 require("./jobs/medicationCron");
-require("./jobs/documentJobSweeper");
+const documentJobSweeper = require("./jobs/documentJobSweeper");
 
 const { pool } = require("./configs/db");
 const { env } = require("./configs/env");
@@ -19,8 +19,10 @@ const errorHandler = require("./middlewares/errorHandler");
 const routes = require("./routes/index.route");
 const cronService = require("./services/cron.service");
 const cronRegisterHandler = require("./configs/cronConfig");
-const { ollamaClient } = require("./clients/ollamaClient");
+// const { ollamaClient } = require("./clients/ollamaClient");
 const sseConnectionService = require("./services/sseConnection.service");
+const ocrProgressBus = require("./services/sse/ocrProgressBus");
+const documentProcessingJobRepository = require("./repositories/documentProcessingJobRepository");
 
 const app = express();
 const server = http.createServer(app);
@@ -44,16 +46,22 @@ app.use((_req, _res, next) => next(new NotFoundException(errorConstants.ROUTE_NO
 app.use(errorHandler);
 
 if (require.main === module) {
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`Server started on port ${port}`);
     // Initialize cron tasks
     cronRegisterHandler();
     cronService.loadStartAll();
     console.log("cron system initialized...");
 
-    // Pre-warm local Ollama models to avoid first-request loading penalty
-    if (env.chatModel) ollamaClient.warmUp(env.chatModel).catch(() => {});
-    if (env.visionModel) ollamaClient.warmUp(env.visionModel).catch(() => {});
+    // Reconcile zombie/running jobs from prior ungraceful shutdowns
+    try {
+      const reconciled = await documentProcessingJobRepository.reconcileRunningJobsOnBoot();
+      if (reconciled?.length) {
+        console.log(`[boot-reconcile] reconciled ${reconciled.length} interrupted running jobs`);
+      }
+    } catch (err) {
+      console.error("[boot-reconcile] failed to reconcile running jobs on boot", err);
+    }
   });
 
   function shutdown(signal) {
@@ -61,6 +69,8 @@ if (require.main === module) {
 
     // Stop accepting new SSE connections and release active streams
     sseConnectionService.destroy();
+    ocrProgressBus.destroy();
+    documentJobSweeper.stopSweeper();
 
     //Stop accepting new HTTP requests
     server.close(async () => {

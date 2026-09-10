@@ -1,0 +1,59 @@
+openapi: 3.0.0
+info:
+  title: Dashboard API
+  version: 1.0.0
+  description: API for retrieving dashboard summary counts
+
+servers:
+  - url: http://localhost:3000/api
+
+paths:
+  /dashboard/summary:
+    get:
+      summary: Get user dashboard summary counts
+      description: Returns the count of medicines, documents, and today's medication doses for the authenticated user.
+      tags:
+        - Dashboard
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Dashboard summary fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      medicinesCount:
+                        type: integer
+                        example: 5
+                      documentsCount:
+                        type: integer
+                        example: 12
+                      todayDosesCount:
+                        type: integer
+                        example: 3
+                  status:
+                    type: object
+                    properties:
+                      description:
+                        type: string
+                        example: Dashboard summary fetched successfully
+                      status:
+                        type: string
+                        example: success
+                      statusCode:
+                        type: integer
+                        example: 200
+        "401":
+          description: Unauthorized access
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

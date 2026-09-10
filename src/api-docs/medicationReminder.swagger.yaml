@@ -69,8 +69,8 @@ components:
           example: 5
 
         dosePerIntake:
-          type: integer
-          example: 1
+          type: doublePrecision
+          example: 0.1
 
         # routineBase:
         #   type: string

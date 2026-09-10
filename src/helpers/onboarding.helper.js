@@ -5,7 +5,8 @@ const { aiClient } = require("../services/ai");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
-    text = text.text || JSON.stringify(text);
+    text =
+      text.message?.content || text.content || text.text || text.response || JSON.stringify(text);
   }
 
   if (!text || typeof text !== "string") {
@@ -165,10 +166,13 @@ function normalizeDOB(dobStr) {
 
 function normalizePhone(phoneStr) {
   if (!phoneStr) return null;
-  const cleaned = String(phoneStr)
+  let cleaned = String(phoneStr)
     .trim()
     .replace(/[^\d+]/g, "");
-  return cleaned.length >= 7 && cleaned.length <= 15 ? cleaned : null;
+  // Strip duplicate country codes like +91+91+91
+  cleaned = cleaned.replace(/(\+\d{1,4})\1+/g, "$1");
+  cleaned = cleaned.replace(/(\+\d{1,4})\+/g, "$1");
+  return cleaned.length >= 7 && cleaned.length <= 20 ? cleaned : null;
 }
 
 function validateEditedFields(editedData) {

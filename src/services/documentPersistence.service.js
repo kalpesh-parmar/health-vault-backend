@@ -103,14 +103,16 @@ class DocumentPersistenceService {
         hospitalName: extractedStructuredData?.hospitalName || null,
         ocrExtractedText: rawOcrData?.fullText || null,
         ocrStatus: ocrStatus.COMPLETED,
-        remarks: extractedStructuredData?.summary || null,
+        remarks:
+          extractedStructuredData?.summaryInPreferredLanguage ||
+          extractedStructuredData?.summary ||
+          null,
         reportDate: reportDateOrNow,
         s3Bucket: bucketName,
         s3Key: s3Key,
         structuredExtractedData: extractedStructuredData,
         userId,
         summaryEnglish: extractedStructuredData?.summaryEnglish || null,
-        summaryInPreferredLanguage: extractedStructuredData?.summaryInPreferredLanguage || null,
       })
       .onConflictDoUpdate({
         target: document.s3Key,
@@ -127,12 +129,14 @@ class DocumentPersistenceService {
           hospitalName: extractedStructuredData?.hospitalName || null,
           ocrExtractedText: rawOcrData?.fullText || null,
           ocrStatus: ocrStatus.COMPLETED,
-          remarks: extractedStructuredData?.summary || null,
+          remarks:
+            extractedStructuredData?.summaryInPreferredLanguage ||
+            extractedStructuredData?.summary ||
+            null,
           reportDate: reportDateOrNow,
           s3Bucket: bucketName,
           structuredExtractedData: extractedStructuredData,
           summaryEnglish: extractedStructuredData?.summaryEnglish || null,
-          summaryInPreferredLanguage: extractedStructuredData?.summaryInPreferredLanguage || null,
           updatedAt: new Date(),
         },
       })
@@ -187,7 +191,10 @@ class DocumentPersistenceService {
       recommendations: extractedStructuredData?.recommendations || [],
       reportDate: reportDateOrNull,
       reportType: extractedStructuredData?.reportType || null,
-      summary: extractedStructuredData?.summary || null,
+      summary:
+        extractedStructuredData?.summaryInPreferredLanguage ||
+        extractedStructuredData?.summary ||
+        null,
       testResults:
         extractedStructuredData?.testResults || extractedStructuredData?.labResults || [],
       userId,

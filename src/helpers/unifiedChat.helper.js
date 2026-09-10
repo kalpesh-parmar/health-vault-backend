@@ -4,6 +4,7 @@ const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
+const aiClient = require("../services/ai/clients/aiClient.service");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -44,7 +45,11 @@ function normalizeUnifiedChatInput(body = {}) {
     state: state && typeof state === "object" ? state : null,
     history: Array.isArray(history) ? history : [],
     displayLabel: displayLabel || null,
-    preferredLanguage: preferredLanguage ? normalizeLanguage(preferredLanguage) : null,
+    preferredLanguage: preferredLanguage
+      ? normalizeLanguage(preferredLanguage)
+      : state?.preferredLanguage
+        ? normalizeLanguage(state.preferredLanguage)
+        : null,
     fromScreen: fromScreen || (state && state.fromScreen) || null,
   };
 }
@@ -87,6 +92,7 @@ function buildUnifiedResponse({
     documentSummary,
     sessionId,
     onboardingState,
+    state: onboardingState,
     medicines,
     citations,
     document,
@@ -211,6 +217,7 @@ async function executeAddDocumentAction({
   userId,
   actionData,
   sessionId,
+  preferredLanguage = "english",
   isOnboardingCompleted,
   documentPersistenceService,
   documentOcrJobService,
@@ -305,6 +312,7 @@ async function executeAddDocumentAction({
         const job = await documentOcrJobService.enqueue({
           fileKey: currentS3Key,
           mimeType,
+          preferredLanguage,
           userId,
         });
 
@@ -610,6 +618,36 @@ async function executeAddDocumentAction({
           },
         ]
       : [];
+
+  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
+    const prefLang = normalizeLanguage(preferredLanguage);
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    for (const docItem of docs) {
+      if (!docItem) continue;
+      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
+      if (struct && typeof struct === "object") {
+        if (struct.summariesByLanguage && struct.summariesByLanguage[prefLang]) {
+          struct.summary = struct.summariesByLanguage[prefLang];
+          struct.summaryInPreferredLanguage = struct.summariesByLanguage[prefLang];
+        } else if (struct.summaryInPreferredLanguage) {
+          struct.summary = struct.summaryInPreferredLanguage;
+        } else if (struct.summary || struct.summaryEnglish) {
+          try {
+            const baseSummary = struct.summary || struct.summaryEnglish;
+            const translated = await aiClient.translate(baseSummary, "english", prefLang);
+            if (translated) {
+              struct.summary = translated;
+              struct.summaryInPreferredLanguage = translated;
+              if (!struct.summariesByLanguage) struct.summariesByLanguage = {};
+              struct.summariesByLanguage[prefLang] = translated;
+            }
+          } catch (err) {
+            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
+          }
+        }
+      }
+    }
+  }
 
   return buildUnifiedResponse({
     mode: "ACTION",

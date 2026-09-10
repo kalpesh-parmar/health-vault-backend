@@ -5,11 +5,7 @@ const medicationRepository = require("../repositories/medicationRepository");
 const refillRepository = require("../repositories/refillRepository");
 const notificationRepository = require("../repositories/notificationRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
-const {
-  beforeReminderTime,
-  afterReminderTime,
-  isSameMinute,
-} = require("../utils/reminderOccurrenceGenerator");
+const { beforeReminderTime, afterReminderTime } = require("../utils/reminderOccurrenceGenerator");
 const reminderNotificationService = require("./reminderNotification.service");
 const { reminderTypes } = require("../enums/reminderTypes");
 
@@ -21,53 +17,88 @@ class ReminderService {
   }
   // 1. SEND REMINDERS (EVERY MINUTE)
   async sendReminder() {
-    const reminders = await medicationReminderOccurrenceRepository.findPendingReminders([
-      reminderOccurrenceStatus.PENDING,
-    ]);
+    const now = new Date();
+    // Bounded time window: occurrences scheduled from 3 hours ago to 2 hours in the future
+    const startTime = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+
+    const reminders = await medicationReminderOccurrenceRepository.findPendingReminders(
+      [reminderOccurrenceStatus.PENDING],
+      { startTime, endTime },
+    );
+
     for (const reminder of reminders) {
       try {
         const { occurrence, medication } = reminder;
-        const now = new Date();
-        const beforeTime = beforeReminderTime(
-          occurrence.actualMedicationTime,
-          medication.reminderBeforeMinutes,
-        );
-        const afterTime = afterReminderTime(occurrence.actualMedicationTime);
+        const actualMedTime = new Date(occurrence.actualMedicationTime);
+        const beforeTime = beforeReminderTime(actualMedTime, medication.reminderBeforeMinutes || 5);
+        const afterTime = afterReminderTime(actualMedTime);
+        const overdueTime = new Date(afterTime.getTime() + 30 * 60 * 1000);
 
-        // 1. Send Main Reminder Notification
-        if (beforeTime && isSameMinute(now, beforeTime)) {
-          await reminderNotificationService.sendReminderNotification(
-            reminder,
+        // 1. Send Main Reminder Notification (Before intake time)
+        if (beforeTime && now >= beforeTime && now < actualMedTime) {
+          const alreadySent = await notificationRepository.findReminderNotificationSent(
+            medication.userId,
+            occurrence.id,
             reminderTypes.BEFORE,
           );
+          if (!alreadySent) {
+            await reminderNotificationService.sendReminderNotification(
+              reminder,
+              reminderTypes.BEFORE,
+            );
+          }
         }
-        //MARK AS FOLLOW UP TRUE AFTER ACTUAL MEDICATION TIME
+
+        // 2. Mark overdue once actual medication time has passed
         if (
           !occurrence.isOverdue &&
-          now >= new Date(occurrence.actualMedicationTime) &&
-          occurrence.status == reminderOccurrenceStatus.PENDING
+          now >= actualMedTime &&
+          occurrence.status === reminderOccurrenceStatus.PENDING
         ) {
           await medicationReminderOccurrenceRepository.update(occurrence.id, {
             isOverdue: true,
           });
+          occurrence.isOverdue = true;
         }
 
-        // 2. Send after Notification
+        // 3. Send after Notification
+        const afterWindowEnd = new Date(afterTime.getTime() + 15 * 60 * 1000);
         if (
           occurrence.isOverdue &&
-          occurrence.status == reminderOccurrenceStatus.PENDING &&
-          isSameMinute(now, afterTime)
+          occurrence.status === reminderOccurrenceStatus.PENDING &&
+          now >= afterTime &&
+          now <= afterWindowEnd
         ) {
-          await reminderNotificationService.sendReminderNotification(reminder, reminderTypes.AFTER);
+          const alreadySent = await notificationRepository.findReminderNotificationSent(
+            medication.userId,
+            occurrence.id,
+            reminderTypes.AFTER,
+          );
+          if (!alreadySent) {
+            await reminderNotificationService.sendReminderNotification(
+              reminder,
+              reminderTypes.AFTER,
+            );
+          }
         }
 
-        //3. send follow up notification if 30 mins overdue and not marked as skipped
+        // 4. Send follow up notification if 30 mins overdue
+        const overdueWindowEnd = new Date(overdueTime.getTime() + 15 * 60 * 1000);
         if (
-          !occurrence.overdueNotificationSent &&
+          occurrence.isOverdue &&
           occurrence.status === reminderOccurrenceStatus.PENDING &&
-          isSameMinute(now, new Date(afterTime.getTime() + 30 * 60 * 1000))
+          now >= overdueTime &&
+          now <= overdueWindowEnd
         ) {
-          await reminderNotificationService.sendOverdueNotification(reminder);
+          const alreadySent = await notificationRepository.findReminderNotificationSent(
+            medication.userId,
+            occurrence.id,
+            "OVERDUE",
+          );
+          if (!alreadySent) {
+            await reminderNotificationService.sendOverdueNotification(reminder);
+          }
         }
       } catch (err) {
         console.error("Reminder failed:", err);

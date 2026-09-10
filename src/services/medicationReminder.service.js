@@ -18,6 +18,13 @@ class MedicationReminderService {
     const validData = await validateSchema(createReminderSchema, data);
     // VALIDATE MEDICATION OWNERSHIP
     const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
+
+    // CHECK EXISTING REMINDER (IDEMPOTENCY)
+    const existingReminder = await medicationReminderRepository.findByMedicationId(medication.id);
+    if (existingReminder) {
+      return existingReminder;
+    }
+
     // CREATE MAIN REMINDER
     const reminder = await medicationReminderRepository.create({
       patientId: userId,
