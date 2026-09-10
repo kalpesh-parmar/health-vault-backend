@@ -95,14 +95,19 @@ class DocumentOcrJobService {
    * background via `setImmediate` so the HTTP request can resolve in
    * tens of milliseconds.
    */
-  async enqueue({ fileKey, mimeType, userId }) {
+  async enqueue({ fileKey, mimeType, userId, originalName }) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "fileKey is required");
     }
 
     await ensureFileExists(fileKey);
 
-    const job = await documentProcessingJobRepository.startJob({ fileKey, userId, mimeType });
+    const job = await documentProcessingJobRepository.startJob({
+      fileKey,
+      userId,
+      mimeType,
+      originalName,
+    });
 
     let patientContext = null;
     try {

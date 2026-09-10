@@ -40,19 +40,28 @@ class MedicationService {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
     if (!options.skipDuplicateCheck) {
-      const { resolution, replaceMedicationId } = validData;
-      if (resolution === "REPLACE" && replaceMedicationId) {
+      const { resolution } = validData;
+      const targetId =
+        validData.replaceMedicationId ||
+        validData.targetMedicationId ||
+        validData.duplicateInfo?.matchedMedication?.id ||
+        validData.matchedMedicationId;
+
+      if (resolution === "REPLACE" && targetId) {
         try {
-          await this.deleteMedication(replaceMedicationId, userId);
+          await this.deleteMedication(targetId, userId);
         } catch (delErr) {
           console.warn(
-            `[MedicationService] Soft-delete warning for replaced med ${replaceMedicationId}:`,
+            `[MedicationService] Soft-delete warning for replaced med ${targetId}:`,
             delErr.message,
           );
         }
       } else {
         const dupCheck = await this.checkDuplicateMedication(userId, validData);
         if (dupCheck.hasDuplicate) {
+          if (resolution === "KEEP_EXISTING" && dupCheck.matchedMedication) {
+            return dupCheck.matchedMedication;
+          }
           throwDuplicateConflict(dupCheck);
         }
       }
@@ -470,6 +479,14 @@ class MedicationService {
       if (incomingNorm || incomingRaw) {
         // Check against active DB medications
         for (const med of activeMedications) {
+          if (
+            (item.isSaved || item.dbId) &&
+            med.id &&
+            (String(med.id) === String(item.dbId) || String(med.id) === String(item.id))
+          ) {
+            continue;
+          }
+
           const existingRaw = med.medicationName || "";
           const existingNorm = normalizeMedicationName(existingRaw);
 
@@ -492,6 +509,8 @@ class MedicationService {
         // Check against in-batch items (other extracted medicines in same request)
         medicineList.forEach((otherItem, otherIdx) => {
           if (otherIdx === index) return;
+          if (item.isSaved || item.dbId) return;
+
           const otherRaw =
             otherItem.medicationName ||
             otherItem.name ||

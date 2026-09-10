@@ -246,10 +246,6 @@ async function executeAddDocumentAction({
     for (const fItem of filesList) {
       const currentS3Key = extractFileKey(fItem);
       if (!currentS3Key) continue;
-      const fileName =
-        (typeof fItem === "object" ? fItem?.fileName || fItem?.originalFileName : null) ||
-        currentS3Key.split("/").pop();
-      fileNames.push(fileName);
 
       let existingJob = null;
       if (documentOcrJobService?.getStatus) {
@@ -259,6 +255,36 @@ async function executeAddDocumentAction({
           existingJob = null;
         }
       }
+
+      let rawExtractedName =
+        (typeof fItem === "object"
+          ? fItem?.originalName ||
+            fItem?.originalFileName ||
+            fItem?.fileName ||
+            fItem?.name ||
+            fItem?.original_file_name ||
+            fItem?.file_name
+          : null) ||
+        existingJob?.metadata?.originalName ||
+        existingJob?.metadata?.fileName;
+
+      if (!rawExtractedName && userId) {
+        try {
+          const [dbDoc] = await db
+            .select({ fileName: document.fileName })
+            .from(document)
+            .where(and(eq(document.s3Key, currentS3Key), eq(document.userId, userId)))
+            .limit(1);
+          if (dbDoc && dbDoc.fileName) {
+            rawExtractedName = dbDoc.fileName;
+          }
+        } catch {
+          // ignore DB lookup error
+        }
+      }
+
+      const fileName = rawExtractedName || currentS3Key.split("/").pop();
+      fileNames.push(fileName);
 
       if (existingJob) {
         let normStatus = "completed";
@@ -308,6 +334,7 @@ async function executeAddDocumentAction({
           fileKey: currentS3Key,
           mimeType,
           userId,
+          originalName: fileName,
         });
 
         createdDocs.push({

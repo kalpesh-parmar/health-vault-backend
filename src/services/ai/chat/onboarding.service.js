@@ -7,6 +7,7 @@ const userOnboardingRepository = require("../../../repositories/userOnboardingRe
 const authProviderRepository = require("../../../repositories/authProviderRepository");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const medicationService = require("../../medication.service");
+const medicationReminderService = require("../../medicationReminder.service");
 const { languageTypeValues, languageNativeLabels } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 // const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
@@ -1735,12 +1736,17 @@ async function updateStateFromMessage(state, message, userId = null) {
         } else {
           // Process soft-deletions for replaced medications
           for (const m of state.medicinesToAdd) {
-            if (m.selected && m.resolution === "REPLACE" && m.replaceMedicationId && userId) {
+            const targetId =
+              m.replaceMedicationId ||
+              m.targetMedicationId ||
+              m.duplicateInfo?.matchedMedication?.id ||
+              m.matchedMedicationId;
+            if (m.selected && m.resolution === "REPLACE" && targetId && userId) {
               try {
-                await medicationService.deleteMedication(m.replaceMedicationId, userId);
+                await medicationService.deleteMedication(targetId, userId);
               } catch (delErr) {
                 console.warn(
-                  `[OnboardingService] Soft-delete warning for replaced med ${m.replaceMedicationId}:`,
+                  `[OnboardingService] Soft-delete warning for replaced med ${targetId}:`,
                   delErr.message,
                 );
               }
@@ -1769,16 +1775,16 @@ async function updateStateFromMessage(state, message, userId = null) {
               if (matchIdx >= 0 && created) {
                 state.medicinesToAdd[matchIdx].isSaved = true;
                 state.medicinesToAdd[matchIdx].dbId = created.id;
-                // try {
-                //   await medicationReminderService.createReminder(userId, {
-                //     medicationId: created.id,
-                //   });
-                // } catch (err) {
-                //   console.error(
-                //     `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
-                //     err,
-                //   );
-                // }
+                try {
+                  await medicationReminderService.createReminder(userId, {
+                    medicationId: created.id,
+                  });
+                } catch (err) {
+                  console.error(
+                    `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
+                    err,
+                  );
+                }
               }
             }
           }
@@ -2372,26 +2378,17 @@ async function getLocalizedResponse(step, state) {
       };
 
     case "ASK_BLOOD_GROUP": {
-      const shouldShowGreeting =
+      if (
         getMissingRequiredStep(state) === null &&
         state.profileConfirmed === true &&
-        !state.profileGreetingShown;
-
-      if (shouldShowGreeting) {
+        !state.profileGreetingShown
+      ) {
         state.profileGreetingShown = true;
       }
 
-      const greetingTitle = shouldShowGreeting
-        ? await getLocalizedText(
-            "onboarding.canSkip.message",
-            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
-            state.preferredLanguage,
-          )
-        : null;
-
       return {
         action: "ASK_BLOOD_GROUP",
-        title: greetingTitle,
+        title: null,
         subtitle: await getLocalizedText(
           "onboarding.askBloodGroup.message",
           "What is your blood group? You can skip this question.",
@@ -2413,26 +2410,17 @@ async function getLocalizedResponse(step, state) {
     }
 
     case "ASK_ALLERGIES": {
-      const shouldShowGreeting =
+      if (
         getMissingRequiredStep(state) === null &&
         state.profileConfirmed === true &&
-        !state.profileGreetingShown;
-
-      if (shouldShowGreeting) {
+        !state.profileGreetingShown
+      ) {
         state.profileGreetingShown = true;
       }
 
-      const greetingTitle = shouldShowGreeting
-        ? await getLocalizedText(
-            "onboarding.canSkip.message",
-            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
-            state.preferredLanguage,
-          )
-        : null;
-
       return {
         action: "ASK_ALLERGIES",
-        title: greetingTitle,
+        title: null,
         subtitle: await getLocalizedText(
           "onboarding.askAllergies.message",
           "Do you have any allergies? You can skip this question.",

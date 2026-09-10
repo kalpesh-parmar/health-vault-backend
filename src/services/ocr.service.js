@@ -511,11 +511,13 @@ class V1Service {
               continue;
             }
 
-            if (
-              medData.resolution === "REPLACE" &&
-              (medData.replaceMedicationId || medData.targetMedicationId)
-            ) {
-              const targetId = medData.replaceMedicationId || medData.targetMedicationId;
+            const targetId =
+              medData.replaceMedicationId ||
+              medData.targetMedicationId ||
+              medData.duplicateInfo?.matchedMedication?.id ||
+              medData.matchedMedicationId;
+
+            if (medData.resolution === "REPLACE" && targetId) {
               try {
                 await medicationService.deleteMedication(targetId, userId);
               } catch (delErr) {
