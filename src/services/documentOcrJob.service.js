@@ -42,6 +42,8 @@ const documentProcessingJobRepository = require("../repositories/documentProcess
 const documentRepository = require("../repositories/documentRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const patientRepository = require("../repositories/patientRepository");
+const { normalizeLanguage } = require("../utils/commonUtils");
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -95,7 +97,7 @@ class DocumentOcrJobService {
    * background via `setImmediate` so the HTTP request can resolve in
    * tens of milliseconds.
    */
-  async enqueue({ fileKey, mimeType, userId, originalName }) {
+  async enqueue({ fileKey, mimeType, userId, originalName, preferredLanguage = "english" }) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "fileKey is required");
     }
@@ -117,16 +119,21 @@ class DocumentOcrJobService {
     }
 
     setImmediate(() => {
-      this._runPipeline({ fileKey, jobId: job.id, mimeType, patientContext, userId }).catch(
-        (error) => {
-          // eslint-disable-next-line no-console
-          console.error("[ocr-job] uncaught pipeline error", {
-            error: error.message,
-            fileKey,
-            jobId: job.id,
-          });
-        },
-      );
+      this._runPipeline({
+        fileKey,
+        jobId: job.id,
+        mimeType,
+        patientContext,
+        preferredLanguage,
+        userId,
+      }).catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error("[ocr-job] uncaught pipeline error", {
+          error: error.message,
+          fileKey,
+          jobId: job.id,
+        });
+      });
     });
 
     return job;
@@ -136,7 +143,14 @@ class DocumentOcrJobService {
     return documentProcessingJobRepository.findByFileKey(fileKey, userId);
   }
 
-  async _runPipeline({ fileKey, jobId, patientContext, userId, mimeType }) {
+  async _runPipeline({
+    fileKey,
+    jobId,
+    patientContext,
+    userId,
+    mimeType,
+    preferredLanguage: explicitLang = null,
+  }) {
     if (RUNNING_LOCKS.has(fileKey)) {
       // Idempotency: a second enqueue while the first is in-flight is a
       // no-op. The shared job row already reflects the latest state.
@@ -210,16 +224,23 @@ class DocumentOcrJobService {
       });
 
       let preferredLanguage = "english";
-      try {
-        if (userId) {
+      if (explicitLang) {
+        preferredLanguage = normalizeLanguage(explicitLang);
+      } else if (userId) {
+        try {
           const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
           if (onboardingRecord?.data?.preferredLanguage) {
-            preferredLanguage = onboardingRecord.data.preferredLanguage;
+            preferredLanguage = normalizeLanguage(onboardingRecord.data.preferredLanguage);
+          } else {
+            const patient = await patientRepository.findByUserId(userId);
+            if (patient?.preferredLanguage) {
+              preferredLanguage = normalizeLanguage(patient.preferredLanguage);
+            }
           }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("[ocr-job] failed to fetch preferred language", err);
         }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("[ocr-job] failed to fetch preferred language", err);
       }
 
       const rawTextToSummarize = rawOcrData.fullText || "";
@@ -230,38 +251,97 @@ class DocumentOcrJobService {
         structured?.summary ||
         "";
       let summaryPreferredLanguage =
-        ocrResponse?.summaryGujarati || structured?.summaryInPreferredLanguage || "";
+        ocrResponse?.summaryGujarati ||
+        structured?.summaryInPreferredLanguage ||
+        (preferredLanguage !== "english" && structured?.summariesByLanguage?.[preferredLanguage]) ||
+        "";
 
-      if (rawTextToSummarize && (!summaryEnglish || !summaryPreferredLanguage)) {
-        if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
+      if (rawTextToSummarize) {
+        if (preferredLanguage === "english") {
           if (!summaryEnglish) {
-            summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
-          } else {
-            // eslint-disable-next-line no-console
-            console.log(
-              "[OCR] => Reusing structured extraction summary for English (0ms extra latency)",
-            );
+            try {
+              summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn("[ocr-job] English summary generation failed", err.message);
+            }
           }
           summaryPreferredLanguage = summaryEnglish;
         } else {
-          if (!summaryEnglish && !summaryPreferredLanguage) {
-            const [sumEng, sumPref] = await Promise.all([
-              ocrService.generateSummary(rawTextToSummarize, "english"),
-              ocrService.generateSummary(rawTextToSummarize, preferredLanguage),
-            ]);
-            summaryEnglish = sumEng;
-            summaryPreferredLanguage = sumPref;
-            summaryPreferredLanguage = await ocrService.generateSummary(
-              rawTextToSummarize,
-              preferredLanguage,
-            );
+          // Generate or preserve English summary
+          if (!summaryEnglish) {
+            try {
+              summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn("[ocr-job] English summary generation failed", err.message);
+            }
           }
+
+          // Generate or translate preferred language summary
+          if (!summaryPreferredLanguage) {
+            try {
+              summaryPreferredLanguage = await ocrService.generateSummary(
+                rawTextToSummarize,
+                preferredLanguage,
+              );
+            } catch (genErr) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[ocr-job] generateSummary failed for ${preferredLanguage}, attempting translation`,
+                genErr.message,
+              );
+            }
+
+            if (!summaryPreferredLanguage && summaryEnglish) {
+              try {
+                summaryPreferredLanguage = await ocrService.translateSummary(
+                  summaryEnglish,
+                  preferredLanguage,
+                );
+              } catch (transErr) {
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `[ocr-job] translateSummary failed for ${preferredLanguage}`,
+                  transErr.message,
+                );
+              }
+            }
+
+            if (!summaryPreferredLanguage) {
+              summaryPreferredLanguage = summaryEnglish;
+            }
+          }
+        }
+      } else if (preferredLanguage !== "english" && summaryEnglish && !summaryPreferredLanguage) {
+        try {
+          summaryPreferredLanguage = await ocrService.translateSummary(
+            summaryEnglish,
+            preferredLanguage,
+          );
+        } catch (transErr) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[ocr-job] translateSummary fallback failed for ${preferredLanguage}`,
+            transErr.message,
+          );
+          summaryPreferredLanguage = summaryEnglish;
         }
       }
 
       structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
+      structured.summary = summaryPreferredLanguage || summaryEnglish;
+      if (!structured.summariesByLanguage) {
+        structured.summariesByLanguage = {};
+      }
+      if (summaryEnglish) {
+        structured.summariesByLanguage.english = summaryEnglish;
+      }
+      if (summaryPreferredLanguage && preferredLanguage) {
+        structured.summariesByLanguage[preferredLanguage] = summaryPreferredLanguage;
+      }
 
       // Best-effort graph extraction
       let graphs = [];
@@ -306,8 +386,8 @@ class DocumentOcrJobService {
       const updatedDoc = await documentRepository
         .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
           documentType: analyzedDocumentType,
+          remarks: summaryPreferredLanguage || summaryEnglish,
           summaryEnglish,
-          summaryInPreferredLanguage: summaryPreferredLanguage,
           structuredExtractedData: finalPayload.extractedStructuredData,
         })
         .catch((err) => {

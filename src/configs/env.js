@@ -86,6 +86,7 @@ const env = Object.freeze({
   reminderAfterMinutes: numberFromEnv("REMINDER_AFTER_MINUTES", 10),
   rateLimitMax: numberFromEnv("RATE_LIMIT_MAX", 200),
   rateLimitWindowMs: numberFromEnv("RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+  cronDisable: booleanFromEnv("CRON_DISABLE", false),
 
   // Email / SMTP
   emailEnabled: booleanFromEnv("EMAIL_ENABLED", true),

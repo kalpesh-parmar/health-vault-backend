@@ -21,7 +21,19 @@ class MedicationReminderOccurrenceRepository {
       .limit(1);
     return result[0] || null;
   }
-  async findPendingReminders(pendingStatuses) {
+  async findPendingReminders(pendingStatuses, options = {}) {
+    const conditions = [
+      or(...pendingStatuses.map((status) => eq(medicationReminderOccurrence.status, status))),
+      eq(medicationReminderOccurrence.softDelete, false),
+    ];
+
+    if (options.startTime) {
+      conditions.push(gte(medicationReminderOccurrence.actualMedicationTime, options.startTime));
+    }
+    if (options.endTime) {
+      conditions.push(lte(medicationReminderOccurrence.actualMedicationTime, options.endTime));
+    }
+
     return db
       .select({
         occurrence: medicationReminderOccurrence,
@@ -29,13 +41,7 @@ class MedicationReminderOccurrenceRepository {
       })
       .from(medicationReminderOccurrence)
       .innerJoin(medication, eq(medication.id, medicationReminderOccurrence.medicationId))
-      .where(
-        and(
-          or(...pendingStatuses.map((status) => eq(medicationReminderOccurrence.status, status))),
-
-          eq(medicationReminderOccurrence.softDelete, false),
-        ),
-      );
+      .where(and(...conditions));
   }
   async findAllOccurrences(userId) {
     return db

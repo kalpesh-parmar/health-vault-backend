@@ -1,4 +1,4 @@
-const { and, eq, lt, ne, sql } = require("drizzle-orm");
+const { and, eq, lt, ne, sql, or, isNull } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
@@ -77,7 +77,13 @@ class DocumentProcessingJobRepository {
   async markRunning(jobId, patch = {}) {
     const [row] = await db
       .update(documentProcessingJob)
-      .set({ startedAt: new Date(), status: "RUNNING", updatedAt: new Date(), ...patch })
+      .set({
+        startedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+        status: "RUNNING",
+        updatedAt: new Date(),
+        ...patch,
+      })
       .where(eq(documentProcessingJob.id, jobId))
       .returning();
     return row || null;
@@ -86,7 +92,11 @@ class DocumentProcessingJobRepository {
   async updateProgress(jobId, patch) {
     const [row] = await db
       .update(documentProcessingJob)
-      .set({ ...patch, updatedAt: new Date() })
+      .set({
+        ...patch,
+        lastHeartbeatAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(documentProcessingJob.id, jobId))
       .returning();
     return row || null;
@@ -178,9 +188,47 @@ class DocumentProcessingJobRepository {
       .where(
         and(
           eq(documentProcessingJob.status, "RUNNING"),
-          lt(documentProcessingJob.lastHeartbeatAt, cutoffDate),
+          or(
+            lt(documentProcessingJob.lastHeartbeatAt, cutoffDate),
+            and(
+              isNull(documentProcessingJob.lastHeartbeatAt),
+              or(
+                lt(documentProcessingJob.startedAt, cutoffDate),
+                lt(documentProcessingJob.createdAt, cutoffDate),
+              ),
+            ),
+          ),
         ),
       );
+  }
+
+  async failStalledRunningJobs(cutoffDate, reason = "Job execution timed out without heartbeat") {
+    return db
+      .update(documentProcessingJob)
+      .set({
+        status: "FAILED",
+        stageStatus: "FAILED",
+        retryable: true,
+        error: reason,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documentProcessingJob.status, "RUNNING"),
+          or(
+            lt(documentProcessingJob.lastHeartbeatAt, cutoffDate),
+            and(
+              isNull(documentProcessingJob.lastHeartbeatAt),
+              or(
+                lt(documentProcessingJob.startedAt, cutoffDate),
+                lt(documentProcessingJob.createdAt, cutoffDate),
+              ),
+            ),
+          ),
+        ),
+      )
+      .returning();
   }
 
   async reconcileRunningJobsOnBoot() {

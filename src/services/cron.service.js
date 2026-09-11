@@ -74,8 +74,8 @@ class cronService {
   // start multiple jobs
   async loadStartAll() {
     const cronDisable = env.cronDisable;
-    if (cronDisable === "false") {
-      console.log("cron is Disable...");
+    if (cronDisable === true || cronDisable === "true") {
+      console.log("cron is disabled...");
       return;
     }
 

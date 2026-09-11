@@ -46,7 +46,11 @@ function normalizeUnifiedChatInput(body = {}) {
     state: state && typeof state === "object" ? state : null,
     history: Array.isArray(history) ? history : [],
     displayLabel: displayLabel || null,
-    preferredLanguage: preferredLanguage ? normalizeLanguage(preferredLanguage) : null,
+    preferredLanguage: preferredLanguage
+      ? normalizeLanguage(preferredLanguage)
+      : state?.preferredLanguage
+        ? normalizeLanguage(state.preferredLanguage)
+        : null,
     fromScreen: fromScreen || (state && state.fromScreen) || null,
   };
 }
@@ -89,6 +93,7 @@ function buildUnifiedResponse({
     documentSummary,
     sessionId,
     onboardingState,
+    state: onboardingState,
     medicines,
     citations,
     document,
@@ -334,6 +339,7 @@ async function executeAddDocumentAction({
         const job = await documentOcrJobService.enqueue({
           fileKey: currentS3Key,
           mimeType,
+          preferredLanguage,
           userId,
           originalName: fileName,
         });

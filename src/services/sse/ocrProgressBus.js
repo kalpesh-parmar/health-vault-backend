@@ -167,6 +167,10 @@ class OcrProgressBus {
       }
     }
 
+    if (TERMINAL_STAGES.has(enriched.stage)) {
+      this._closeChannel(channelKey);
+    }
+
     if (this._adapter && !fromAdapter) {
       this._adapter.publish(channelKey, enriched);
     }

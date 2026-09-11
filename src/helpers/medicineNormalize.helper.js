@@ -568,12 +568,6 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (!input.medicationType && input.type) {
     input.medicationType = String(input.type).toUpperCase();
   }
-  if (!input.medicationType) {
-    input.medicationType = "TABLET";
-  }
-  if (!input.type) {
-    input.type = input.medicationType;
-  }
   if (input.instructions && !input.notes) {
     input.notes = String(input.instructions).slice(0, 1000);
   }

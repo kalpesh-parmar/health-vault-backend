@@ -244,22 +244,57 @@ const STAGES_PIPELINE = [
     stage: DOCUMENT_STAGES.SUMMARIZING,
     timeoutMs: env.llmStageTimeoutMs || 180000,
     message: messageConstants.EXTRACTING_DOCUMENT,
-    isSatisfied: (ctx) =>
-      Boolean(
-        ctx.structured?.summaryEnglish ||
-        ctx.structured?.summary ||
-        ctx.checkpointData?.summaryEnglish,
-      ),
+    isSatisfied: (ctx) => {
+      const preferredLanguage =
+        ctx.record?.options?.preferredLanguage ||
+        ctx.patientContext?.preferredLanguage ||
+        "english";
+      const hasEnglish = Boolean(
+        ctx.structured?.summaryEnglish || ctx.checkpointData?.summaryEnglish,
+      );
+      if (preferredLanguage === "english") {
+        return hasEnglish || Boolean(ctx.structured?.summary);
+      }
+      return Boolean(
+        (ctx.structured?.summaryInPreferredLanguage ||
+          ctx.checkpointData?.summaryInPreferredLanguage) &&
+        hasEnglish,
+      );
+    },
     run: async (ctx) => {
+      const preferredLanguage =
+        ctx.record?.options?.preferredLanguage ||
+        ctx.patientContext?.preferredLanguage ||
+        "english";
+
       let summaryEnglish =
         ctx.structured?.summaryEnglish ||
-        ctx.structured?.summary ||
         ctx.checkpointData?.summaryEnglish ||
+        ctx.structured?.summary ||
         "";
 
-      if (!summaryEnglish) {
-        const rawOcr = await resolveRawOcrData(ctx);
-        const rawTextToSummarize = rawOcr?.fullText || "";
+      let summaryInPreferredLanguage =
+        ctx.structured?.summaryInPreferredLanguage ||
+        ctx.checkpointData?.summaryInPreferredLanguage ||
+        "";
+
+      const rawOcr = await resolveRawOcrData(ctx);
+      const rawTextToSummarize = rawOcr?.fullText || "";
+
+      // 1. Ensure English summary exists
+      if (!summaryEnglish && rawTextToSummarize) {
+        try {
+          summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+          console.log("[runExtraction] Generated summaryEnglish:", summaryEnglish?.slice(0, 80));
+        } catch (sumErr) {
+          console.warn("[runExtraction] English summary generation failed:", sumErr.message);
+        }
+      }
+
+      // 2. Ensure Preferred Language summary exists
+      if (preferredLanguage === "english") {
+        summaryInPreferredLanguage = summaryEnglish;
+      } else if (!summaryInPreferredLanguage) {
         if (rawTextToSummarize) {
           try {
             summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
@@ -273,6 +308,43 @@ const STAGES_PIPELINE = [
             console.warn("[runExtraction] summary fallback failed:", sumErr.message);
           }
         }
+        if (!summaryInPreferredLanguage && summaryEnglish) {
+          try {
+            summaryInPreferredLanguage = await ocrService.translateSummary(
+              summaryEnglish,
+              preferredLanguage,
+            );
+            console.log(
+              `[runExtraction] Translated summary to ${preferredLanguage}:`,
+              summaryInPreferredLanguage?.slice(0, 80),
+            );
+          } catch (transErr) {
+            console.warn(
+              `[runExtraction] Summary translation to ${preferredLanguage} failed:`,
+              transErr.message,
+            );
+          }
+        }
+      }
+
+      ctx.checkpointData.summaryEnglish = summaryEnglish;
+      ctx.checkpointData.summaryInPreferredLanguage = summaryInPreferredLanguage;
+
+      if (ctx.structured) {
+        ctx.structured.summaryEnglish = summaryEnglish;
+        ctx.structured.summaryInPreferredLanguage = summaryInPreferredLanguage;
+        ctx.structured.summary =
+          preferredLanguage !== "english" && summaryInPreferredLanguage
+            ? summaryInPreferredLanguage
+            : summaryEnglish || summaryInPreferredLanguage;
+        ctx.structured.summariesByLanguage = {
+          ...(ctx.structured.summariesByLanguage || {}),
+          english: summaryEnglish,
+          ...(preferredLanguage !== "english" && summaryInPreferredLanguage
+            ? { [preferredLanguage]: summaryInPreferredLanguage }
+            : {}),
+        };
+        ctx.patch.extractedStructuredData = ctx.structured;
       }
     },
   },
@@ -461,14 +533,28 @@ class DocumentService {
       userId,
     });
 
-    const summaries = rows.map((doc) => ({
-      id: doc.id,
-      fileName: doc.fileName,
-      documentType: doc.documentType,
-      summaryEnglish: doc.summaryEnglish,
-      summaryInPreferredLanguage: doc.summaryInPreferredLanguage,
-      createdAt: doc.createdAt,
-    }));
+    const summaries = rows.map((doc) => {
+      let struct = doc.structuredExtractedData;
+      if (typeof struct === "string") {
+        try {
+          struct = JSON.parse(struct);
+        } catch {
+          struct = {};
+        }
+      }
+      return {
+        id: doc.id,
+        fileName: doc.fileName,
+        documentType: doc.documentType,
+        summaryEnglish: doc.summaryEnglish || struct?.summaryEnglish || null,
+        summaryInPreferredLanguage:
+          struct?.summaryInPreferredLanguage || doc.summaryInPreferredLanguage || null,
+        summary:
+          struct?.summaryInPreferredLanguage || struct?.summary || doc.summaryEnglish || null,
+        summariesByLanguage: struct?.summariesByLanguage || {},
+        createdAt: doc.createdAt,
+      };
+    });
 
     return {
       items: summaries,
@@ -568,7 +654,7 @@ class DocumentService {
     return updatedDocument;
   }
 
-  async uploadDocuments(files, authUserId, options = {}) {
+  async uploadDocuments(files, authUserId) {
     try {
       if (!authUserId) {
         throw new InvalidRequestException(errorConstants.UNAUTHORIZED_ACCESS_TO_PATIENT_RESOURCE);
@@ -588,7 +674,8 @@ class DocumentService {
       }
 
       const patientId = authUserId;
-      const opts = options || {};
+      const preferredLanguage = existingPatient.preferredLanguage || "english";
+
       const batchId = newBatchId();
       const fileKeys = list.map(() => newFileKey());
 
@@ -616,9 +703,9 @@ class DocumentService {
             status: StageType.QUEUED,
             createdAt: new Date().toISOString(),
             options: {
-              documentType: opts?.documentType || null,
-              language: opts?.language || "eng",
-              returnRawText: opts?.returnRawText !== false,
+              language: preferredLanguage,
+              preferredLanguage: preferredLanguage,
+              returnRawText: true,
             },
           };
           documentStore.set(record.fileKey, record);

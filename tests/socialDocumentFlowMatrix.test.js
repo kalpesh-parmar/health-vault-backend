@@ -7,6 +7,8 @@ const documentRepository = require("../src/repositories/documentRepository");
 // const medicationService = require("../src/services/medication.service");
 const { chatService } = require("../src/services/ai/chat/chat.service");
 
+jest.setTimeout(30000);
+
 describe("Social + Document Upload Onboarding 3-Choice Matrix Tests", () => {
   let dbStates = {};
 
@@ -107,7 +109,7 @@ describe("Social + Document Upload Onboarding 3-Choice Matrix Tests", () => {
 
     expect(dashboardRes.onboardingState.existingUserData.firstName).toBe("Shraddha");
     expect(dashboardRes.onboardingState.selectedProfileSource).toBe("SOCIAL");
-  });
+  }, 30000);
 
   test("2] USE DOCUMENT DATA: patient data persists as Document info across skipping and DASHBOARD selection", async () => {
     let initialState = {

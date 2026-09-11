@@ -1,4 +1,6 @@
 const aiServiceClient = require("../../../clients/aiServiceClient");
+const { ollamaClient } = require("../../../clients/ollamaClient");
+const { env } = require("../../../configs/env");
 const { InternalServerException } = require("../../../exceptions/appError");
 
 class MemoryLRUCache {
@@ -41,32 +43,110 @@ class AiServiceClientWrapper {
   }
 
   async _translateChunk(text, srcLang = "en", tgtLang) {
-    if (!text || srcLang === tgtLang) return text;
-    const cacheKey = `${srcLang}:${tgtLang}:${text}`;
+    if (!text) return text;
+    const normSrc = String(srcLang || "en")
+      .trim()
+      .toLowerCase();
+    const normTgt = String(tgtLang || "en")
+      .trim()
+      .toLowerCase();
+    if (normSrc === normTgt) return text;
+
+    const cacheKey = `${normSrc}:${normTgt}:${text}`;
     const cached = this.translationCache.get(cacheKey);
     if (cached) return cached;
 
-    // eslint-disable-next-line no-console
-    console.log(
-      `[AiServiceClient] Calling IndicTrans2 model to translate chunk (${text.length} chars) from ${srcLang} to ${tgtLang}...`,
-    );
+    // 1. Attempt IndicTrans2 via ai-service
+    let translatedText = null;
     try {
       const startTime = Date.now();
-      const response = await aiServiceClient.translate({ text, srcLang, tgtLang });
+      const response = await aiServiceClient.translate({
+        text,
+        srcLang: normSrc,
+        tgtLang: normTgt,
+      });
       const endTime = Date.now();
-      // eslint-disable-next-line no-console
-      console.log(`[AiServiceClient] Translation API call took ${endTime - startTime}ms`);
-      const translatedText = response?.translated_text || text;
-      this.translationCache.set(cacheKey, translatedText);
-      return translatedText;
+      const candidate = response?.translated_text?.trim();
+
+      // Ensure IndicTrans2 actually performed translation rather than echoing unchanged source text
+      if (candidate && candidate.toLowerCase() !== text.trim().toLowerCase()) {
+        translatedText = candidate;
+        // eslint-disable-next-line no-console
+        console.log(
+          `[AiServiceClient] IndicTrans2 translated (${text.length} chars) in ${endTime - startTime}ms`,
+        );
+      } else {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[AiServiceClient] IndicTrans2 returned unchanged text or was un-warmed. Triggering LLM translation fallback.`,
+        );
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(
-        `[AiServiceClient] Translation failed from ${srcLang} to ${tgtLang}:`,
-        err.message,
+      console.warn(
+        `[AiServiceClient] IndicTrans2 unavailable (${normSrc} -> ${normTgt}): ${err.message}. Falling back to LLM.`,
       );
-      return text;
     }
+
+    // 2. Resilient fallback to Ollama / Qwen model
+    if (!translatedText) {
+      translatedText = await this._translateWithLlm(text, normSrc, normTgt);
+    }
+
+    const finalResult = translatedText || text;
+    this.translationCache.set(cacheKey, finalResult);
+    return finalResult;
+  }
+
+  async _translateWithLlm(text, srcLang, tgtLang) {
+    if (!text || !text.trim()) return text;
+    try {
+      const targetLangName =
+        tgtLang === "gu" || tgtLang === "gujarati"
+          ? "Gujarati"
+          : tgtLang === "hi" || tgtLang === "hindi"
+            ? "Hindi"
+            : tgtLang === "mr" || tgtLang === "marathi"
+              ? "Marathi"
+              : tgtLang === "ta" || tgtLang === "tamil"
+                ? "Tamil"
+                : tgtLang;
+
+      const prompt = `You are an expert medical translator for a healthcare application. Translate the following medical report/prescription summary into natural, fluent ${targetLangName}.
+CRITICAL RULES:
+1. Preserve medical entities in English characters or standard medical representation:
+   - Doctor names (e.g. "Dr. Patel")
+   - Hospital / Clinic names (e.g. "Apollo Hospital")
+   - Medicine / drug names (e.g. "Metformin", "Paracetamol")
+   - Specific medical diagnoses / disease names (e.g. "Type 2 Diabetes", "Hypertension")
+   - Lab test names (e.g. "Hemoglobin", "HbA1c", "WBC", "Platelet Count")
+   - Numbers, dosages, and units (e.g. "500mg", "14.2 g/dL", "10 days", "1-0-1")
+2. Translate all explanatory sentences, findings, and patient instructions into clear, simple ${targetLangName} suitable for a patient.
+3. Do not alter clinical facts or measurements.
+4. Output ONLY the translated text. Do not include markdown code fences, notes, explanations, or conversational filler.
+
+Text to translate:
+"""
+${text}
+"""
+/no_think`;
+
+      const model = env.aiModel || "qwen3-vl:latest";
+      const response = await ollamaClient.generate(prompt, model, {
+        temperature: 0.1,
+        maxTokens: 1024,
+        think: false,
+        rawOptions: { num_ctx: 8192 },
+      });
+      const cleaned = response ? response.trim() : "";
+      if (cleaned) {
+        return cleaned;
+      }
+    } catch (llmErr) {
+      // eslint-disable-next-line no-console
+      console.warn(`[AiServiceClient] LLM translation fallback failed: ${llmErr.message}`);
+    }
+    return text;
   }
 
   async translate(text, srcLang = "en", tgtLang) {

@@ -557,4 +557,61 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       expect(keys).not.toContain("DASHBOARD");
     });
   });
+
+  // =========================================================================
+  // FLOW 5: MEDICINE_OPTIONS PROGRESSION & SERVER STATE AUTHORITY
+  // =========================================================================
+  describe("Flow 5: MEDICINE_OPTIONS Progression & Server State Authority", () => {
+    test("MEDICINE_OPTIONS advances to ADD_MEDICINE on ADD or aliases without repeating question", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: true,
+        medicationFlowDone: false,
+        medicinesConfirmed: false,
+        currentStep: "MEDICINE_OPTIONS",
+      };
+      dbStates["user-105"] = state;
+
+      let res = await onboardingService.chat("ADD", [], state, "user-105");
+      expect(res.action).toBe("ADD_MEDICINE");
+      expect(res.state.currentStep).toBe("ADD_MEDICINE");
+      expect(res.action).not.toBe("MEDICINE_OPTIONS");
+
+      // Aliases test: ADD_MORE_MEDICINES
+      let state2 = { ...state };
+      let res2 = await onboardingService.chat("ADD_MORE_MEDICINES", [], state2, "user-105");
+      expect(res2.action).toBe("ADD_MEDICINE");
+      expect(res2.state.currentStep).toBe("ADD_MEDICINE");
+    });
+
+    test("MEDICINE_OPTIONS advances to COMPLETE on DASHBOARD without repeating question", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: true,
+        medicationFlowDone: false,
+        medicinesConfirmed: false,
+        currentStep: "MEDICINE_OPTIONS",
+      };
+      dbStates["user-105"] = state;
+
+      let res = await onboardingService.chat("DASHBOARD", [], state, "user-105");
+      expect(res.state.isOnboardingCompleted).toBe(true);
+      expect(res.state.medicationFlowDone).toBe(true);
+      expect(res.state.medicinesConfirmed).toBe(true);
+      expect(res.state.currentStep).toBe("COMPLETE");
+      expect(res.action).not.toBe("MEDICINE_OPTIONS");
+
+      // Aliases test: GO_TO_DASHBOARD
+      let state2 = { ...state };
+      let res2 = await onboardingService.chat("GO_TO_DASHBOARD", [], state2, "user-105");
+      expect(res2.state.isOnboardingCompleted).toBe(true);
+      expect(res2.state.currentStep).toBe("COMPLETE");
+    });
+  });
 });

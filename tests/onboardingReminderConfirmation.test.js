@@ -8,6 +8,7 @@ const medicationRepository = require("../src/repositories/medicationRepository")
 const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
 const authProviderRepository = require("../src/repositories/authProviderRepository");
 const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+const { chatService } = require("../src/services/ai/chat/chat.service");
 
 jest.mock("../src/repositories/patientRepository");
 jest.mock("../src/repositories/medicationRepository");
@@ -21,6 +22,8 @@ describe("Onboarding & Post-Onboarding Reminder Creation and KEEP_EXISTING Verif
     jest.clearAllMocks();
     authProviderRepository.findByUserId.mockResolvedValue([]);
     jest.spyOn(chatSessionRepository, "appendMessage").mockResolvedValue({ id: "msg-999" });
+    jest.spyOn(chatSessionRepository, "createSession").mockResolvedValue({ id: "sess-onboard-1" });
+    jest.spyOn(chatService, "createOnboardingSession").mockResolvedValue({ id: "sess-onboard-1" });
   });
 
   afterEach(() => {

@@ -1122,7 +1122,7 @@ Return STRICT JSON only:
     const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
 
     const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear ${langDisplay}.
-Keep common medical terms (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium, and drug names) in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
+Keep common medical terms, doctor names, hospital/clinic names, diagnoses, lab tests (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium), and drug/medication names with dosages (like "Metformin 500mg") in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
 The summary should be easy to understand for a layperson.
 Limit the summary to 150-200 words.
 Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
@@ -1140,10 +1140,34 @@ ${rawText}
         think: false,
         rawOptions: { num_ctx: 8192 },
       });
-      return response.trim();
+      const responseText =
+        typeof response === "string" ? response : response?.response || response?.text || "";
+      return responseText.trim();
     } catch (error) {
       console.error("[OcrService] Summary generation failed:", error.message);
       return "";
+    }
+  }
+
+  async translateSummary(summaryText, targetLanguage, sourceLanguage = "english") {
+    if (!summaryText || !summaryText.trim()) {
+      return "";
+    }
+    const normSrc = String(sourceLanguage || "english")
+      .trim()
+      .toLowerCase();
+    const normTgt = String(targetLanguage || "english")
+      .trim()
+      .toLowerCase();
+    if (normSrc === normTgt) {
+      return summaryText.trim();
+    }
+    try {
+      const translated = await aiClient.translate(summaryText, normSrc, normTgt);
+      return translated ? translated.trim() : summaryText.trim();
+    } catch (err) {
+      console.warn(`[OcrService] translateSummary failed (${normSrc}->${normTgt}):`, err.message);
+      return summaryText.trim();
     }
   }
 

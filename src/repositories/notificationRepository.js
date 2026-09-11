@@ -139,6 +139,25 @@ class NotificationRepository {
 
     return result[0] || null;
   }
+
+  async findReminderNotificationSent(userId, occurrenceId, reminderType) {
+    const conditions = [
+      eq(notification.userId, userId),
+      sql`${notification.data}->>'occurrenceId' = ${occurrenceId}`,
+    ];
+
+    if (reminderType) {
+      conditions.push(sql`${notification.data}->>'reminderType' = ${reminderType}`);
+    }
+
+    const result = await db
+      .select()
+      .from(notification)
+      .where(and(...conditions))
+      .limit(1);
+
+    return result[0] || null;
+  }
 }
 
 module.exports = new NotificationRepository();
