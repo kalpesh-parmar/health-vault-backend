@@ -109,6 +109,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       mimeType: "application/pdf",
       preferredLanguage: "english",
       userId: "user-123",
+      originalName: "test_report.pdf",
     });
     expect(response.mode).toBe("ACTION");
     expect(response.actionType).toBe("ADD_DOCUMENT");
@@ -1138,7 +1139,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(res.canSkip).toBe(true);
       // 3. Completion message is emitted separately
       expect(res.completionMessage).toBe(
-        "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
+        "Your onboarding is complete! The Skip button is now enabled. You can tap Skip to go directly to the Dashboard and complete any remaining steps later.",
       );
       // 4. completionMessageSent flag is true
       expect(res.state.completionMessageSent).toBe(true);
@@ -1147,12 +1148,109 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(appendMsgSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           content:
-            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
+            "Your onboarding is complete! The Skip button is now enabled. You can tap Skip to go directly to the Dashboard and complete any remaining steps later.",
           metadata: expect.objectContaining({
             action: "ONBOARDING_COMPLETED_NOTICE",
           }),
         }),
       );
+
+      jest.restoreAllMocks();
+    });
+
+    test("Multilingual onboarding completion messages emit localized confirmation for Gujarati, Hindi, Marathi, and Tamil", async () => {
+      const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      const { chatService } = require("../src/services/ai/chat/chat.service");
+
+      jest
+        .spyOn(patientRepository, "findById")
+        .mockResolvedValue({ id: "p-multi-lang", onboardingCompleted: false });
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue(null);
+      jest.spyOn(userOnboardingRepository, "create").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+      jest.spyOn(chatService, "createOnboardingSession").mockResolvedValue({ id: "session-multi" });
+      jest
+        .spyOn(chatService, "appendChatMessage")
+        .mockResolvedValue({ id: "msg-m", createdAt: new Date() });
+
+      const langMap = {
+        gujarati:
+          "તમારું ઓનબોર્ડિંગ પૂર્ણ થઈ ગયું છે! હવે SKIP બટન સક્રિય થઈ ગયું છે. તમે SKIP પર ટેપ કરીને સીધા ડેશબોર્ડ પર જઈ શકો છો અને બાકી રહેલા સ્ટેપ્સ પછીથી પણ પૂર્ણ કરી શકો છો.",
+        hindi:
+          "आपका ऑनबोर्डिंग पूरा हो गया है! अब SKIP बटन सक्रिय हो गया है। आप SKIP पर टैप करके सीधे डैशबोर्ड पर जा सकते हैं और बाकी चरण बाद में भी पूरे कर सकते हैं।",
+        marathi:
+          "तुमचे ऑनबोर्डिंग पूर्ण झाले आहे! आता SKIP बटण सक्रिय झाले आहे. तुम्ही SKIP वर टॅप करून थेट डॅशबोर्डवर जाऊ शकता आणि उर्वरित स्टेप्स नंतरही पूर्ण करू शकता.",
+        tamil:
+          "உங்கள் ஆன்போர்டிங் முடிந்துவிட்டது! இப்போது SKIP பொத்தான் செயல்படுத்தப்பட்டுள்ளது. SKIP என்பதைத் தட்டி நேரடியாக Dashboard-க்கு செல்லலாம் மற்றும் மீதமுள்ள படிகளை பின்னரும் முடிக்கலாம்.",
+      };
+
+      for (const [lang, expectedMsg] of Object.entries(langMap)) {
+        const testState = {
+          chatSessionId: `session-${lang}`,
+          preferredLanguage: lang,
+          flowMode: "MANUAL",
+          currentStep: "ASK_GENDER",
+          existingUserData: {
+            firstName: "Test",
+            lastName: "User",
+            dateOfBirth: "1995-05-15",
+          },
+        };
+
+        const res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        expect(res.canSkip).toBe(true);
+        expect(res.completionMessage).toBe(expectedMsg);
+        expect(res.state.completionMessageSent).toBe(true);
+      }
+
+      jest.restoreAllMocks();
+    });
+
+    test("Completion message idempotency: subsequent step does not re-emit completionMessage once sent", async () => {
+      const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      const { chatService } = require("../src/services/ai/chat/chat.service");
+
+      jest
+        .spyOn(patientRepository, "findById")
+        .mockResolvedValue({ id: "p-idem-test", onboardingCompleted: false });
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue(null);
+      jest.spyOn(userOnboardingRepository, "create").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+      jest.spyOn(chatService, "createOnboardingSession").mockResolvedValue({ id: "session-idem" });
+      jest
+        .spyOn(chatService, "appendChatMessage")
+        .mockResolvedValue({ id: "msg-idem", createdAt: new Date() });
+
+      const stateAlreadySent = {
+        chatSessionId: "session-idem",
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        currentStep: "ASK_BLOOD_GROUP",
+        completionMessageSent: true,
+        canSkip: true,
+        profileConfirmed: true,
+        existingUserData: {
+          firstName: "John",
+          lastName: "Doe",
+          dateOfBirth: "1990-01-01",
+          gender: "male",
+        },
+      };
+
+      const resNext = await onboardingService.chat("A+", [], stateAlreadySent, "p-idem-test");
+      expect(resNext.canSkip).toBe(true);
+      expect(resNext.completionMessage).toBeUndefined();
+      expect(resNext.state.completionMessageSent).toBe(true);
 
       jest.restoreAllMocks();
     });

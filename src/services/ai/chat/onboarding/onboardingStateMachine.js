@@ -373,6 +373,13 @@ function getProfileMismatches(state) {
  */
 function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
   const compareKeys = ["firstName", "lastName", "phoneNumber", "dateOfBirth", "gender", "email"];
+
+  // const useDoc =
+  //   state.useDocumentData !== false &&
+  //   state.flowMode === "UPLOAD" &&
+  //   state.documentConfirmed !== false &&
+  //   !!state.documentData;
+
   const docData = state.documentData || {};
 
   let normSource = null;
@@ -413,6 +420,15 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     }
   }
 
+  if (!normSource && state.selectedProfileSource) {
+    const upperSel = String(state.selectedProfileSource).trim().toUpperCase();
+    if (upperSel === "DOCUMENT" || state.useDocumentData === true) {
+      normSource = "DOCUMENT";
+    } else if (upperSel === "SOCIAL" || upperSel === "LOGIN" || state.useSocialData === true) {
+      normSource = "LOGIN";
+    }
+  }
+
   for (const key of compareKeys) {
     const loginField = state.loginData?.[key] || { value: null, verified: false };
     const rawLogin = loginField.value;
@@ -436,15 +452,13 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
     const existingVal = state.existingUserData?.[key] || null;
     const shownValue = loginField.verified ? rawLogin : rawLogin || rawDoc || existingVal || null;
 
-    if (editedData) {
-      state.selectedProfileSource = "MANUAL";
-      state.useSocialData = false;
-      state.useDocumentData = false;
-      if (editedData[key] !== undefined && editedData[key] !== null && editedData[key] !== "") {
-        state.existingUserData[key] = editedData[key];
-      } else {
-        state.existingUserData[key] = shownValue;
-      }
+    if (
+      editedData &&
+      editedData[key] !== undefined &&
+      editedData[key] !== null &&
+      editedData[key] !== ""
+    ) {
+      state.existingUserData[key] = editedData[key];
     } else if (normSource === "DOCUMENT") {
       const docVal = state.documentData?.[key] !== undefined ? state.documentData[key] : rawDoc;
       const validDocVal = docVal !== undefined && docVal !== null && docVal !== "" ? docVal : null;
@@ -460,13 +474,15 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.selectedProfileSource = "SOCIAL";
       state.useSocialData = true;
       state.useDocumentData = false;
+    } else if (editedData) {
+      state.existingUserData[key] = existingVal || shownValue;
     } else if (loginField.verified) {
-      state.existingUserData[key] = rawLogin;
+      state.existingUserData[key] = existingVal || rawLogin;
     } else if (isMismatch && normSource) {
       const chosenVal = normSource === "DOCUMENT" ? rawDoc : rawLogin;
       state.existingUserData[key] = chosenVal || existingVal || null;
     } else {
-      state.existingUserData[key] = rawLogin || rawDoc || existingVal || null;
+      state.existingUserData[key] = existingVal || rawLogin || rawDoc || null;
     }
   }
 

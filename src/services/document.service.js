@@ -297,19 +297,15 @@ const STAGES_PIPELINE = [
       } else if (!summaryInPreferredLanguage) {
         if (rawTextToSummarize) {
           try {
-            summaryInPreferredLanguage = await ocrService.generateSummary(
-              rawTextToSummarize,
-              preferredLanguage,
-            );
-            console.log(
-              `[runExtraction] Generated summaryInPreferredLanguage (${preferredLanguage}):`,
-              summaryInPreferredLanguage?.slice(0, 80),
-            );
-          } catch (prefErr) {
-            console.warn(
-              `[runExtraction] Preferred language (${preferredLanguage}) summary generation failed:`,
-              prefErr.message,
-            );
+            summaryEnglish = await ocrService.generateSummary(rawTextToSummarize, "english");
+            console.log("[ocrService.generateSummary] summaryEnglish", summaryEnglish);
+            ctx.checkpointData.summaryEnglish = summaryEnglish;
+            if (ctx.structured) {
+              ctx.structured.summaryEnglish = summaryEnglish;
+              ctx.patch.extractedStructuredData = ctx.structured;
+            }
+          } catch (sumErr) {
+            console.warn("[runExtraction] summary fallback failed:", sumErr.message);
           }
         }
         if (!summaryInPreferredLanguage && summaryEnglish) {

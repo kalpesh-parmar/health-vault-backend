@@ -49,7 +49,7 @@
   "onboarding.medicineOptions.goToDashboard": "டாஷ்போர்டிற்குச் செல்லவும்",
   "onboarding.medicineOptions.askAboutReport": "எனது அறிக்கையைப் பற்றிக் கேட்கவும்",
   "onboarding.complete.message": "நன்றி! ஆன்போர்டிங் முடிந்தது.",
-  "onboarding.canSkip.message": "பதிவு நிறைவடைந்தது! உங்கள் டாஷ்போர்டை (dashboard) பார்வையிட, எப்போது வேண்டுமானாலும் மீதமுள்ள படிகளைத் தவிர்க்கலாம்.",
+  "onboarding.canSkip.message": "உங்கள் ஆன்போர்டிங் முடிந்துவிட்டது! இப்போது SKIP பொத்தான் செயல்படுத்தப்பட்டுள்ளது. SKIP என்பதைத் தட்டி நேரடியாக Dashboard-க்கு செல்லலாம் மற்றும் மீதமுள்ள படிகளை பின்னரும் முடிக்கலாம்.",
   "onboarding.complete.addMoreMedicines": "மேலும் மருந்துகளைச் சேர்க்கவும்",
   "onboarding.complete.viewMyMedicines": "எனது மருந்துகளைப் பார்க்கவும்",
   "onboarding.upload.failed": "❌ ஆவண செயலாக்கம் தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும் அல்லது விவரங்களை கைமுறையாக உள்ளிடவும்.",

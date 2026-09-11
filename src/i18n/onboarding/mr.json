@@ -49,7 +49,7 @@
   "onboarding.medicineOptions.goToDashboard": "डॅशबोर्डवर जा",
   "onboarding.medicineOptions.askAboutReport": "माझ्या रिपोर्टबद्दल विचारा",
   "onboarding.complete.message": "धन्यवाद! ऑनबोर्डिंग पूर्ण झाले आहे.",
-  "onboarding.canSkip.message": "नोंदणी पूर्ण झाली आहे! तुमचा डॅशबोर्ड पाहण्यासाठी तुम्ही उर्वरित पायऱ्या कधीही वगळू शकता.",
+  "onboarding.canSkip.message": "तुमचे ऑनबोर्डिंग पूर्ण झाले आहे! आता SKIP बटण सक्रिय झाले आहे. तुम्ही SKIP वर टॅप करून थेट डॅशबोर्डवर जाऊ शकता आणि उर्वरित स्टेप्स नंतरही पूर्ण करू शकता.",
   "onboarding.complete.addMoreMedicines": "आणखी औषधे जोडा",
   "onboarding.complete.viewMyMedicines": "माझी औषधे पहा",
   "onboarding.upload.failed": "❌ दस्तऐवज प्रक्रिया अयशस्वी. कृपया पुन्हा प्रयत्न करा किंवा मॅन्युअली माहिती भरा.",

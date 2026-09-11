@@ -3,11 +3,10 @@ const { db } = require("../../../../configs/db");
 const { document } = require("../../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { getLocalizedText } = require("../../../../helpers/onboarding.helper");
-const { normalizeLanguage } = require("../../../../utils/commonUtils");
 const { toDbDateOnlyString } = require("../../../../utils/dateUtils");
 const { languageTypeValues, languageNativeLabels } = require("../../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../../enums/bloodGroupType");
-const { ocrService } = require("../../ocr/ocr.service");
+const aiClient = require("../../clients/aiClient.service");
 const { getProfileMismatches, getMissingRequiredStep } = require("./onboardingStateMachine");
 
 const REPORT_QUESTIONS_I18N = {
@@ -168,7 +167,6 @@ async function getLocalizedResponse(step, state) {
         "Use Document",
         state.preferredLanguage,
       );
-      console.log("[DOCUMENT DETAILS]====", useDocText);
 
       let loginSummary, documentSummary;
       if (loginName) {
@@ -303,7 +301,6 @@ async function getLocalizedResponse(step, state) {
       );
       return payload;
     }
-
     case "ASK_UPLOAD_DOCUMENT":
       return {
         action: "ASK_UPLOAD_DOCUMENT",
@@ -429,26 +426,17 @@ async function getLocalizedResponse(step, state) {
       };
 
     case "ASK_BLOOD_GROUP": {
-      const shouldShowGreeting =
+      if (
         getMissingRequiredStep(state) === null &&
         state.profileConfirmed === true &&
-        !state.profileGreetingShown;
-
-      if (shouldShowGreeting) {
+        !state.profileGreetingShown
+      ) {
         state.profileGreetingShown = true;
       }
 
-      const greetingTitle = shouldShowGreeting
-        ? await getLocalizedText(
-            "onboarding.canSkip.message",
-            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
-            state.preferredLanguage,
-          )
-        : null;
-
       return {
         action: "ASK_BLOOD_GROUP",
-        title: greetingTitle,
+        title: null,
         subtitle: await getLocalizedText(
           "onboarding.askBloodGroup.message",
           "What is your blood group? You can skip this question.",
@@ -470,26 +458,17 @@ async function getLocalizedResponse(step, state) {
     }
 
     case "ASK_ALLERGIES": {
-      const shouldShowGreeting =
+      if (
         getMissingRequiredStep(state) === null &&
         state.profileConfirmed === true &&
-        !state.profileGreetingShown;
-
-      if (shouldShowGreeting) {
+        !state.profileGreetingShown
+      ) {
         state.profileGreetingShown = true;
       }
 
-      const greetingTitle = shouldShowGreeting
-        ? await getLocalizedText(
-            "onboarding.canSkip.message",
-            "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
-            state.preferredLanguage,
-          )
-        : null;
-
       return {
         action: "ASK_ALLERGIES",
-        title: greetingTitle,
+        title: null,
         subtitle: await getLocalizedText(
           "onboarding.askAllergies.message",
           "Do you have any allergies? You can skip this question.",
@@ -585,7 +564,6 @@ async function getLocalizedResponse(step, state) {
         medicine: med || emptyMedTemplate,
       };
     }
-
     case "MEDICINE_OPTIONS": {
       const options = [
         {
@@ -655,10 +633,7 @@ async function getLocalizedResponse(step, state) {
           const [doc] = await db.select().from(document).where(eq(document.id, targetDocId));
           docRecord = doc;
         } catch (err) {
-          console.warn(
-            "[StepResponseBuilder] Failed to fetch document for ASK_REPORT:",
-            err.message,
-          );
+          console.warn("[OnboardingService] Failed to fetch document for ASK_REPORT:", err.message);
         }
       }
 
@@ -676,7 +651,7 @@ async function getLocalizedResponse(step, state) {
           }
         } catch (err) {
           console.warn(
-            "[StepResponseBuilder] Failed to fetch latest document for ASK_REPORT:",
+            "[OnboardingService] Failed to fetch latest document for ASK_REPORT:",
             err.message,
           );
         }
@@ -700,27 +675,21 @@ async function getLocalizedResponse(step, state) {
       const patientInfo = structured.patientInfo || structured.patient || {};
       const tests =
         Array.isArray(structured.tests) && structured.tests.length > 0
-          ? tests
+          ? structured.tests
           : Array.isArray(structured.labResults) && structured.labResults.length > 0
             ? structured.labResults
             : [];
 
-      const lang = normalizeLanguage(state.preferredLanguage || "english");
-      const baseEnglishSummary =
-        structured.summariesByLanguage?.english ||
+      const lang = state.preferredLanguage || "english";
+      let docSummary =
+        (lang !== "english" &&
+          (structured.summaryInPreferredLanguage || docRecord?.summaryInPreferredLanguage)) ||
         docRecord?.summaryEnglish ||
         structured.summaryEnglish ||
         structured.summary ||
+        structured.summaryInPreferredLanguage ||
         docRecord?.remarks ||
         "";
-
-      let docSummary = "";
-      if (lang === "english") {
-        docSummary = baseEnglishSummary;
-      } else {
-        docSummary =
-          structured.summariesByLanguage?.[lang] || structured.summaryInPreferredLanguage || "";
-      }
 
       const isPrescription =
         docRecord?.documentType === "PRESCERIPTION" ||
@@ -731,71 +700,63 @@ async function getLocalizedResponse(step, state) {
           structured.medications.length > 0 &&
           tests.length === 0);
 
-      // If docSummary is still empty or in English for non-English user
-      if (lang !== "english" && !docSummary) {
-        // 1. Try generating from OCR extracted text
-        if (docRecord?.ocrExtractedText) {
-          try {
-            docSummary = await ocrService.generateSummary(docRecord.ocrExtractedText, lang);
-          } catch (genErr) {
-            console.warn(
-              `[StepResponseBuilder] generateSummary failed for ${lang}:`,
-              genErr.message,
-            );
-          }
-        }
-
-        // 2. Fallback: translate the base English summary
-        if (!docSummary && baseEnglishSummary) {
-          try {
-            docSummary = await ocrService.translateSummary(baseEnglishSummary, lang);
-          } catch (transErr) {
-            console.warn(
-              `[StepResponseBuilder] translateSummary failed for ${lang}:`,
-              transErr.message,
-            );
-          }
-        }
-
-        // 3. Fallback to base English summary if translation failed
-        if (!docSummary) {
-          docSummary = baseEnglishSummary;
-        }
-
-        // 4. Persist newly translated/generated summary back to DB for future requests
-        if (docRecord?.id && docSummary && docSummary !== baseEnglishSummary) {
-          try {
-            const updatedStructured = {
-              ...structured,
-              summaryInPreferredLanguage: docSummary,
-              summariesByLanguage: {
-                ...(structured.summariesByLanguage || {}),
-                [lang]: docSummary,
-                ...(baseEnglishSummary ? { english: baseEnglishSummary } : {}),
-              },
-            };
-            await db
-              .update(document)
-              .set({
-                structuredExtractedData: updatedStructured,
-                updatedAt: new Date(),
-              })
-              .where(eq(document.id, docRecord.id));
-            docRecord.structuredExtractedData = updatedStructured;
-          } catch (persistErr) {
-            console.warn(
-              "[StepResponseBuilder] Failed to persist summary to document:",
-              persistErr.message,
-            );
-          }
-        }
-      }
+      const REPORT_QUESTIONS_I18N = {
+        english: [
+          "What does my report mean?",
+          "Are there any abnormal values?",
+          "What should I discuss with my doctor?",
+          "Can you explain this report in simple language?",
+        ],
+        gujarati: [
+          "મારા રિપોર્ટનો અર્થ શું છે?",
+          "શું કોઈ અસામાન્ય મૂલ્યો છે?",
+          "મારે મારા ડૉક્ટર સાથે શું ચર્ચા કરવી જોઈએ?",
+          "શું તમે આ રિપોર્ટ સરળ ભાષામાં સમજાવી શકો છો?",
+        ],
+        hindi: [
+          "मेरी रिपोर्ट का क्या मतलब है?",
+          "क्या कोई असामान्य मूल्य हैं?",
+          "मुझे अपने डॉक्टर से क्या चर्चा करनी चाहिए?",
+          "क्या आप इस रिपोर्ट को सरल भाषा में समझा सकते हैं?",
+        ],
+        marathi: [
+          "माझ्या रिपोर्टचा अर्थ काय आहे?",
+          "काही असामान्य मूल्ये आहेत का?",
+          "मी माझ्या डॉक्टरांशी काय चर्चा करावी?",
+          "तुम्ही हा रिपोर्ट सोप्या भाषेत समजावून सांगू शकता का?",
+        ],
+        tamil: [
+          "எனது அறிக்கையின் அர்த்தம் என்ன?",
+          "ஏதேனும் அசாதாரண மதிப்புகள் உள்ளதா?",
+          "எனது மருத்துவரிடம் நான் என்ன விவாதிக்க வேண்டும்?",
+          "இந்த அறிக்கையை எளிய மொழியில் விளக்க முடியுமா?",
+        ],
+      };
 
       if (!docSummary) {
         if (isPrescription) {
           docSummary = `Prescription from ${docRecord?.doctorName || structured.doctorName || "Doctor"} at ${docRecord?.hospitalName || structured.hospitalName || "Clinic"}.`;
         } else {
           docSummary = "Medical report summary.";
+        }
+      }
+
+      if (
+        lang !== "english" &&
+        docSummary &&
+        !structured.summaryInPreferredLanguage &&
+        !docRecord?.summaryInPreferredLanguage
+      ) {
+        try {
+          const translatedSummary = await aiClient.translate(docSummary, "english", lang);
+          if (translatedSummary) {
+            docSummary = translatedSummary;
+          }
+        } catch (err) {
+          console.warn(
+            "[OnboardingService] Failed to translate docSummary for ASK_REPORT:",
+            err.message,
+          );
         }
       }
 
@@ -863,11 +824,6 @@ async function getLocalizedResponse(step, state) {
           hospitalName: resolvedHospital,
           doctorName: resolvedDoctor,
           summary: docSummary,
-          summaryEnglish: baseEnglishSummary || docSummary,
-          summaryInPreferredLanguage: docSummary,
-          summariesByLanguage: docRecord?.structuredExtractedData?.summariesByLanguage || {
-            [lang]: docSummary,
-          },
           labFindings,
           medicationFindings,
           keyFindings: labFindings.length > 0 ? labFindings : medicationFindings,

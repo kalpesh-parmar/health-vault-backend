@@ -251,10 +251,6 @@ async function executeAddDocumentAction({
     for (const fItem of filesList) {
       const currentS3Key = extractFileKey(fItem);
       if (!currentS3Key) continue;
-      const fileName =
-        (typeof fItem === "object" ? fItem?.fileName || fItem?.originalFileName : null) ||
-        currentS3Key.split("/").pop();
-      fileNames.push(fileName);
 
       let existingJob = null;
       if (documentOcrJobService?.getStatus) {
@@ -264,6 +260,36 @@ async function executeAddDocumentAction({
           existingJob = null;
         }
       }
+
+      let rawExtractedName =
+        (typeof fItem === "object"
+          ? fItem?.originalName ||
+            fItem?.originalFileName ||
+            fItem?.fileName ||
+            fItem?.name ||
+            fItem?.original_file_name ||
+            fItem?.file_name
+          : null) ||
+        existingJob?.metadata?.originalName ||
+        existingJob?.metadata?.fileName;
+
+      if (!rawExtractedName && userId) {
+        try {
+          const [dbDoc] = await db
+            .select({ fileName: document.fileName })
+            .from(document)
+            .where(and(eq(document.s3Key, currentS3Key), eq(document.userId, userId)))
+            .limit(1);
+          if (dbDoc && dbDoc.fileName) {
+            rawExtractedName = dbDoc.fileName;
+          }
+        } catch {
+          // ignore DB lookup error
+        }
+      }
+
+      const fileName = rawExtractedName || currentS3Key.split("/").pop();
+      fileNames.push(fileName);
 
       if (existingJob) {
         let normStatus = "completed";
@@ -314,6 +340,7 @@ async function executeAddDocumentAction({
           mimeType,
           preferredLanguage,
           userId,
+          originalName: fileName,
         });
 
         createdDocs.push({
@@ -539,7 +566,28 @@ async function executeAddDocumentAction({
     failed: failedCount,
     rejected: rejectedCount,
   };
-
+  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
+    const prefLang = preferredLanguage.toLowerCase();
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    for (const docItem of docs) {
+      if (!docItem) continue;
+      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
+      if (struct && typeof struct === "object") {
+        if (struct.summaryInPreferredLanguage) {
+          struct.summary = struct.summaryInPreferredLanguage;
+        } else if (struct.summary) {
+          try {
+            const translated = await aiClient.translate(struct.summary, "english", prefLang);
+            if (translated) {
+              struct.summary = translated;
+            }
+          } catch (err) {
+            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
+          }
+        }
+      }
+    }
+  }
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,

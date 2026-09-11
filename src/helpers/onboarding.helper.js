@@ -5,8 +5,7 @@ const { aiClient } = require("../services/ai");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {
-    text =
-      text.message?.content || text.content || text.text || text.response || JSON.stringify(text);
+    text = text.message?.content || text.content || text.text || JSON.stringify(text);
   }
 
   if (!text || typeof text !== "string") {

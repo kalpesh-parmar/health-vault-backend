@@ -18,6 +18,7 @@ const {
   canSkipOnboarding,
   saveOnboardingState,
 } = require("./ai/chat/onboarding.service");
+const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardingStateMachine");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
@@ -37,6 +38,43 @@ const {
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
 const { and, eq, desc } = require("drizzle-orm");
+
+function isStepAlreadySatisfied(stepName, state) {
+  if (!stepName || !state) return false;
+  if (state.isOnboardingCompleted === true) return true;
+  if (stepName === "ASK_BLOOD_GROUP") {
+    return (
+      state.bloodGroupSkipped === true ||
+      (state.existingUserData?.bloodGroup !== undefined &&
+        state.existingUserData?.bloodGroup !== null &&
+        state.existingUserData?.bloodGroup !== "")
+    );
+  }
+  if (stepName === "ASK_ALLERGIES") {
+    return (
+      state.allergiesSkipped === true ||
+      (Array.isArray(state.existingUserData?.allergies) &&
+        state.existingUserData.allergies.length > 0)
+    );
+  }
+  if (
+    [
+      "ASK_FIRST_NAME",
+      "ASK_LAST_NAME",
+      "ASK_DOB",
+      "ASK_GENDER",
+      "RESOLVE_PROFILE_SOURCE",
+      "CONFIRM_DOCUMENT_OWNERSHIP",
+      "ASK_UPLOAD_OR_SKIP",
+    ].includes(stepName)
+  ) {
+    return state.profileConfirmed === true;
+  }
+  if (["MEDICINE_OPTIONS", "REVIEW_MEDICINES_LIST"].includes(stepName)) {
+    return state.medicationFlowDone === true;
+  }
+  return false;
+}
 
 class V1Service {
   async ocrExtract(userId, file) {
@@ -158,11 +196,10 @@ class V1Service {
       }
     }
     const summary =
-      structData?.summaryInPreferredLanguage ||
-      structData?.summary ||
+      docRow.summaryInPreferredLanguage ||
       docRow.summaryEnglish ||
       structData?.summaryEnglish ||
-      docRow.remarks ||
+      structData?.summary ||
       structData?.remarks ||
       "";
 
@@ -268,7 +305,51 @@ class V1Service {
               Object.entries(inputState).filter(([_, v]) => v !== null && v !== undefined),
             )
           : {};
-      const effectiveState = { ...(dbState || {}), ...cleanedInputState };
+
+      const authoritativeIsOnboardingCompleted =
+        dbState?.isOnboardingCompleted === true || cleanedInputState.isOnboardingCompleted === true;
+      const authoritativeHasSkipped =
+        dbState?.hasSkipped === true || cleanedInputState.hasSkipped === true;
+      const authoritativeMedicationFlowDone =
+        dbState?.medicationFlowDone === true || cleanedInputState.medicationFlowDone === true;
+      const authoritativeMedicinesConfirmed =
+        dbState?.medicinesConfirmed === true || cleanedInputState.medicinesConfirmed === true;
+      const authoritativeProfileConfirmed =
+        dbState?.profileConfirmed === true || cleanedInputState.profileConfirmed === true;
+      const authoritativeBloodGroupSkipped =
+        dbState?.bloodGroupSkipped === true || cleanedInputState.bloodGroupSkipped === true;
+      const authoritativeAllergiesSkipped =
+        dbState?.allergiesSkipped === true || cleanedInputState.allergiesSkipped === true;
+      const authoritativeCompletionMessageSent =
+        dbState?.completionMessageSent === true || cleanedInputState.completionMessageSent === true;
+      const authoritativeCompletionMessageId =
+        dbState?.completionMessageId || cleanedInputState.completionMessageId || null;
+
+      let authoritativeStep = dbState?.currentStep || cleanedInputState.currentStep || null;
+      if (cleanedInputState.currentStep && dbState?.currentStep) {
+        if (isStepAlreadySatisfied(cleanedInputState.currentStep, dbState)) {
+          authoritativeStep = dbState.currentStep;
+        } else {
+          authoritativeStep = cleanedInputState.currentStep;
+        }
+      }
+
+      const effectiveState = {
+        ...(dbState || {}),
+        ...cleanedInputState,
+        isOnboardingCompleted: authoritativeIsOnboardingCompleted,
+        hasSkipped: authoritativeHasSkipped,
+        medicationFlowDone: authoritativeMedicationFlowDone,
+        medicinesConfirmed: authoritativeMedicinesConfirmed,
+        profileConfirmed: authoritativeProfileConfirmed,
+        bloodGroupSkipped: authoritativeBloodGroupSkipped,
+        allergiesSkipped: authoritativeAllergiesSkipped,
+        completionMessageSent: authoritativeCompletionMessageSent,
+        ...(authoritativeCompletionMessageId
+          ? { completionMessageId: authoritativeCompletionMessageId }
+          : {}),
+        ...(authoritativeStep ? { currentStep: authoritativeStep } : {}),
+      };
 
       let isMedicineSelectionMsg = false;
       if (message) {
@@ -512,11 +593,13 @@ class V1Service {
               continue;
             }
 
-            if (
-              medData.resolution === "REPLACE" &&
-              (medData.replaceMedicationId || medData.targetMedicationId)
-            ) {
-              const targetId = medData.replaceMedicationId || medData.targetMedicationId;
+            const targetId =
+              medData.replaceMedicationId ||
+              medData.targetMedicationId ||
+              medData.duplicateInfo?.matchedMedication?.id ||
+              medData.matchedMedicationId;
+
+            if (medData.resolution === "REPLACE" && targetId) {
               try {
                 await medicationService.deleteMedication(targetId, userId);
               } catch (delErr) {
@@ -651,6 +734,13 @@ class V1Service {
           if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicationFlowDone = true;
+          } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
+            stateToUpdate.currentStep = "ADD_MEDICINE";
+          } else if (
+            effectiveState.currentStep &&
+            effectiveState.currentStep !== "MEDICINE_OPTIONS"
+          ) {
+            stateToUpdate.currentStep = effectiveState.currentStep;
           } else {
             stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           }
@@ -672,6 +762,11 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
           });
+          if (onboardingResult?.completionMessage) {
+            responsePayload.completionMessage = onboardingResult.completionMessage;
+            responsePayload.completionMessageId = onboardingResult.completionMessageId;
+            responsePayload.completionAction = onboardingResult.completionAction;
+          }
           responsePayload.canSkip =
             onboardingResult?.canSkip !== undefined
               ? onboardingResult.canSkip
@@ -783,7 +878,7 @@ class V1Service {
           state = dbState;
         } else {
           const incomingStateCleaned = Object.fromEntries(
-            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
+            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined && v !== ""),
           );
 
           const dbExistingUserData = dbState?.existingUserData || {};
@@ -815,20 +910,72 @@ class V1Service {
             incomingStateCleaned.useDocumentData === true ||
             (documentConfirmed && dbState?.useDocumentData !== false);
 
-          const mergedUserData = {
-            ...dbExistingUserData,
-            ...incomingUserDataCleaned,
-            bloodGroup: incomingUserDataCleaned.bloodGroup || dbExistingUserData.bloodGroup || null,
-            allergies:
-              Array.isArray(incomingUserDataCleaned.allergies) &&
-              incomingUserDataCleaned.allergies.length > 0
-                ? incomingUserDataCleaned.allergies
-                : dbExistingUserData.allergies || [],
-          };
+          const isProfileConfirmedInDb =
+            dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
+
+          const mergedUserData =
+            isProfileConfirmedInDb && !incomingStateCleaned.edited
+              ? {
+                  ...incomingUserDataCleaned,
+                  ...dbExistingUserData,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                }
+              : {
+                  ...dbExistingUserData,
+                  ...incomingUserDataCleaned,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                };
+
+          const case3AuthoritativeIsOnboardingCompleted =
+            dbState?.isOnboardingCompleted === true ||
+            incomingStateCleaned.isOnboardingCompleted === true;
+          const case3AuthoritativeHasSkipped =
+            dbState?.hasSkipped === true || incomingStateCleaned.hasSkipped === true;
+          const case3AuthoritativeMedicationFlowDone =
+            dbState?.medicationFlowDone === true ||
+            incomingStateCleaned.medicationFlowDone === true;
+          const case3AuthoritativeMedicinesConfirmed =
+            dbState?.medicinesConfirmed === true ||
+            incomingStateCleaned.medicinesConfirmed === true;
+          const case3AuthoritativeCompletionMessageSent =
+            dbState?.completionMessageSent === true ||
+            incomingStateCleaned.completionMessageSent === true;
+          const case3AuthoritativeCompletionMessageId =
+            dbState?.completionMessageId || incomingStateCleaned.completionMessageId || null;
+
+          let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
+          if (incomingStateCleaned.currentStep && dbState?.currentStep) {
+            if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
+              case3AuthoritativeStep = dbState.currentStep;
+            } else {
+              case3AuthoritativeStep = incomingStateCleaned.currentStep;
+            }
+          }
 
           state = {
             ...dbState,
             ...incomingStateCleaned,
+            currentStep: case3AuthoritativeStep,
+            isOnboardingCompleted: case3AuthoritativeIsOnboardingCompleted,
+            hasSkipped: case3AuthoritativeHasSkipped,
+            medicationFlowDone: case3AuthoritativeMedicationFlowDone,
+            medicinesConfirmed: case3AuthoritativeMedicinesConfirmed,
+            completionMessageSent: case3AuthoritativeCompletionMessageSent,
+            ...(case3AuthoritativeCompletionMessageId
+              ? { completionMessageId: case3AuthoritativeCompletionMessageId }
+              : {}),
             bloodGroupSkipped,
             allergiesSkipped,
             ...(documentConfirmed !== undefined && documentConfirmed !== null
@@ -847,6 +994,11 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+
+          // Generic forward transition: If currentStep is already satisfied in the authoritative state, advance to next step
+          if (isStepAlreadySatisfied(state.currentStep, state)) {
+            state.currentStep = getNextRequiredOrOptionalStep(state);
+          }
         }
 
         if (hasUnansweredOptional && !state.currentStep && actionType !== "SKIP_ONBOARDING") {
@@ -913,6 +1065,8 @@ class V1Service {
         responsePayload.state = onboardingResult?.state || state;
         if (onboardingResult?.completionMessage) {
           responsePayload.completionMessage = onboardingResult.completionMessage;
+          responsePayload.completionMessageId = onboardingResult.completionMessageId;
+          responsePayload.completionAction = onboardingResult.completionAction;
         }
         responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
         responsePayload.canSkip =
@@ -1083,6 +1237,7 @@ class V1Service {
       documentsName,
       documentSummary,
       currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
+      canSkip: resumableState ? canSkipOnboarding(resumableState) : false,
       resumableState,
     };
   }

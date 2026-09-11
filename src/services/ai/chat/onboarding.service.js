@@ -7,6 +7,7 @@ const userOnboardingRepository = require("../../../repositories/userOnboardingRe
 const authProviderRepository = require("../../../repositories/authProviderRepository");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const medicationService = require("../../medication.service");
+const medicationReminderService = require("../../medicationReminder.service");
 const { languageTypeValues } = require("../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 // const { TRANSLATION_SYSTEM_PROMPT } = require("../prompts");
@@ -473,7 +474,14 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (payload && typeof payload === "object") {
         if (!payload.source && !payload.edited) {
           const sourceVal =
-            payload.source || payload.value || payload.option || payload.key || payload.selected;
+            payload.source ||
+            payload.value ||
+            payload.option ||
+            payload.key ||
+            payload.selected ||
+            payload.displayLabel ||
+            payload.label ||
+            payload.text;
           if (typeof sourceVal === "string") {
             const upper = sourceVal.toUpperCase();
             if (
@@ -535,54 +543,37 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
-      if (payload && payload.confirmed) {
-        const sourceToUse = payload.source || state.selectedProfileSource || null;
-        mergeAndApplyProfile(state, sourceToUse);
-        state.profileConfirmed = true;
-        state.selectedProfileSource =
-          sourceToUse === "DOCUMENT"
-            ? "DOCUMENT"
-            : sourceToUse === "LOGIN" || sourceToUse === "SOCIAL"
-              ? "SOCIAL"
-              : "MANUAL";
-        state.profileManuallyEdited = state.selectedProfileSource === "MANUAL";
-        state.stepClarificationNeeded = false;
-        state.currentStep = computeCurrentStep(state);
-      } else if (payload && payload.source) {
-        if (payload.source === "MANUAL") {
-          state.profileManuallyEdited = true;
-          state.selectedProfileSource = "MANUAL";
-          state.currentStep = "RESOLVE_PROFILE_SOURCE";
-        } else {
-          mergeAndApplyProfile(state, payload.source);
-          state.profileConfirmed = true;
-          state.selectedProfileSource = payload.source === "LOGIN" ? "SOCIAL" : payload.source;
-          state.profileManuallyEdited = false;
-          state.stepClarificationNeeded = false;
-          state.currentStep = computeCurrentStep(state);
-        }
-      } else if (payload && payload.edited) {
-        if (payload.edited.gender) {
-          const normG = normalizeGenderLocally(String(payload.edited.gender));
-          if (normG) payload.edited.gender = normG;
-        }
-        if (payload.edited.dateOfBirth) {
-          const normD = normalizeDOB(String(payload.edited.dateOfBirth));
-          if (normD) payload.edited.dateOfBirth = normD;
+      if (payload && (payload.confirmed || payload.source || payload.edited)) {
+        if (payload.edited) {
+          if (payload.edited.gender) {
+            const normG = normalizeGenderLocally(String(payload.edited.gender));
+            if (normG) payload.edited.gender = normG;
+          }
+          if (payload.edited.dateOfBirth) {
+            const normD = normalizeDOB(String(payload.edited.dateOfBirth));
+            if (normD) payload.edited.dateOfBirth = normD;
+          }
         }
 
-        const isEditValid = validateEditedFields(payload.edited);
-        if (isEditValid) {
-          mergeAndApplyProfile(state, null, payload.edited);
+        const sourceToUse = payload.source || state.selectedProfileSource || null;
+        if (payload.source === "MANUAL" && !payload.edited && payload.confirmed === false) {
           state.profileManuallyEdited = true;
-          state.profileConfirmed = true;
           state.selectedProfileSource = "MANUAL";
+          state.currentStep = "RESOLVE_PROFILE_SOURCE";
+        } else {
+          mergeAndApplyProfile(state, sourceToUse, payload.edited || null);
+          state.profileConfirmed = true;
+          state.selectedProfileSource = payload.edited
+            ? "MANUAL"
+            : sourceToUse === "DOCUMENT"
+              ? "DOCUMENT"
+              : sourceToUse === "LOGIN" || sourceToUse === "SOCIAL"
+                ? "SOCIAL"
+                : "MANUAL";
+          state.profileManuallyEdited =
+            !!payload.edited || state.selectedProfileSource === "MANUAL";
           state.stepClarificationNeeded = false;
           state.currentStep = computeCurrentStep(state);
-        } else {
-          state.profileConfirmed = false;
-          state.stepClarificationNeeded = true;
-          state.currentStep = "RESOLVE_PROFILE_SOURCE";
         }
       } else {
         state.profileConfirmed = false;
@@ -1301,12 +1292,17 @@ async function updateStateFromMessage(state, message, userId = null) {
         } else {
           // Process soft-deletions for replaced medications
           for (const m of state.medicinesToAdd) {
-            if (m.selected && m.resolution === "REPLACE" && m.replaceMedicationId && userId) {
+            const targetId =
+              m.replaceMedicationId ||
+              m.targetMedicationId ||
+              m.duplicateInfo?.matchedMedication?.id ||
+              m.matchedMedicationId;
+            if (m.selected && m.resolution === "REPLACE" && targetId && userId) {
               try {
-                await medicationService.deleteMedication(m.replaceMedicationId, userId);
+                await medicationService.deleteMedication(targetId, userId);
               } catch (delErr) {
                 console.warn(
-                  `[OnboardingService] Soft-delete warning for replaced med ${m.replaceMedicationId}:`,
+                  `[OnboardingService] Soft-delete warning for replaced med ${targetId}:`,
                   delErr.message,
                 );
               }
@@ -1335,16 +1331,16 @@ async function updateStateFromMessage(state, message, userId = null) {
               if (matchIdx >= 0 && created) {
                 state.medicinesToAdd[matchIdx].isSaved = true;
                 state.medicinesToAdd[matchIdx].dbId = created.id;
-                // try {
-                //   await medicationReminderService.createReminder(userId, {
-                //     medicationId: created.id,
-                //   });
-                // } catch (err) {
-                //   console.error(
-                //     `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
-                //     err,
-                //   );
-                // }
+                try {
+                  await medicationReminderService.createReminder(userId, {
+                    medicationId: created.id,
+                  });
+                } catch (err) {
+                  console.error(
+                    `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
+                    err,
+                  );
+                }
               }
             }
           }
@@ -1497,20 +1493,31 @@ async function updateStateFromMessage(state, message, userId = null) {
       try {
         payload = JSON.parse(msg);
       } catch {
-        if (
-          msg === "ADD" ||
-          msg === "DASHBOARD" ||
-          msg === "ASK_REPORT" ||
-          msg === "ASK_ABOUT_REPORT"
-        ) {
-          payload = { key: msg === "ASK_ABOUT_REPORT" ? "ASK_REPORT" : msg };
-        } else {
-          payload = {};
-        }
+        payload = {};
       }
 
-      const rawKey = payload.key || msg;
-      const key = rawKey === "ASK_ABOUT_REPORT" ? "ASK_REPORT" : rawKey;
+      const rawKey = String(payload.key || payload.value || payload.action || msg || "")
+        .trim()
+        .toUpperCase();
+      let key = rawKey;
+      if (rawKey === "ASK_ABOUT_REPORT" || rawKey.includes("REPORT")) {
+        key = "ASK_REPORT";
+      } else if (
+        rawKey === "ADD" ||
+        rawKey === "ADD_MEDICINE" ||
+        rawKey === "ADD_MORE_MEDICINES" ||
+        rawKey.includes("ADD ANOTHER MEDICINE") ||
+        rawKey.includes("ADD MEDICINE")
+      ) {
+        key = "ADD";
+      } else if (
+        rawKey === "DASHBOARD" ||
+        rawKey === "GO_TO_DASHBOARD" ||
+        rawKey.includes("DASHBOARD")
+      ) {
+        key = "DASHBOARD";
+      }
+
       if (key === "ADD") {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
@@ -1878,7 +1885,7 @@ class OnboardingService {
           } else if (providerNames.includes("password")) {
             primaryProvider = "email";
           }
-          state.loginProvider = primaryProvider;
+          state.loginProvider = state.loginProvider || primaryProvider;
 
           let isPhoneVerified = false;
           let isEmailVerified = false;
@@ -1942,7 +1949,9 @@ class OnboardingService {
             primaryProvider,
           );
 
-          state.hasSocialData = isSocialProvider;
+          if (state.hasSocialData === undefined) {
+            state.hasSocialData = isSocialProvider;
+          }
           state.socialData = isSocialProvider
             ? {
                 firstName: state.loginData.firstName.value,
@@ -2057,7 +2066,12 @@ class OnboardingService {
         state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
         const step = getNextStep(state);
         await saveOnboardingState(userId, state);
-        return createResponse(step, state);
+        const response = await createResponse(step, state);
+        return {
+          ...response,
+          state,
+          canSkip: true,
+        };
       }
     }
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
@@ -2384,16 +2398,17 @@ class OnboardingService {
 
     const canSkipNow = canSkipOnboarding(state);
     let completionMessage = null;
+    let completionMessageId = null;
     if (canSkipNow && !state.completionMessageSent) {
       state.completionMessageSent = true;
       completionMessage = await getLocalizedText(
         "onboarding.canSkip.message",
-        "Registration complete! You can skip the remaining steps anytime to explore your dashboard.",
+        "Your onboarding is complete! The Skip button is now enabled. You can tap Skip to go directly to the Dashboard and complete any remaining steps later.",
         state.preferredLanguage,
       );
       if (state.chatSessionId) {
         try {
-          await chatService.appendChatMessage({
+          const savedNoticeMsg = await chatService.appendChatMessage({
             sessionId: state.chatSessionId,
             userId,
             role: "assistant",
@@ -2402,6 +2417,9 @@ class OnboardingService {
               action: "ONBOARDING_COMPLETED_NOTICE",
             },
           });
+          if (savedNoticeMsg?.id) {
+            completionMessageId = savedNoticeMsg.id;
+          }
         } catch (msgErr) {
           console.warn(
             "[OnboardingService] Failed to append completion notice message:",
@@ -2409,12 +2427,22 @@ class OnboardingService {
           );
         }
       }
+      if (!completionMessageId) {
+        completionMessageId = `ai-comp-${Date.now()}`;
+      }
     }
 
     state.canSkip = canSkipNow;
-    await saveOnboardingState(userId, state);
 
     const nextStep = getNextStep(state);
+    if (nextStep && nextStep !== "COMPLETE" && nextStep !== "POST_ONBOARDING") {
+      state.currentStep = nextStep;
+    } else if (nextStep === "COMPLETE" || nextStep === "POST_ONBOARDING") {
+      state.currentStep = nextStep;
+      state.isOnboardingCompleted = true;
+    }
+    await saveOnboardingState(userId, state);
+
     const response = await createResponse(nextStep, state);
 
     let assistantMsgCreatedAt = new Date().toISOString();
@@ -2469,7 +2497,13 @@ class OnboardingService {
       timestamp: new Date(assistantMsgCreatedAt).getTime(),
       state: state,
       canSkip: canSkipNow,
-      ...(completionMessage ? { completionMessage } : {}),
+      ...(completionMessage
+        ? {
+            completionMessage,
+            completionMessageId,
+            completionAction: "ONBOARDING_COMPLETED_NOTICE",
+          }
+        : {}),
     };
   }
 }
