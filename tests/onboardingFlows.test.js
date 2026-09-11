@@ -230,10 +230,51 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
     });
   });
 
-  // =========================================================================
-  // FLOW 2: UPLOAD + MOBILE
-  // =========================================================================
   describe("Flow 2: UPLOAD + MOBILE", () => {
+    test("Should return RESOLVE_PROFILE_SOURCE after confirming document ownership and completing required details", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        loginProvider: "mobile",
+        hasSocialData: false,
+        documentId: "doc-789",
+        documentUploaded: true,
+        documentExtracted: true,
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        documentData: {
+          firstName: "URMILA",
+          lastName: "HIPARARA",
+          gender: "female",
+        },
+        existingUserData: {
+          firstName: "URMILA",
+          lastName: "HIPARARA",
+          gender: "female",
+        },
+      };
+
+      // 1. Confirm document ownership ("Yes") -> triggers ASK_DOB because dateOfBirth is missing
+      let res = await onboardingService.chat("Yes", [], state, "user-102-dob");
+      state = res.state;
+      expect(state.profileConfirmed).toBe(false);
+      expect(res.action).toBe("ASK_DOB");
+
+      // 2. Answer date of birth -> required fields are now complete -> triggers RESOLVE_PROFILE_SOURCE
+      res = await onboardingService.chat("1992-08-15", [], state, "user-102-dob");
+      state = res.state;
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      // 3. Confirm profile source -> advances to ASK_BLOOD_GROUP
+      res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true, source: "DOCUMENT" }),
+        [],
+        state,
+        "user-102-dob",
+      );
+      expect(res.action).toBe("ASK_BLOOD_GROUP");
+      expect(res.state.profileConfirmed).toBe(true);
+    });
+
     test("[IF USER DOES NOT SKIP] Should complete all onboarding steps and return 3 buttons on MEDICINE_OPTIONS", async () => {
       let state = {
         preferredLanguage: "english",

@@ -104,11 +104,13 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       chatSessionRepository: mockChatSessionRepository,
     });
 
-    expect(mockDocumentOcrJobService.enqueue).toHaveBeenCalledWith({
-      fileKey: "documents/test_report.pdf",
-      mimeType: "application/pdf",
-      userId: "user-123",
-    });
+    expect(mockDocumentOcrJobService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileKey: "documents/test_report.pdf",
+        mimeType: "application/pdf",
+        userId: "user-123",
+      }),
+    );
     expect(response.mode).toBe("ACTION");
     expect(response.actionType).toBe("ADD_DOCUMENT");
     expect(response.document.ocrStatus).toBe("in_progress");

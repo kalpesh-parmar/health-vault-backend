@@ -416,29 +416,18 @@ function getMissingRequiredStep(state) {
 
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
-
-  const useDoc =
-    state.useDocumentData !== false &&
-    state.flowMode === "UPLOAD" &&
-    state.documentConfirmed !== false &&
-    (!!state.documentData || !!state.documentId);
-
   const missingRequired = getMissingRequiredStep(state);
   if (missingRequired) {
     return missingRequired;
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow when there is a Social login profile to compare with the document
-  const isSocial =
-    state.hasSocialData === true ||
-    ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-
-  if (state.flowMode === "UPLOAD" && useDoc && isSocial && !state.profileConfirmed) {
+  // Return RESOLVE_PROFILE_SOURCE for UPLOAD flow if profile is not yet confirmed
+  if (state.flowMode === "UPLOAD" && !state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
   }
 
-  // In Mobile + Upload flow (no social profile to compare against), or in MANUAL/SKIP flow: auto-confirm profile
-  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc || !isSocial) {
+  // In MANUAL/SKIP flow: auto-confirm profile once required fields exist
+  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP") {
     state.profileConfirmed = true;
   }
 
@@ -776,7 +765,12 @@ function computeCurrentStep(state) {
   if (!state.flowMode) return "ASK_UPLOAD_OR_SKIP";
 
   if (state.flowMode === "UPLOAD") {
-    const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
+    const isUploaded =
+      state.documentUploaded ||
+      state.uploadedMedicalDocument ||
+      state.documentAttachedToChat ||
+      Boolean(state.documentId) ||
+      false;
     if (state.ocrFailed) return "ASK_UPLOAD_DOCUMENT_FAILED";
     if (!isUploaded) return "ASK_UPLOAD_DOCUMENT";
     if (
@@ -1044,8 +1038,10 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.currentStep = computeCurrentStep(state);
         }
       } else {
-        state.profileConfirmed = false;
-        state.currentStep = "RESOLVE_PROFILE_SOURCE";
+        const sourceToUse = state.selectedProfileSource || "DOCUMENT";
+        mergeAndApplyProfile(state, sourceToUse);
+        state.profileConfirmed = true;
+        state.currentStep = computeCurrentStep(state);
       }
       break;
     }
@@ -1241,10 +1237,13 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         }
 
-        const isSocial =
-          state.hasSocialData === true ||
-          ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-        state.profileConfirmed = !isSocial;
+        const mismatches = getProfileMismatches(state);
+        state.profileConfirmed = false;
+        if (!mismatches.hasMismatch) {
+          mergeAndApplyProfile(state, "DOCUMENT");
+          state.selectedProfileSource = "DOCUMENT";
+          state.useDocumentData = true;
+        }
         state.currentStep = computeCurrentStep(state);
       } else if (answer === "NO") {
         state.documentOwnershipConfirmed = false;
@@ -1672,35 +1671,73 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (isConfirm) {
         state.medicinesConfirmed = true;
-        const selectedIds =
-          payload.selected ||
-          (state.medicinesToAdd || []).map((m) => m.id || m.client_med_id).filter(Boolean);
+        const rawSelectedList =
+          payload.selected || payload.medicines || payload.selectedMedicines || [];
+
+        const providedSelectedIds = Array.isArray(rawSelectedList)
+          ? rawSelectedList
+              .map((item) =>
+                typeof item === "string"
+                  ? item.trim()
+                  : item && typeof item === "object"
+                    ? item.id || item.client_med_id || item.clientMedId
+                    : null,
+              )
+              .filter(Boolean)
+          : [];
 
         // Optionally update medicines if FE sends updated list in payload
         if (Array.isArray(payload.medicines)) {
           payload.medicines.forEach((updatedMed) => {
-            const medId = updatedMed.id || updatedMed.client_med_id;
-            if (medId) {
-              const idx = (state.medicinesToAdd || []).findIndex(
-                (m) => (m.id && m.id === medId) || (m.client_med_id && m.client_med_id === medId),
-              );
-              if (idx >= 0) {
-                state.medicinesToAdd[idx] = {
-                  ...state.medicinesToAdd[idx],
-                  ...updatedMed,
-                };
+            if (typeof updatedMed === "object" && updatedMed !== null) {
+              const medId = updatedMed.id || updatedMed.client_med_id || updatedMed.clientMedId;
+              if (medId) {
+                const idx = (state.medicinesToAdd || []).findIndex(
+                  (m, i) =>
+                    (m.id && m.id === medId) ||
+                    (m.client_med_id && m.client_med_id === medId) ||
+                    (m.clientMedId && m.clientMedId === medId) ||
+                    `doc_med_${i + 1}` === medId ||
+                    `extracted_med_${i + 1}` === medId,
+                );
+                if (idx >= 0) {
+                  state.medicinesToAdd[idx] = {
+                    ...state.medicinesToAdd[idx],
+                    ...updatedMed,
+                  };
+                }
               }
             }
           });
         }
 
-        state.medicinesToAdd = (state.medicinesToAdd || []).map((m) => {
-          const isSelected =
-            m.resolution === "KEEP_EXISTING" || m.resolution === "REMOVE_NEW"
-              ? false
-              : selectedIds.length > 0
-                ? selectedIds.includes(m.id || m.client_med_id)
-                : true;
+        const isMedSelected = (m, idx) => {
+          if (m.resolution === "KEEP_EXISTING" || m.resolution === "REMOVE_NEW") {
+            return false;
+          }
+          if (providedSelectedIds.length === 0) {
+            return true;
+          }
+          const mId = String(m.id || "").trim();
+          const mClient = String(m.client_med_id || m.clientMedId || "").trim();
+          const docId1 = `doc_med_${idx + 1}`;
+          const docId2 = `doc_med_${idx}`;
+          const extId1 = `extracted_med_${idx + 1}`;
+          const extId2 = `extracted_med_${idx}`;
+
+          return providedSelectedIds.some(
+            (id) =>
+              id === mId ||
+              id === mClient ||
+              id === docId1 ||
+              id === docId2 ||
+              id === extId1 ||
+              id === extId2,
+          );
+        };
+
+        state.medicinesToAdd = (state.medicinesToAdd || []).map((m, idx) => {
+          const isSelected = isMedSelected(m, idx);
 
           return {
             ...m,
@@ -3046,11 +3083,13 @@ class OnboardingService {
         state.foundMedicines.length === 0)
     ) {
       try {
+        const UUID_REGEX =
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
         let docRow = null;
-        if (state.documentId) {
+        if (state.documentId && UUID_REGEX.test(String(state.documentId))) {
           const rows = await db.select().from(document).where(eq(document.id, state.documentId));
           docRow = rows[0] || null;
-        } else if (userId) {
+        } else if (userId && UUID_REGEX.test(String(userId))) {
           const rows = await db
             .select()
             .from(document)
