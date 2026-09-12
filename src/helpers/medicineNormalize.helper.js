@@ -302,7 +302,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   const rawTiming = med.timing || med.when || med.timeOfDay || "";
   const rawInstructions = med.instructions || med.notes || "";
   const rawDuration = med.duration || "";
-  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 0;
+  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 1;
 
   const needsReview = {
     name: false,

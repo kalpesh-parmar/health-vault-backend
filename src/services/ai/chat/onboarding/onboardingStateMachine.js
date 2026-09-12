@@ -169,29 +169,21 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  const useDoc =
-    state.useDocumentData !== false &&
-    state.flowMode === "UPLOAD" &&
-    state.documentConfirmed !== false &&
-    (!!state.documentData || !!state.documentId);
+  // const useDoc =
+  //   state.useDocumentData !== false &&
+  //   state.flowMode === "UPLOAD" &&
+  //   state.documentConfirmed !== false &&
+  //   (!!state.documentData || !!state.documentId);
 
   const missingRequired = getMissingRequiredStep(state);
   if (missingRequired) {
     return missingRequired;
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow when there is a Social login profile to compare with the document
-  const isSocial =
-    state.hasSocialData === true ||
-    ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-
-  if (state.flowMode === "UPLOAD" && useDoc && isSocial && !state.profileConfirmed) {
-    return "RESOLVE_PROFILE_SOURCE";
-  }
-
-  // In Mobile + Upload flow (no social profile to compare against), or in MANUAL/SKIP flow: auto-confirm profile
-  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc || !isSocial) {
+  if (state.flowMode === "SKIP") {
     state.profileConfirmed = true;
+  } else if (!state.profileConfirmed) {
+    return "RESOLVE_PROFILE_SOURCE";
   }
 
   // HARD RULE: Once state.profileConfirmed === true, REQUIRED questions and RESOLVE_PROFILE_SOURCE must NEVER be returned again.

@@ -395,6 +395,7 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
         flowMode: "MANUAL",
         loginProvider: "google",
         hasSocialData: true,
+        profileConfirmed: true,
         loginData: {
           firstName: { value: "Alice", verified: true },
           lastName: { value: "Smith", verified: true },
@@ -498,6 +499,16 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
 
       // Required Q4: Gender
       res = await onboardingService.chat("male", [], state, "user-104");
+      state = res.state;
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      // Confirm profile details
+      res = await onboardingService.chat(
+        JSON.stringify({ source: "MANUAL" }),
+        [],
+        state,
+        "user-104",
+      );
       state = res.state;
       expect(res.action).toBe("ASK_BLOOD_GROUP");
 

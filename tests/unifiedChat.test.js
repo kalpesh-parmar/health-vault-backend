@@ -1131,7 +1131,15 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         },
       };
 
-      const res = await onboardingService.chat("male", [], state, "p-gender-test");
+      let res = await onboardingService.chat("male", [], state, "p-gender-test");
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      res = await onboardingService.chat(
+        JSON.stringify({ source: "MANUAL" }),
+        [],
+        res.state,
+        "p-gender-test",
+      );
 
       // 1. User remains on onboarding chat screen, next question is ASK_BLOOD_GROUP
       expect(res.action).toBe("ASK_BLOOD_GROUP");
@@ -1202,7 +1210,14 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           },
         };
 
-        const res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        let res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+        res = await onboardingService.chat(
+          JSON.stringify({ source: "MANUAL" }),
+          [],
+          res.state,
+          `user-${lang}`,
+        );
         expect(res.canSkip).toBe(true);
         expect(res.completionMessage).toBe(expectedMsg);
         expect(res.state.completionMessageSent).toBe(true);
