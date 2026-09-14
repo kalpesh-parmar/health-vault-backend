@@ -7,9 +7,10 @@ const { EventType } = require("../enums/eventType");
 const { SseEmitterConstant } = require("../constants/sseEmitterConstant");
 const { successResponse } = require("../helpers/generalResponse");
 const { messageConstants } = require("../constants/messageConstants");
+const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 
 class SseController {
-  streamFile = (req, res) => {
+  streamFile = async (req, res) => {
     const { fileKey } = req?.params || {};
     const authUserId = req?.auth?.userId;
 
@@ -20,13 +21,42 @@ class SseController {
       });
     }
 
-    const channel = sseConnection.channels.get(fileKey);
+    let channel = sseConnection.channels.get(fileKey);
 
     if (!channel) {
-      return res.status(StatusCodes.NOT_FOUND).json({
-        status: "FAILED",
-        message: "Document not found or stream expired",
-      });
+      // Dynamic Channel Hydration from database
+      const job = await documentProcessingJobRepository
+        .findByFileKey(fileKey, authUserId)
+        .catch(() => null);
+
+      if (job) {
+        channel = sseConnection.getOrCreate(fileKey, false);
+        channel.ownerId = job.userId;
+        channel.fileName = job.metadata?.originalName || null;
+        channel.batchId = job.metadata?.batchId || null;
+
+        if (job.status) {
+          channel.buffer.push({
+            type: "document.progress",
+            fileKey,
+            batchId: job.metadata?.batchId || null,
+            fileName: job.metadata?.originalName || null,
+            stage: job.stage,
+            stageStatus: job.stageStatus,
+            progress: job.percentage || 0,
+            percentage: job.percentage || 0,
+            status: job.status === "FAILED" ? ProcessStatus.FAILED : ProcessStatus.SUCCESS,
+            message: job.message || `Document ${job.stage || job.status}`,
+            eventId: channel.nextEventId++,
+            timestamp: job.updatedAt || new Date().toISOString(),
+          });
+        }
+      } else {
+        return res.status(StatusCodes.NOT_FOUND).json({
+          status: "FAILED",
+          message: "Document not found or stream expired",
+        });
+      }
     }
 
     // Verify document ownership before opening the SSE connection.
@@ -60,6 +90,7 @@ class SseController {
         cleanup();
       }
     }, config.heartbeatMs);
+    heartbeat.unref?.();
 
     req.on?.("close", cleanup);
     res.on?.("error", cleanup);
@@ -124,6 +155,7 @@ class SseController {
     const heartbeat = setInterval(() => {
       if (!sseTransport.heartbeat(res)) cleanup();
     }, config.heartbeatMs);
+    heartbeat.unref?.();
 
     req.on?.("close", cleanup);
     res.on?.("error", cleanup);

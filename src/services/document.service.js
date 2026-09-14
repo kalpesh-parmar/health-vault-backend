@@ -2,6 +2,7 @@
  * Document CRUD service with Resumable and Retryable Pipeline Execution.
  */
 
+const fs = require("fs");
 const path = require("path");
 const { StatusCodes } = require("http-status-codes");
 
@@ -28,8 +29,8 @@ const {
 } = require("../validations");
 const { updateDocumentSchema } = require("../validations/documentValidation");
 const sseConnectionService = require("./sseConnection.service");
-const { newBatchId, newFileKey, normalizeFiles } = require("../utils/fileUtils");
-const { OCR_CONCURRENCY, ALLOWED_MIME_TYPES } = require("../configs/fileConfig");
+const { newBatchId, newFileKey, normalizeFiles, getPageCount } = require("../utils/fileUtils");
+const { ALLOWED_MIME_TYPES } = require("../configs/fileConfig");
 const { StageType } = require("../enums/stageStatus");
 const { ProgressEmitter } = require("./progressEmitter.service");
 const { DOCUMENT_STAGES, STAGE_WEIGHTS } = require("../constants/documentProgress.constants");
@@ -39,9 +40,11 @@ const aiServiceClient = require("../clients/aiServiceClient");
 const { ocrOrchestrator, ocrService, embeddingService } = require("./ai");
 const documentPersistenceService = require("./documentPersistence.service");
 const aiClient = require("./ai/clients/aiClient.service");
+const { normalizeLanguage, extractKeyPoints } = require("../helpers/summary.helper");
+
+const documentQueue = require("./queue/documentQueue.service");
 
 const defaultProvider = ocrOrchestrator;
-const documentStore = new Map();
 
 function withTimeout(promise, ms, stageName) {
   return new Promise((resolve, reject) => {
@@ -82,6 +85,25 @@ async function resolveRawOcrData(ctx) {
   return null;
 }
 
+const COMPUTE_HEAVY_STAGES = new Set([
+  DOCUMENT_STAGES.OCR_RUNNING,
+  DOCUMENT_STAGES.FIELD_EXTRACTION,
+  DOCUMENT_STAGES.SUMMARIZING,
+]);
+
+function getAdaptiveStageTimeout(pipelineStep, ctx) {
+  const baseTimeout = pipelineStep?.timeoutMs || 120000;
+  if (!pipelineStep || !COMPUTE_HEAVY_STAGES.has(pipelineStep.stage)) {
+    return baseTimeout;
+  }
+  const pageCount = Math.max(
+    1,
+    ctx?.totalPages || ctx?.checkpointData?.pageCount || ctx?.record?.totalPages || 1,
+  );
+  const extraPages = Math.max(0, pageCount - 1);
+  return Math.max(baseTimeout, baseTimeout + extraPages * 30000);
+}
+
 const STAGES_PIPELINE = [
   {
     stage: DOCUMENT_STAGES.VALIDATING,
@@ -104,9 +126,10 @@ const STAGES_PIPELINE = [
         );
       }
 
+      const filePath = ctx.file?.path;
       const fileBuffer = ctx.file?.buffer;
-      if (!fileBuffer) {
-        throw new InvalidRequestException("File buffer required for validation stage");
+      if (!filePath && !fileBuffer) {
+        throw new InvalidRequestException("File path or buffer required for validation stage");
       }
 
       ctx.emitter.stage(
@@ -116,7 +139,7 @@ const STAGES_PIPELINE = [
       );
 
       const validationResult = await aiServiceClient.validateMedicalDocument({
-        file: fileBuffer,
+        file: filePath || fileBuffer,
         fileName: ctx.file?.originalname || ctx.record?.fileName,
         mimeType: ctx.file?.mimetype || ctx.record?.mimeType,
       });
@@ -128,6 +151,14 @@ const STAGES_PIPELINE = [
       }
 
       ctx.checkpointData.validation = validationResult;
+
+      const totalPages =
+        ctx.totalPages ||
+        ctx.checkpointData?.pageCount ||
+        (await getPageCount(ctx.file || ctx.file?.path || ctx.file?.buffer));
+      ctx.totalPages = totalPages;
+      ctx.checkpointData.pageCount = totalPages;
+      ctx.emitter?.setTotalPages?.(totalPages);
     },
   },
   {
@@ -136,13 +167,17 @@ const STAGES_PIPELINE = [
     message: messageConstants.UPLOADING_DOCUMENT,
     isSatisfied: (ctx) =>
       !ctx.file?.buffer &&
+      !ctx.file?.path &&
       Boolean(
         ctx.job?.checkpointData?.uploaded &&
         (ctx.job?.checkpointData?.s3Bucket || ctx.record?.bucket),
       ),
     run: async (ctx) => {
-      if (!ctx.file?.buffer) {
-        throw new InvalidRequestException(errorConstants.FILE_BUFFER_REQUIRED_FOR_UPLOADING_STAGE);
+      if (!ctx.file?.buffer && !ctx.file?.path) {
+        throw new InvalidRequestException(
+          errorConstants.FILE_REQUIRED_FOR_UPLOADING_STAGE ||
+            errorConstants.FILE_BUFFER_REQUIRED_FOR_UPLOADING_STAGE,
+        );
       }
 
       const uploadResult = await objectStorageService.uploadFile(
@@ -167,6 +202,10 @@ const STAGES_PIPELINE = [
       ctx.checkpointData.uploaded = true;
       ctx.checkpointData.s3Bucket = bucket;
       ctx.checkpointData.s3Key = fileKey;
+
+      if (ctx.file?.path && fs.existsSync(ctx.file.path)) {
+        fs.unlink(ctx.file.path, () => {});
+      }
     },
   },
   {
@@ -186,9 +225,17 @@ const STAGES_PIPELINE = [
         fileKey: s3Key,
         mimeType: ctx.record?.mimeType,
         traceId: `ocr_job_${ctx.fileKey}`,
+        onProgress: ({ page, totalPages }) => {
+          ctx.emitter.page(page, totalPages);
+        },
       });
 
       ctx.rawOcrData = ocrResponse;
+      if (ocrResponse?.metadata?.pageCount) {
+        ctx.totalPages = ocrResponse.metadata.pageCount;
+        ctx.checkpointData.pageCount = ocrResponse.metadata.pageCount;
+        ctx.emitter?.setTotalPages?.(ocrResponse.metadata.pageCount);
+      }
 
       // Hybrid OCR Checkpointing
       const serialized = JSON.stringify(ocrResponse);
@@ -205,13 +252,6 @@ const STAGES_PIPELINE = [
         ctx.checkpointData.ocrArtifactKey = artifactKey;
       }
     },
-  },
-  {
-    stage: DOCUMENT_STAGES.PARSING,
-    timeoutMs: 30000,
-    message: messageConstants.EXTRACTING_DOCUMENT,
-    isSatisfied: (ctx) => ctx.completedStages.includes(DOCUMENT_STAGES.PARSING),
-    run: async () => {},
   },
   {
     stage: DOCUMENT_STAGES.FIELD_EXTRACTION,
@@ -232,13 +272,6 @@ const STAGES_PIPELINE = [
       ctx.structured = structured || {};
       ctx.patch.extractedStructuredData = ctx.structured;
     },
-  },
-  {
-    stage: DOCUMENT_STAGES.ANALYZING,
-    timeoutMs: 30000,
-    message: messageConstants.EXTRACTING_DOCUMENT,
-    isSatisfied: (ctx) => ctx.completedStages.includes(DOCUMENT_STAGES.ANALYZING),
-    run: async () => {},
   },
   {
     stage: DOCUMENT_STAGES.SUMMARIZING,
@@ -327,8 +360,17 @@ const STAGES_PIPELINE = [
         }
       }
 
+      const normSummaryLang = normalizeLanguage(preferredLanguage);
+      const keyPoints = extractKeyPoints(
+        ctx.structured,
+        summaryInPreferredLanguage || summaryEnglish,
+        normSummaryLang,
+      );
+
       ctx.checkpointData.summaryEnglish = summaryEnglish;
       ctx.checkpointData.summaryInPreferredLanguage = summaryInPreferredLanguage;
+      ctx.checkpointData.summaryLanguage = normSummaryLang;
+      ctx.checkpointData.keyPoints = keyPoints;
 
       if (ctx.structured) {
         ctx.structured.summaryEnglish = summaryEnglish;
@@ -337,6 +379,8 @@ const STAGES_PIPELINE = [
           preferredLanguage !== "english" && summaryInPreferredLanguage
             ? summaryInPreferredLanguage
             : summaryEnglish || summaryInPreferredLanguage;
+        ctx.structured.summaryLanguage = normSummaryLang;
+        ctx.structured.keyPoints = keyPoints;
         ctx.structured.summariesByLanguage = {
           ...(ctx.structured.summariesByLanguage || {}),
           english: summaryEnglish,
@@ -401,13 +445,6 @@ const STAGES_PIPELINE = [
     },
   },
   {
-    stage: DOCUMENT_STAGES.CHUNKING,
-    timeoutMs: 30000,
-    message: messageConstants.EXTRACTING_DOCUMENT,
-    isSatisfied: (ctx) => ctx.completedStages.includes(DOCUMENT_STAGES.CHUNKING),
-    run: async () => {},
-  },
-  {
     stage: DOCUMENT_STAGES.EMBEDDING,
     timeoutMs: env.stageTimeoutMs || 120000,
     message: messageConstants.EXTRACTING_DOCUMENT,
@@ -434,68 +471,20 @@ const STAGES_PIPELINE = [
 
 class DocumentService {
   constructor() {
-    this._startWatchdog();
     this._reconcileRunningJobsOnBoot();
-  }
-
-  _startWatchdog(intervalMs = 30000) {
-    const watchdogInterval = setInterval(async () => {
-      try {
-        const timeoutMs = env.stageTimeoutMs || 120000;
-        const cutoff = new Date(Date.now() - timeoutMs);
-        const stalledJobs = await documentProcessingJobRepository.findStalledRunningJobs(cutoff);
-        for (const job of stalledJobs) {
-          const failedStage = job.stage || DOCUMENT_STAGES.VALIDATING;
-          const requiresReupload = [
-            DOCUMENT_STAGES.QUEUED,
-            DOCUMENT_STAGES.VALIDATING,
-            DOCUMENT_STAGES.UPLOADING,
-          ].includes(failedStage);
-
-          await documentProcessingJobRepository.checkpointStage(job.id, {
-            status: "FAILED",
-            stageStatus: StageType.FAILED,
-            retryable: true,
-            requiresReupload,
-            error: "Stage stalled without progress",
-            lastHeartbeatAt: new Date(),
-          });
-
-          const emitter = ProgressEmitter.for({
-            fileKey: job.fileKey,
-            fileName: job.metadata?.originalName || "document",
-            batchId: job.metadata?.batchId,
-            patientId: job.userId,
-          });
-
-          emitter.error(failedStage, "Stage stalled without progress", {
-            errorCode: "STAGE_STALLED",
-            retryable: true,
-            requiresReupload,
-            failedStage,
-            resumeStage: failedStage,
-          });
-        }
-      } catch (err) {
-        console.warn("[Watchdog] sweep error:", err.message);
-      }
-    }, intervalMs);
-
-    if (watchdogInterval && watchdogInterval.unref) {
-      watchdogInterval.unref();
-    }
   }
 
   async _reconcileRunningJobsOnBoot() {
     try {
-      const recovered = await documentProcessingJobRepository.reconcileRunningJobsOnBoot();
+      const recovered = await documentQueue.resumeOrphanedJobsOnBoot();
       if (recovered && recovered.length > 0) {
+        const resumed = recovered.filter((r) => r.resumed).length;
         console.log(
-          `[BootReconciliation] Recovered ${recovered.length} orphaned RUNNING jobs to FAILED/retryable.`,
+          `[BootRecovery] Processed ${recovered.length} orphaned jobs (${resumed} resumed, ${recovered.length - resumed} marked for reupload).`,
         );
       }
     } catch (err) {
-      console.warn("[BootReconciliation] startup reconciliation failed:", err.message);
+      console.warn("[BootRecovery] startup recovery failed:", err.message);
     }
   }
 
@@ -669,8 +658,10 @@ class DocumentService {
       if (!list || !Array.isArray(list) || list.length === 0) {
         throw new InvalidRequestException(errorConstants.AT_LEAST_ONE_DOCUMENT_FILE_IS_REQUIRED);
       }
-      if (list?.length > 5) {
-        throw new InvalidRequestException(errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED);
+      if (list?.length > (env.maxFilesPerUpload || 20)) {
+        throw new InvalidRequestException(
+          errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED(env.maxFilesPerUpload || 20),
+        );
       }
 
       const patientId = authUserId;
@@ -684,11 +675,13 @@ class DocumentService {
       const jobs = await Promise.all(
         list.map(async (file, index) => {
           const fileKey = fileKeys[index];
+          const pageCount = await getPageCount(file);
           const jobRow = await documentProcessingJobRepository.createQueuedJob({
             fileKey,
             userId: authUserId,
             mimeType: file?.mimetype || "",
             originalName: file?.originalname || "",
+            pageCount,
           });
 
           const record = {
@@ -701,6 +694,7 @@ class DocumentService {
             mimeType: file?.mimetype || "",
             sizeBytes: file?.size || 0,
             status: StageType.QUEUED,
+            totalPages: pageCount,
             createdAt: new Date().toISOString(),
             options: {
               language: preferredLanguage,
@@ -708,13 +702,13 @@ class DocumentService {
               returnRawText: true,
             },
           };
-          documentStore.set(record.fileKey, record);
 
           const emitter = ProgressEmitter.for({
             fileKey: record.fileKey,
             fileName: record.fileName,
             batchId,
             patientId,
+            totalPages: pageCount,
           });
 
           emitter.stage(StageType.QUEUED, StageType.STARTED, messageConstants.QUEUE_FOR_EXTRACTION);
@@ -723,11 +717,9 @@ class DocumentService {
         }),
       );
 
-      setImmediate(() => {
-        runWithConcurrency(jobs, OCR_CONCURRENCY).catch((err) =>
-          console.error("[document.service] batch runner failed", err),
-        );
-      });
+      for (const jobItem of jobs) {
+        documentQueue.enqueue(jobItem);
+      }
 
       return {
         batchId,
@@ -783,7 +775,7 @@ class DocumentService {
         job.stage,
       );
 
-    if (requiresReupload && (!file || !file.buffer)) {
+    if (requiresReupload && (!file || (!file.buffer && !file.path))) {
       throw new InvalidRequestException(
         "This stage failure requires re-uploading the file payload.",
       );
@@ -805,11 +797,13 @@ class DocumentService {
       sseConnectionService.unmarkDocumentDone(job.metadata.batchId, fileKey);
     }
 
+    const pageCount = job.checkpointData?.pageCount || (file ? await getPageCount(file) : 1);
     const emitter = ProgressEmitter.for({
       fileKey,
       fileName: job.metadata?.originalName || file?.originalname || "document",
       batchId: job.metadata?.batchId,
       patientId: userId,
+      totalPages: pageCount,
     });
 
     const record = {
@@ -825,7 +819,6 @@ class DocumentService {
       stage: claimed.stage,
       attemptCount: claimed.attemptCount,
     };
-    documentStore.set(fileKey, record);
 
     const jobs = [
       {
@@ -840,11 +833,7 @@ class DocumentService {
       },
     ];
 
-    setImmediate(() => {
-      runWithConcurrency(jobs, OCR_CONCURRENCY).catch((err) =>
-        console.error("[document.service] retry runner failed", err),
-      );
-    });
+    documentQueue.enqueue(jobs[0]);
 
     const resumeStage = claimed.stage || DOCUMENT_STAGES.QUEUED;
     const progress = STAGE_WEIGHTS[resumeStage]?.[0] ?? claimed.percentage ?? 0;
@@ -871,10 +860,9 @@ async function runWithConcurrency(jobs, limit) {
   await Promise.all(workers);
 }
 
-/** Run one document and fold the result back into the store. */
+/** Run one document and fold the result back into the record. */
 async function processOne({ file, record, emitter, job = null }) {
   record.status = StageType.IN_PROGRESS;
-  documentStore.set(record.fileKey, record);
 
   const result = await runExtraction({ file, record, emitter, job });
 
@@ -884,7 +872,6 @@ async function processOne({ file, record, emitter, job = null }) {
     record.status = record.status || StageType.FAILED;
     record.errorCode = record?.errorCode || "PIPELINE_FAILED";
   }
-  documentStore.set(record.fileKey, record);
   return result;
 }
 
@@ -909,13 +896,21 @@ async function runExtraction({
     if (job) jobId = job.id;
   }
 
-  const checkpointData = { ...(job?.checkpointData || {}) };
+  const totalPages =
+    record?.totalPages || job?.checkpointData?.pageCount || (file ? await getPageCount(file) : 1);
+
+  const checkpointData = { pageCount: totalPages, ...(job?.checkpointData || {}) };
   const completedStages = [...(job?.completedStages || [])];
+
+  if (emitter?.setTotalPages) {
+    emitter.setTotalPages(totalPages);
+  }
 
   const ctx = {
     file,
     record,
     emitter,
+    totalPages,
     ocr: ocr || defaultProvider,
     job,
     jobId,
@@ -965,7 +960,8 @@ async function runExtraction({
 
       emitter.stage(currentStage, StageType.STARTED, pipelineStep.message);
 
-      await withTimeout(pipelineStep.run(ctx), pipelineStep.timeoutMs, currentStage);
+      const timeoutMs = getAdaptiveStageTimeout(pipelineStep, ctx);
+      await withTimeout(pipelineStep.run(ctx), timeoutMs, currentStage);
 
       completedStages.push(currentStage);
       emitter.stage(currentStage, StageType.IN_PROGRESS, pipelineStep.message, 1);
@@ -1066,10 +1062,23 @@ async function runExtraction({
     record.requiresReupload = requiresReupload;
 
     return null;
+  } finally {
+    if (ctx.file?.path && fs.existsSync(ctx.file.path)) {
+      if (
+        ctx.checkpointData?.uploaded ||
+        [StageType.COMPLETED, StageType.FAILED, "REJECTED"].includes(record.status)
+      ) {
+        fs.unlink(ctx.file.path, () => {});
+      }
+    }
   }
 }
+
+documentQueue.setRunner(runExtraction);
 
 module.exports = new DocumentService();
 module.exports.runExtraction = runExtraction;
 module.exports.runWithConcurrency = runWithConcurrency;
 module.exports.resolveRawOcrData = resolveRawOcrData;
+module.exports.getAdaptiveStageTimeout = getAdaptiveStageTimeout;
+module.exports.STAGES_PIPELINE = STAGES_PIPELINE;

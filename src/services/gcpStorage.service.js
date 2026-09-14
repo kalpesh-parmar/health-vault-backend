@@ -1,3 +1,4 @@
+const fs = require("fs");
 const crypto = require("crypto");
 const { env } = require("../configs/env");
 const { gcpStorage } = require("../configs/gcpStorage");
@@ -36,10 +37,21 @@ class GcpStorageService {
 
     const bucket = gcpStorage.bucket(this.bucket);
     const blob = bucket.file(fileKey);
-    await blob.save(file.buffer, {
-      contentType: file.mimetype,
-      resumable: false,
-    });
+    if (file.path && fs.existsSync(file.path)) {
+      await new Promise((resolve, reject) => {
+        fs.createReadStream(file.path)
+          .pipe(blob.createWriteStream({ contentType: file.mimetype, resumable: false }))
+          .on("error", reject)
+          .on("finish", resolve);
+      });
+    } else if (file.buffer) {
+      await blob.save(file.buffer, {
+        contentType: file.mimetype,
+        resumable: false,
+      });
+    } else {
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
+    }
 
     return {
       fileKey,

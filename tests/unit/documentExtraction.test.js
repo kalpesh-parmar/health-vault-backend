@@ -8,6 +8,7 @@ const documentProcessingJobRepository = require("../../src/repositories/document
 const { DOCUMENT_STAGES } = require("../../src/constants/documentProgress.constants");
 const { StageType } = require("../../src/enums/stageStatus");
 
+jest.mock("pdf-parse", () => jest.fn(async () => ({ numpages: 1 })));
 jest.mock("../../src/services/objectStorage.service");
 jest.mock("../../src/clients/aiServiceClient");
 jest.mock("../../src/services/ai", () => ({

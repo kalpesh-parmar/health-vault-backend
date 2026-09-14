@@ -8,13 +8,15 @@ const {
   buildChunks,
   asArray,
 } = require("../../../helpers/embedding.helper");
+const { stripThinking } = require("../../../utils/textCleanUtils");
 
 class EmbeddingService {
   async embedText(text) {
-    if (!text || !text.trim()) {
+    const cleanText = stripThinking(text || "");
+    if (!cleanText || !cleanText.trim()) {
       return new Array(env.embeddingDim || 1024).fill(0);
     }
-    const vector = await ollamaClient.embeddings(text, env.embeddingModel);
+    const vector = await ollamaClient.embeddings(cleanText, env.embeddingModel);
     return normalizeVectorDimension(vector, env.embeddingDim || 1024);
   }
 

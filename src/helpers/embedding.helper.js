@@ -1,4 +1,5 @@
 const { env } = require("../configs/env");
+const { stripThinking } = require("../utils/textCleanUtils");
 
 const CHUNK_TARGET_CHARS = 1500;
 const CHUNK_OVERLAP_CHARS = 250;
@@ -43,7 +44,8 @@ function splitText(text, { target = CHUNK_TARGET_CHARS, overlap = CHUNK_OVERLAP_
 function buildChunks({ rawOcr, structured }) {
   const chunks = [];
 
-  const fullText = rawOcr?.fullText || rawOcr?.text || "";
+  const rawFullText = rawOcr?.fullText || rawOcr?.text || "";
+  const fullText = stripThinking(rawFullText);
   splitText(fullText).forEach((content, index) => {
     chunks.push({
       content,
@@ -55,9 +57,10 @@ function buildChunks({ rawOcr, structured }) {
   });
 
   if (structured?.summary) {
-    const summaryText = Array.isArray(structured.summary)
+    const rawSummary = Array.isArray(structured.summary)
       ? structured.summary.join("\n")
       : String(structured.summary);
+    const summaryText = stripThinking(rawSummary);
     splitText(summaryText).forEach((content) => {
       chunks.push({
         content,

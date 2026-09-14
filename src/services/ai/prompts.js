@@ -352,14 +352,29 @@ Perform two tasks on the provided document page image:
    - "COVER": Document cover page, title page, blank page, or table of contents with no clinical findings.
    - "OTHER": Non-medical document page (e.g. ID card, driver's license, receipt, random photo, bank statement).
 
-2. If the page is "MEDICAL", transcribe ALL visible text verbatim. For non-medical pages (ADVERTISEMENT, COVER, OTHER), leave rawText empty.
+2. If the page is "MEDICAL", transcribe all visible clinical text verbatim, while strictly enforcing these layout and filtering rules:
+   - EXCLUDE NON-CLINICAL REGIONS:
+     * Exclude commercial advertisements, hospital marketing slogans, pharmacy discount offers, app download promos, website URLs, social media links, and customer care toll-free numbers.
+     * Exclude legal boilerplate disclaimers (e.g. "This report is generated electronically", "Not valid for medico-legal purposes", "Please correlate clinically").
+     * Focus strictly on genuine clinical information: patient demographics, clinical vitals, doctor/hospital identity, diagnoses, prescribed medications, dosages, lab tests/values, and doctor's remarks.
+   - SEMANTIC DIAGRAM & FIGURE TAGGING:
+     * If the page contains visual diagrams, ECG waveforms, radiographs/X-rays, dental notation charts, or anatomical illustrations: DO NOT transcribe visual lines as ASCII symbols or character noise.
+     * Output a concise semantic descriptor tag instead:
+       [DIAGRAM: <type> - <brief clinical description>]
+       For example: [DIAGRAM: ECG 12-lead strip showing regular sinus rhythm] or [FIGURE: Chest X-ray PA view with clear lung fields].
+   - MULTILINGUAL & MIXED-SCRIPT PRESERVATION:
+     * Transcribe mixed-script documents verbatim across English, Gujarati, Hindi, Marathi, and Tamil.
+     * Always preserve medication brand names, generic formulations, medical acronyms, and dosages in English / Latin characters (e.g. "Tab. Caldison D3 1-0-0", "Cap. Amoxicillin 500mg", "BP: 120/80 mmHg") even when surrounded by Indic doctor notes.
+     * Never translate medication names or medical terms into Indic characters.
+
+For non-medical pages (ADVERTISEMENT, COVER, OTHER), leave rawText empty.
 
 You MUST return a STRICT JSON response matching this schema:
 {
   "pageType": "MEDICAL",
-  "rawText": "Complete page text transcribed verbatim..."
+  "rawText": "Complete clinical text transcribed verbatim..."
 }
-/no_think`;
+`;
 
 const STRUCTURED_EXTRACTION_PROMPT = (rawText) => `You are a precise medical data extraction engine.
 Analyze the provided transcribed text from a medical document and convert it into the exact JSON format specified below.

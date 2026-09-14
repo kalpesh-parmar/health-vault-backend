@@ -7,7 +7,15 @@ const DEFAULT_TTL_HOURS = 24;
 
 class DocumentProcessingJobRepository {
   async createQueuedJob(
-    { fileKey, userId, mimeType, originalName, ttlHours = DEFAULT_TTL_HOURS },
+    {
+      fileKey,
+      userId,
+      mimeType,
+      originalName,
+      pageCount = 1,
+      metadata = {},
+      ttlHours = DEFAULT_TTL_HOURS,
+    },
     tx = null,
   ) {
     const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
@@ -25,6 +33,11 @@ class DocumentProcessingJobRepository {
       metadata: {
         ...(mimeType ? { mimeType } : {}),
         ...(originalName ? { originalName } : {}),
+        pageCount: Number(pageCount) || 1,
+        ...metadata,
+      },
+      checkpointData: {
+        pageCount: Number(pageCount) || 1,
       },
       pendingSteps: 0,
       percentage: 0,
@@ -303,6 +316,63 @@ class DocumentProcessingJobRepository {
       .orderBy(documentProcessingJob.createdAt);
 
     return rows.map((r) => r.metadata?.originalName || r.fileKey?.split("/").pop()).filter(Boolean);
+  }
+
+  async claimNextQueuedJob() {
+    const result = await db.execute(sql`
+      UPDATE document_processing_jobs
+      SET status = 'RUNNING',
+          stage_status = 'IN_PROGRESS',
+          started_at = NOW(),
+          last_heartbeat_at = NOW(),
+          attempt_count = attempt_count + 1,
+          updated_at = NOW()
+      WHERE id = (
+        SELECT id FROM document_processing_jobs
+        WHERE status = 'QUEUED'
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      RETURNING *;
+    `);
+    return result.rows?.[0] || null;
+  }
+
+  async updateHeartbeat(jobId) {
+    if (!jobId) return null;
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        lastHeartbeatAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(documentProcessingJob.id, jobId))
+      .returning();
+    return row || null;
+  }
+
+  async getOrphanedRunningJobs() {
+    return db
+      .select()
+      .from(documentProcessingJob)
+      .where(eq(documentProcessingJob.status, "RUNNING"));
+  }
+
+  async reEnqueueJob(jobId, patch = {}) {
+    if (!jobId) return null;
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        status: "QUEUED",
+        stageStatus: "QUEUED",
+        error: null,
+        updatedAt: new Date(),
+        ...patch,
+      })
+      .where(eq(documentProcessingJob.id, jobId))
+      .returning();
+    return row || null;
   }
 }
 

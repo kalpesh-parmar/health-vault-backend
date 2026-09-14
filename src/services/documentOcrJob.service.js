@@ -44,6 +44,7 @@ const DocumentIntelligenceRepository = require("../repositories/documentIntellig
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
 const { normalizeLanguage } = require("../utils/commonUtils");
+const { extractKeyPoints } = require("../helpers/summary.helper");
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -329,10 +330,21 @@ class DocumentOcrJobService {
         }
       }
 
+      const normSummaryLang = normalizeLanguage(preferredLanguage);
+      const keyPoints = extractKeyPoints(
+        structured,
+        summaryPreferredLanguage || summaryEnglish,
+        normSummaryLang,
+      );
+      const detectedLanguages = rawOcrData?.detectedLanguages || [normSummaryLang];
+
       structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
       structured.summary = summaryPreferredLanguage || summaryEnglish;
+      structured.summaryLanguage = normSummaryLang;
+      structured.keyPoints = keyPoints;
+      structured.detectedLanguages = detectedLanguages;
       if (!structured.summariesByLanguage) {
         structured.summariesByLanguage = {};
       }
@@ -372,6 +384,8 @@ class DocumentOcrJobService {
           medications: structured.medications.length,
           pageCount: rawOcrData.pageCount,
           processingSeconds: rawOcrData.processingSeconds,
+          detectedLanguages,
+          summaryLanguage: normSummaryLang,
         },
         pendingSteps: 0,
         rawOcrData,

@@ -17,6 +17,14 @@ const MedicationSchema = z
     frequency: z.string().nullable().default(null),
     duration: z.string().nullable().default(null),
     instructions: z.string().nullable().default(null),
+    quantity: z.string().nullable().optional(),
+    qty: z.string().nullable().optional(),
+    type: z.string().nullable().optional(),
+    canonicalName: z.string().nullable().optional(),
+    genericName: z.string().nullable().optional(),
+    isFormularyMatch: z.boolean().optional().default(false),
+    confidence: z.number().nullable().optional(),
+    flaggedForReview: z.boolean().optional().default(false),
   })
   .passthrough();
 
@@ -45,7 +53,12 @@ const MedicalExtractionSchema = z
     isMedicalDocument: z.boolean().optional(),
     reason: z.string().nullable().optional(),
     summaryEn: z.string().nullable().default(null),
+    summaryEnglish: z.string().nullable().default(null),
+    summaryInPreferredLanguage: z.string().nullable().default(null),
     summary: z.string().nullable().default(null),
+    summaryLanguage: z.string().nullable().default(null),
+    keyPoints: z.array(z.string()).default([]),
+    detectedLanguages: z.array(z.string()).default(["english"]),
   })
   .passthrough();
 

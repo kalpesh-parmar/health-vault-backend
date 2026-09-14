@@ -95,6 +95,10 @@ function buildOcrResult({
   const resolvedPageCount = pageCount ?? normalizedPages.length;
   const resolvedProcessed = processedPageCount ?? normalizedPages.length;
 
+  const detectedLanguages =
+    medicalExtraction?.detectedLanguages ||
+    (medicalExtraction?.primaryLanguage ? [medicalExtraction.primaryLanguage] : ["english"]);
+
   const structuredDocument = {
     pages: normalizedPages,
     text: fullText,
@@ -102,6 +106,7 @@ function buildOcrResult({
     confidence: meanConfidence,
     pageCount: resolvedPageCount,
     processedPageCount: resolvedProcessed,
+    detectedLanguages,
     paragraphs: buildParagraphs(normalizedPages),
     medicalExtraction: medicalExtraction || emptyMedicalExtraction(),
   };
@@ -121,6 +126,7 @@ function buildOcrResult({
       filename,
       mimeType,
       nonEmptyPages,
+      detectedLanguages,
     },
     metrics: {
       engine,
@@ -139,7 +145,14 @@ function buildOcrResult({
 }
 
 class OcrOrchestrator {
-  async runFromStorage({ bucket, fileKey, mimeType, traceId, enforceMedicalGate = true }) {
+  async runFromStorage({
+    bucket,
+    fileKey,
+    mimeType,
+    traceId,
+    enforceMedicalGate = true,
+    onProgress,
+  }) {
     const trace = createTrace(traceId);
     const t0 = Date.now();
     ocrLogger.info(trace, "ocr_started", {
@@ -171,6 +184,7 @@ class OcrOrchestrator {
       traceId: trace,
       startedAt: t0,
       enforceMedicalGate,
+      onProgress,
     });
   }
 
@@ -181,6 +195,7 @@ class OcrOrchestrator {
     traceId,
     startedAt,
     enforceMedicalGate = true,
+    onProgress,
   }) {
     const trace = createTrace(traceId);
     const t0 = startedAt || Date.now();
@@ -216,6 +231,7 @@ class OcrOrchestrator {
         mimeType,
         traceId: trace,
         enforceMedicalGate,
+        onProgress,
       });
       const parsedOCR = JSON.parse(jsonStr);
 

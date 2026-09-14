@@ -1,6 +1,7 @@
 const { createHttpClient } = require("../configs/http.config");
 const apiConfig = require("../configs/api.config");
 const { env } = require("../configs/env");
+const { stripThinking } = require("../utils/textCleanUtils");
 
 class OllamaClient {
   constructor() {
@@ -63,7 +64,7 @@ class OllamaClient {
       thinkingText = data.thinking || "";
     }
 
-    let text = typeof primaryText === "string" ? primaryText : "";
+    let text = typeof primaryText === "string" ? stripThinking(primaryText) : "";
     const fallbackToThinking = options.fallbackToThinking ?? true;
 
     if (
@@ -77,7 +78,17 @@ class OllamaClient {
         `[OllamaClient] Primary response field ('${apiType === "chat" ? "message.content" : "response"}') was empty. ` +
           `Falling back to 'thinking' field (length: ${thinkingText.length}).`,
       );
-      text = thinkingText;
+      const thinkingStripped = stripThinking(thinkingText);
+      text = thinkingStripped.trim() ? thinkingStripped : thinkingText;
+    }
+
+    if (!text.trim() && typeof primaryText === "string" && primaryText.trim()) {
+      const match = primaryText.match(/\{[\s\S]*\}/);
+      if (match) {
+        text = match[0];
+      } else {
+        text = primaryText;
+      }
     }
 
     if (typeof text !== "string" || !text.trim()) {
@@ -107,7 +118,7 @@ class OllamaClient {
         model,
         messages,
         stream: false,
-        keep_alive: options.keep_alive || "24h",
+        keep_alive: options.keep_alive !== undefined ? options.keep_alive : -1,
         think: options.think ?? false,
         options: {
           temperature: options.temperature ?? 0.2,
@@ -209,7 +220,7 @@ class OllamaClient {
       model,
       messages,
       stream: true,
-      keep_alive: options.keep_alive || "24h",
+      keep_alive: options.keep_alive !== undefined ? options.keep_alive : -1,
       think: options.think ?? false,
       options: {
         temperature: options.temperature ?? 0.2,
@@ -307,7 +318,7 @@ class OllamaClient {
       model,
       prompt,
       stream: false,
-      keep_alive: options.keep_alive || "24h",
+      keep_alive: options.keep_alive !== undefined ? options.keep_alive : -1,
       think: options.think ?? false,
       options: {
         temperature: options.temperature ?? 0,

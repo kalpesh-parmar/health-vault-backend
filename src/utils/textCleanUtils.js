@@ -5,4 +5,16 @@ const cleanOCRText = (data) => {
     .replace(/```json|```/g, "")
     .trim();
 };
-module.exports = { cleanOCRText };
+
+function stripThinking(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think\b[^>]*>[\s\S]*$/gi, "")
+    .trim();
+}
+
+module.exports = {
+  cleanOCRText,
+  stripThinking,
+};

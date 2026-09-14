@@ -1,9 +1,13 @@
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const multer = require("multer");
 const { z, ZodError } = require("zod");
 const { InvalidRequestException } = require("../exceptions/appError");
 const { errorConstants } = require("../constants/errorConstants");
 const { env } = require("../configs/env");
 const { MAX_FILE_SIZES, ALLOWED_MIME_TYPES } = require("../configs/fileConfig");
+const { retryDocumentSchema } = require("./documentValidation");
 
 const patientIdParamSchema = z.object({
   patientId: z
@@ -35,13 +39,29 @@ const rawProfileMulter = multer({
   },
 }).single("file");
 
+const documentDiskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const tempDir = env.uploadTempDir || path.resolve(process.cwd(), "uploads/temp");
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+    cb(null, tempDir);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "");
+    const safeExt = ext && ext.length <= 10 ? ext : "";
+    const uniqueId = crypto.randomUUID();
+    cb(null, `${uniqueId}${safeExt}`);
+  },
+});
+
 const rawDocumentMulter = multer({
-  storage: multer.memoryStorage(),
+  storage: documentDiskStorage,
   limits: {
     fileSize: MAX_FILE_SIZES.PATIENT_DOCUMENT,
-    files: 5,
+    files: env.maxFilesPerUpload || 20,
   },
-}).array("files", 5);
+}).array("files", env.maxFilesPerUpload || 20);
 
 function profileUploadMulter(req, res, next) {
   rawProfileMulter(req, res, (err) => {
@@ -75,7 +95,9 @@ function documentUploadMulter(req, res, next) {
       }
       if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
         return next(
-          new InvalidRequestException(errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED),
+          new InvalidRequestException(
+            errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED(env.maxFilesPerUpload || 20),
+          ),
         );
       }
       return next(new InvalidRequestException(err.message || "File upload error"));
@@ -148,12 +170,19 @@ async function validateDocumentUpload(req, _res, next) {
     return next();
   } catch (error) {
     console.error("Error - Validate Document: ", error);
+    if (req.files && Array.isArray(req.files)) {
+      for (const file of req.files) {
+        if (file.path && fs.existsSync(file.path)) {
+          fs.unlink(file.path, () => {});
+        }
+      }
+    }
     return next(error);
   }
 }
 
 const rawDocumentRetryMulter = multer({
-  storage: multer.memoryStorage(),
+  storage: documentDiskStorage,
   limits: {
     fileSize: MAX_FILE_SIZES.PATIENT_DOCUMENT,
     files: 1,
@@ -182,6 +211,56 @@ function documentRetryUploadMulter(req, res, next) {
   });
 }
 
+async function validateDocumentRetry(req, _res, next) {
+  try {
+    const payload = {
+      fileKey: req.body?.fileKey || req.query?.fileKey,
+      batchId: req.body?.batchId || req.query?.batchId,
+    };
+
+    try {
+      const parsed = await retryDocumentSchema.parseAsync(payload);
+      req.validatedRetry = parsed;
+      if (req.body && typeof req.body === "object") {
+        req.body.fileKey = parsed.fileKey;
+      }
+      if (req.query && typeof req.query === "object") {
+        req.query.fileKey = parsed.fileKey;
+      }
+    } catch (error) {
+      if (error instanceof ZodError) {
+        throw new InvalidRequestException(
+          error.issues[0]?.message || errorConstants.FILE_KEY_REQUIRED,
+        );
+      }
+      throw error;
+    }
+
+    if (req.file) {
+      try {
+        await documentUploadFileSchema.parseAsync({
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+        });
+      } catch (error) {
+        if (error instanceof ZodError) {
+          throw new InvalidRequestException(
+            `Invalid file ${req.file.originalname}: ${error.issues[0]?.message}`,
+          );
+        }
+        throw error;
+      }
+    }
+
+    return next();
+  } catch (error) {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlink(req.file.path, () => {});
+    }
+    return next(error);
+  }
+}
+
 module.exports = {
   profileUploadFileSchema,
   documentUploadFileSchema,
@@ -190,4 +269,8 @@ module.exports = {
   validateProfileUpload,
   validateDocumentUpload,
   documentRetryUploadMulter,
+  validateDocumentRetry,
+  documentDiskStorage,
+  rawDocumentMulter,
+  rawDocumentRetryMulter,
 };

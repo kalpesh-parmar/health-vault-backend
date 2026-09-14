@@ -21,8 +21,29 @@ def decode_symbol_pua_text(text: str) -> str:
 
 NOISE_PATTERNS = (
     re.compile(r"^[^A-Za-z0-9]{2,}$"),
-    re.compile(r"^[|_.,:;\-\s]{2,}$"),
+    re.compile(r"^[|_.,:;\-\s~=\\/^#*`'\"]{2,}$"),
     re.compile(r"^\d{1,2}$"),
+)
+
+MARKETING_PATTERNS = (
+    re.compile(r"(?i)download (?:our )?(?:mobile )?app"),
+    re.compile(r"(?i)(?:get|flat) \d+% (?:off|discount)"),
+    re.compile(r"(?i)promo(?:tion)? code|coupon code|use code [A-Z0-9]+"),
+    re.compile(r"(?i)(?:call|contact|toll[- ]?free|helpline)[\s:]*(?:\+?\d{1,4}[- ]?)?1800[- ]?\d+"),
+    re.compile(r"(?i)visit (?:our )?website|log on to (?:www\.)?"),
+    re.compile(r"(?i)follow us on (?:facebook|instagram|twitter|linkedin|youtube)"),
+    re.compile(r"(?i)serving humanity since \d{4}"),
+    re.compile(r"(?i)trusted by [\d,.]+\s*[kKmM]?\+?\s*patients"),
+    re.compile(r"(?i)nabh accredited (?:multi[- ]?speciality )?hospital"),
+)
+
+DISCLAIMER_PATTERNS = (
+    re.compile(r"(?i)not valid for medico-?legal (?:purposes|cases|proceedings)"),
+    re.compile(r"(?i)this (?:report|prescription|document) is (?:an? )?electronically generated"),
+    re.compile(r"(?i)requires no (?:physical )?signature|not valid without signature"),
+    re.compile(r"(?i)results relate only to the specimen (?:received|tested)"),
+    re.compile(r"(?i)(?:please |kindly )?correlate clinically(?: with clinical findings)?"),
+    re.compile(r"(?i)subject to [a-zA-Z\s]+ jurisdiction"),
 )
 
 
@@ -49,6 +70,19 @@ def normalize_line(line: str) -> str:
 
 
 def is_useful_line(line: str) -> bool:
+    trimmed = line.strip()
+    # Always preserve semantic diagram, chart, or figure descriptor tags
+    if re.match(r"(?i)^\[(?:DIAGRAM|FIGURE|CHART|IMAGE):", trimmed):
+        return True
+
+    # Filter non-clinical marketing slogans & promo footers
+    if any(pattern.search(trimmed) for pattern in MARKETING_PATTERNS):
+        return False
+
+    # Filter boilerplate legal disclaimers
+    if any(pattern.search(trimmed) for pattern in DISCLAIMER_PATTERNS):
+        return False
+
     if re.search(r"\d", line) and re.search(r"(?i)(\d+(\.\d+)?\s*(mg|mcg|g|ml|iu|%|mg/dl|mg/l|mmol/l|years?)\b|<\s*\d|\d+\s*-\s*\d|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", line):
         return True
     if re.fullmatch(r"\d+(?:\.\d+)?", line) and len(line) >= 2:
