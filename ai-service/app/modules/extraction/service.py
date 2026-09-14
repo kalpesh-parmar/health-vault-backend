@@ -1,9 +1,94 @@
 from __future__ import annotations
 
+import re
+from typing import Any
+
 from app.core.json_utils import parse_json_object
 from app.modules.extraction.prompts import graph_extraction_prompt, structured_document_prompt, summary_prompt
 from app.services.llm import LLMService
 from app.services.llm.service import LLMModelError
+
+_PLACEHOLDER_REGEX = re.compile(
+    r"^(string\|null|number\|null|null|undefined|string|number|boolean|object|\[.*\])$",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_string(val: Any) -> str | None:
+    if val is None:
+        return None
+    if not isinstance(val, str):
+        val = str(val)
+    trimmed = val.strip()
+    if not trimmed or _PLACEHOLDER_REGEX.match(trimmed) or "|null" in trimmed.lower():
+        return None
+    return trimmed
+
+
+def _sanitize_page(val: Any) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, int) and not isinstance(val, bool):
+        return val
+    if isinstance(val, float) and val.is_integer():
+        return int(val)
+    if isinstance(val, str):
+        trimmed = val.strip()
+        if _PLACEHOLDER_REGEX.match(trimmed) or "|null" in trimmed.lower():
+            return None
+        if re.fullmatch(r"-?\d+", trimmed):
+            return int(trimmed)
+    return None
+
+
+def _sanitize_graph_type(val: Any) -> str:
+    if not val:
+        return "unknown"
+    val_str = str(val).strip().lower()
+    if "|" in val_str or _PLACEHOLDER_REGEX.match(val_str) or len(val_str) > 64:
+        return "unknown"
+    return val_str
+
+
+def _sanitize_axis(val: Any) -> list:
+    if not isinstance(val, list):
+        return []
+    cleaned = []
+    for item in val:
+        if isinstance(item, str):
+            trimmed = item.strip()
+            if _PLACEHOLDER_REGEX.match(trimmed) or "..." in trimmed or "|null" in trimmed.lower():
+                continue
+            cleaned.append(trimmed)
+        elif isinstance(item, (int, float)) and not isinstance(item, bool):
+            cleaned.append(item)
+    return cleaned
+
+
+def _sanitize_series(val: Any) -> list:
+    if not isinstance(val, list):
+        return []
+    cleaned = []
+    for item in val:
+        if not isinstance(item, dict):
+            continue
+        name = _sanitize_string(item.get("name")) or "Series"
+        values = _sanitize_axis(item.get("values"))
+        cleaned.append({"name": name, "values": values})
+    return cleaned
+
+
+def normalize_graph_dict(graph: dict) -> dict:
+    return {
+        "graphType": _sanitize_graph_type(graph.get("graphType")),
+        "title": _sanitize_string(graph.get("title")),
+        "xAxis": _sanitize_axis(graph.get("xAxis")),
+        "yAxis": _sanitize_axis(graph.get("yAxis")),
+        "series": _sanitize_series(graph.get("series")),
+        "unit": _sanitize_string(graph.get("unit")),
+        "page": _sanitize_page(graph.get("page")),
+        "metadata": graph.get("metadata") if isinstance(graph.get("metadata"), dict) else {},
+    }
 
 
 def parse_json(text: str, _unused_default: dict | None = None) -> dict:
@@ -106,16 +191,5 @@ class ExtractionService:
         for graph in graphs:
             if not isinstance(graph, dict):
                 continue
-            normalized.append(
-                {
-                    "graphType": str(graph.get("graphType") or "unknown").lower(),
-                    "title": graph.get("title"),
-                    "xAxis": graph.get("xAxis") or [],
-                    "yAxis": graph.get("yAxis") or [],
-                    "series": graph.get("series") or [],
-                    "unit": graph.get("unit"),
-                    "page": graph.get("page"),
-                    "metadata": graph.get("metadata") or {},
-                }
-            )
+            normalized.append(normalize_graph_dict(graph))
         return normalized

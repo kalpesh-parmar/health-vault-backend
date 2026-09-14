@@ -52,6 +52,53 @@ const runOcrSchema = z
   })
   .strict();
 
+const graphItemSchema = z
+  .object({
+    graphType: z.preprocess(
+      (val) =>
+        typeof val === "string" && !val.includes("|") ? val.trim().slice(0, 64) : "unknown",
+      z.string().optional().default("unknown"),
+    ),
+    title: z.preprocess((val) => {
+      if (!val || typeof val !== "string") return null;
+      const trimmed = val.trim();
+      if (
+        /^(string\|null|number\|null|null|undefined|string|number)$/i.test(trimmed) ||
+        /\|null/i.test(trimmed)
+      ) {
+        return null;
+      }
+      return trimmed.slice(0, 255) || null;
+    }, z.string().nullable().optional()),
+    xAxis: z.array(z.any()).optional().default([]),
+    yAxis: z.array(z.any()).optional().default([]),
+    series: z.array(z.any()).optional().default([]),
+    unit: z.preprocess((val) => {
+      if (!val || typeof val !== "string") return null;
+      const trimmed = val.trim();
+      if (
+        /^(string\|null|number\|null|null|undefined|string|number)$/i.test(trimmed) ||
+        /\|null/i.test(trimmed)
+      ) {
+        return null;
+      }
+      return trimmed.slice(0, 64) || null;
+    }, z.string().nullable().optional()),
+    page: z
+      .union([z.number().int(), z.string(), z.null()])
+      .optional()
+      .transform((val) => {
+        if (typeof val === "number" && Number.isInteger(val)) return val;
+        if (typeof val === "string") {
+          const trimmed = val.trim();
+          if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+        }
+        return null;
+      }),
+    metadata: z.record(z.any()).optional().default({}),
+  })
+  .passthrough();
+
 const addDocumentSchema = z
   .object({
     s3Key: z.string().trim().min(3).max(500),
@@ -63,7 +110,7 @@ const addDocumentSchema = z
     mimeType: z.string().trim().max(128).optional(),
     rawOcrData: z.record(z.any()).nullable().optional(),
     extractedStructuredData: z.record(z.any()).nullable().optional(),
-    graphs: z.array(z.record(z.any())).optional().default([]),
+    graphs: z.array(graphItemSchema).optional().default([]),
     embeddingsGenerated: z.boolean().optional().default(false),
   })
   .strict();

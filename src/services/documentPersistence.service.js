@@ -16,6 +16,77 @@ const { embeddingService } = require("./ai/chat/embedding.service");
 const { inferFileType, buildPatientSuggestions, asText } = require("../helpers/document.helper");
 const { toDbDate } = require("../utils/dateUtils");
 
+function sanitizeGraphRow(graph, documentId, userId) {
+  let graphType = "unknown";
+  if (typeof graph?.graphType === "string") {
+    const trimmed = graph.graphType.trim().toLowerCase();
+    if (!trimmed.includes("|") && trimmed.length <= 64 && trimmed !== "unknown") {
+      graphType = trimmed;
+    }
+  }
+
+  let page = null;
+  if (typeof graph?.page === "number" && Number.isInteger(graph.page)) {
+    page = graph.page;
+  } else if (typeof graph?.page === "string") {
+    const trimmed = graph.page.trim();
+    if (/^\d+$/.test(trimmed)) {
+      page = parseInt(trimmed, 10);
+    }
+  }
+
+  const sanitizeText = (val, maxLen = 255) => {
+    if (!val || typeof val !== "string") return null;
+    const trimmed = val.trim();
+    if (
+      /^(string\|null|number\|null|null|undefined|string|number|object)$/i.test(trimmed) ||
+      /\|null/i.test(trimmed)
+    ) {
+      return null;
+    }
+    return trimmed.slice(0, maxLen) || null;
+  };
+
+  const sanitizeAxis = (arr) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((item) => {
+      if (typeof item === "string") {
+        const trimmed = item.trim();
+        return !/^(string\|null|number\|null|\[.*\])$/i.test(trimmed) && !trimmed.includes("...");
+      }
+      return typeof item === "number" && !Number.isNaN(item);
+    });
+  };
+
+  const sanitizeSeries = (series) => {
+    if (!Array.isArray(series)) return [];
+    return series
+      .filter((s) => s && typeof s === "object")
+      .map((s) => ({
+        name: sanitizeText(s.name, 128) || "Series",
+        values: sanitizeAxis(s.values),
+      }));
+  };
+
+  return {
+    documentId,
+    graphType,
+    metadata:
+      typeof graph?.metadata === "object" &&
+      graph?.metadata !== null &&
+      !Array.isArray(graph.metadata)
+        ? graph.metadata
+        : {},
+    page,
+    series: sanitizeSeries(graph?.series),
+    title: sanitizeText(graph?.title, 255),
+    unit: sanitizeText(graph?.unit, 64),
+    userId,
+    xAxis: sanitizeAxis(graph?.xAxis),
+    yAxis: sanitizeAxis(graph?.yAxis),
+  };
+}
+
 class DocumentPersistenceService {
   async addDocument({ userId, payload }) {
     const { s3Key, extractedStructuredData } = payload;
@@ -203,18 +274,7 @@ class DocumentPersistenceService {
     const safeGraphs = Array.isArray(graphs) ? graphs : [];
     await artifacts.replaceGraphs(
       documentId,
-      safeGraphs.map((graph) => ({
-        documentId,
-        graphType: graph.graphType || "unknown",
-        metadata: graph.metadata || {},
-        page: graph.page ?? null,
-        series: graph.series || [],
-        title: graph.title || null,
-        unit: graph.unit || null,
-        userId,
-        xAxis: graph.xAxis || [],
-        yAxis: graph.yAxis || [],
-      })),
+      safeGraphs.map((graph) => sanitizeGraphRow(graph, documentId, userId)),
     );
 
     const { rows: medicationRows, skipped: medicationSkipped } = medicationMapper.buildRows({
