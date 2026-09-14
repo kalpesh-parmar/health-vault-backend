@@ -9,7 +9,7 @@ describe("documentType Enum & Normalization Unit Tests", () => {
     expect(documentTypeValue).toHaveLength(9);
     expect(documentTypeValue).toEqual(
       expect.arrayContaining([
-        "PRESCERIPTION",
+        "PRESCRIPTION",
         "LAB_REPORT",
         "IMAGING_REPORT",
         "DISCHARGE_SUMMARY",
@@ -24,7 +24,7 @@ describe("documentType Enum & Normalization Unit Tests", () => {
 
   test("isValidDocumentType helper works correctly", () => {
     expect(isValidDocumentType("IMAGING_REPORT")).toBe(true);
-    expect(isValidDocumentType("PRESCERIPTION")).toBe(true);
+    expect(isValidDocumentType("PRESCRIPTION")).toBe(true);
     expect(isValidDocumentType("MEDICAL_DOCUMENT")).toBe(false);
     expect(isValidDocumentType("INSURANCE")).toBe(false);
     expect(isValidDocumentType(null)).toBe(false);
@@ -38,7 +38,7 @@ describe("documentType Enum & Normalization Unit Tests", () => {
       { input: "MRI report", expected: "IMAGING_REPORT" },
       { input: "CBC Report", expected: "LAB_REPORT" },
       { input: "blood_report", expected: "LAB_REPORT" },
-      { input: "Prescription", expected: "PRESCERIPTION" },
+      { input: "Prescription", expected: "PRESCRIPTION" },
       { input: "Doctor Note", expected: "CONSULTATION_REPORT" },
       { input: "Discharge Summary", expected: "DISCHARGE_SUMMARY" },
       { input: "Surgery Report", expected: "SURGERY_PROCEDURE_REPORT" },

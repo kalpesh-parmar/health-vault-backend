@@ -15,8 +15,12 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     dbStates = {};
-    jest.spyOn(ollamaClient, "chat").mockResolvedValue({
-      message: { content: JSON.stringify({ value: "ExtractedValue" }) },
+    jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
+      const msgStr = JSON.stringify(messages || []);
+      if (msgStr.includes("Bob")) return { message: { content: JSON.stringify({ value: "Bob" }) } };
+      if (msgStr.includes("Brown"))
+        return { message: { content: JSON.stringify({ value: "Brown" }) } };
+      return { message: { content: JSON.stringify({ value: "ExtractedValue" }) } };
     });
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: "user-101",
@@ -226,10 +230,51 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
     });
   });
 
-  // =========================================================================
-  // FLOW 2: UPLOAD + MOBILE
-  // =========================================================================
   describe("Flow 2: UPLOAD + MOBILE", () => {
+    test("Should return RESOLVE_PROFILE_SOURCE after confirming document ownership and completing required details", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "UPLOAD",
+        loginProvider: "mobile",
+        hasSocialData: false,
+        documentId: "doc-789",
+        documentUploaded: true,
+        documentExtracted: true,
+        currentStep: "CONFIRM_DOCUMENT_OWNERSHIP",
+        documentData: {
+          firstName: "URMILA",
+          lastName: "HIPARARA",
+          gender: "female",
+        },
+        existingUserData: {
+          firstName: "URMILA",
+          lastName: "HIPARARA",
+          gender: "female",
+        },
+      };
+
+      // 1. Confirm document ownership ("Yes") -> triggers ASK_DOB because dateOfBirth is missing
+      let res = await onboardingService.chat("Yes", [], state, "user-102-dob");
+      state = res.state;
+      expect(state.profileConfirmed).toBe(false);
+      expect(res.action).toBe("ASK_DOB");
+
+      // 2. Answer date of birth -> required fields are now complete -> triggers RESOLVE_PROFILE_SOURCE
+      res = await onboardingService.chat("1992-08-15", [], state, "user-102-dob");
+      state = res.state;
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      // 3. Confirm profile source -> advances to ASK_BLOOD_GROUP
+      res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true, source: "DOCUMENT" }),
+        [],
+        state,
+        "user-102-dob",
+      );
+      expect(res.action).toBe("ASK_BLOOD_GROUP");
+      expect(res.state.profileConfirmed).toBe(true);
+    });
+
     test("[IF USER DOES NOT SKIP] Should complete all onboarding steps and return 3 buttons on MEDICINE_OPTIONS", async () => {
       let state = {
         preferredLanguage: "english",
@@ -350,6 +395,7 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
         flowMode: "MANUAL",
         loginProvider: "google",
         hasSocialData: true,
+        profileConfirmed: true,
         loginData: {
           firstName: { value: "Alice", verified: true },
           lastName: { value: "Smith", verified: true },
@@ -374,11 +420,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission and return 2 buttons in Dashboard Chat stream", async () => {
@@ -415,10 +460,9 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
     });
   });
@@ -427,7 +471,7 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
   // FLOW 4: MANUAL + MOBILE
   // =========================================================================
   describe("Flow 4: MANUAL + MOBILE", () => {
-    test("[IF USER DOES NOT SKIP] Should prompt required details, optional details, and return 3 buttons", async () => {
+    test("[IF USER DOES NOT SKIP] Should prompt required details, optional details, and return 2 buttons", async () => {
       let state = {
         preferredLanguage: "english",
         flowMode: "MANUAL",
@@ -456,6 +500,16 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       // Required Q4: Gender
       res = await onboardingService.chat("male", [], state, "user-104");
       state = res.state;
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      // Confirm profile details
+      res = await onboardingService.chat(
+        JSON.stringify({ source: "MANUAL" }),
+        [],
+        state,
+        "user-104",
+      );
+      state = res.state;
       expect(res.action).toBe("ASK_BLOOD_GROUP");
 
       // Optional Q1: Blood Group
@@ -468,11 +522,10 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(3);
+      expect(res.options.length).toBe(2);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
       expect(keys).toContain("DASHBOARD");
-      expect(keys).toContain("ASK_REPORT");
     });
 
     test("[IF USER SKIPS] Should validate skip permission once required details exist and return 2 buttons in Dashboard Chat stream", async () => {
@@ -509,11 +562,67 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       state = res.state;
 
       expect(res.action).toBe("MEDICINE_OPTIONS");
-      expect(res.options.length).toBe(2);
+      expect(res.options.length).toBe(1);
       const keys = res.options.map((o) => o.key);
       expect(keys).toContain("ADD");
-      expect(keys).toContain("ASK_REPORT");
       expect(keys).not.toContain("DASHBOARD");
+    });
+  });
+
+  // =========================================================================
+  // FLOW 5: MEDICINE_OPTIONS PROGRESSION & SERVER STATE AUTHORITY
+  // =========================================================================
+  describe("Flow 5: MEDICINE_OPTIONS Progression & Server State Authority", () => {
+    test("MEDICINE_OPTIONS advances to ADD_MEDICINE on ADD or aliases without repeating question", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: true,
+        medicationFlowDone: false,
+        medicinesConfirmed: false,
+        currentStep: "MEDICINE_OPTIONS",
+      };
+      dbStates["user-105"] = state;
+
+      let res = await onboardingService.chat("ADD", [], state, "user-105");
+      expect(res.action).toBe("ADD_MEDICINE");
+      expect(res.state.currentStep).toBe("ADD_MEDICINE");
+      expect(res.action).not.toBe("MEDICINE_OPTIONS");
+
+      // Aliases test: ADD_MORE_MEDICINES
+      let state2 = { ...state };
+      let res2 = await onboardingService.chat("ADD_MORE_MEDICINES", [], state2, "user-105");
+      expect(res2.action).toBe("ADD_MEDICINE");
+      expect(res2.state.currentStep).toBe("ADD_MEDICINE");
+    });
+
+    test("MEDICINE_OPTIONS advances to COMPLETE on DASHBOARD without repeating question", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: true,
+        medicationFlowDone: false,
+        medicinesConfirmed: false,
+        currentStep: "MEDICINE_OPTIONS",
+      };
+      dbStates["user-105"] = state;
+
+      let res = await onboardingService.chat("DASHBOARD", [], state, "user-105");
+      expect(res.state.isOnboardingCompleted).toBe(true);
+      expect(res.state.medicationFlowDone).toBe(true);
+      expect(res.state.medicinesConfirmed).toBe(true);
+      expect(res.state.currentStep).toBe("COMPLETE");
+      expect(res.action).not.toBe("MEDICINE_OPTIONS");
+
+      // Aliases test: GO_TO_DASHBOARD
+      let state2 = { ...state };
+      let res2 = await onboardingService.chat("GO_TO_DASHBOARD", [], state2, "user-105");
+      expect(res2.state.isOnboardingCompleted).toBe(true);
+      expect(res2.state.currentStep).toBe("COMPLETE");
     });
   });
 });

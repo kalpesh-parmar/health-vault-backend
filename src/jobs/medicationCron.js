@@ -1,30 +1,17 @@
-const cron = require("node-cron");
+/**
+ * Medication Cron Handler (Consolidated & Layer-Aligned)
+ *
+ * NOTE: Scheduled medication adherence tasks are registered in src/configs/cronConfig.js
+ * and orchestrated via src/services/cron.service.js and src/services/reminder.service.js.
+ * This file is retained for backwards-compatibility of job exports.
+ */
 
-const medicationRepository = require("../repositories/medicationRepository");
+const reminderService = require("../services/reminder.service");
 
-//every minute
-cron.schedule("0 0 * * *", async () => {
-  console.log("Medication cron started");
+async function runMedicationReminders() {
+  await reminderService.processReminders();
+}
 
-  try {
-    const medications = await medicationRepository.findAllActive();
-
-    for (const item of medications) {
-      if (item.remainingQuantity <= 0) {
-        continue;
-      }
-
-      const updatedRemaining = item.remainingQuantity - item.dailyConsumption;
-
-      await medicationRepository.updateById(item.id, {
-        remainingQuantity: Math.max(updatedRemaining, 0),
-      });
-
-      console.log(`Updated medication ${item.id}`);
-    }
-
-    console.log("Medication cron completed");
-  } catch (error) {
-    console.error(error);
-  }
-});
+module.exports = {
+  runMedicationReminders,
+};

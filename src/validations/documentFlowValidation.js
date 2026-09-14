@@ -45,6 +45,10 @@ const runOcrSchema = z
       (val) => (!val || val === "string" ? undefined : val),
       z.string().trim().max(128).optional(),
     ),
+    preferredLanguage: z.preprocess(
+      (val) => (!val || val === "string" ? undefined : val),
+      z.string().trim().max(64).optional(),
+    ),
   })
   .strict();
 

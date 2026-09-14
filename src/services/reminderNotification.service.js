@@ -47,6 +47,9 @@ class ReminderNotificationService {
       body: Mustache.render(notificationConstant.BEFORE_MEDICATION_TEMPLATE, variable),
       data: {
         type: notificationType.BEFORE_MEDICATION_REMINDER,
+        reminderType: reminderTypes.BEFORE,
+        occurrenceId: data.occurrence?.id,
+        medicationId: data.medication?.id,
         ...variable,
       },
     };
@@ -61,6 +64,9 @@ class ReminderNotificationService {
       body: Mustache.render(notificationConstant.AFTER_MEDICATION_TEMPLATE, variable),
       data: {
         type: notificationType.AFTER_MEDICATION_REMINDER,
+        reminderType: reminderTypes.AFTER,
+        occurrenceId: data.occurrence?.id,
+        medicationId: data.medication?.id,
         ...variable,
       },
     };
@@ -75,6 +81,7 @@ class ReminderNotificationService {
       body: Mustache.render(notificationConstant.REFILL_ALERT_TEMPLATE, variable),
       data: {
         type: notificationType.REFILL_ALERT,
+        reminderType: reminderTypes.REFILL,
         medicationId: data.medication.id,
         ...variable,
       },
@@ -90,6 +97,9 @@ class ReminderNotificationService {
         body: Mustache.render(notificationConstant.FOLLOW_UP_TEMPLATE, variable),
         data: {
           type: notificationType.FOLLOW_UP_MEDICATION_REMINDER,
+          reminderType: "OVERDUE",
+          occurrenceId: occurrence.occurrence?.id,
+          medicationId: occurrence.medication?.id,
           ...variable,
         },
       };

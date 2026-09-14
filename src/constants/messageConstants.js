@@ -106,11 +106,6 @@ const messageConstants = Object.freeze({
   QUEUE_FOR_EXTRACTION: "Queued for extraction",
   BATCH_OCR_JOBS_STARTED: "Batch OCR jobs started successfully",
   BATCH_OCR_JOBS_STATUS_FETCHED: "Batch OCR job statuses fetched successfully",
-  // DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (fileName, count) =>
-  //   `Document '${fileName}' has been processed. Found ${count} medication${count > 1 ? "s" : ""} in your document. Please review and confirm to add them to your active medications:`,
-  // MEDICATIONS_CONFIRMED_SUCCESS:
-  //   "Selected medications have been added to your active list successfully.",
-  // MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",
 
   //DOCUMENT MESSAGE
   DOCUMENT_RETRY_INITIATED: "Document retry initiated",

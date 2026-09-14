@@ -124,7 +124,7 @@ function maskSensitiveData(data, visited = new WeakSet()) {
  * @param {number} maxLength
  * @returns {any}
  */
-function truncatePayload(payload, maxLength = 3000) {
+function truncatePayload(payload, maxLength = 7000) {
   if (!payload) return payload;
 
   if (typeof payload === "string") {

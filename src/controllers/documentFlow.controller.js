@@ -14,6 +14,7 @@ const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
 const { attachSseStream } = require("../services/sse/sseTransport");
 const { NotFoundException } = require("../exceptions/appError");
+const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const documentOcrJobService = require("../services/documentOcrJob.service");
 const documentPersistenceService = require("../services/documentPersistence.service");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
@@ -27,9 +28,65 @@ const {
 
 async function ocrProgressStream(req, res) {
   const { fileKey } = await validateSchema(fileKeySchema, req.params);
-  const stream = attachSseStream(req, res);
-  const unsubscribe = ocrProgressBus.subscribe(fileKey, (event) => stream.write(event));
-  res.on("close", () => unsubscribe());
+  const userId = req.auth?.userId;
+
+  // 1. Enforce Tenant Isolation
+  const job = await documentProcessingJobRepository.findByFileKey(fileKey, userId);
+  if (!job) {
+    throw new NotFoundException("Document job not found for this fileKey");
+  }
+
+  // 2. Reconnection support: read Last-Event-ID header or lastEventId query param
+  const lastEventId = req.get("Last-Event-ID") || req.query?.lastEventId || null;
+
+  let unsubscribe = null;
+  const cleanup = () => {
+    if (unsubscribe) {
+      const fn = unsubscribe;
+      unsubscribe = null;
+      fn();
+    }
+  };
+
+  // 3. Attach SSE transport with onClose callback
+  const stream = attachSseStream(req, res, { onClose: cleanup });
+  res.on("close", cleanup);
+
+  let eventsEmitted = 0;
+  // 4. Subscribe to the in-process OCR progress bus with replay & terminal auto-close
+  unsubscribe = ocrProgressBus.subscribe(
+    fileKey,
+    (event) => {
+      eventsEmitted++;
+      stream.write(event);
+    },
+    {
+      sinceEventId: lastEventId,
+      onTerminal: () => {
+        setImmediate(() => stream.close());
+      },
+    },
+  );
+
+  // 5. If the database record is already in a terminal state and no events were emitted,
+  // emit final status and close immediately.
+  const isTerminal =
+    job.status === "COMPLETED" || job.status === "FAILED" || job.status === "REJECTED";
+  if (isTerminal && eventsEmitted === 0 && !stream.isClosed()) {
+    const isCompleted = job.status === "COMPLETED";
+    stream.write({
+      eventId: 1,
+      fileKey: job.fileKey,
+      stage: job.stage || (isCompleted ? "COMPLETED" : "FAILED"),
+      stageStatus: job.stageStatus || job.status,
+      percentage: isCompleted ? 100 : job.percentage || 0,
+      status: isCompleted ? "SUCCESS" : "FAILED",
+      error: job.error || null,
+      message: job.message || (isCompleted ? "Processing completed" : "Document processing failed"),
+      extractedStructuredData: job.extractedStructuredData || null,
+    });
+    setImmediate(() => stream.close());
+  }
 }
 
 /**
@@ -42,11 +99,14 @@ async function runOcr(req, res) {
   const userId = req.auth.userId;
   const jobs = [];
 
+  const preferredLanguage = data.preferredLanguage || req.body?.preferredLanguage || null;
+
   // 1. Handle legacy single fileKey
   if (data.fileKey) {
     const job = await documentOcrJobService.enqueue({
       fileKey: data.fileKey,
       mimeType: data.mimeType,
+      preferredLanguage,
       userId,
     });
     jobs.push(job);
@@ -59,6 +119,7 @@ async function runOcr(req, res) {
       if (fKey === data.fileKey) continue;
       const job = await documentOcrJobService.enqueue({
         fileKey: fKey,
+        preferredLanguage,
         userId,
       });
       jobs.push(job);

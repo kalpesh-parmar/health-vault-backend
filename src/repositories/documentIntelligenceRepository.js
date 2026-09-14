@@ -74,7 +74,7 @@ class DocumentIntelligenceRepository {
 
   async searchSimilarChunks({ userId, queryEmbedding, limit, documentIds, sectionType, keywords }) {
     const vectorLiteral = toVectorLiteral(queryEmbedding);
-    const conditions = [eq(embedding.userId, userId)];
+    const conditions = [eq(embedding.userId, userId), eq(documentChunk.userId, userId)];
     if (documentIds && documentIds.length > 0) {
       conditions.push(inArray(documentChunk.documentId, documentIds));
     }

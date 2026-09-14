@@ -302,7 +302,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   const rawTiming = med.timing || med.when || med.timeOfDay || "";
   const rawInstructions = med.instructions || med.notes || "";
   const rawDuration = med.duration || "";
-  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 0;
+  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 1;
 
   const needsReview = {
     name: false,
@@ -493,7 +493,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   };
 
   // 7. Stable client_med_id for OCR
-  const clientMedId = med.client_med_id || med.clientMedId || `doc_med_${index}`;
+  const clientMedId = med.client_med_id || med.clientMedId || med.id || `doc_med_${index + 1}`;
 
   const row = {
     bestTaken: [foodFrequency],
@@ -565,7 +565,7 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.name && !input.medicationName) {
     input.medicationName = input.name;
   }
-  if (input.type && !input.medicationType) {
+  if (!input.medicationType && input.type) {
     input.medicationType = String(input.type).toUpperCase();
   }
   if (input.instructions && !input.notes) {
@@ -644,36 +644,65 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
     input.totalQuantity = 30;
   }
-  if (!input.startDate) {
-    input.startDate = new Date().toISOString().split("T")[0];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayDate = new Date(todayStr);
+  todayDate.setHours(0, 0, 0, 0);
+
+  if (
+    !input.startDate ||
+    typeof input.startDate !== "string" ||
+    input.startDate.trim() === "" ||
+    input.startDate === "null" ||
+    input.startDate === "none" ||
+    input.startDate === "N/A"
+  ) {
+    input.startDate = todayStr;
+  } else {
+    const parsedDate = new Date(input.startDate);
+    if (isNaN(parsedDate.getTime())) {
+      input.startDate = todayStr;
+    } else {
+      const formatted = parsedDate.toISOString().split("T")[0];
+      const selDate = new Date(formatted);
+      selDate.setHours(0, 0, 0, 0);
+      if (selDate < todayDate) {
+        input.startDate = todayStr;
+      } else {
+        input.startDate = formatted;
+      }
+    }
   }
   if (!input.foodFrequency) {
     input.foodFrequency = "AFTER_FOOD";
   }
 
-  // Strip non-schema properties so Zod .strict() validation passes
-  delete input.id;
-  delete input.name;
-  delete input.type;
-  delete input.dose;
-  delete input.client_med_id;
-  delete input.clientMedId;
-  delete input.resolution;
-  delete input.selected;
-  delete input.replaceMedicationId;
-  delete input.targetMedicationId;
-  delete input.isSaved;
-  delete input.dbId;
-  delete input.source;
-  delete input.subtitle;
-  delete input.duration;
-  delete input.needsReview;
-  delete input.refill_alert;
-  delete input.refillAlert;
-  delete input.prescribed_by;
-  delete input.total_quantity;
+  // Construct clean object containing ONLY allowed keys for createMedicationSchema .strict() validation
+  const allowedKeys = [
+    "medicationName",
+    "medicationType",
+    "prescribedBy",
+    "dosePerIntake",
+    "frequency",
+    "medicationSchedule",
+    "foodFrequency",
+    "startDate",
+    "endDate",
+    "ongoing",
+    "totalQuantity",
+    "reminderBeforeMinutes",
+    "notes",
+    "resolution",
+    "replaceMedicationId",
+  ];
 
-  return input;
+  const cleanInput = {};
+  for (const key of allowedKeys) {
+    if (input[key] !== undefined) {
+      cleanInput[key] = input[key];
+    }
+  }
+
+  return cleanInput;
 }
 
 module.exports = {

@@ -5,6 +5,7 @@ const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
+const { normalizeMedicine } = require("./medicineNormalize.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -45,7 +46,11 @@ function normalizeUnifiedChatInput(body = {}) {
     state: state && typeof state === "object" ? state : null,
     history: Array.isArray(history) ? history : [],
     displayLabel: displayLabel || null,
-    preferredLanguage: preferredLanguage ? normalizeLanguage(preferredLanguage) : null,
+    preferredLanguage: preferredLanguage
+      ? normalizeLanguage(preferredLanguage)
+      : state?.preferredLanguage
+        ? normalizeLanguage(state.preferredLanguage)
+        : null,
     fromScreen: fromScreen || (state && state.fromScreen) || null,
   };
 }
@@ -88,6 +93,7 @@ function buildUnifiedResponse({
     documentSummary,
     sessionId,
     onboardingState,
+    state: onboardingState,
     medicines,
     citations,
     document,
@@ -246,10 +252,6 @@ async function executeAddDocumentAction({
     for (const fItem of filesList) {
       const currentS3Key = extractFileKey(fItem);
       if (!currentS3Key) continue;
-      const fileName =
-        (typeof fItem === "object" ? fItem?.fileName || fItem?.originalFileName : null) ||
-        currentS3Key.split("/").pop();
-      fileNames.push(fileName);
 
       let existingJob = null;
       if (documentOcrJobService?.getStatus) {
@@ -259,6 +261,36 @@ async function executeAddDocumentAction({
           existingJob = null;
         }
       }
+
+      let rawExtractedName =
+        (typeof fItem === "object"
+          ? fItem?.originalName ||
+            fItem?.originalFileName ||
+            fItem?.fileName ||
+            fItem?.name ||
+            fItem?.original_file_name ||
+            fItem?.file_name
+          : null) ||
+        existingJob?.metadata?.originalName ||
+        existingJob?.metadata?.fileName;
+
+      if (!rawExtractedName && userId) {
+        try {
+          const [dbDoc] = await db
+            .select({ fileName: document.fileName })
+            .from(document)
+            .where(and(eq(document.s3Key, currentS3Key), eq(document.userId, userId)))
+            .limit(1);
+          if (dbDoc && dbDoc.fileName) {
+            rawExtractedName = dbDoc.fileName;
+          }
+        } catch {
+          // ignore DB lookup error
+        }
+      }
+
+      const fileName = rawExtractedName || currentS3Key.split("/").pop();
+      fileNames.push(fileName);
 
       if (existingJob) {
         let normStatus = "completed";
@@ -307,7 +339,9 @@ async function executeAddDocumentAction({
         const job = await documentOcrJobService.enqueue({
           fileKey: currentS3Key,
           mimeType,
+          preferredLanguage,
           userId,
+          originalName: fileName,
         });
 
         createdDocs.push({
@@ -456,19 +490,36 @@ async function executeAddDocumentAction({
   }
 
   if (Array.isArray(rawMeds) && rawMeds.length > 0) {
-    const rawList = rawMeds.map((m, idx) => ({
-      id: m.id || m.client_med_id || `extracted_med_${idx + 1}`,
-      name: m.name || m.medicationName || "Unknown Medicine",
-      medicationName: m.name || m.medicationName || "Unknown Medicine",
-      medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-      type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-      dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
-      frequency: m.frequency || "ONCE",
-      duration: m.duration || null,
-      instructions: m.instructions || m.timing || null,
-      selected: true,
-      isSaved: false,
-    }));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const rawList = rawMeds.map((m, idx) => {
+      const { row, onboardingMed } = normalizeMedicine(m, idx, "P-TEMP", {
+        startDate: todayStr,
+      });
+      return {
+        id: m.id || m.client_med_id || onboardingMed.id,
+        client_med_id: m.client_med_id || onboardingMed.client_med_id,
+        name: onboardingMed.name,
+        medicationName: onboardingMed.name,
+        medicationType: onboardingMed.type,
+        type: onboardingMed.type,
+        dosePerIntake: row.dosePerIntake || 1,
+        frequency: onboardingMed.frequency,
+        duration: onboardingMed.duration,
+        instructions: m.instructions || m.timing || row.notes || null,
+        notes: row.notes || null,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        foodFrequency: row.foodFrequency,
+        medicationSchedule: onboardingMed.medicationSchedule,
+        totalQuantity: row.totalQuantity,
+        unit: row.unit,
+        dailyConsumption: row.dailyConsumption,
+        prescribedBy: row.prescribedBy || null,
+        refillAlert: row.refillAlert || false,
+        selected: true,
+        isSaved: false,
+      };
+    });
 
     if (userId) {
       extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList);
@@ -533,6 +584,81 @@ async function executeAddDocumentAction({
     failed: failedCount,
     rejected: rejectedCount,
   };
+
+  const documentsBatchList = [];
+  const documentsStatusList = [];
+  let mainDocumentSummaryText = null;
+
+  if (docsList.length > 0) {
+    for (let i = 0; i < docsList.length; i++) {
+      const d = docsList[i];
+      if (!d) continue;
+      const struct = d.extractedStructuredData || d.structuredExtractedData || {};
+      const docSum =
+        struct.summary ||
+        struct.summaryInPreferredLanguage ||
+        d.summary ||
+        d.summaryEnglish ||
+        d.summaryGujarati ||
+        d.remarks ||
+        (d.error ? `Failed: ${d.error}` : null);
+
+      if (docSum && !mainDocumentSummaryText) {
+        mainDocumentSummaryText = docSum;
+      }
+
+      const st = String(d.ocrStatus || d.status || d.stageStatus || "COMPLETED").toUpperCase();
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: d.id || d.s3Key || null,
+        fileName: d.fileName || batchDocumentsName[i] || "document",
+        status: st,
+        ocrStatus: d.ocrStatus || d.status || "COMPLETED",
+        summary: docSum || null,
+        error: d.error || null,
+      });
+    }
+  } else if (jobsList.length > 0) {
+    for (let i = 0; i < jobsList.length; i++) {
+      const j = jobsList[i];
+      if (!j) continue;
+      const struct = j.extractedStructuredData || {};
+      const jobSum =
+        struct.summary || j.summary || j.remarks || (j.error ? `Failed: ${j.error}` : null);
+
+      if (jobSum && !mainDocumentSummaryText) {
+        mainDocumentSummaryText = jobSum;
+      }
+
+      const st = String(j.status || j.ocrStatus || j.stageStatus || "PENDING").toUpperCase();
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: j.jobId || j.s3Key || j.id || null,
+        fileName: j.fileName || batchDocumentsName[i] || "document",
+        status: st,
+        ocrStatus: j.ocrStatus || j.status || "PENDING",
+        summary: jobSum || null,
+        error: j.error || null,
+      });
+    }
+  } else if (filesList.length > 0) {
+    filesList.forEach((f, i) => {
+      const fn = f.fileName || batchDocumentsName[i] || "document";
+      const st = failedCount > 0 ? "FAILED" : "COMPLETED";
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: f.fileKey || null,
+        fileName: fn,
+        status: st,
+        ocrStatus: st,
+        summary: null,
+      });
+    });
+  }
+
+  const primaryDocumentStatus =
+    documentsStatusList[0] || (failedCount > 0 ? "FAILED" : "COMPLETED");
+
   if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
     const prefLang = preferredLanguage.toLowerCase();
     const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
@@ -555,7 +681,6 @@ async function executeAddDocumentAction({
       }
     }
   }
-
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,
@@ -572,21 +697,6 @@ async function executeAddDocumentAction({
     activeSessionId = newSession?.id || null;
   }
 
-  if (activeSessionId) {
-    await chatSessionRepository.appendMessage({
-      sessionId: activeSessionId,
-      userId,
-      role: "assistant",
-      content: replyText,
-      metadata: {
-        actionType: "ADD_DOCUMENT",
-        documentId: docResult?.document?.id,
-        documentSummary,
-        documentsName: batchDocumentsName,
-      },
-    });
-  }
-
   if (userId && !isOnboardingCompleted) {
     const createdDocId =
       docResult?.document?.id ||
@@ -601,6 +711,8 @@ async function executeAddDocumentAction({
             documentId: createdDocId,
             flowMode: "UPLOAD",
             documentUploaded: true,
+            uploadedMedicalDocument: true,
+            documentAttachedToChat: true,
             documentConfirmed: true,
           };
           await userOnboardingRepository.updateByUserId(userId, { data: updatedData });
@@ -635,11 +747,40 @@ async function executeAddDocumentAction({
         ]
       : [];
 
+  if (activeSessionId) {
+    await chatSessionRepository.appendMessage({
+      sessionId: activeSessionId,
+      userId,
+      role: "assistant",
+      content: replyText,
+      metadata: {
+        mode: "ACTION",
+        actionType: returnedActionType,
+        documentId: docResult?.document?.id,
+        document: docResult?.document,
+        documentSummary,
+        documentsName: batchDocumentsName,
+        documentsStatus: documentsStatusList,
+        documentStatus: primaryDocumentStatus,
+        summary: mainDocumentSummaryText || docResult?.document?.summary || null,
+        documents: documentsBatchList,
+        medicines: extractedMedicines,
+        suggestedAction,
+        options,
+      },
+    });
+  }
+
   return buildUnifiedResponse({
     mode: "ACTION",
     actionType: returnedActionType,
     reply: replyText,
     documentSummary,
+    documentsName: batchDocumentsName,
+    documentsStatus: documentsStatusList,
+    documentStatus: primaryDocumentStatus,
+    summary: mainDocumentSummaryText || docResult?.document?.summary || null,
+    documents: documentsBatchList,
     sessionId: activeSessionId,
     document: docResult.document,
     medicines: extractedMedicines,

@@ -184,7 +184,7 @@ function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options
     startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
     endDate: null,
     ongoing: options.ongoing !== undefined ? options.ongoing : false,
-    totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
+    totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 1,
     unit: unitDb,
     dailyConsumption,
     reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,

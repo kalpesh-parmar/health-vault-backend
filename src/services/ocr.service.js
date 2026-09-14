@@ -18,10 +18,14 @@ const {
   canSkipOnboarding,
   saveOnboardingState,
 } = require("./ai/chat/onboarding.service");
+const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardingStateMachine");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
-const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
+const {
+  normalizeCreateMedicationInput,
+  normalizeMedicine,
+} = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
 const { errorConstants } = require("../constants/errorConstants");
 const { inferFileType } = require("../helpers/document.helper");
@@ -37,6 +41,44 @@ const {
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
 const { and, eq, desc } = require("drizzle-orm");
+const medicationRepository = require("../repositories/medicationRepository");
+
+function isStepAlreadySatisfied(stepName, state) {
+  if (!stepName || !state) return false;
+  if (state.isOnboardingCompleted === true) return true;
+  if (stepName === "ASK_BLOOD_GROUP") {
+    return (
+      state.bloodGroupSkipped === true ||
+      (state.existingUserData?.bloodGroup !== undefined &&
+        state.existingUserData?.bloodGroup !== null &&
+        state.existingUserData?.bloodGroup !== "")
+    );
+  }
+  if (stepName === "ASK_ALLERGIES") {
+    return (
+      state.allergiesSkipped === true ||
+      (Array.isArray(state.existingUserData?.allergies) &&
+        state.existingUserData.allergies.length > 0)
+    );
+  }
+  if (
+    [
+      "ASK_FIRST_NAME",
+      "ASK_LAST_NAME",
+      "ASK_DOB",
+      "ASK_GENDER",
+      "RESOLVE_PROFILE_SOURCE",
+      "CONFIRM_DOCUMENT_OWNERSHIP",
+      "ASK_UPLOAD_OR_SKIP",
+    ].includes(stepName)
+  ) {
+    return state.profileConfirmed === true;
+  }
+  if (["MEDICINE_OPTIONS", "REVIEW_MEDICINES_LIST"].includes(stepName)) {
+    return state.medicationFlowDone === true;
+  }
+  return false;
+}
 
 class V1Service {
   async ocrExtract(userId, file) {
@@ -267,7 +309,51 @@ class V1Service {
               Object.entries(inputState).filter(([_, v]) => v !== null && v !== undefined),
             )
           : {};
-      const effectiveState = { ...(dbState || {}), ...cleanedInputState };
+
+      const authoritativeIsOnboardingCompleted =
+        dbState?.isOnboardingCompleted === true || cleanedInputState.isOnboardingCompleted === true;
+      const authoritativeHasSkipped =
+        dbState?.hasSkipped === true || cleanedInputState.hasSkipped === true;
+      const authoritativeMedicationFlowDone =
+        dbState?.medicationFlowDone === true || cleanedInputState.medicationFlowDone === true;
+      const authoritativeMedicinesConfirmed =
+        dbState?.medicinesConfirmed === true || cleanedInputState.medicinesConfirmed === true;
+      const authoritativeProfileConfirmed =
+        dbState?.profileConfirmed === true || cleanedInputState.profileConfirmed === true;
+      const authoritativeBloodGroupSkipped =
+        dbState?.bloodGroupSkipped === true || cleanedInputState.bloodGroupSkipped === true;
+      const authoritativeAllergiesSkipped =
+        dbState?.allergiesSkipped === true || cleanedInputState.allergiesSkipped === true;
+      const authoritativeCompletionMessageSent =
+        dbState?.completionMessageSent === true || cleanedInputState.completionMessageSent === true;
+      const authoritativeCompletionMessageId =
+        dbState?.completionMessageId || cleanedInputState.completionMessageId || null;
+
+      let authoritativeStep = dbState?.currentStep || cleanedInputState.currentStep || null;
+      if (cleanedInputState.currentStep && dbState?.currentStep) {
+        if (isStepAlreadySatisfied(cleanedInputState.currentStep, dbState)) {
+          authoritativeStep = dbState.currentStep;
+        } else {
+          authoritativeStep = cleanedInputState.currentStep;
+        }
+      }
+
+      const effectiveState = {
+        ...(dbState || {}),
+        ...cleanedInputState,
+        isOnboardingCompleted: authoritativeIsOnboardingCompleted,
+        hasSkipped: authoritativeHasSkipped,
+        medicationFlowDone: authoritativeMedicationFlowDone,
+        medicinesConfirmed: authoritativeMedicinesConfirmed,
+        profileConfirmed: authoritativeProfileConfirmed,
+        bloodGroupSkipped: authoritativeBloodGroupSkipped,
+        allergiesSkipped: authoritativeAllergiesSkipped,
+        completionMessageSent: authoritativeCompletionMessageSent,
+        ...(authoritativeCompletionMessageId
+          ? { completionMessageId: authoritativeCompletionMessageId }
+          : {}),
+        ...(authoritativeStep ? { currentStep: authoritativeStep } : {}),
+      };
 
       let isMedicineSelectionMsg = false;
       if (message) {
@@ -452,13 +538,14 @@ class V1Service {
           }
         }
 
-        // Post-onboarding fallback: if confirming post-onboarding document medications and medsToProcess is still empty
+        // Post-onboarding fallback: if reviewing or confirming post-onboarding document medications and medsToProcess is still empty
         if (
           !isActiveOnboardingStep &&
           (!medsToProcess || medsToProcess.length === 0) &&
           userId &&
           (actionType === "CONFIRM_MEDICINES" ||
             actionType === "REVIEW_MEDICINES_LIST" ||
+            actionType === "SHOW_EXTRACTED_MEDICINES" ||
             String(message || "").toUpperCase() === "CONFIRM" ||
             String(message || "").toUpperCase() === "CONFIRM_SELECTED")
         ) {
@@ -474,18 +561,36 @@ class V1Service {
               const struct = latestDoc.structuredExtractedData;
               const extracted = struct.medications || struct.structuredData?.medications || [];
               if (Array.isArray(extracted) && extracted.length > 0) {
-                medsToProcess = extracted.map((m, idx) => ({
-                  id: m.id || m.client_med_id || `doc_med_${idx}`,
-                  name: m.name || m.medicationName || "Medical Document Medicine",
-                  medicationName: m.name || m.medicationName || "Medical Document Medicine",
-                  medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-                  type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-                  dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
-                  frequency: m.frequency || "ONCE",
-                  duration: m.duration || null,
-                  instructions: m.instructions || m.timing || null,
-                  selected: true,
-                }));
+                const todayStr = new Date().toISOString().slice(0, 10);
+                medsToProcess = extracted.map((m, idx) => {
+                  const { row, onboardingMed } = normalizeMedicine(m, idx, "P-TEMP", {
+                    startDate: todayStr,
+                  });
+                  return {
+                    id: m.id || m.client_med_id || onboardingMed.id,
+                    client_med_id: m.client_med_id || onboardingMed.client_med_id,
+                    name: onboardingMed.name,
+                    medicationName: onboardingMed.name,
+                    medicationType: onboardingMed.type,
+                    type: onboardingMed.type,
+                    dosePerIntake: row.dosePerIntake || 1,
+                    frequency: onboardingMed.frequency,
+                    duration: onboardingMed.duration,
+                    instructions: m.instructions || m.timing || row.notes || null,
+                    notes: row.notes || null,
+                    startDate: row.startDate,
+                    endDate: row.endDate,
+                    foodFrequency: row.foodFrequency,
+                    medicationSchedule: onboardingMed.medicationSchedule,
+                    totalQuantity: row.totalQuantity,
+                    unit: row.unit,
+                    dailyConsumption: row.dailyConsumption,
+                    prescribedBy: row.prescribedBy || null,
+                    refillAlert: row.refillAlert || false,
+                    selected: true,
+                    isSaved: false,
+                  };
+                });
               }
             }
           } catch (docLookupErr) {
@@ -496,6 +601,56 @@ class V1Service {
           }
         }
 
+        // Handle REVIEW_MEDICINES_LIST / SHOW_EXTRACTED_MEDICINES post-onboarding: duplicate check & return review list
+        if (
+          !isActiveOnboardingStep &&
+          (actionType === "REVIEW_MEDICINES_LIST" || actionType === "SHOW_EXTRACTED_MEDICINES") &&
+          Array.isArray(medsToProcess) &&
+          medsToProcess.length > 0
+        ) {
+          const checkedMeds = await medicationService.checkDuplicateMedicationsBatch(
+            userId,
+            medsToProcess,
+          );
+          const replyText = `We found ${checkedMeds.length} medication${checkedMeds.length === 1 ? "" : "s"} for your review.`;
+
+          let activeSessionId = sessionId;
+          if (!activeSessionId && isOnboardingCompleted) {
+            const newSession = await chatService.createSession({
+              userId,
+              title: "Medication Chat",
+            });
+            activeSessionId = newSession?.id || null;
+          }
+
+          if (activeSessionId) {
+            await chatSessionRepository.appendMessage({
+              sessionId: activeSessionId,
+              userId,
+              role: "assistant",
+              content: replyText,
+              metadata: {
+                mode: "ACTION",
+                actionType: "REVIEW_MEDICINES_LIST",
+                medicines: checkedMeds,
+              },
+            });
+          }
+
+          return buildUnifiedResponse({
+            mode: "ACTION",
+            actionType: "REVIEW_MEDICINES_LIST",
+            reply: replyText,
+            sessionId: activeSessionId,
+            medicines: checkedMeds,
+            options: [
+              { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+              { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+              { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+            ],
+          });
+        }
+
         if (!isActiveOnboardingStep && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
           for (const rawMedData of medsToProcess) {
             let medData =
@@ -503,19 +658,36 @@ class V1Service {
                 ? { ...rawMedData }
                 : { id: rawMedData, selected: true };
 
-            if (
-              medData.selected === false ||
-              medData.resolution === "KEEP_EXISTING" ||
-              medData.resolution === "REMOVE_NEW"
-            ) {
+            if (medData.selected === false || medData.resolution === "REMOVE_NEW") {
               continue;
             }
 
-            if (
-              medData.resolution === "REPLACE" &&
-              (medData.replaceMedicationId || medData.targetMedicationId)
-            ) {
-              const targetId = medData.replaceMedicationId || medData.targetMedicationId;
+            if (medData.resolution === "KEEP_EXISTING") {
+              const matchedId =
+                medData.replaceMedicationId ||
+                medData.targetMedicationId ||
+                medData.duplicateInfo?.matchedMedication?.id ||
+                medData.matchedMedicationId;
+              if (matchedId) {
+                try {
+                  const existingMed = await medicationRepository.findById(matchedId);
+                  if (existingMed) {
+                    createdMeds.push(existingMed);
+                  }
+                } catch (kErr) {
+                  console.warn("[UnifiedChat] KEEP_EXISTING lookup warning:", kErr.message);
+                }
+              }
+              continue;
+            }
+
+            const targetId =
+              medData.replaceMedicationId ||
+              medData.targetMedicationId ||
+              medData.duplicateInfo?.matchedMedication?.id ||
+              medData.matchedMedicationId;
+
+            if (medData.resolution === "REPLACE" && targetId) {
               try {
                 await medicationService.deleteMedication(targetId, userId);
               } catch (delErr) {
@@ -528,48 +700,200 @@ class V1Service {
 
             if (!medData.name && !medData.medicationName && userId) {
               try {
-                const [latestDoc] = await db
-                  .select()
-                  .from(document)
-                  .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
-                  .orderBy(desc(document.createdAt))
-                  .limit(1);
+                const matchId =
+                  typeof rawMedData === "string" ? rawMedData : medData.id || medData.client_med_id;
 
-                if (latestDoc && latestDoc.structuredExtractedData) {
-                  const struct = latestDoc.structuredExtractedData;
-                  const docMeds = struct.medications || struct.structuredData?.medications || [];
-                  const matchId =
-                    typeof rawMedData === "string"
-                      ? rawMedData
-                      : medData.id || medData.client_med_id;
-                  const foundInDoc = docMeds.find(
-                    (m, idx) =>
-                      m.id === matchId ||
-                      m.client_med_id === matchId ||
-                      `extracted_med_${idx + 1}` === matchId ||
-                      `doc_med_${idx}` === matchId,
-                  );
-
-                  if (foundInDoc) {
-                    medData = {
-                      ...foundInDoc,
-                      ...medData,
-                      name:
-                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
-                      medicationName:
-                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
-                      medicationType: String(
-                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
-                      ).toUpperCase(),
-                      type: String(
-                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
-                      ).toUpperCase(),
-                      dosePerIntake: foundInDoc.dosage ? parseFloat(foundInDoc.dosage) || 1 : 1,
-                      frequency: foundInDoc.frequency || "ONCE",
-                      duration: foundInDoc.duration || null,
-                      instructions: foundInDoc.instructions || foundInDoc.timing || null,
+                const parseMedicineMatchId = (matchIdStr) => {
+                  if (!matchIdStr || typeof matchIdStr !== "string") return null;
+                  const compoundRegex =
+                    /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-med-(\d+)-(.*)$/i;
+                  const match = matchIdStr.trim().match(compoundRegex);
+                  if (match) {
+                    const rawName = match[3]
+                      .replace(/([a-z])([A-Z])/g, "$1 $2")
+                      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+                      .trim();
+                    return {
+                      documentId: match[1],
+                      index: parseInt(match[2], 10),
+                      name: rawName,
                     };
                   }
+                  return null;
+                };
+
+                const parsedCompound = parseMedicineMatchId(matchId);
+
+                let foundInDoc = null;
+                const candidateSources = [
+                  effectiveState?.foundMedicines,
+                  effectiveState?.medicinesToAdd,
+                  effectiveState?.medicines,
+                  actionData?.foundMedicines,
+                  actionData?.medicinesList,
+                  body?.state?.foundMedicines,
+                  body?.state?.medicinesToAdd,
+                ].filter((arr) => Array.isArray(arr) && arr.length > 0);
+
+                const findMedicineByMatchId = (medsArray, matchIdVal) => {
+                  if (!Array.isArray(medsArray) || medsArray.length === 0 || !matchIdVal)
+                    return null;
+                  const matchStr = String(matchIdVal).trim();
+                  const compound = parseMedicineMatchId(matchStr);
+
+                  if (compound && compound.index >= 0 && compound.index < medsArray.length) {
+                    return medsArray[compound.index];
+                  }
+
+                  const directMatch = medsArray.find(
+                    (m, idx) =>
+                      m &&
+                      (String(m.id || "") === matchStr ||
+                        String(m.client_med_id || "") === matchStr ||
+                        String(m.clientMedId || "") === matchStr ||
+                        `extracted_med_${idx + 1}` === matchStr ||
+                        `doc_med_${idx + 1}` === matchStr ||
+                        `extracted_med_${idx}` === matchStr ||
+                        `doc_med_${idx}` === matchStr),
+                  );
+                  if (directMatch) return directMatch;
+
+                  if (compound && compound.name) {
+                    const cleanCompName = compound.name.toLowerCase().replace(/\s+/g, "");
+                    const nameMatch = medsArray.find(
+                      (m) =>
+                        m &&
+                        (m.name || m.medicationName) &&
+                        String(m.name || m.medicationName)
+                          .toLowerCase()
+                          .replace(/\s+/g, "") === cleanCompName,
+                    );
+                    if (nameMatch) return nameMatch;
+                  }
+
+                  const numMatch = matchStr.match(/(?:extracted_med_|doc_med_)?(\d+)/i);
+                  if (numMatch) {
+                    const parsedNum = parseInt(numMatch[1], 10);
+                    if (!isNaN(parsedNum)) {
+                      if (parsedNum >= 1 && parsedNum <= medsArray.length) {
+                        return medsArray[parsedNum - 1];
+                      }
+                      if (parsedNum >= 0 && parsedNum < medsArray.length) {
+                        return medsArray[parsedNum];
+                      }
+                    }
+                  }
+                  return null;
+                };
+
+                for (const sourceArr of candidateSources) {
+                  foundInDoc = findMedicineByMatchId(sourceArr, matchId);
+                  if (foundInDoc) break;
+                }
+
+                if (!foundInDoc) {
+                  const targetDocId =
+                    parsedCompound?.documentId ||
+                    (Array.isArray(body?.documentId) ? body.documentId[0] : body?.documentId) ||
+                    (Array.isArray(actionData?.documentId)
+                      ? actionData.documentId[0]
+                      : actionData?.documentId) ||
+                    effectiveState?.documentId;
+
+                  const UUID_REGEX =
+                    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+                  let docRecord = null;
+                  if (
+                    targetDocId &&
+                    UUID_REGEX.test(String(targetDocId)) &&
+                    userId &&
+                    UUID_REGEX.test(String(userId))
+                  ) {
+                    const [matchedDoc] = await db
+                      .select()
+                      .from(document)
+                      .where(
+                        and(eq(document.id, targetDocId), eq(document.userId, String(userId))),
+                      );
+                    docRecord = matchedDoc;
+                  }
+
+                  if (!docRecord && userId && UUID_REGEX.test(String(userId))) {
+                    const [latestDoc] = await db
+                      .select()
+                      .from(document)
+                      .where(
+                        and(
+                          eq(document.userId, String(userId)),
+                          eq(document.ocrStatus, "completed"),
+                        ),
+                      )
+                      .orderBy(desc(document.createdAt))
+                      .limit(1);
+                    docRecord = latestDoc;
+                  }
+
+                  if (docRecord && docRecord.structuredExtractedData) {
+                    const struct = docRecord.structuredExtractedData;
+                    const docMeds = struct.medications || struct.structuredData?.medications || [];
+                    foundInDoc = findMedicineByMatchId(docMeds, matchId);
+                  }
+                }
+
+                if (foundInDoc) {
+                  const normDocMed = normalizeMedicine(foundInDoc, 0);
+                  medData = {
+                    ...normDocMed.row,
+                    ...foundInDoc,
+                    ...medData,
+                    name:
+                      medData.name ||
+                      medData.medicationName ||
+                      foundInDoc.name ||
+                      foundInDoc.medicationName ||
+                      parsedCompound?.name ||
+                      "Medical Document Medicine",
+                    medicationName:
+                      medData.name ||
+                      medData.medicationName ||
+                      foundInDoc.name ||
+                      foundInDoc.medicationName ||
+                      parsedCompound?.name ||
+                      "Medical Document Medicine",
+                    medicationType: String(
+                      medData.type ||
+                        medData.medicationType ||
+                        foundInDoc.type ||
+                        foundInDoc.medicationType ||
+                        "TABLET",
+                    ).toUpperCase(),
+                    type: String(
+                      medData.type ||
+                        medData.medicationType ||
+                        foundInDoc.type ||
+                        foundInDoc.medicationType ||
+                        "TABLET",
+                    ).toUpperCase(),
+                    dosePerIntake:
+                      medData.dosePerIntake ||
+                      (foundInDoc.dosage ? parseFloat(foundInDoc.dosage) || 1 : 1),
+                    frequency: medData.frequency || foundInDoc.frequency || "ONCE",
+                    duration: medData.duration || foundInDoc.duration || null,
+                    instructions:
+                      medData.instructions ||
+                      medData.notes ||
+                      foundInDoc.instructions ||
+                      foundInDoc.timing ||
+                      null,
+                    startDate:
+                      medData.startDate ||
+                      foundInDoc.startDate ||
+                      new Date().toISOString().split("T")[0],
+                  };
+                } else if (parsedCompound && parsedCompound.name) {
+                  medData.name = parsedCompound.name;
+                  medData.medicationName = parsedCompound.name;
                 }
               } catch (lookupErr) {
                 console.warn("[UnifiedChat] Document lookup for med ID failed:", lookupErr.message);
@@ -581,8 +905,10 @@ class V1Service {
               if (matchIdStr.startsWith("extracted_med_") || matchIdStr.startsWith("doc_med_")) {
                 medData.name = "Medical Document Medicine";
                 medData.medicationName = "Medical Document Medicine";
+              } else if (matchIdStr.trim().length > 0) {
+                medData.name = matchIdStr.replace(/[{}[\]"]/g, "").trim();
+                medData.medicationName = medData.name;
               } else {
-                // Skip raw database UUIDs or unrecognized string IDs lacking a medication name
                 continue;
               }
             }
@@ -650,6 +976,13 @@ class V1Service {
           if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicationFlowDone = true;
+          } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
+            stateToUpdate.currentStep = "ADD_MEDICINE";
+          } else if (
+            effectiveState.currentStep &&
+            effectiveState.currentStep !== "MEDICINE_OPTIONS"
+          ) {
+            stateToUpdate.currentStep = effectiveState.currentStep;
           } else {
             stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           }
@@ -671,6 +1004,11 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
           });
+          if (onboardingResult?.completionMessage) {
+            responsePayload.completionMessage = onboardingResult.completionMessage;
+            responsePayload.completionMessageId = onboardingResult.completionMessageId;
+            responsePayload.completionAction = onboardingResult.completionAction;
+          }
           responsePayload.canSkip =
             onboardingResult?.canSkip !== undefined
               ? onboardingResult.canSkip
@@ -782,14 +1120,14 @@ class V1Service {
           state = dbState;
         } else {
           const incomingStateCleaned = Object.fromEntries(
-            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined),
+            Object.entries(state).filter(([_, v]) => v !== null && v !== undefined && v !== ""),
           );
 
           const dbExistingUserData = dbState?.existingUserData || {};
           const incomingExistingUserData = incomingStateCleaned.existingUserData || {};
           const incomingUserDataCleaned = Object.fromEntries(
             Object.entries(incomingExistingUserData).filter(
-              ([_, v]) => v !== null && v !== undefined,
+              ([_, v]) => v !== null && v !== undefined && v !== "",
             ),
           );
 
@@ -814,20 +1152,72 @@ class V1Service {
             incomingStateCleaned.useDocumentData === true ||
             (documentConfirmed && dbState?.useDocumentData !== false);
 
-          const mergedUserData = {
-            ...dbExistingUserData,
-            ...incomingUserDataCleaned,
-            bloodGroup: incomingUserDataCleaned.bloodGroup || dbExistingUserData.bloodGroup || null,
-            allergies:
-              Array.isArray(incomingUserDataCleaned.allergies) &&
-              incomingUserDataCleaned.allergies.length > 0
-                ? incomingUserDataCleaned.allergies
-                : dbExistingUserData.allergies || [],
-          };
+          const isProfileConfirmedInDb =
+            dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
+
+          const mergedUserData =
+            isProfileConfirmedInDb && !incomingStateCleaned.edited
+              ? {
+                  ...incomingUserDataCleaned,
+                  ...dbExistingUserData,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                }
+              : {
+                  ...dbExistingUserData,
+                  ...incomingUserDataCleaned,
+                  ...(incomingUserDataCleaned.bloodGroup
+                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+                    : {}),
+                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+                  incomingUserDataCleaned.allergies.length > 0
+                    ? { allergies: incomingUserDataCleaned.allergies }
+                    : {}),
+                };
+
+          const case3AuthoritativeIsOnboardingCompleted =
+            dbState?.isOnboardingCompleted === true ||
+            incomingStateCleaned.isOnboardingCompleted === true;
+          const case3AuthoritativeHasSkipped =
+            dbState?.hasSkipped === true || incomingStateCleaned.hasSkipped === true;
+          const case3AuthoritativeMedicationFlowDone =
+            dbState?.medicationFlowDone === true ||
+            incomingStateCleaned.medicationFlowDone === true;
+          const case3AuthoritativeMedicinesConfirmed =
+            dbState?.medicinesConfirmed === true ||
+            incomingStateCleaned.medicinesConfirmed === true;
+          const case3AuthoritativeCompletionMessageSent =
+            dbState?.completionMessageSent === true ||
+            incomingStateCleaned.completionMessageSent === true;
+          const case3AuthoritativeCompletionMessageId =
+            dbState?.completionMessageId || incomingStateCleaned.completionMessageId || null;
+
+          let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
+          if (incomingStateCleaned.currentStep && dbState?.currentStep) {
+            if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
+              case3AuthoritativeStep = dbState.currentStep;
+            } else {
+              case3AuthoritativeStep = incomingStateCleaned.currentStep;
+            }
+          }
 
           state = {
             ...dbState,
             ...incomingStateCleaned,
+            currentStep: case3AuthoritativeStep,
+            isOnboardingCompleted: case3AuthoritativeIsOnboardingCompleted,
+            hasSkipped: case3AuthoritativeHasSkipped,
+            medicationFlowDone: case3AuthoritativeMedicationFlowDone,
+            medicinesConfirmed: case3AuthoritativeMedicinesConfirmed,
+            completionMessageSent: case3AuthoritativeCompletionMessageSent,
+            ...(case3AuthoritativeCompletionMessageId
+              ? { completionMessageId: case3AuthoritativeCompletionMessageId }
+              : {}),
             bloodGroupSkipped,
             allergiesSkipped,
             ...(documentConfirmed !== undefined && documentConfirmed !== null
@@ -846,9 +1236,14 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+
+          // Generic forward transition: If currentStep is already satisfied in the authoritative state, advance to next step
+          if (isStepAlreadySatisfied(state.currentStep, state)) {
+            state.currentStep = getNextRequiredOrOptionalStep(state);
+          }
         }
 
-        if (hasUnansweredOptional && actionType !== "SKIP_ONBOARDING") {
+        if (hasUnansweredOptional && !state.currentStep && actionType !== "SKIP_ONBOARDING") {
           state.currentStep = null;
         }
 
@@ -909,8 +1304,11 @@ class V1Service {
           medicines: onboardingResult?.medicines || [],
           document: onboardingResult?.document || null,
         });
+        responsePayload.state = onboardingResult?.state || state;
         if (onboardingResult?.completionMessage) {
           responsePayload.completionMessage = onboardingResult.completionMessage;
+          responsePayload.completionMessageId = onboardingResult.completionMessageId;
+          responsePayload.completionAction = onboardingResult.completionAction;
         }
         responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
         responsePayload.canSkip =
@@ -1081,6 +1479,7 @@ class V1Service {
       documentsName,
       documentSummary,
       currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
+      canSkip: resumableState ? canSkipOnboarding(resumableState) : false,
       resumableState,
     };
   }
