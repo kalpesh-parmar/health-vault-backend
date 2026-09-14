@@ -523,7 +523,71 @@ ${chunksContent}`;
         prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
         prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
       systemPrompt += `\n\n${instructionContent}`;
-      const formattedMessages = [{ role: "system", content: systemPrompt }, ...messages];
+
+      // eslint-disable-next-line no-console
+      console.log("========== RAG DEBUG START ==========");
+      // eslint-disable-next-line no-console
+      console.log("userQuery:", userQuery);
+      // eslint-disable-next-line no-console
+      console.log("contextChunks.length:", contextChunks ? contextChunks.length : 0);
+      // eslint-disable-next-line no-console
+      console.log("unique document count:", uniqueDocsCount);
+      // eslint-disable-next-line no-console
+      console.log("contextText.length:", contextText ? contextText.length : 0);
+      // eslint-disable-next-line no-console
+      console.log("systemPrompt.length:", systemPrompt ? systemPrompt.length : 0);
+      // eslint-disable-next-line no-console
+      console.log("messages.length:", messages ? messages.length : 0);
+      if (Array.isArray(messages)) {
+        messages.forEach((msg, idx) => {
+          // eslint-disable-next-line no-console
+          console.log(
+            `Incoming Message [${idx}] - Role: ${msg.role}, Length: ${msg.content ? msg.content.length : 0}`,
+          );
+          // eslint-disable-next-line no-console
+          console.log(`Incoming Message [${idx}] Content:\n${msg.content}`);
+        });
+      }
+      // eslint-disable-next-line no-console
+      console.log("========== RAG DEBUG END ==========");
+
+      const formattedMessages =
+        Array.isArray(messages) && messages.length > 0
+          ? [{ role: "system", content: systemPrompt }, ...messages]
+          : [
+              {
+                role: "system",
+                content: systemPrompt,
+              },
+              {
+                role: "user",
+                content: userQuery,
+              },
+            ];
+
+      const totalPromptCharCount = formattedMessages.reduce(
+        (sum, m) => sum + (m.content ? m.content.length : 0),
+        0,
+      );
+
+      // eslint-disable-next-line no-console
+      console.log("========== OLLAMA REQUEST DEBUG ==========");
+      // eslint-disable-next-line no-console
+      console.log("Model:", env.chatModel);
+      // eslint-disable-next-line no-console
+      console.log("Number of messages:", formattedMessages.length);
+      formattedMessages.forEach((m, idx) => {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Message [${idx}] Index: ${idx}, Role: ${m.role}, Length: ${m.content ? m.content.length : 0}`,
+        );
+      });
+      // eslint-disable-next-line no-console
+      console.log("Total prompt character count:", totalPromptCharCount);
+      // eslint-disable-next-line no-console
+      console.log("Full messages payload:", JSON.stringify(formattedMessages, null, 2));
+      // eslint-disable-next-line no-console
+      console.log("========== OLLAMA REQUEST END ==========");
 
       // eslint-disable-next-line no-console
       console.log(
@@ -531,14 +595,15 @@ ${chunksContent}`;
       );
 
       let answer = "";
+      let resObj = null;
       if (onChunk) {
-        //streming mode
-        await ollamaClient.chatStream(
+        // streaming mode
+        resObj = await ollamaClient.chatStream(
           formattedMessages,
           env.chatModel,
           (chunk) => {
-            answer += chunk; //save in local variable for final return
-            onChunk(chunk); //pass to frontend for streaming
+            answer += chunk; // save in local variable for final return
+            onChunk(chunk); // pass to frontend for streaming
           },
           {
             temperature: 0.2,
@@ -557,6 +622,21 @@ ${chunksContent}`;
           signal: abortSignal,
         });
       }
+
+      // eslint-disable-next-line no-console
+      console.log("========== OLLAMA RESPONSE DEBUG ==========");
+      // eslint-disable-next-line no-console
+      console.log("Response model:", resObj?.model || env.chatModel);
+      // eslint-disable-next-line no-console
+      console.log("Generated answer:", answer);
+      // eslint-disable-next-line no-console
+      console.log("prompt_eval_count:", resObj?.prompt_eval_count ?? "N/A");
+      // eslint-disable-next-line no-console
+      console.log("eval_count:", resObj?.eval_count ?? "N/A");
+      // eslint-disable-next-line no-console
+      console.log("done:", resObj?.done ?? true);
+      // eslint-disable-next-line no-console
+      console.log("========== OLLAMA RESPONSE END ==========");
       return {
         answer,
         mode,
@@ -1040,22 +1120,7 @@ ${chunksContent}`;
       const intentStartTime = Date.now();
 
       const lowerQuestion = retrievalQuery.toLowerCase();
-      const compareKeywords = [
-        "all",
-        "compare",
-        "trends",
-        "both",
-        "multiple",
-        "every",
-        "which",
-        "highest",
-        "lowest",
-        "across",
-        "સરખામણી",
-        "તુલના",
-        "तुलना",
-        "ஒப்பிடுக",
-      ];
+
       const documentKeywords = [
         "report",
         "lab",
@@ -1087,44 +1152,106 @@ ${chunksContent}`;
         "विस्तार",
       ];
 
-      const hasCompare = compareKeywords.some((kw) => lowerQuestion.includes(kw));
+      const explicitCompareKeywords = [
+        "compare",
+        "comparison",
+        "contrast",
+        "difference",
+        "differences",
+        "versus",
+        "vs",
+        "changed",
+        "trend",
+        "trends",
+        "between",
+        "than",
+        "highest",
+        "lowest",
+        "across",
+        "સરખામણી",
+        "તુલના",
+        "तुलना",
+        "ஒப்பிடுக",
+      ];
+      const compareKeywords = explicitCompareKeywords;
+      const summaryKeywords = [
+        "summary",
+        "summaries",
+        "summarize",
+        "overview",
+        "brief",
+        "outline",
+        "સારાંશ",
+        "सारांश",
+      ];
+      const allScopeKeywords = [
+        "all",
+        "reports",
+        "every",
+        "multiple",
+        "both",
+        "documents",
+        "અહેવાલો",
+        "રિપોર્ટ્સ",
+        "रिपोर्ट्स",
+      ];
+
+      const hasExplicitCompare = explicitCompareKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasSummary = summaryKeywords.some((kw) => lowerQuestion.includes(kw));
+      const hasAllScope = allScopeKeywords.some((kw) => lowerQuestion.includes(kw));
       const hasDocument = documentKeywords.some((kw) => lowerQuestion.includes(kw));
       const hasFullDoc = fullDocKeywords.some((kw) => lowerQuestion.includes(kw));
+
+      let intentReason = "DEFAULT";
 
       if (documentId && documentId.length > 0) {
         intent = documentId.length > 1 ? "COMPARE" : "DOCUMENT";
         documentScope = documentId.length > 1 ? "SELECTED_MULTI_DOCUMENT" : "SINGLE_DOCUMENT";
+        intentReason =
+          documentId.length > 1 ? "EXPLICIT_DOCUMENT_IDS_MULTI" : "EXPLICIT_DOCUMENT_ID_SINGLE";
         if (hasFullDoc) documentScope = "FULL_DOCUMENT";
       } else {
-        if (hasCompare && hasDocument) {
+        // High-priority rule: ALL-DOCUMENTS summary/overview query without explicit compare intent
+        if (hasSummary && (hasAllScope || hasDocument) && !hasExplicitCompare) {
+          intent = "DOCUMENT";
+          documentScope = "ALL_DOCUMENTS";
+          intentReason = "ALL_DOCUMENTS_SUMMARY_OVERVIEW";
+        } else if (hasExplicitCompare && (hasDocument || hasAllScope)) {
           intent = "COMPARE";
           documentScope = "ALL_DOCUMENTS";
-        } else if (hasCompare && lowerQuestion.includes("report")) {
+          intentReason = "EXPLICIT_COMPARE_QUERY";
+        } else if (hasExplicitCompare) {
           intent = "COMPARE";
           documentScope = "ALL_DOCUMENTS";
-        } else if (hasCompare) {
-          intent = "COMPARE";
+          intentReason = "EXPLICIT_COMPARE_KEYWORD";
+        } else if (hasDocument || hasAllScope) {
+          intent = "DOCUMENT";
           documentScope = "ALL_DOCUMENTS";
-        } else if (hasDocument) {
-          if (lowerQuestion.includes("reports")) {
-            intent = "COMPARE";
-            documentScope = "ALL_DOCUMENTS";
-          } else {
-            intent = "DOCUMENT";
-            documentScope = "ALL_DOCUMENTS"; // Needs resolution to pick latest
-          }
+          intentReason = "DOCUMENT_QUERY";
         } else {
           intent = "GENERAL";
           documentScope = "NONE";
+          intentReason = "GENERAL_HEALTH_QUERY";
         }
+
         if (hasFullDoc && intent !== "GENERAL") {
           documentScope = "FULL_DOCUMENT";
         }
       }
 
       debugLogger.info(
-        `sendMessage: [PERFORMANCE] Intent Analyzer took ${Date.now() - intentStartTime}ms`,
-        { intent, documentScope, detectedLanguage },
+        `sendMessage: [INTENT ANALYZER] ${JSON.stringify({
+          query: retrievalQuery,
+          intent,
+          documentScope,
+          reason: intentReason,
+          detectedLanguage,
+          durationMs: Date.now() - intentStartTime,
+        })}`,
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        `[IntentAnalyzer] Query: "${retrievalQuery}" | Intent: ${intent} | documentScope: ${documentScope} | Reason: ${intentReason}`,
       );
 
       let finalDocumentIds = [];
@@ -1475,7 +1602,7 @@ ${chunksContent}`;
                         });
                         return { dId, entity: null, chunks, success: true };
                       } catch (err) {
-                        console.log("err", err);
+                        debugLogger.error("Failed to fetch document chunks:", err);
                         return { dId, entity: null, chunks: [], success: false };
                       }
                     })(),
@@ -1588,7 +1715,7 @@ ${chunksContent}`;
                 }
               }
 
-              // Pass 2: Fill remaining up to MAX_CONTEXT_CHUNKS (25)
+              // Pass 2: Fill remaining up to MAX_CONTEXT_CHUNKS (12 for optimal LLM context window)
               const MAX_CONTEXT_CHUNKS = 25;
               for (const c of filteredChunks) {
                 if (finalSelection.length >= MAX_CONTEXT_CHUNKS) break;
