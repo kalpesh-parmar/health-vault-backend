@@ -80,6 +80,27 @@ function normalizeLanguage(lang) {
   return "english";
 }
 
+function stripReasoningTags(text) {
+  if (!text || typeof text !== "string") return "";
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+function isValidClinicalSummary(text, _patientName) {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+  if (clean.length < 5) return false;
+  const lower = clean.toLowerCase();
+  if (
+    lower.includes("unable to generate") ||
+    lower.includes("not available") ||
+    lower.includes("no medical summary") ||
+    lower.includes("error processing")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -88,4 +109,6 @@ module.exports = {
   parseDurationToDate,
   sanitizePatient,
   normalizeLanguage,
+  stripReasoningTags,
+  isValidClinicalSummary,
 };

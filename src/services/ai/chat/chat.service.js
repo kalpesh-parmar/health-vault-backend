@@ -368,7 +368,11 @@ ${chunksContent}`;
             temperature: 0.2,
             maxTokens: 4096,
             think: false,
-            rawOptions: { num_ctx: env.ollamaNumCtx },
+            rawOptions: {
+              num_ctx: env.ollamaNumCtx,
+              repeat_penalty: 1.2,
+              repeat_last_n: 64,
+            },
             signal: abortSignal,
           },
         );
@@ -377,7 +381,11 @@ ${chunksContent}`;
           temperature: 0.2,
           maxTokens: 4096,
           think: false,
-          rawOptions: { num_ctx: env.ollamaNumCtx },
+          rawOptions: {
+            num_ctx: env.ollamaNumCtx,
+            repeat_penalty: 1.2,
+            repeat_last_n: 64,
+          },
           signal: abortSignal,
         });
       }
@@ -418,7 +426,11 @@ ${chunksContent}`;
           temperature: 0.2,
           maxTokens: 4096,
           think: false,
-          rawOptions: { num_ctx: env.ollamaNumCtx },
+          rawOptions: {
+            num_ctx: env.ollamaNumCtx,
+            repeat_penalty: 1.2,
+            repeat_last_n: 64,
+          },
           signal: abortSignal,
         },
       );
@@ -427,7 +439,11 @@ ${chunksContent}`;
         temperature: 0.2,
         maxTokens: 4096,
         think: false,
-        rawOptions: { num_ctx: env.ollamaNumCtx },
+        rawOptions: {
+          num_ctx: env.ollamaNumCtx,
+          repeat_penalty: 1.2,
+          repeat_last_n: 64,
+        },
         signal: abortSignal,
       });
     }
