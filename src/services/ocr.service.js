@@ -45,7 +45,10 @@ const medicationRepository = require("../repositories/medicationRepository");
 
 function isStepAlreadySatisfied(stepName, state) {
   if (!stepName || !state) return false;
-  if (state.isOnboardingCompleted === true) return true;
+  if (["MEDICINE_OPTIONS", "REVIEW_MEDICINES_LIST"].includes(stepName)) {
+    return state.medicationFlowDone === true;
+  }
+  if (state.isOnboardingCompleted === true && state.medicationFlowDone === true) return true;
   if (stepName === "ASK_BLOOD_GROUP") {
     return (
       state.bloodGroupSkipped === true ||
@@ -73,9 +76,6 @@ function isStepAlreadySatisfied(stepName, state) {
     ].includes(stepName)
   ) {
     return state.profileConfirmed === true;
-  }
-  if (["MEDICINE_OPTIONS", "REVIEW_MEDICINES_LIST"].includes(stepName)) {
-    return state.medicationFlowDone === true;
   }
   return false;
 }
@@ -970,12 +970,14 @@ class V1Service {
             }
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicinesSavedToDb = true;
-            stateToUpdate.medicationFlowDone = true;
+            stateToUpdate.medicationFlowDone = false;
+            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           }
 
           if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
             stateToUpdate.medicinesConfirmed = true;
-            stateToUpdate.medicationFlowDone = true;
+            stateToUpdate.medicationFlowDone = false;
+            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
           } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
             stateToUpdate.currentStep = "ADD_MEDICINE";
           } else if (
@@ -1081,10 +1083,10 @@ class V1Service {
           ((!allergies || allergies.length === 0) && !allergiesSkipped));
 
       const isMedicationFlowPending =
-        !isOnboardingCompleted &&
         dbState?.medicationFlowDone !== true &&
         inputState?.medicationFlowDone !== true &&
-        effectiveState?.medicationFlowDone !== true;
+        effectiveState?.medicationFlowDone !== true &&
+        effectiveState?.currentStep !== "MEDICINE_OPTIONS";
 
       const isForcedOnboardingAction =
         message === "ASK_REPORT" ||
@@ -1152,33 +1154,20 @@ class V1Service {
             incomingStateCleaned.useDocumentData === true ||
             (documentConfirmed && dbState?.useDocumentData !== false);
 
-          const isProfileConfirmedInDb =
-            dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
+          // const isProfileConfirmedInDb =
+          //   dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
 
-          const mergedUserData =
-            isProfileConfirmedInDb && !incomingStateCleaned.edited
-              ? {
-                  ...incomingUserDataCleaned,
-                  ...dbExistingUserData,
-                  ...(incomingUserDataCleaned.bloodGroup
-                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
-                    : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
-                }
-              : {
-                  ...dbExistingUserData,
-                  ...incomingUserDataCleaned,
-                  ...(incomingUserDataCleaned.bloodGroup
-                    ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
-                    : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
-                };
+          const mergedUserData = {
+            ...dbExistingUserData,
+            ...incomingUserDataCleaned,
+            ...(incomingUserDataCleaned.bloodGroup
+              ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
+              : {}),
+            ...(Array.isArray(incomingUserDataCleaned.allergies) &&
+            incomingUserDataCleaned.allergies.length > 0
+              ? { allergies: incomingUserDataCleaned.allergies }
+              : {}),
+          };
 
           const case3AuthoritativeIsOnboardingCompleted =
             dbState?.isOnboardingCompleted === true ||
@@ -1197,14 +1186,7 @@ class V1Service {
           const case3AuthoritativeCompletionMessageId =
             dbState?.completionMessageId || incomingStateCleaned.completionMessageId || null;
 
-          let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
-          if (incomingStateCleaned.currentStep && dbState?.currentStep) {
-            if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
-              case3AuthoritativeStep = dbState.currentStep;
-            } else {
-              case3AuthoritativeStep = incomingStateCleaned.currentStep;
-            }
-          }
+          let case3AuthoritativeStep = incomingStateCleaned.currentStep || dbState?.currentStep;
 
           state = {
             ...dbState,
@@ -1236,11 +1218,6 @@ class V1Service {
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
-
-          // Generic forward transition: If currentStep is already satisfied in the authoritative state, advance to next step
-          if (isStepAlreadySatisfied(state.currentStep, state)) {
-            state.currentStep = getNextRequiredOrOptionalStep(state);
-          }
         }
 
         if (hasUnansweredOptional && !state.currentStep && actionType !== "SKIP_ONBOARDING") {
@@ -1253,19 +1230,35 @@ class V1Service {
           }
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
-          if (!state.currentStep && dbState && dbState.currentStep) {
-            state.currentStep = dbState.currentStep;
-          }
+
+          const nextStep = getNextRequiredOrOptionalStep(state);
+          state.currentStep = nextStep;
 
           await saveOnboardingState(userId, state);
 
+          const onboardingResult = await onboardingService.chat(
+            "",
+            history,
+            state,
+            userId,
+            null,
+            displayLabel,
+          );
+
           const responsePayload = buildUnifiedResponse({
             mode: "ONBOARDING",
-            actionType: "SKIP_ONBOARDING",
-            reply: "",
-            onboardingState: state,
-            options: [],
-            medicines: [],
+            actionType: onboardingResult?.action || "SKIP_ONBOARDING",
+            reply: onboardingResult?.message || onboardingResult?.reply || "",
+            title: onboardingResult?.title || null,
+            subtitle: onboardingResult?.subtitle || null,
+            fields: onboardingResult?.fields || [],
+            explainer: onboardingResult?.explainer || null,
+            loginSummary: onboardingResult?.loginSummary || null,
+            documentSummary: onboardingResult?.documentSummary || null,
+            onboardingState: onboardingResult?.state || state,
+            options: onboardingResult?.options || [],
+            medicines: onboardingResult?.medicines || [],
+            document: onboardingResult?.document || null,
           });
           responsePayload.canSkip = true;
           return responsePayload;
@@ -1320,6 +1313,12 @@ class V1Service {
 
       // CASE 4: NORMAL_CHAT (Post-onboarding RAG Chat)
       console.log(`[UnifiedChat] Executing Normal Chat / RAG query for userId=${userId}`);
+      if (effectiveState && userId) {
+        effectiveState.medicationFlowDone = true;
+        await saveOnboardingState(userId, { ...effectiveState, medicationFlowDone: true }).catch(
+          () => {},
+        );
+      }
       const userLang = preferredLanguage || patient?.preferredLanguage || "english";
       const promptText = message && message.trim().length > 0 ? message.trim() : "Hello";
 

@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 const fs = require("fs");
 const path = require("path");
-const { aiClient } = require("../services/ai");
+const aiClient = require("../services/ai/clients/aiClient.service");
 
 function cleanAndParseJson(text) {
   if (text && typeof text === "object") {

@@ -195,8 +195,11 @@ function getNextRequiredOrOptionalStep(state) {
     return "ASK_BLOOD_GROUP";
   }
 
-  const hasAllergies = Array.isArray(data.allergies) && data.allergies.length > 0;
-  if (!hasAllergies && !state.allergiesSkipped) {
+  const isAllergiesAnswered =
+    state.allergiesSkipped === true ||
+    state.allergiesAnswered === true ||
+    (Array.isArray(data.allergies) && data.allergies.length > 0);
+  if (!isAllergiesAnswered) {
     return "ASK_ALLERGIES";
   }
 
@@ -527,10 +530,14 @@ function computeCurrentStep(state) {
       return state.currentStep;
     }
     const data = state.existingUserData || {};
+    const isAllergiesAnswered =
+      state.allergiesSkipped === true ||
+      state.allergiesAnswered === true ||
+      (Array.isArray(data.allergies) && data.allergies.length > 0);
     const hasUnansweredOptional =
       ((data.bloodGroup === undefined || data.bloodGroup === null || data.bloodGroup === "") &&
         !state.bloodGroupSkipped) ||
-      ((!Array.isArray(data.allergies) || data.allergies.length === 0) && !state.allergiesSkipped);
+      !isAllergiesAnswered;
     if (hasUnansweredOptional) {
       return getNextRequiredOrOptionalStep(state);
     }

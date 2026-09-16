@@ -578,7 +578,6 @@ async function getLocalizedResponse(step, state) {
       ];
 
       const hasDocument =
-        state.flowMode === "UPLOAD" ||
         state.documentUploaded === true ||
         state.uploadedMedicalDocument === true ||
         !!state.documentId ||

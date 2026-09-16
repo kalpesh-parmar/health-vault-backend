@@ -1048,6 +1048,7 @@ async function updateStateFromMessage(state, message, userId = null) {
             }
           }
         }
+        state.bloodGroupSkipped = true;
       }
       if (userId) {
         try {
@@ -1088,6 +1089,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (isNegative) {
         state.allergiesSkipped = true;
+        state.allergiesAnswered = true;
         state.existingUserData.allergies = [];
       } else {
         const allergiesVal = await extractFieldFromMessage(
@@ -1097,7 +1099,6 @@ async function updateStateFromMessage(state, message, userId = null) {
         );
         if (Array.isArray(allergiesVal)) {
           state.existingUserData.allergies = allergiesVal;
-          state.allergiesSkipped = true;
         } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
           const parsed = allergiesVal
             .replace(/^\[|\]$/g, "")
@@ -1105,11 +1106,11 @@ async function updateStateFromMessage(state, message, userId = null) {
             .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
             .filter(Boolean);
           state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
-          state.allergiesSkipped = true;
         } else if (msg.trim()) {
           state.existingUserData.allergies = [msg.trim()];
-          state.allergiesSkipped = true;
         }
+        state.allergiesSkipped = true;
+        state.allergiesAnswered = true;
       }
       if (userId) {
         try {
@@ -2058,7 +2059,6 @@ class OnboardingService {
             }
             if (patientRec.bloodGroup && !uData.bloodGroup) {
               uData.bloodGroup = patientRec.bloodGroup;
-              state.bloodGroupSkipped = true;
             }
             if (
               patientRec.allergies &&
@@ -2067,7 +2067,6 @@ class OnboardingService {
               (!uData.allergies || uData.allergies.length === 0)
             ) {
               uData.allergies = patientRec.allergies;
-              state.allergiesSkipped = true;
             }
           }
         } catch (err) {
