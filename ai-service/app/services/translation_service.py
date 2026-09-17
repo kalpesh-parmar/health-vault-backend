@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -163,17 +164,20 @@ class TranslationService:
         return [s.strip() for s in sentences if s.strip()]
 
     async def translate(self, text: str, src_lang: str, tgt_lang: str) -> str:
+        request_id = str(uuid.uuid4())[:8]
+        logger.info(f"[TranslationService][{request_id}] STEP 1 - Request received | src={src_lang}, tgt={tgt_lang}, length={len(text)} chars")
         if not text:
             return text
             
         if not self.is_warm:
-            logger.warning("[TranslationService] Model not warm, returning original text")
+            logger.warning(f"[TranslationService][{request_id}] Model not warm, returning original text")
             return text
 
         src_code = self.map_lang_code(src_lang)
         tgt_code = self.map_lang_code(tgt_lang)
 
         if src_code == tgt_code:
+            logger.info(f"[TranslationService][{request_id}] Source and target languages are identical ({src_code}), skipping translation")
             return text
 
         if tgt_code == "eng_Latn":
@@ -184,9 +188,10 @@ class TranslationService:
             current_model = self.en_indic_model
 
         if current_model is None or current_tokenizer is None:
-            logger.error(f"[TranslationService] Required translation model is not loaded for {src_code} -> {tgt_code}")
+            logger.error(f"[TranslationService][{request_id}] Required translation model is not loaded for {src_code} -> {tgt_code}")
             return text
 
+        logger.info(f"[TranslationService][{request_id}] STEP 2 - Preprocessing & masking started")
         masked_text, masks = mask_text(text)
         
         paragraphs = masked_text.split('\n')
@@ -202,7 +207,13 @@ class TranslationService:
                 sentence_to_para_map.append(i)
                 
         if not all_sentences:
+            logger.warning(f"[TranslationService][{request_id}] No sentences to translate after preprocessing")
             return text
+
+        total_sentences = len(all_sentences)
+        batch_size = 4
+        total_batches = (total_sentences + batch_size - 1) // batch_size
+        logger.info(f"[TranslationService][{request_id}] STEP 3 - Preprocessing completed: {total_sentences} sentences in {len(paragraphs)} paragraph(s), total {total_batches} batch(es)")
 
         try:
             import torch
@@ -210,23 +221,31 @@ class TranslationService:
             start_time = time.time()
             translated_sentences = []
             
-            batch_size = 4
-            for i in range(0, len(all_sentences), batch_size):
-                sentence_batch = all_sentences[i:i + batch_size]
-                batch = self.ip.preprocess_batch(sentence_batch, src_lang=src_code, tgt_lang=tgt_code)
+            logger.info(f"[TranslationService][{request_id}] STEP 4 - Waiting to acquire translation lock for request...")
+            lock_start = time.time()
+            async with self._lock:
+                logger.info(f"[TranslationService][{request_id}] STEP 5 - Lock acquired after {time.time() - lock_start:.2f}s. Starting batch processing...")
                 
-                inputs = current_tokenizer(
-                    batch,
-                    truncation=True,
-                    padding="longest",
-                    return_tensors="pt"
-                ).to(self.device)
+                for i in range(0, total_sentences, batch_size):
+                    batch_num = (i // batch_size) + 1
+                    sentence_batch = all_sentences[i:i + batch_size]
+                    logger.info(f"[TranslationService][{request_id}] STEP 6 - Preparing batch {batch_num}/{total_batches} ({len(sentence_batch)} sentences)")
+                    
+                    batch = self.ip.preprocess_batch(sentence_batch, src_lang=src_code, tgt_lang=tgt_code)
+                    
+                    inputs = current_tokenizer(
+                        batch,
+                        truncation=True,
+                        padding="longest",
+                        return_tensors="pt"
+                    ).to(self.device)
 
-                loop = asyncio.get_running_loop()
-                async with self._lock:
+                    loop = asyncio.get_running_loop()
+                    
                     def _generate(inputs_arg=inputs, model_arg=current_model):
+                        gen_start = time.time()
                         with torch.no_grad():
-                            return model_arg.generate(
+                            res = model_arg.generate(
                                 **inputs_arg,
                                 use_cache=False,
                                 min_length=0,
@@ -234,12 +253,18 @@ class TranslationService:
                                 num_beams=self.settings.translation_num_beams,
                                 num_return_sequences=1
                             )
+                        gen_duration = time.time() - gen_start
+                        logger.info(f"[TranslationService][{request_id}] PyTorch model.generate() finished in {gen_duration:.2f}s for batch {batch_num}/{total_batches}")
+                        return res
+                        
                     generated_tokens = await loop.run_in_executor(None, _generate)
 
-                decoded = current_tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-                postprocessed = self.ip.postprocess_batch(decoded, lang=tgt_code)
-                translated_sentences.extend(postprocessed)
+                    decoded = current_tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+                    postprocessed = self.ip.postprocess_batch(decoded, lang=tgt_code)
+                    translated_sentences.extend(postprocessed)
+                    logger.info(f"[TranslationService][{request_id}] Completed batch {batch_num}/{total_batches}")
 
+            logger.info(f"[TranslationService][{request_id}] STEP 7 - Lock released. Reassembling paragraphs and unmasking...")
             translated_paragraphs = [""] * len(paragraphs)
             for i, translated_sent in zip(sentence_to_para_map, translated_sentences):
                 if translated_paragraphs[i]:
@@ -251,8 +276,8 @@ class TranslationService:
             unmasked_text = unmask_text(translated_text, masks)
             
             end_time = time.time()
-            logger.info(f"[TranslationService] Translated {len(text)} chars from {src_lang} to {tgt_lang} in {end_time - start_time:.2f} seconds")
+            logger.info(f"[TranslationService][{request_id}] SUCCESS - Translated {len(text)} chars ({total_sentences} sentences) from {src_lang} to {tgt_lang} in {end_time - start_time:.2f} seconds")
             return unmasked_text
         except Exception as e:
-            logger.error(f"[TranslationService] Error during translation: {e}", exc_info=True)
+            logger.error(f"[TranslationService][{request_id}] Error during translation: {e}", exc_info=True)
             return text

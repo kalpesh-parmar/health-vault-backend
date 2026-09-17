@@ -60,7 +60,7 @@ class AiServiceClient {
         src_lang: srcLang,
         tgt_lang: tgtLang,
       },
-      { timeout: 30000, retries: 2 },
+      { timeout: 120000, retries: 0 },
     );
   }
 

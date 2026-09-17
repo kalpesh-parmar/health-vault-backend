@@ -43,7 +43,7 @@ const documentRepository = require("../repositories/documentRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
-const { normalizeLanguage } = require("../utils/commonUtils");
+const { normalizeLanguage, formatDuration } = require("../utils/commonUtils");
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -158,46 +158,44 @@ class DocumentOcrJobService {
     }
     RUNNING_LOCKS.add(fileKey);
 
+    const pipelineStartTime = Date.now();
     try {
-      //print timing in teminal or console for each steps
+      // Print timing in terminal or console for each steps
       // eslint-disable-next-line no-console
       console.time("[OCR]: starting process");
+      // eslint-disable-next-line no-console
+      console.log(`[ocr-job] [START] OCR job ${jobId} started for fileKey: ${fileKey}`);
 
-      // console.log(`[ocr-job] OCR job started at ${new Date(startTime).toISOString()}`);
       await documentProcessingJobRepository.markRunning(jobId);
       await emitAndPersist(jobId, fileKey, STAGES.OCR_STARTED, { metadata: { fileKey } });
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 1. Uploading File / Download check stage
+      const tUploadCheckStart = Date.now();
       await emitAndPersist(jobId, fileKey, STAGES.UPLOADING_FILE);
       await ensureFileExists(fileKey);
-
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      const uploadCheckDurationMs = Date.now() - tUploadCheckStart;
 
       // 2. Medical Document Validation stage
       await emitAndPersist(jobId, fileKey, STAGES.VALIDATING);
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
-
       // 3. Extracting Text stage
       await emitAndPersist(jobId, fileKey, STAGES.EXTRACTING);
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
+      const tOcrRunStart = Date.now();
       const ocrResponse = await ocrOrchestrator.runFromStorage({
         bucket: env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName,
         fileKey,
         mimeType: inferMimeType(fileKey, mimeType),
         traceId: `ocr_job_${jobId}`,
       });
+      const ocrRunDurationMs = Date.now() - tOcrRunStart;
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const ocrPayload = ocrResponse?.structuredDocument || ocrResponse?.ocr || ocrResponse || {};
       const pageCount =
         ocrPayload?.pageCount ||
         ocrResponse?.metadata?.pageCount ||
         (Array.isArray(ocrPayload?.pages) ? ocrPayload.pages.length : 0);
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       // 4. Analyzing Report stage
       await emitAndPersist(jobId, fileKey, STAGES.ANALYZING, {
         metadata: {
@@ -212,12 +210,10 @@ class DocumentOcrJobService {
         },
       });
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
-
       // 5. Generating Summary stage
+      const tSummarizeStart = Date.now();
       await emitAndPersist(jobId, fileKey, STAGES.SUMMARIZING);
 
-      // console.log(`[ocr-job] OCR job started at ${new Date().toISOString()}`);
       const { rawOcrData, structured, normalized, summary } = await ocrService.normalizeExtraction({
         patientContext,
         rawOcr: ocrResponse,
@@ -329,6 +325,8 @@ class DocumentOcrJobService {
         }
       }
 
+      const summarizeDurationMs = Date.now() - tSummarizeStart;
+
       structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
@@ -352,6 +350,7 @@ class DocumentOcrJobService {
         console.warn("[ocr-job] graph extraction failed", { error: error.message, fileKey, jobId });
       }
 
+      const tDbSyncStart = Date.now();
       const finalPayload = {
         embeddingsGenerated: true,
         extractedStructuredData: { ...structured, normalized, rawSummary: summary },
@@ -360,6 +359,25 @@ class DocumentOcrJobService {
         metrics: rawOcrData.metrics,
         rawOcrData,
       };
+
+      const totalDurationMs = Date.now() - pipelineStartTime;
+      const processingTimeSeconds = Number((totalDurationMs / 1000).toFixed(1));
+      const processingTimeFormatted = formatDuration(totalDurationMs);
+
+      const processingTimingsMs = {
+        uploadCheckDurationMs,
+        ocrRunDurationMs,
+        summarizeDurationMs,
+        totalDurationMs,
+        processingTimeSeconds,
+        processingTimeFormatted,
+      };
+
+      structured.processingTimeSeconds = processingTimeSeconds;
+      structured.processingTimeFormatted = processingTimeFormatted;
+      structured.totalTimeTaken = processingTimeFormatted;
+      structured.processingTimingsMs = processingTimingsMs;
+
       await documentProcessingJobRepository.markCompleted(jobId, {
         completedSteps: 8,
         currentStep: "Done",
@@ -371,7 +389,10 @@ class DocumentOcrJobService {
           graphsDetected: graphs.length,
           medications: structured.medications.length,
           pageCount: rawOcrData.pageCount,
-          processingSeconds: rawOcrData.processingSeconds,
+          processingSeconds: processingTimeSeconds,
+          processingTimeFormatted,
+          totalTimeTaken: processingTimeFormatted,
+          processingTimingsMs,
         },
         pendingSteps: 0,
         rawOcrData,
@@ -401,6 +422,7 @@ class DocumentOcrJobService {
 
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: updateOcrStatusByFileKey");
+      const dbSyncDurationMs = Date.now() - tDbSyncStart;
 
       ocrProgressBus.publish(
         fileKey,
@@ -410,7 +432,10 @@ class DocumentOcrJobService {
             graphsDetected: graphs.length,
             medications: structured.medications.length,
             pageCount: rawOcrData.pageCount,
-            processingSeconds: rawOcrData.processingSeconds,
+            processingSeconds: processingTimeSeconds,
+            processingTimeFormatted,
+            totalTimeTaken: processingTimeFormatted,
+            processingTimingsMs,
           },
         }),
       );
@@ -418,6 +443,10 @@ class DocumentOcrJobService {
 
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: starting process");
+      // eslint-disable-next-line no-console
+      console.log(
+        `[ocr-job] [TIMING] Job ${jobId} (fileKey: ${fileKey}) completed in ${processingTimeFormatted} (${totalDurationMs}ms) (Upload Check: ${uploadCheckDurationMs}ms, OCR/Analysis: ${ocrRunDurationMs}ms, Summarization: ${summarizeDurationMs}ms, DB Sync: ${dbSyncDurationMs}ms)`,
+      );
 
       // Non-blocking fire-and-forget background embedding pipeline
       setImmediate(async () => {

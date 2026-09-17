@@ -1606,6 +1606,7 @@ ${rawText}
   }
 
   async processAndStoreSynchronously({ file, userId }) {
+    const pipelineStartTime = Date.now();
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
     // Fetch preferred language from onboarding state
@@ -1625,12 +1626,11 @@ ${rawText}
     }
 
     // 0. Upload file and validate it as a medical document.
-    // `uploadFileService.uploadFile` already runs AI validation for PATIENT_DOCUMENT,
-    // so this avoids duplicate classifier logic and keeps v1/ocr/extract aligned with the document OCR pipeline.
     const tUploadStart = Date.now();
     const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
+    const uploadDurationMs = Date.now() - tUploadStart;
     console.log(
-      `[OcrService] [UPLOAD] Duration: ${Date.now() - tUploadStart}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
+      `[OcrService] [UPLOAD] Duration: ${uploadDurationMs}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
     );
 
     const fileKey = uploadResult.data.fileKey;
@@ -1640,6 +1640,7 @@ ${rawText}
     const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
     let ocrResult;
     let structuredData;
+    let extractDurationMs = 0;
 
     if (env.useExternalOcrService) {
       const extResult = await this.extractViaExternalService(file, preferredLanguage);
@@ -1664,13 +1665,15 @@ ${rawText}
         // 3. Extract structured medical data
         const tExtractStart = Date.now();
         structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+        extractDurationMs = Date.now() - tExtractStart;
         console.log(
-          `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
+          `[OcrService] [EXTRACT] Duration: ${extractDurationMs}ms. Structured extraction complete. Generating summary...`,
         );
       }
     }
+    const ocrDurationMs = Date.now() - tOcrStart;
 
-    // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+    // 4. Generate summaries in English and preferred language
     const tSummaryStart = Date.now();
     let summaryEnglish = "";
     let summaryPreferredLanguage = "";
@@ -1688,7 +1691,6 @@ ${rawText}
         summaryPreferredLanguage = sumPref;
       }
     } else {
-      // Remote service handles structuring and translation inside structuredData
       summaryEnglish = structuredData.summaryEnglish || structuredData.remarks || "";
       summaryPreferredLanguage =
         structuredData.summaryInPreferredLanguage ||
@@ -1696,8 +1698,9 @@ ${rawText}
         structuredData.remarks ||
         "";
     }
+    const summaryDurationMs = Date.now() - tSummaryStart;
     console.log(
-      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Saving to database...`,
+      `[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated. Saving to database...`,
     );
 
     // Ensure controller response contains both summaries
@@ -1733,11 +1736,13 @@ ${rawText}
         summaryInPreferredLanguage: summaryPreferredLanguage,
       })
       .returning();
+    const dbDurationMs = Date.now() - tDbStart;
     console.log(
-      `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. ID=${documentRow.id}. Indexing in RAG...`,
+      `[OcrService] [DATABASE] Duration: ${dbDurationMs}ms. ID=${documentRow.id}. Indexing in RAG...`,
     );
 
-    //remove await so that time reduce and embedding performs in bachground
+    // 6. Index Document in RAG
+    const tRagStart = Date.now();
     await embeddingService.embedAndPersist({
       documentId: documentRow.id,
       userId,
@@ -1756,8 +1761,22 @@ ${rawText}
         medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
       },
     });
+    const ragDurationMs = Date.now() - tRagStart;
 
-    console.log(`[OcrService] RAG indexing completed.`);
+    const totalDurationMs = Date.now() - pipelineStartTime;
+    structuredData.processingTimingsMs = {
+      uploadDurationMs,
+      ocrDurationMs,
+      extractDurationMs,
+      summaryDurationMs,
+      dbDurationMs,
+      ragDurationMs,
+      totalDurationMs,
+    };
+
+    console.log(
+      `[OcrService] [TIMING] processAndStoreSynchronously complete in ${totalDurationMs}ms (Upload: ${uploadDurationMs}ms, OCR: ${ocrDurationMs}ms, Extract: ${extractDurationMs}ms, Summary: ${summaryDurationMs}ms, DB: ${dbDurationMs}ms, RAG: ${ragDurationMs}ms)`,
+    );
 
     return {
       document: documentRow,
@@ -1767,6 +1786,7 @@ ${rawText}
   }
 
   async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+    const pipelineStartTime = Date.now();
     console.log(
       `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
     );
@@ -1793,6 +1813,7 @@ ${rawText}
       const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
       let ocrResult;
       let structuredData;
+      let extractDurationMs = 0;
 
       if (env.useExternalOcrService) {
         const extResult = await this.extractViaExternalService(file, preferredLanguage);
@@ -1814,12 +1835,15 @@ ${rawText}
           // 3. Extract structured medical data
           const tExtractStart = Date.now();
           structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+          extractDurationMs = Date.now() - tExtractStart;
           console.log(
-            `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete.`,
+            `[OcrService] [EXTRACT] Duration: ${extractDurationMs}ms. Structured extraction complete.`,
           );
         }
       }
-      // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+      const ocrDurationMs = Date.now() - tOcrStart;
+
+      // 4. Generate summaries in English and preferred language
       const tSummaryStart = Date.now();
       let summaryEnglish = "";
       let summaryPreferredLanguage = "";
@@ -1845,9 +1869,8 @@ ${rawText}
           structuredData.remarks ||
           "";
       }
-      console.log(
-        `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated.`,
-      );
+      const summaryDurationMs = Date.now() - tSummaryStart;
+      console.log(`[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated.`);
 
       // Ensure data contains both summaries & normalized documentType
       const analyzedDocumentType = normalizeDocumentType(
@@ -1878,11 +1901,13 @@ ${rawText}
           updatedAt: new Date(),
         })
         .where(eq(document.id, documentId));
+      const dbDurationMs = Date.now() - tDbStart;
       console.log(
-        `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. Document ${documentId} updated. Indexing in RAG...`,
+        `[OcrService] [DATABASE] Duration: ${dbDurationMs}ms. Document ${documentId} updated. Indexing in RAG...`,
       );
 
       // 6. Index Document in RAG
+      const tRagStart = Date.now();
       await embeddingService.embedAndPersist({
         documentId,
         userId,
@@ -1902,13 +1927,28 @@ ${rawText}
           testResults: structuredData.testResults || [],
         },
       });
+      const ragDurationMs = Date.now() - tRagStart;
 
+      const totalDurationMs = Date.now() - pipelineStartTime;
+      structuredData.processingTimingsMs = {
+        ocrDurationMs,
+        extractDurationMs,
+        summaryDurationMs,
+        dbDurationMs,
+        ragDurationMs,
+        totalDurationMs,
+      };
+
+      console.log(
+        `[OcrService] [TIMING] Document ${documentId} complete in ${totalDurationMs}ms (OCR: ${ocrDurationMs}ms, Extract: ${extractDurationMs}ms, Summary: ${summaryDurationMs}ms, DB: ${dbDurationMs}ms, RAG: ${ragDurationMs}ms)`,
+      );
       console.log(
         `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
       );
     } catch (err) {
+      const totalFailedDurationMs = Date.now() - pipelineStartTime;
       console.error(
-        `[OcrService] [ERROR] processAndStoreAsynchronously failed for document ${documentId}:`,
+        `[OcrService] [ERROR] processAndStoreAsynchronously failed after ${totalFailedDurationMs}ms for document ${documentId}:`,
         err,
       );
       try {

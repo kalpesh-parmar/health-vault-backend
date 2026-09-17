@@ -80,6 +80,17 @@ function normalizeLanguage(lang) {
   return "english";
 }
 
+function formatDuration(ms) {
+  if (!ms || isNaN(ms)) return "0s";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -88,4 +99,5 @@ module.exports = {
   parseDurationToDate,
   sanitizePatient,
   normalizeLanguage,
+  formatDuration,
 };

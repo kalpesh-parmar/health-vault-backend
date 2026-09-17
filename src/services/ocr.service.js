@@ -21,7 +21,7 @@ const {
 const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardingStateMachine");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
-const { normalizeLanguage } = require("../utils/commonUtils");
+const { normalizeLanguage, formatDuration } = require("../utils/commonUtils");
 const {
   normalizeCreateMedicationInput,
   normalizeMedicine,
@@ -144,7 +144,7 @@ class V1Service {
 
       const duration = Date.now() - startTime;
       console.log(
-        `[v1Controller] [${requestId}] Exit - async ocrExtract start success. Duration: ${duration}ms`,
+        `[ocrService] [${requestId}] [TIMING] Fast sync upload & validation complete in ${duration}ms for document ${documentRow.id}. Background OCR & summary processing started.`,
       );
 
       return {
@@ -207,10 +207,19 @@ class V1Service {
       structData?.remarks ||
       "";
 
+    const processingTimeMs = structData?.processingTimingsMs?.totalDurationMs;
+    const processingTimeSeconds = processingTimeMs
+      ? Number((processingTimeMs / 1000).toFixed(1))
+      : null;
+    const processingTimeFormatted = processingTimeMs ? formatDuration(processingTimeMs) : null;
+
     return {
       documentId: docRow.id,
       status,
       summary,
+      processingTimeSeconds,
+      processingTimeFormatted,
+      totalTimeTaken: processingTimeFormatted,
       document: {
         id: docRow.id,
         fileName: docRow.fileName,

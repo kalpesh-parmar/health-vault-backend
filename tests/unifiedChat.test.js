@@ -699,6 +699,9 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       ...msg,
     }));
 
+    const aiClient = require("../src/services/ai/clients/aiClient.service");
+    jest.spyOn(aiClient, "detectLanguage").mockResolvedValue("english");
+
     let capturedPrompt = "";
     jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
       const sysMsg = messages.find((m) => m.role === "system");
