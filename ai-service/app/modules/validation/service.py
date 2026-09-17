@@ -177,26 +177,35 @@ class MedicalValidationService:
 
         base_url = self._resolve_ollama_base_url()
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            print(f"[MedicalValidation] Checking installed Ollama models at {base_url}/api/tags...")
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{base_url}/api/tags")
                 if resp.status_code == 200:
                     data = resp.json()
                     models = {m.get("name") for m in data.get("models", []) if m.get("name")}
                     self._tag_cache = {"tags": models, "timestamp": now}
+                    print(f"[MedicalValidation] Ollama installed models: {list(models)}")
                     return models
+                else:
+                    print(f"[MedicalValidation] [WARNING] Ollama /api/tags returned status {resp.status_code}")
         except Exception as exc:
             logger.warning("Failed to fetch Ollama tags for preflight: %s", exc)
+            print(f"[MedicalValidation] [WARNING] Could not connect to Ollama /api/tags at {base_url}: {exc}")
 
         return self._tag_cache.get("tags", set())
 
     async def is_model_available(self, model_name: str) -> bool:
         installed = await self._get_installed_models()
         if not installed:
-            return True
+            print(f"[MedicalValidation] Installed models list is empty or unreachable. Cannot verify '{model_name}'.")
+            return False
         if model_name in installed:
             return True
         base_name = model_name.split(":")[0]
-        return any(m == model_name or m.startswith(f"{base_name}:") for m in installed)
+        match = any(m == model_name or m.startswith(f"{base_name}:") for m in installed)
+        if not match:
+            print(f"[MedicalValidation] Model '{model_name}' (base: '{base_name}') is NOT in installed models {list(installed)}.")
+        return match
 
     def _downscale_image(self, image_bytes: bytes, max_dim: int = 1536) -> bytes:
         try:
@@ -309,6 +318,7 @@ class MedicalValidationService:
             "medical_validation_started",
             extra={"trace_id": trace, "file_key": effective_filename, "model": model_name},
         )
+        print(f"[MedicalValidation] [START] Validating document '{effective_filename}' using model '{model_name}' (timeout: {timeout_sec}s)...")
 
         if file_bytes is not None:
             document_bytes = file_bytes
@@ -316,25 +326,31 @@ class MedicalValidationService:
             if not file_key or not file_key.strip():
                 raise InvalidDocumentFileError("fileKey is required when file_bytes is not provided")
             try:
+                print(f"[MedicalValidation] Reading file bytes from storage for key '{file_key}'...")
                 document_bytes = await self.storage.read_bytes(
                     bucket=bucket or (self.settings.aws_bucket_name if self.settings.resolve_storage_provider() == "s3" else self.settings.gcp_storage_bucket),
                     key=file_key,
                 )
             except Exception as exc:
                 logger.error("medical_validation_storage_read_failed", extra={"trace_id": trace, "error": str(exc)})
+                print(f"[MedicalValidation] [ERROR] Storage read failed: {exc}")
                 raise InvalidDocumentFileError(f"Unable to read file from storage: {exc}") from exc
 
         if not document_bytes or len(document_bytes) == 0:
             raise InvalidDocumentFileError("Uploaded file is empty" if file_bytes is not None else "File in storage is empty")
 
+        print(f"[MedicalValidation] File received ({len(document_bytes)} bytes). Checking Ollama model '{model_name}' availability...")
         model_ok = await self.is_model_available(model_name)
         if not model_ok:
+            print(f"[MedicalValidation] [WARNING] Model '{model_name}' is NOT available on Ollama server ({base_url}).")
             if self.settings.medgemma_fallback != "text_classifier":
                 raise MedGemmaUnavailableError(f"Model {model_name} is not installed on Ollama server")
             logger.warning(
                 "medical_validation_model_unavailable_fallback",
                 extra={"trace_id": trace, "model": model_name},
             )
+        else:
+            print(f"[MedicalValidation] Model '{model_name}' is available on Ollama server.")
 
         is_pdf = (
             (mime_type and "pdf" in mime_type.lower())
@@ -347,17 +363,22 @@ class MedicalValidationService:
 
         if is_pdf:
             try:
+                print(f"[MedicalValidation] Document is PDF. Rendering up to {pages_limit} pages to PNG...")
                 rendered = _render_pdf_pages_to_png(document_bytes, max_pages=pages_limit)
                 pages_used = len(rendered)
                 for _, png_data in rendered:
                     downscaled = self._downscale_image(png_data)
                     base64_images.append(base64.b64encode(downscaled).decode("utf-8"))
+                print(f"[MedicalValidation] Rendered {pages_used} PDF page(s) to base64 images.")
             except Exception as exc:
                 logger.error("medical_validation_pdf_render_failed", extra={"trace_id": trace, "error": str(exc)})
+                print(f"[MedicalValidation] [ERROR] PDF rendering failed: {exc}")
                 raise InvalidDocumentFileError(f"Failed to render PDF: {exc}") from exc
         else:
+            print("[MedicalValidation] Document is an image. Downscaling & encoding to base64...")
             downscaled = self._downscale_image(document_bytes)
             base64_images.append(base64.b64encode(downscaled).decode("utf-8"))
+            print(f"[MedicalValidation] Image downscaled successfully ({len(downscaled)} bytes).")
 
         if not base64_images:
             raise InvalidDocumentFileError("No usable images extracted from document")
@@ -368,6 +389,8 @@ class MedicalValidationService:
 
         if model_ok:
             try:
+                print(f"[MedicalValidation] Sending Vision API request to Ollama ({base_url}/api/generate) for model '{model_name}'...")
+                t_ollama = time.monotonic()
                 async with httpx.AsyncClient(timeout=timeout_sec) as client:
                     payload = {
                         "model": model_name,
@@ -379,18 +402,27 @@ class MedicalValidationService:
                         "options": {"temperature": 0.0, "num_predict": 100},
                     }
                     resp = await client.post(f"{base_url}/api/generate", json=payload)
+                    ollama_duration = round(time.monotonic() - t_ollama, 2)
+                    print(f"[MedicalValidation] Ollama vision API response received in {ollama_duration}s (HTTP {resp.status_code}).")
                     if resp.status_code == 200:
                         raw_out = resp.json().get("response", "")
                         parsed = self._clean_and_parse_json(raw_out)
+                        print(f"[MedicalValidation] Parsed Vision JSON response: {parsed}")
                     else:
                         logger.warning("Ollama vision returned HTTP %s: %s", resp.status_code, resp.text[:200])
+                        print(f"[MedicalValidation] [WARNING] Ollama returned HTTP {resp.status_code}: {resp.text[:200]}")
+            except httpx.TimeoutException as exc:
+                print(f"[MedicalValidation] [TIMEOUT] Ollama vision call timed out after {timeout_sec}s for model '{model_name}': {exc}")
+                logger.warning("Ollama vision call timed out: %s", exc)
             except Exception as exc:
+                print(f"[MedicalValidation] [ERROR] Ollama vision call failed: {exc}")
                 logger.warning("Ollama vision call failed: %s", exc)
 
         if parsed is None:
             if self.settings.medgemma_fallback == "text_classifier":
                 method = "fallback"
                 resolved_model = self.settings.ai_model
+                print(f"[MedicalValidation] Triggering fallback text_classifier with model '{self.settings.ai_model}'...")
                 try:
                     text_content = text or f"Document filename: {effective_filename}"
                     async with httpx.AsyncClient(timeout=timeout_sec) as client:
@@ -406,9 +438,14 @@ class MedicalValidationService:
                         if resp.status_code == 200:
                             raw_out = resp.json().get("response", "")
                             parsed = self._clean_and_parse_json(raw_out)
+                            print(f"[MedicalValidation] Fallback text classifier response: {parsed}")
+                        else:
+                            print(f"[MedicalValidation] [WARNING] Fallback text classifier returned HTTP {resp.status_code}")
                 except Exception as exc:
                     logger.error("Fallback text classifier also failed: %s", exc)
+                    print(f"[MedicalValidation] [ERROR] Fallback text classifier failed: {exc}")
             else:
+                print(f"[MedicalValidation] [ERROR] Vision model '{model_name}' failed and no fallback configured.")
                 raise MedGemmaUnavailableError(f"Medical validation model {model_name} unavailable and no fallback configured")
 
         if parsed:

@@ -73,6 +73,10 @@ class AiServiceClient {
   }
 
   async validateMedicalDocument({ file, fileName, mimeType }) {
+    console.log(
+      `[AiServiceClient] POST ${this.endpoints.validateMedical} - Validating file '${fileName}' (mime: ${mimeType})...`,
+    );
+    const t0 = Date.now();
     const formData = new FormData();
 
     formData.append("file", file, {
@@ -80,11 +84,24 @@ class AiServiceClient {
       contentType: mimeType,
     });
 
-    return this.postWithRetry(this.endpoints.validateMedical, formData, {
-      timeout: env.medgemmaTimeoutMs,
-      retries: 1,
-      headers: formData.getHeaders(),
-    });
+    try {
+      const res = await this.postWithRetry(this.endpoints.validateMedical, formData, {
+        timeout: env.medgemmaTimeoutMs,
+        retries: 1,
+        headers: formData.getHeaders(),
+      });
+      console.log(
+        `[AiServiceClient] POST ${this.endpoints.validateMedical} SUCCESS in ${Date.now() - t0}ms:`,
+        res,
+      );
+      return res;
+    } catch (err) {
+      console.error(
+        `[AiServiceClient] POST ${this.endpoints.validateMedical} FAILED after ${Date.now() - t0}ms:`,
+        err.message,
+      );
+      throw err;
+    }
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {

@@ -8,54 +8,54 @@ components:
       bearerFormat: JWT
 
 paths:
-  /v1/ocr/extract:
-    post:
-      tags: [Intelligent Onboarding]
-      summary: Extract user details from uploaded medical document (synchronous)
-      description: |
-        Uploads a medical report document, runs OCR + AI extraction synchronously,
-        and extracts structured patient information (first/last name, gender, DOB, blood group, allergies)
-        to pre-fill signup/onboarding details.
-        Supports PDF or image medical reports, including graphical charts such as ECG / cardiogram images.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-                  description: Medical report (PDF or Image) to extract data from
-      responses:
-        "202":
-          description: Document processing started
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: SUCCESS
-                  message:
-                    type: string
-                    example: Document processing started
-                  data:
-                    type: object
-                    properties:
-                      document:
-                        type: object
-                        description: Uploaded document details
-                      ocr:
-                        type: object
-                      structuredData:
-                        type: object
-                        description: Pre-filled patient fields
+  # /v1/ocr/extract:
+  #   post:
+  #     tags: [Intelligent Onboarding]
+  #     summary: Extract user details from uploaded medical document (synchronous)
+  #     description: |
+  #       Uploads a medical report document, runs OCR + AI extraction synchronously,
+  #       and extracts structured patient information (first/last name, gender, DOB, blood group, allergies)
+  #       to pre-fill signup/onboarding details.
+  #       Supports PDF or image medical reports, including graphical charts such as ECG / cardiogram images.
+  #     security:
+  #       - bearerAuth: []
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         multipart/form-data:
+  #           schema:
+  #             type: object
+  #             required: [file]
+  #             properties:
+  #               file:
+  #                 type: string
+  #                 format: binary
+  #                 description: Medical report (PDF or Image) to extract data from
+  #     responses:
+  #       "202":
+  #         description: Document processing started
+  #         content:
+  #           application/json:
+  #             schema:
+  #               type: object
+  #               properties:
+  #                 status:
+  #                   type: string
+  #                   example: SUCCESS
+  #                 message:
+  #                   type: string
+  #                   example: Document processing started
+  #                 data:
+  #                   type: object
+  #                   properties:
+  #                     document:
+  #                       type: object
+  #                       description: Uploaded document details
+  #                     ocr:
+  #                       type: object
+  #                     structuredData:
+  #                       type: object
+  #                       description: Pre-filled patient fields
 
   /v1/ocr/status/{documentId}:
     get:

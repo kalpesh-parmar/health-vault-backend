@@ -48,7 +48,7 @@ const messageConstants = Object.freeze({
   MEDICATION_UPDATED: "Medication updated successfully",
   MEDICATION_DELETED: "Medication deleted successfully",
   MEDICATION_FETCHED: "Medication fetched successfully",
-  MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
+  MEDICATION_LIST_FETCHED: "Medication list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
   MEDICATION_DUPLICATE_CHECKED: "Medication duplicate check completed successfully",
 
@@ -60,7 +60,6 @@ const messageConstants = Object.freeze({
   MEDICATION_REMINDER_COMPLETED: "Medication reminder marked as completed",
   MEDICATION_REMINDER_SKIPPED: "Medication reminder marked as skipped",
   MEDICATION_REMINDER_MISSED: "Medication reminder marked as missed",
-  EDICATION_REMINDER_SKIPPED: "Medication reminder marked as skipped",
   MEDICATION_REMINDER_SNOOZED: "Medication reminder snoozed",
   REFILL_ALERTS_FETCHED: "Refill alerts fetched successfully",
   TODAY_REFILL_ALERTS_FETCHED: "Today's refill alerts fetched successfully",
@@ -69,7 +68,7 @@ const messageConstants = Object.freeze({
   REFILL_FILTERED_LIST_FETCHED: "Refill filtered list fetched successfully",
   MEDICATION_REMINDER_CREATED: "Medication reminder created successfully",
   MEDICATION_OCCURRENCE_UPDATED: "Medication occurrence updated successfully",
-  MEDICTION_SUMMARY: "Medication summary fetched successfully",
+  MEDICATION_SUMMARY: "Medication summary fetched successfully",
   MEDICATION_REFILLED: "Medication refilled successfully",
 
   //OCR Message

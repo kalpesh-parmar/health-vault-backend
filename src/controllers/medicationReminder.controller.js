@@ -56,7 +56,7 @@ async function getTodayOccurrences(req, res) {
 async function getMedicationSummary(req, res) {
   const result = await medicationReminderService.getMedicationSummary(req.auth.userId, req.body);
 
-  return successResponse(res, result, messageConstants.MEDICTION_SUMMARY);
+  return successResponse(res, result, messageConstants.MEDICATION_SUMMARY);
 }
 
 module.exports = {

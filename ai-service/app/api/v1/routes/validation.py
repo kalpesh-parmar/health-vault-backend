@@ -31,31 +31,39 @@ async def validate_medical(
     container = request.app.state.container
     service = MedicalValidationService(container.settings, container.storage)
 
+    print(f"\n[API ROUTE] POST /v1/validation/medical - Received file: '{file.filename}', ContentType: '{file.content_type}', TraceId: '{trace_id}'")
+
     try:
         content = await file.read()
         if not content or len(content) == 0:
+            print("[API ROUTE] [ERROR] Uploaded file is 0 bytes!")
             raise InvalidDocumentFileError("Uploaded file is empty")
 
+        print(f"[API ROUTE] Read {len(content)} bytes. Dispatching to MedicalValidationService...")
         result = await service.validate_medical_document(
             file_bytes=content,
             file_name=file.filename,
             mime_type=file.content_type,
             trace_id=trace_id,
         )
+        print(f"[API ROUTE] Medical validation SUCCESS: isMedical={result.isMedical}, docType={result.documentType}, method={result.method}, elapsed={result.metrics.processing_seconds}s")
         return result
     except InvalidDocumentFileError as exc:
+        print(f"[API ROUTE] [HTTP 422] Unreadable file: {exc}")
         logger.warning("Unreadable file in medical validation: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "UNREADABLE_FILE", "message": str(exc)},
         ) from exc
     except MedGemmaUnavailableError as exc:
+        print(f"[API ROUTE] [HTTP 503] MedGemma unavailable: {exc}")
         logger.error("MedGemma unavailable: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MEDGEMMA_UNAVAILABLE", "message": str(exc)},
         ) from exc
     except Exception as exc:
+        print(f"[API ROUTE] [HTTP 500] Unexpected error in medical validation: {exc}")
         logger.error("Unexpected error in medical validation: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
