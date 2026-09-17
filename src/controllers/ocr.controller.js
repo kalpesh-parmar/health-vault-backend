@@ -25,8 +25,6 @@ async function onboardingChat(req, res) {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
-    // Bypass compression middleware for this specific SSE response
-    res.flush = () => {};
     req.socket.setTimeout(0);
     // Optionally flush headers if a middleware like compression is used
     if (typeof res.flushHeaders === "function") res.flushHeaders();

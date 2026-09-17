@@ -645,7 +645,11 @@ function normalizeCreateMedicationInput(payload = {}) {
     input.totalQuantity = 30;
   }
   if (!input.startDate) {
-    input.startDate = new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    input.startDate = `${year}-${month}-${day}`;
   }
   if (!input.foodFrequency) {
     input.foodFrequency = "AFTER_FOOD";

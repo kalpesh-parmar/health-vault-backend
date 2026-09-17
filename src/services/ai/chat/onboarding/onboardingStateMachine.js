@@ -180,17 +180,32 @@ function getNextRequiredOrOptionalStep(state) {
     return missingRequired;
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is strictly gated to UPLOAD flow when there is a Social login profile to compare with the document
-  const isSocial =
+  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing profile to compare with the document and a mismatch exists
+  const hasLoginProfile =
+    Boolean(state.loginData) ||
     state.hasSocialData === true ||
     ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
 
-  if (state.flowMode === "UPLOAD" && useDoc && isSocial && !state.profileConfirmed) {
+  const { hasMismatch } = getProfileMismatches(state);
+
+  if (
+    state.flowMode === "UPLOAD" &&
+    useDoc &&
+    hasLoginProfile &&
+    hasMismatch &&
+    !state.profileConfirmed
+  ) {
     return "RESOLVE_PROFILE_SOURCE";
   }
 
-  // In Mobile + Upload flow (no social profile to compare against), or in MANUAL/SKIP flow: auto-confirm profile
-  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP" || !useDoc || !isSocial) {
+  // In flow with no profile mismatch, or in MANUAL/SKIP flow: auto-confirm profile
+  if (
+    state.flowMode === "MANUAL" ||
+    state.flowMode === "SKIP" ||
+    !useDoc ||
+    !hasLoginProfile ||
+    !hasMismatch
+  ) {
     state.profileConfirmed = true;
   }
 
@@ -210,6 +225,11 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
+    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
+      state.medicationFlowStarted = true;
+      return "MEDICINE_OPTIONS";
+    }
+
     const hasExtractedMedicines =
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);

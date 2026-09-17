@@ -1755,4 +1755,338 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(res.options.map((o) => o.key)).toEqual(["ADD"]);
     });
   });
+
+  describe("Onboarding Optional Questions Flow (Blood Group -> Allergies -> Medicine Options)", () => {
+    test("User answers Blood Group 'O+' with client-injected bloodGroup: returns ASK_ALLERGIES, persists bloodGroup, does NOT corrupt allergies", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-bg-1",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const clientPayload = {
+        message: "O+",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_BLOOD_GROUP",
+          profileConfirmed: true,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-bg-1", clientPayload);
+
+      expect(res.actionType).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.existingUserData.bloodGroup).toBe("O+");
+      expect(res.onboardingState.existingUserData.allergies).toBeUndefined();
+      expect(res.onboardingState.allergiesSkipped).toBe(false);
+
+      expect(updatePatientSpy).toHaveBeenCalledWith(
+        "patient-bg-1",
+        expect.objectContaining({
+          bloodGroup: "O+",
+        }),
+      );
+      expect(updatePatientSpy).not.toHaveBeenCalledWith(
+        "patient-bg-1",
+        expect.objectContaining({
+          allergies: ["O+"],
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+
+    test("User skips Blood Group: returns ASK_ALLERGIES, sets bloodGroupSkipped true, allergiesSkipped false", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-bg-skip",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        onboardingCompleted: false,
+      });
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_BLOOD_GROUP",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const clientPayload = {
+        message: "SKIP",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_BLOOD_GROUP",
+          bloodGroupSkipped: true,
+          profileConfirmed: true,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-bg-skip", clientPayload);
+
+      expect(res.actionType).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.bloodGroupSkipped).toBe(true);
+      expect(res.onboardingState.allergiesSkipped).toBe(false);
+
+      jest.restoreAllMocks();
+    });
+
+    test("User answers Allergies 'Peanuts, Dust': returns MEDICINE_OPTIONS, persists allergies to DB", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+      const { ollamaClient } = require("../src/clients/ollamaClient");
+
+      jest
+        .spyOn(ollamaClient, "chat")
+        .mockResolvedValue(JSON.stringify({ value: ["Peanuts", "Dust"] }));
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-allergy-1",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        bloodGroup: "O+",
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_ALLERGIES",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const clientPayload = {
+        message: "Peanuts, Dust",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_ALLERGIES",
+          profileConfirmed: true,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+            allergies: ["Peanuts", "Dust"],
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-allergy-1", clientPayload);
+
+      expect(res.actionType).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.currentStep).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.existingUserData.allergies).toEqual(
+        expect.arrayContaining(["Peanuts", "Dust"]),
+      );
+      expect(updatePatientSpy).toHaveBeenCalledWith(
+        "patient-allergy-1",
+        expect.objectContaining({
+          allergies: expect.arrayContaining(["Peanuts", "Dust"]),
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+
+    test("User skips Allergies: returns MEDICINE_OPTIONS, sets allergiesSkipped true", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-allergy-skip",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        bloodGroup: "O+",
+        onboardingCompleted: false,
+      });
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_ALLERGIES",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const clientPayload = {
+        message: "SKIP",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_ALLERGIES",
+          allergiesSkipped: true,
+          profileConfirmed: true,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-allergy-skip", clientPayload);
+
+      expect(res.actionType).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.currentStep).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.allergiesSkipped).toBe(true);
+
+      jest.restoreAllMocks();
+    });
+
+    test("Duplicate Blood Group request when dbState is already at ASK_ALLERGIES: safely returns ASK_ALLERGIES without corrupting allergies", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-dup",
+        firstName: "John",
+        lastName: "Doe",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        bloodGroup: "O+",
+        onboardingCompleted: false,
+      });
+      const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_ALLERGIES",
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      const staleClientPayload = {
+        message: "O+",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_BLOOD_GROUP",
+          profileConfirmed: true,
+          existingUserData: {
+            firstName: "John",
+            lastName: "Doe",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-dup", staleClientPayload);
+
+      expect(res.actionType).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.onboardingState.existingUserData.allergies).toBeUndefined();
+      expect(updatePatientSpy).not.toHaveBeenCalledWith(
+        "patient-dup",
+        expect.objectContaining({
+          allergies: ["O+"],
+        }),
+      );
+
+      jest.restoreAllMocks();
+    });
+  });
 });

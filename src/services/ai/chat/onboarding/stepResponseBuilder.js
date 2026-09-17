@@ -553,22 +553,32 @@ async function getLocalizedResponse(step, state) {
             "Please enter the new medication details:",
             state.preferredLanguage,
           );
+      const totalBuffered = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd.length : 0;
       return {
         action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         renderType: "MEDICINE_FORM",
         message,
         medicine: med || emptyMedTemplate,
+        medicines: state.medicinesToAdd || [],
+        totalBuffered,
       };
     }
     case "MEDICINE_OPTIONS": {
+      const hasMedicines = Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0;
       const options = [
         {
           key: "ADD",
-          label: await getLocalizedText(
-            "onboarding.medicineOptions.addAnother",
-            "Add Another Medicine",
-            state.preferredLanguage,
-          ),
+          label: hasMedicines
+            ? await getLocalizedText(
+                "onboarding.medicineOptions.addMore",
+                "Add More Medicines",
+                state.preferredLanguage,
+              )
+            : await getLocalizedText(
+                "onboarding.medicineOptions.addMedicines",
+                "Add Medicines",
+                state.preferredLanguage,
+              ),
           primary: true,
         },
       ];
@@ -609,13 +619,26 @@ async function getLocalizedResponse(step, state) {
         });
       }
 
+      const baseOptionsMsg = await getLocalizedText(
+        "onboarding.medicineOptions.message",
+        "What would you like to do next?",
+        state.preferredLanguage,
+      );
+
+      let finalOptionsMsg = baseOptionsMsg;
+      if (state.cancellationNotice === true) {
+        const cancelNotice = await getLocalizedText(
+          "onboarding.medicineCancelled.message",
+          "Medicine entry has been cancelled.",
+          state.preferredLanguage,
+        );
+        finalOptionsMsg = `${cancelNotice}\n\n${baseOptionsMsg}`;
+        state.cancellationNotice = false;
+      }
+
       return {
         action: "MEDICINE_OPTIONS",
-        message: await getLocalizedText(
-          "onboarding.medicineOptions.message",
-          "What would you like to do next?",
-          state.preferredLanguage,
-        ),
+        message: finalOptionsMsg,
         options,
         medicines: state.medicinesToAdd || [],
       };

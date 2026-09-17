@@ -566,28 +566,7 @@ async function executeAddDocumentAction({
     failed: failedCount,
     rejected: rejectedCount,
   };
-  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
-    const prefLang = preferredLanguage.toLowerCase();
-    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
-    for (const docItem of docs) {
-      if (!docItem) continue;
-      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
-      if (struct && typeof struct === "object") {
-        if (struct.summaryInPreferredLanguage) {
-          struct.summary = struct.summaryInPreferredLanguage;
-        } else if (struct.summary) {
-          try {
-            const translated = await aiClient.translate(struct.summary, "english", prefLang);
-            if (translated) {
-              struct.summary = translated;
-            }
-          } catch (err) {
-            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
-          }
-        }
-      }
-    }
-  }
+
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,
@@ -596,12 +575,16 @@ async function executeAddDocumentAction({
   });
 
   let activeSessionId = sessionId;
-  if (!activeSessionId && isOnboardingCompleted) {
-    const newSession = await chatService.createSession({
-      userId,
-      title: docResult?.document?.fileName || "Document Chat",
-    });
-    activeSessionId = newSession?.id || null;
+  if (!activeSessionId && userId) {
+    try {
+      const newSession = await chatService.createSession({
+        userId,
+        title: docResult?.document?.fileName || "Medical Document",
+      });
+      activeSessionId = newSession?.id || null;
+    } catch (sErr) {
+      console.warn("[executeAddDocumentAction] Failed to initialize session:", sErr.message);
+    }
   }
 
   if (activeSessionId) {

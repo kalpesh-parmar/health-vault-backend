@@ -165,6 +165,8 @@ const unifiedChatSchema = z.object({
   state: z.record(z.any()).optional().nullable(),
   history: z.array(z.record(z.any())).optional().default([]),
   displayLabel: z.string().optional().nullable(),
+  fromScreen: z.string().optional().nullable(),
+  medicines: z.array(z.any()).optional().nullable(),
   preferredLanguage: z.string().optional().nullable(),
   stream: z
     .union([z.boolean(), z.enum(["true", "false"])])
