@@ -63,8 +63,9 @@ async function getDocumentSummaryList(req, res) {
 }
 
 async function retryDocument(req, res) {
+  const fileKey = req.body?.fileKey || req.query?.fileKey || req.validatedRetry?.fileKey;
   const result = await documentService.retryDocument({
-    fileKey: req?.query?.fileKey,
+    fileKey,
     userId: req.auth.userId,
     file: req.files?.[0] || req.file || null,
   });

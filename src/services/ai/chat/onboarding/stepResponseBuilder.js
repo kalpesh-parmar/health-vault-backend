@@ -1,13 +1,9 @@
 /* eslint-disable no-console */
-const { db } = require("../../../../configs/db");
-const { document } = require("../../../../models/document");
-const { eq, desc } = require("drizzle-orm");
 const { getLocalizedText } = require("../../../../helpers/onboarding.helper");
-const { toDbDateOnlyString } = require("../../../../utils/dateUtils");
 const { languageTypeValues, languageNativeLabels } = require("../../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../../enums/bloodGroupType");
-const aiClient = require("../../clients/aiClient.service");
 const { getProfileMismatches, getMissingRequiredStep } = require("./onboardingStateMachine");
+const { buildStructuredReportPayload } = require("../../../../helpers/reportPayload.helper");
 
 const REPORT_QUESTIONS_I18N = {
   english: [
@@ -557,22 +553,32 @@ async function getLocalizedResponse(step, state) {
             "Please enter the new medication details:",
             state.preferredLanguage,
           );
+      const totalBuffered = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd.length : 0;
       return {
         action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         renderType: "MEDICINE_FORM",
         message,
         medicine: med || emptyMedTemplate,
+        medicines: state.medicinesToAdd || [],
+        totalBuffered,
       };
     }
     case "MEDICINE_OPTIONS": {
+      const hasMedicines = Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0;
       const options = [
         {
           key: "ADD",
-          label: await getLocalizedText(
-            "onboarding.medicineOptions.addAnother",
-            "Add Another Medicine",
-            state.preferredLanguage,
-          ),
+          label: hasMedicines
+            ? await getLocalizedText(
+                "onboarding.medicineOptions.addMore",
+                "Add More Medicines",
+                state.preferredLanguage,
+              )
+            : await getLocalizedText(
+                "onboarding.medicineOptions.addMedicines",
+                "Add Medicines",
+                state.preferredLanguage,
+              ),
           primary: true,
         },
       ];
@@ -613,51 +619,41 @@ async function getLocalizedResponse(step, state) {
         });
       }
 
+      const baseOptionsMsg = await getLocalizedText(
+        "onboarding.medicineOptions.message",
+        "What would you like to do next?",
+        state.preferredLanguage,
+      );
+
+      let finalOptionsMsg = baseOptionsMsg;
+      if (state.cancellationNotice === true) {
+        const cancelNotice = await getLocalizedText(
+          "onboarding.medicineCancelled.message",
+          "Medicine entry has been cancelled.",
+          state.preferredLanguage,
+        );
+        finalOptionsMsg = `${cancelNotice}\n\n${baseOptionsMsg}`;
+        state.cancellationNotice = false;
+      }
+
       return {
         action: "MEDICINE_OPTIONS",
-        message: await getLocalizedText(
-          "onboarding.medicineOptions.message",
-          "What would you like to do next?",
-          state.preferredLanguage,
-        ),
+        message: finalOptionsMsg,
         options,
         medicines: state.medicinesToAdd || [],
       };
     }
 
     case "ASK_REPORT": {
-      let docRecord = null;
       const targetDocId = Array.isArray(state.documentId) ? state.documentId[0] : state.documentId;
-      if (targetDocId) {
-        try {
-          const [doc] = await db.select().from(document).where(eq(document.id, targetDocId));
-          docRecord = doc;
-        } catch (err) {
-          console.warn("[OnboardingService] Failed to fetch document for ASK_REPORT:", err.message);
-        }
-      }
-
       const effectiveUserId = state.userId || state.existingUserData?.id;
-      if (!docRecord && effectiveUserId) {
-        try {
-          const docs = await db
-            .select()
-            .from(document)
-            .where(eq(document.userId, effectiveUserId))
-            .orderBy(desc(document.createdAt))
-            .limit(1);
-          if (docs && docs.length > 0) {
-            docRecord = docs[0];
-          }
-        } catch (err) {
-          console.warn(
-            "[OnboardingService] Failed to fetch latest document for ASK_REPORT:",
-            err.message,
-          );
-        }
-      }
-
-      if (!docRecord && !targetDocId) {
+      const payload = await buildStructuredReportPayload({
+        docRecord: state.documentRecord || state.document || null,
+        targetDocId,
+        userId: effectiveUserId,
+        preferredLanguage: state.preferredLanguage || "english",
+      });
+      if (!payload || !payload.document) {
         return {
           action: "NORMAL_CHAT",
           message: await getLocalizedText(
@@ -670,169 +666,7 @@ async function getLocalizedResponse(step, state) {
           options: [],
         };
       }
-
-      const structured = docRecord?.structuredExtractedData || {};
-      const patientInfo = structured.patientInfo || structured.patient || {};
-      const tests =
-        Array.isArray(structured.tests) && structured.tests.length > 0
-          ? structured.tests
-          : Array.isArray(structured.labResults) && structured.labResults.length > 0
-            ? structured.labResults
-            : [];
-
-      const lang = state.preferredLanguage || "english";
-      let docSummary =
-        (lang !== "english" &&
-          (structured.summaryInPreferredLanguage || docRecord?.summaryInPreferredLanguage)) ||
-        docRecord?.summaryEnglish ||
-        structured.summaryEnglish ||
-        structured.summary ||
-        structured.summaryInPreferredLanguage ||
-        docRecord?.remarks ||
-        "";
-
-      const isPrescription =
-        docRecord?.documentType === "PRESCERIPTION" ||
-        docRecord?.documentType === "PRESCRIPTION" ||
-        structured.documentType === "PRESCRIPTION" ||
-        structured.documentType === "PRESCERIPTION" ||
-        (Array.isArray(structured.medications) &&
-          structured.medications.length > 0 &&
-          tests.length === 0);
-
-      const REPORT_QUESTIONS_I18N = {
-        english: [
-          "What does my report mean?",
-          "Are there any abnormal values?",
-          "What should I discuss with my doctor?",
-          "Can you explain this report in simple language?",
-        ],
-        gujarati: [
-          "મારા રિપોર્ટનો અર્થ શું છે?",
-          "શું કોઈ અસામાન્ય મૂલ્યો છે?",
-          "મારે મારા ડૉક્ટર સાથે શું ચર્ચા કરવી જોઈએ?",
-          "શું તમે આ રિપોર્ટ સરળ ભાષામાં સમજાવી શકો છો?",
-        ],
-        hindi: [
-          "मेरी रिपोर्ट का क्या मतलब है?",
-          "क्या कोई असामान्य मूल्य हैं?",
-          "मुझे अपने डॉक्टर से क्या चर्चा करनी चाहिए?",
-          "क्या आप इस रिपोर्ट को सरल भाषा में समझा सकते हैं?",
-        ],
-        marathi: [
-          "माझ्या रिपोर्टचा अर्थ काय आहे?",
-          "काही असामान्य मूल्ये आहेत का?",
-          "मी माझ्या डॉक्टरांशी काय चर्चा करावी?",
-          "तुम्ही हा रिपोर्ट सोप्या भाषेत समजावून सांगू शकता का?",
-        ],
-        tamil: [
-          "எனது அறிக்கையின் அர்த்தம் என்ன?",
-          "ஏதேனும் அசாதாரண மதிப்புகள் உள்ளதா?",
-          "எனது மருத்துவரிடம் நான் என்ன விவாதிக்க வேண்டும்?",
-          "இந்த அறிக்கையை எளிய மொழியில் விளக்க முடியுமா?",
-        ],
-      };
-
-      if (!docSummary) {
-        if (isPrescription) {
-          docSummary = `Prescription from ${docRecord?.doctorName || structured.doctorName || "Doctor"} at ${docRecord?.hospitalName || structured.hospitalName || "Clinic"}.`;
-        } else {
-          docSummary = "Medical report summary.";
-        }
-      }
-
-      if (
-        lang !== "english" &&
-        docSummary &&
-        !structured.summaryInPreferredLanguage &&
-        !docRecord?.summaryInPreferredLanguage
-      ) {
-        try {
-          const translatedSummary = await aiClient.translate(docSummary, "english", lang);
-          if (translatedSummary) {
-            docSummary = translatedSummary;
-          }
-        } catch (err) {
-          console.warn(
-            "[OnboardingService] Failed to translate docSummary for ASK_REPORT:",
-            err.message,
-          );
-        }
-      }
-
-      const suggestedQuestions = REPORT_QUESTIONS_I18N[lang] || REPORT_QUESTIONS_I18N.english;
-
-      const labFindings =
-        tests.length > 0
-          ? tests.map((t) => ({
-              name: t.name || t.testName || t.parameter || "Test",
-              value: t.value || t.result || "",
-              unit: t.unit || "",
-              status: t.status || (t.isAbnormal ? "Abnormal" : "Normal"),
-              referenceRange: t.normalRange || t.referenceRange || t.range || "",
-            }))
-          : [];
-
-      const medicationFindings = Array.isArray(structured.medications)
-        ? structured.medications.map((m) => ({
-            name: m.name || "Medicine",
-            dosage: m.dosage || m.dose || "",
-            timeOfDay: m.timeOfDay || m.timing || "",
-            frequency: m.frequency || "",
-            duration: m.duration || "",
-            quantity: m.quantity || m.qty || "",
-            instructions: m.instructions || m.notes || "",
-            type: m.type || "",
-            foodContext: m.food_context || "",
-          }))
-        : [];
-
-      const docTypeResolved = isPrescription
-        ? "PRESCRIPTION"
-        : docRecord?.documentType || structured.documentType || "MEDICAL_REPORT";
-
-      const resolvedDoctor =
-        docRecord?.doctorName ||
-        structured.doctorName ||
-        structured.doctorInfo?.name ||
-        structured.doctor?.name ||
-        patientInfo.doctorName ||
-        null;
-
-      const resolvedHospital =
-        docRecord?.hospitalName ||
-        structured.hospitalName ||
-        structured.hospitalInfo?.name ||
-        structured.hospital?.name ||
-        patientInfo.hospitalName ||
-        patientInfo.clinicName ||
-        null;
-
-      const dateOnlyStr =
-        toDbDateOnlyString(docRecord?.reportDate) ||
-        toDbDateOnlyString(structured.reportDate) ||
-        toDbDateOnlyString(new Date());
-
-      return {
-        action: "ASK_REPORT",
-        message: "",
-        document: {
-          id: docRecord?.id || targetDocId,
-          fileName: docRecord?.fileName || (isPrescription ? "Prescription" : "Medical Report"),
-          documentType: docTypeResolved,
-          reportDate: dateOnlyStr,
-          hospitalName: resolvedHospital,
-          doctorName: resolvedDoctor,
-          summary: docSummary,
-          labFindings,
-          medicationFindings,
-          keyFindings: labFindings.length > 0 ? labFindings : medicationFindings,
-          s3Key: docRecord?.s3Key || null,
-          fileUrl: docRecord?.fileUrl || null,
-        },
-        suggestedQuestions,
-        options: [],
-      };
+      return payload;
     }
 
     case "COMPLETE":

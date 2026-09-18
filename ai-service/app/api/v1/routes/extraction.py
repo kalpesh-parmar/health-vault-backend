@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/extraction", tags=["extraction"])
 
@@ -38,8 +40,24 @@ class GraphExtractionRequest(BaseModel):
     structuredDocument: dict
 
 
-@router.post("/graphs")
-async def extract_graphs(payload: GraphExtractionRequest, request: Request) -> dict:
+class MedicalGraphModel(BaseModel):
+    graphType: str = "unknown"
+    title: str | None = None
+    xAxis: list[Any] = Field(default_factory=list)
+    yAxis: list[Any] = Field(default_factory=list)
+    series: list[dict[str, Any]] = Field(default_factory=list)
+    unit: str | None = None
+    page: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphExtractionResponse(BaseModel):
+    success: bool = True
+    graphs: list[MedicalGraphModel]
+
+
+@router.post("/graphs", response_model=GraphExtractionResponse)
+async def extract_graphs(payload: GraphExtractionRequest, request: Request) -> GraphExtractionResponse:
     container = request.app.state.container
     graphs = await container.extraction.extract_graphs(payload.structuredDocument)
-    return {"success": True, "graphs": graphs}
+    return GraphExtractionResponse(success=True, graphs=graphs)

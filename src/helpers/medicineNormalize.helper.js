@@ -644,33 +644,12 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
     input.totalQuantity = 30;
   }
-  const todayStr = new Date().toISOString().split("T")[0];
-  const todayDate = new Date(todayStr);
-  todayDate.setHours(0, 0, 0, 0);
-
-  if (
-    !input.startDate ||
-    typeof input.startDate !== "string" ||
-    input.startDate.trim() === "" ||
-    input.startDate === "null" ||
-    input.startDate === "none" ||
-    input.startDate === "N/A"
-  ) {
-    input.startDate = todayStr;
-  } else {
-    const parsedDate = new Date(input.startDate);
-    if (isNaN(parsedDate.getTime())) {
-      input.startDate = todayStr;
-    } else {
-      const formatted = parsedDate.toISOString().split("T")[0];
-      const selDate = new Date(formatted);
-      selDate.setHours(0, 0, 0, 0);
-      if (selDate < todayDate) {
-        input.startDate = todayStr;
-      } else {
-        input.startDate = formatted;
-      }
-    }
+  if (!input.startDate) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    input.startDate = `${year}-${month}-${day}`;
   }
   if (!input.foodFrequency) {
     input.foodFrequency = "AFTER_FOOD";

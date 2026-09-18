@@ -1,6 +1,7 @@
 require("dotenv").config({ quiet: true });
 require("./configs/axiosLogger");
 // Force nodemon restart to load latest ts changes
+const fs = require("fs");
 const http = require("http");
 const cors = require("cors");
 const express = require("express");
@@ -22,7 +23,13 @@ const cronRegisterHandler = require("./configs/cronConfig");
 // const { ollamaClient } = require("./clients/ollamaClient");
 const sseConnectionService = require("./services/sseConnection.service");
 const ocrProgressBus = require("./services/sse/ocrProgressBus");
-const documentProcessingJobRepository = require("./repositories/documentProcessingJobRepository");
+const sharedSseBus = require("./services/sse/sharedSseBus");
+const documentQueue = require("./services/queue/documentQueue.service");
+
+// Ensure temporary upload directory exists
+if (env.uploadTempDir) {
+  fs.mkdirSync(env.uploadTempDir, { recursive: true });
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -53,23 +60,42 @@ if (require.main === module) {
     cronService.loadStartAll();
     console.log("cron system initialized...");
 
-    // Reconcile zombie/running jobs from prior ungraceful shutdowns
+    // Initialize shared SSE event bus across cluster/instances
     try {
-      const reconciled = await documentProcessingJobRepository.reconcileRunningJobsOnBoot();
-      if (reconciled?.length) {
-        console.log(`[boot-reconcile] reconciled ${reconciled.length} interrupted running jobs`);
+      await sharedSseBus.init({
+        onRemoteEvent: (channelKey, event) => {
+          sseConnectionService.receiveRemote(channelKey, event);
+          ocrProgressBus.receiveRemote(channelKey, event);
+        },
+      });
+      sseConnectionService.setAdapter(sharedSseBus);
+      ocrProgressBus.setAdapter(sharedSseBus);
+    } catch (sseErr) {
+      console.warn("[SharedSseBus] Failed to initialize SSE bus on startup:", sseErr.message);
+    }
+
+    // Intelligent boot recovery: resume uploaded jobs from checkpoint, fail unuploaded
+    try {
+      const recovered = await documentQueue.resumeOrphanedJobsOnBoot();
+      if (recovered?.length) {
+        const resumed = recovered.filter((r) => r.resumed).length;
+        console.log(
+          `[boot-recovery] processed ${recovered.length} orphaned jobs (${resumed} resumed, ${recovered.length - resumed} marked for reupload)`,
+        );
       }
     } catch (err) {
-      console.error("[boot-reconcile] failed to reconcile running jobs on boot", err);
+      console.error("[boot-recovery] failed to recover orphaned jobs on boot", err);
     }
   });
 
   function shutdown(signal) {
     console.log(signal + " received, shutting down");
 
-    // Stop accepting new SSE connections and release active streams
+    // Stop accepting new SSE connections, pause queue, and release active streams
+    documentQueue.pause();
     sseConnectionService.destroy();
     ocrProgressBus.destroy();
+    sharedSseBus.close();
     documentJobSweeper.stopSweeper();
 
     //Stop accepting new HTTP requests

@@ -14,6 +14,7 @@ class ProgressEmitter {
     fileName = null,
     batchId = null,
     patientId = null,
+    totalPages = null,
   }) {
     if (!fileKey) {
       throw new InvalidRequestException(errorConstants.FILE_KEY_IS_REQUIRED);
@@ -24,6 +25,7 @@ class ProgressEmitter {
     this.fileName = fileName;
     this.batchId = batchId;
     this.patientId = patientId;
+    this.totalPages = totalPages;
 
     this.startedAt = Date.now();
     this._lastPercentage = 0;
@@ -32,6 +34,12 @@ class ProgressEmitter {
 
   static for(ctx) {
     return new ProgressEmitter(ctx);
+  }
+
+  setTotalPages(totalPages) {
+    if (Number.isFinite(totalPages) && totalPages > 0) {
+      this.totalPages = totalPages;
+    }
   }
 
   // Creates the common SSE event envelope
@@ -57,6 +65,7 @@ class ProgressEmitter {
       percentage: pct,
       status,
       message,
+      totalPages: this.totalPages || extra.totalPages || undefined,
       timestamp: new Date(),
       elapsedMs: Date.now() - this.startedAt,
       ...extra,
@@ -66,7 +75,7 @@ class ProgressEmitter {
   // Emits a stage event
   stage(stage, stageStatus = StageType.IN_PROGRESS, message = null, ratio = 0, extra = {}) {
     if (this._finished) {
-      return;
+      return null;
     }
 
     const range = STAGE_WEIGHTS[stage];
@@ -86,31 +95,58 @@ class ProgressEmitter {
       extra,
     });
     sseConnection.publish(this.fileKey, event);
+    return event;
   }
 
-  // Emits page-level OCR progress inside the OCR percentage range.
-  page(page, totalPages, extra = {}) {
-    if (this._finished || !totalPages || page <= 0) {
-      return;
+  // Continuous progressive progress formula (REQ-06):
+  // progress = stageBaseline + (unitsDone / totalUnits) * stageWeight
+  progressWithinStage(stage, unitsDone, totalUnits, message = null, extra = {}) {
+    if (this._finished) {
+      return null;
     }
-    const [from, to] = STAGE_WEIGHTS[DOCUMENT_STAGES.OCR_RUNNING];
-    const ratio = Math.min(1, page / totalPages);
+
+    const range = STAGE_WEIGHTS[stage];
+    if (!range) {
+      throw new InvalidRequestException(messageConstants.UNKNOWN_DOCUMENT_STAGE(stage));
+    }
+
+    const resolvedTotal = totalUnits || this.totalPages || 1;
+    const safeUnitsDone = Math.max(0, Math.min(resolvedTotal, unitsDone));
+    const ratio = resolvedTotal > 0 ? safeUnitsDone / resolvedTotal : 0;
+
+    const [from, to] = range;
     const percentage = from + (to - from) * ratio;
 
     const event = this._base({
-      stage: DOCUMENT_STAGES.OCR_RUNNING,
+      stage,
       stageStatus: StageType.IN_PROGRESS,
       percentage,
       status: ProcessStatus.SUCCESS,
-      message: messageConstants.OCR_PAGE_OF_TOTAL_PAGE(page, totalPages),
+      message,
       extra: {
-        page,
-        totalPages,
+        page: unitsDone,
+        totalPages: resolvedTotal,
         ...extra,
       },
     });
 
     sseConnection.publish(this.fileKey, event);
+    return event;
+  }
+
+  // Emits page-level progress inside the OCR percentage range (or any multi-page stage)
+  page(page, totalPages, extra = {}) {
+    if (this._finished || page <= 0) {
+      return null;
+    }
+
+    const total = totalPages || this.totalPages || 1;
+    if (totalPages && (!this.totalPages || this.totalPages !== totalPages)) {
+      this.totalPages = totalPages;
+    }
+
+    const msg = extra?.message || messageConstants.OCR_PAGE_OF_TOTAL_PAGE(page, total);
+    return this.progressWithinStage(DOCUMENT_STAGES.OCR_RUNNING, page, total, msg, extra);
   }
 
   // Marks the document process as successfully completed.

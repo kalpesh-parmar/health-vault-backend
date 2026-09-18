@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { env } = require("../../../configs/env");
 const { ollamaClient } = require("../../../clients/ollamaClient");
+const { StatusCodes } = require("http-status-codes");
 const {
   AppError,
   NonMedicalDocumentException,
@@ -24,7 +25,6 @@ const {
   medicalDocumentClassifierService,
 } = require("../classifier/medicalDocumentClassifier.service");
 const aiClient = require("../clients/aiClient.service");
-const pdfParse = require("pdf-parse");
 const { MedicalExtractionSchema } = require("../../../validations/ocr.validation");
 
 const {
@@ -50,6 +50,15 @@ const {
   joinForText,
 } = require("../../../helpers/ocrNormalizer.helper");
 const { inferFileType } = require("../../../helpers/document.helper");
+const { detectLanguages } = require("../../../helpers/languageDetector.helper");
+const { ocrPageCache } = require("../../../helpers/ocrCache.helper");
+const { validateMedication } = require("../../../helpers/formulary.helper");
+const {
+  normalizeLanguage,
+  buildSummaryPrompt,
+  extractKeyPoints,
+  synthesizeClinicalSummary,
+} = require("../../../helpers/summary.helper");
 
 class OcrService {
   async convertPdfToImages(pdfBuffer, options = {}) {
@@ -343,24 +352,13 @@ class OcrService {
           images: [base64Image],
         },
       ];
-      return ollamaClient.chat(messages, env.aiModel, { temperature: 0 });
+      return ollamaClient.chat(messages, env.aiModel, { temperature: 0, think: false });
     });
 
     let rawText = pageTexts.map((text, idx) => `--- Page ${idx + 1} ---\n${text}`).join("\n\n");
     rawText = cleanOcrText(rawText);
 
-    const hasGujarati = /[\u0A80-\u0AFF]/.test(rawText);
-    const detectedLanguages = ["english"];
-    if (hasGujarati) {
-      detectedLanguages.push("gujarati");
-    }
-    if (
-      userLanguage &&
-      userLanguage.toLowerCase() !== "english" &&
-      !detectedLanguages.includes(userLanguage.toLowerCase())
-    ) {
-      detectedLanguages.push(userLanguage.toLowerCase());
-    }
+    const { detectedLanguages } = detectLanguages(rawText, userLanguage);
 
     return {
       rawText,
@@ -414,6 +412,7 @@ class OcrService {
 
       const responseText = await ollamaClient.chat(messages, env.aiModel, {
         temperature: 0,
+        think: false,
       });
 
       const parsed = this.cleanAndParseJSON(responseText);
@@ -486,18 +485,7 @@ class OcrService {
           .trim() || null,
     };
 
-    const hasGujarati = /[\u0A80-\u0AFF]/.test(combined.rawText || "");
-    const detectedLanguages = ["english"];
-    if (hasGujarati) {
-      detectedLanguages.push("gujarati");
-    }
-    if (
-      userLanguage &&
-      userLanguage.toLowerCase() !== "english" &&
-      !detectedLanguages.includes(userLanguage.toLowerCase())
-    ) {
-      detectedLanguages.push(userLanguage.toLowerCase());
-    }
+    const { detectedLanguages } = detectLanguages(combined.rawText || "", userLanguage);
 
     return {
       rawText: cleanOcrText(combined.rawText || combined.summary || ""),
@@ -577,6 +565,7 @@ ${rawText}
     try {
       const response = await ollamaClient.generate(prompt, env.chatModel, {
         temperature: 0.1,
+        think: false,
       });
 
       const parsed = this.cleanAndParseJSON(response);
@@ -703,6 +692,7 @@ Return STRICT JSON only:
           maxTokens: 512,
           format: "json",
           rawOptions: { num_ctx: 8192 },
+          think: false,
         },
       );
       const parsed = this.cleanAndParseJSON(responseText);
@@ -727,8 +717,28 @@ Return STRICT JSON only:
   async extractMedicalData(file) {
     const traceId = file.traceId || "N/A";
     const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
+    const onProgress = file.onProgress;
 
     const { visionModel, structuringModel } = this.getModelConfig();
+
+    let fileBuffer = file.buffer;
+    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+      const candidatePath = file.path || file.filePath;
+      if (candidatePath && fs.existsSync(candidatePath)) {
+        try {
+          fileBuffer = fs.readFileSync(candidatePath);
+        } catch (readErr) {
+          console.error(
+            `[OcrService] Failed to read file from path ${candidatePath}:`,
+            readErr.message,
+          );
+        }
+      }
+    }
+
+    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+      throw new Error("OCR received an empty or unreadable file buffer");
+    }
 
     const isPdf =
       file.mimeType === "application/pdf" ||
@@ -736,6 +746,7 @@ Return STRICT JSON only:
       file.originalname?.toLowerCase().endsWith(".pdf");
 
     let pageTexts = [];
+    let pageResults = [];
     let isScannedPdfOrImage = false;
     let skippedPages = [];
     let failedPages = [];
@@ -745,13 +756,25 @@ Return STRICT JSON only:
     // STEP 1: Digital PDF Text Extraction vs. Rasterization Fallback
     if (isPdf) {
       try {
-        const pdfData = await pdfParse(file.buffer);
+        const pdfParse = require("pdf-parse");
+        const pdfData = await pdfParse(fileBuffer);
         // Strip control characters while preserving printable Unicode (µ, °, ±, non-English)
         // eslint-disable-next-line no-control-regex -- intentionally stripping control characters from OCR output
         const extracted = (pdfData.text || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim();
         if (extracted.length >= (env.aiMinTextChars || 50)) {
           pageTexts = [extracted];
           hasMedicalPage = true;
+          if (typeof onProgress === "function") {
+            try {
+              onProgress({
+                page: pdfData.numpages || 1,
+                totalPages: pdfData.numpages || 1,
+                stage: "OCR_RUNNING",
+              });
+            } catch (pErr) {
+              console.warn("[OcrService] onProgress callback threw:", pErr.message);
+            }
+          }
         } else {
           isScannedPdfOrImage = true;
         }
@@ -767,90 +790,226 @@ Return STRICT JSON only:
     if (isScannedPdfOrImage) {
       let base64Images = [];
       if (isPdf) {
-        base64Images = await this.convertPdfToImages(file.buffer);
+        base64Images = await this.convertPdfToImages(fileBuffer);
       } else {
-        const processedBuffer = await preprocessImage(file.buffer);
-        base64Images = [processedBuffer.toString("base64")];
+        const processedBuffer = await preprocessImage(fileBuffer);
+        const candidateBase64 = Buffer.isBuffer(processedBuffer)
+          ? processedBuffer.toString("base64")
+          : Buffer.isBuffer(fileBuffer)
+            ? fileBuffer.toString("base64")
+            : "";
+        if (candidateBase64) {
+          base64Images = [candidateBase64];
+        }
       }
 
       if (!base64Images.length) {
         throw new Error("OCR produced no usable text");
       }
 
+      const totalPages = base64Images.length;
+      let completedPages = 0;
+
       console.time(
-        `[OcrService] Processing ${base64Images.length} page(s) in parallel with ${visionModel}...`,
+        `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
       );
 
-      const pageResults = await Promise.all(
+      pageResults = await Promise.all(
         base64Images.map(async (base64Img, index) => {
           const pageNum = index + 1;
-          try {
-            const pageResponse = await ollamaClient.chat(
-              [
-                {
-                  role: "user",
-                  content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
-                  images: [base64Img],
-                },
-              ],
-              visionModel,
-              {
-                temperature: 0,
-                maxTokens: 8192,
-                format: "json",
-                rawOptions: { num_ctx: 8192 },
-              },
+          const pageHash = ocrPageCache.hashPageContent(base64Img);
+          const cachedResult = ocrPageCache.getPageOcr(pageHash);
+          if (cachedResult) {
+            console.log(
+              `[OcrService] Page ${pageNum} cache HIT (hash: ${pageHash.slice(0, 10)}...)`,
             );
+            return {
+              pageNum,
+              pageType: cachedResult.pageType,
+              rawText: cachedResult.rawText,
+              status: "SUCCESS",
+              cached: true,
+            };
+          }
 
-            const pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
-            if (pageParsed && pageParsed.status !== "FAILED") {
-              const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
-              return { pageNum, pageType, rawText: pageParsed.rawText || "", status: "SUCCESS" };
-            } else {
-              return { pageNum, pageType: "UNKNOWN", rawText: "", status: "FAILED" };
-            }
-          } catch (err) {
-            console.error(`[OcrService] Vision OCR failed on Page ${pageNum}:`, err.message);
+          if (!base64Img || typeof base64Img !== "string" || base64Img.trim().length === 0) {
+            console.error(`[OcrService] Page ${pageNum} base64 image payload is empty or invalid`);
             return {
               pageNum,
               pageType: "UNKNOWN",
               rawText: "",
               status: "FAILED",
-              error: err.message,
+              error: "Empty image payload",
             };
+          }
+
+          console.log(
+            `[OcrService] [DIAGNOSTIC] Page ${pageNum}/${totalPages}: imagesCount=1, base64Bytes=${base64Img.length}, visionModel=${visionModel}, traceId=${traceId}, jobId=${jobId}`,
+          );
+
+          let pageResponse;
+          let pageParsed = null;
+          let attempt = 0;
+          let lastError = null;
+
+          while (attempt < 2 && (!pageParsed || pageParsed.status === "FAILED")) {
+            attempt++;
+            try {
+              pageResponse = await ollamaClient.chat(
+                [
+                  {
+                    role: "user",
+                    content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
+                    images: [base64Img],
+                  },
+                ],
+                visionModel,
+                {
+                  temperature: 0,
+                  maxTokens: 8192,
+                  format: "json",
+                  keep_alive: -1,
+                  rawOptions: { num_ctx: 8192 },
+                  think: false,
+                  fallbackToThinking: true,
+                },
+              );
+
+              const rawSnippet =
+                typeof pageResponse === "string"
+                  ? pageResponse.slice(0, 100).replace(/[\r\n]+/g, " ")
+                  : "NON_STRING";
+              console.log(
+                `[OcrService] [DIAGNOSTIC] Page ${pageNum} attempt ${attempt} response snippet: "${rawSnippet}..."`,
+              );
+
+              pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
+              if (pageParsed && pageParsed.status !== "FAILED") {
+                break;
+              }
+            } catch (err) {
+              lastError = err;
+              console.warn(
+                `[OcrService] Vision OCR attempt ${attempt} failed on Page ${pageNum}:`,
+                err.message,
+              );
+            }
+          }
+
+          try {
+            if (pageParsed && pageParsed.status !== "FAILED") {
+              const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
+              const rawText = pageParsed.rawText || "";
+              ocrPageCache.setPageOcr(pageHash, { pageType, rawText });
+              return { pageNum, pageType, rawText, status: "SUCCESS" };
+            } else {
+              return {
+                pageNum,
+                pageType: "UNKNOWN",
+                rawText: "",
+                status: "FAILED",
+                error: lastError?.message || "Unparseable vision response",
+              };
+            }
+          } finally {
+            completedPages++;
+            if (typeof onProgress === "function") {
+              try {
+                onProgress({
+                  page: completedPages,
+                  totalPages,
+                  stage: "OCR_RUNNING",
+                });
+              } catch (progressErr) {
+                console.warn("[OcrService] onProgress callback threw:", progressErr.message);
+              }
+            }
           }
         }),
       );
 
       console.timeEnd(
-        `[OcrService] Processing ${base64Images.length} page(s) in parallel with ${visionModel}...`,
+        `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
       );
+
+      const MEDICAL_PAGE_TYPES = new Set([
+        "MEDICAL",
+        "PRESCRIPTION",
+        "LAB_REPORT",
+        "IMAGING_REPORT",
+        "DISCHARGE_SUMMARY",
+        "CONSULTATION_REPORT",
+        "OTHER_MEDICAL_DOCUMENT",
+      ]);
+
+      const EXPLICIT_NON_MEDICAL_TYPES = new Set([
+        "ADVERTISEMENT",
+        "COVER",
+        "OTHER",
+        "RECEIPT",
+        "INVOICE",
+        "NON_MEDICAL",
+      ]);
+
+      const explicitNonMedicalPages = [];
+      const ambiguousOrFailedPages = [];
 
       for (const res of pageResults) {
         if (res.status === "SUCCESS") {
-          if (res.pageType === "MEDICAL" || file.enforceMedicalGate === false) {
-            if (res.pageType === "MEDICAL") hasMedicalPage = true;
+          const typeUpper = (res.pageType || "").toUpperCase();
+          if (MEDICAL_PAGE_TYPES.has(typeUpper) || file.enforceMedicalGate === false) {
+            hasMedicalPage = true;
             pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
-          } else {
+          } else if (EXPLICIT_NON_MEDICAL_TYPES.has(typeUpper)) {
             skippedPages.push({ page: res.pageNum, reason: res.pageType });
+            explicitNonMedicalPages.push(res.pageNum);
             console.warn(`[OcrService] Page ${res.pageNum} skipped (Type: ${res.pageType})`);
+          } else {
+            ambiguousOrFailedPages.push(res.pageNum);
+            pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
           }
         } else {
           ocrIncomplete = true;
           failedPages.push(res.pageNum);
+          ambiguousOrFailedPages.push(res.pageNum);
           pageTexts.push(`--- Page ${res.pageNum} ---\n[OCR_FAILED]`);
         }
       }
 
-      // Document-Level Medical Check: Reject only if NO page in the document was medical
+      // Document-Level Medical Check: Reject only if NO page was medical AND ALL completed pages were explicitly non-medical
       if (!hasMedicalPage && file.enforceMedicalGate !== false) {
-        const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
-        const uniqueCategories = [...new Set(detectedCategories)];
-        const categoryStr =
-          uniqueCategories.length > 0 ? ` (detected category: ${uniqueCategories.join(", ")})` : "";
-        throw new NonMedicalDocumentException(
-          `The uploaded file is not a medical document${categoryStr}.`,
+        if (explicitNonMedicalPages.length > 0 && ambiguousOrFailedPages.length === 0) {
+          const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
+          const uniqueCategories = [...new Set(detectedCategories)];
+          const categoryStr =
+            uniqueCategories.length > 0
+              ? ` (detected category: ${uniqueCategories.join(", ")})`
+              : "";
+          throw new NonMedicalDocumentException(
+            `The uploaded file is not a medical document${categoryStr}.`,
+          );
+        }
+
+        // Inconclusive/ambiguous/failed classification: FAIL OPEN or mark RETRYABLE_UNKNOWN (Never fail closed)
+        console.warn(
+          `[OcrService] Medical gate inconclusive for document (ambiguous/failed pages: ${ambiguousOrFailedPages.join(", ")}). Failing open or flagging as retryable.`,
         );
+
+        const usableText = pageTexts
+          .join("\n\n")
+          .replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "")
+          .trim();
+
+        if (!usableText) {
+          const retryErr = new AppError(
+            StatusCodes.INTERNAL_SERVER_ERROR,
+            "Medical document classification inconclusive (model output unparseable or failed). Scheduled for retry.",
+            "RETRYABLE_UNKNOWN",
+            true,
+          );
+          retryErr.retryable = true;
+          throw retryErr;
+        }
       }
     }
 
@@ -858,6 +1017,11 @@ Return STRICT JSON only:
     if (!rawText || rawText.replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "").trim() === "") {
       throw new Error("OCR produced no usable text");
     }
+
+    const { detectedLanguages, primaryLanguage, isIndic } = detectLanguages(
+      rawText,
+      file.userLanguage || file.preferredLanguage,
+    );
 
     // STEP 3: Structured JSON Extraction + English Summary (Querying structuringModel)
     const baseStructurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
@@ -881,7 +1045,9 @@ Return STRICT JSON only:
         temperature: 0,
         maxTokens: 4096,
         format: "json",
+        keep_alive: -1,
         rawOptions: { num_ctx: 8192 },
+        think: false,
       });
 
       const parsedCandidate = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
@@ -979,7 +1145,8 @@ Return STRICT JSON only:
         String(m.instructions).trim() !== String(duration).trim()
           ? m.instructions
           : null;
-      return {
+
+      const baseMed = {
         name: m.name || null,
         dosage: m.dosage || m.timeOfDay || null,
         frequency: m.frequency || null,
@@ -988,6 +1155,17 @@ Return STRICT JSON only:
         qty: qty ? String(qty).trim() : null,
         instructions,
         type: m.type || null,
+      };
+
+      const validated = validateMedication(baseMed);
+      return {
+        ...baseMed,
+        canonicalName: validated.canonicalName,
+        genericName: validated.genericName,
+        type: validated.type || baseMed.type,
+        isFormularyMatch: validated.isFormularyMatch,
+        confidence: validated.confidence,
+        flaggedForReview: validated.flaggedForReview,
       };
     });
 
@@ -1038,18 +1216,47 @@ Return STRICT JSON only:
       finalSummaryValue = parts.join(" ").trim();
     }
 
+    const normSummaryLang = normalizeLanguage(primaryLanguage);
+    const keyPoints = extractKeyPoints(
+      {
+        diagnosis: rawParsedCandidate.diagnosis,
+        testResults: rawParsedCandidate.testResults || rawParsedCandidate.labTests,
+        medications: formattedMeds,
+      },
+      finalSummaryValue,
+      normSummaryLang,
+    );
+
     const mapped = {
       documentType: analyzedDocType,
       reportType: analyzedDocType,
-      pages: [
-        {
-          page: 1,
-          text: rawParsedCandidate.rawText || "",
-        },
-      ],
+      detectedLanguages,
+      primaryLanguage,
+      isIndic,
+      keyPoints,
+      summaryLanguage: normSummaryLang,
+      pages:
+        isScannedPdfOrImage && pageResults?.length > 0
+          ? pageResults.map((p) => ({
+              page: p.pageNum,
+              text: p.status === "SUCCESS" ? p.rawText : "",
+            }))
+          : [
+              {
+                page: 1,
+                text: rawParsedCandidate.rawText || "",
+              },
+            ],
       medicalExtraction: {
         documentType: analyzedDocType,
         reportType: analyzedDocType,
+        detectedLanguages,
+        primaryLanguage,
+        isIndic,
+        summaryLanguage: normSummaryLang,
+        summaryEnglish: finalSummaryValue,
+        summaryInPreferredLanguage: finalSummaryValue,
+        keyPoints,
         validationPassed: isSchemaValidated,
         validationError: isSchemaValidated ? null : zodValidationError,
         ocrIncomplete,
@@ -1119,19 +1326,7 @@ Return STRICT JSON only:
     }
 
     const { structuringModel } = this.getModelConfig();
-    const langDisplay = language.charAt(0).toUpperCase() + language.slice(1);
-
-    const prompt = `You are a helpful medical translator. Summarize the following medical document in simple, clear ${langDisplay}.
-Keep common medical terms, doctor names, hospital/clinic names, diagnoses, lab tests (such as Diabetes, Hypertension, Cholesterol, Thyroid, Hemoglobin, CBC, RBC, WBC, ECG, MRI, X-ray, CT Scan, Vitamin, Calcium), and drug/medication names with dosages (like "Metformin 500mg") in English characters (like "Diabetes") or write them phonetically in English, as literal ${langDisplay} translations for these terms are uncommon, awkward, and confusing for patients.
-The summary should be easy to understand for a layperson.
-Limit the summary to 150-200 words.
-Do not include any other text, markdown blocks, introductions, explanations, or notes. Output only the summary.
-
-Medical Document Text:
-"""
-${rawText}
-"""
-/no_think`;
+    const prompt = buildSummaryPrompt(rawText, language);
 
     try {
       const response = await ollamaClient.generate(prompt, structuringModel, {
@@ -1147,6 +1342,24 @@ ${rawText}
       console.error("[OcrService] Summary generation failed:", error.message);
       return "";
     }
+  }
+
+  async synthesizeSummary({
+    rawText,
+    structuredData = {},
+    preferredLanguage = "english",
+    detectedLanguages = ["english"],
+  }) {
+    const { structuringModel } = this.getModelConfig();
+    return synthesizeClinicalSummary({
+      rawText,
+      structuredData,
+      preferredLanguage,
+      detectedLanguages,
+      ollamaClient,
+      aiClient,
+      structuringModel,
+    });
   }
 
   async translateSummary(summaryText, targetLanguage, sourceLanguage = "english") {
@@ -1528,6 +1741,7 @@ ${rawText}
       let pdfData = { text: "" };
       try {
         console.log(`[OcrService] Delegating OCR extraction to pdf-parse...`);
+        const pdfParse = require("pdf-parse");
         pdfData = await pdfParse(file.buffer);
       } catch (err) {
         console.warn(
@@ -1677,19 +1891,20 @@ ${rawText}
     const tSummaryStart = Date.now();
     let summaryEnglish = "";
     let summaryPreferredLanguage = "";
+    let summaryLanguage = normalizeLanguage(preferredLanguage);
+    let keyPoints = [];
 
     if (!env.useExternalOcrService) {
-      if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
-        summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
-        summaryPreferredLanguage = summaryEnglish;
-      } else {
-        const [sumEng, sumPref] = await Promise.all([
-          this.generateSummary(ocrResult.rawText, "english"),
-          this.generateSummary(ocrResult.rawText, preferredLanguage),
-        ]);
-        summaryEnglish = sumEng;
-        summaryPreferredLanguage = sumPref;
-      }
+      const summaryResult = await this.synthesizeSummary({
+        rawText: ocrResult.rawText,
+        structuredData,
+        preferredLanguage,
+        detectedLanguages: ocrResult.detectedLanguages || [summaryLanguage],
+      });
+      summaryEnglish = summaryResult.summaryEnglish;
+      summaryPreferredLanguage = summaryResult.summaryInPreferredLanguage;
+      summaryLanguage = summaryResult.summaryLanguage;
+      keyPoints = summaryResult.keyPoints;
     } else {
       summaryEnglish = structuredData.summaryEnglish || structuredData.remarks || "";
       summaryPreferredLanguage =
@@ -1697,15 +1912,25 @@ ${rawText}
         structuredData.summaryEnglish ||
         structuredData.remarks ||
         "";
+      summaryLanguage = normalizeLanguage(preferredLanguage);
+      keyPoints = extractKeyPoints(
+        structuredData,
+        summaryPreferredLanguage || summaryEnglish,
+        summaryLanguage,
+      );
     }
     const summaryDurationMs = Date.now() - tSummaryStart;
     console.log(
-      `[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated. Saving to database...`,
+      `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Key points extracted: ${keyPoints.length}. Saving to database...`,
     );
 
-    // Ensure controller response contains both summaries
+    // Ensure controller response contains both summaries, key points, and metadata
     structuredData.summaryEnglish = summaryEnglish;
     structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+    structuredData.summary = summaryPreferredLanguage || summaryEnglish;
+    structuredData.summaryLanguage = summaryLanguage;
+    structuredData.keyPoints = keyPoints;
+    structuredData.detectedLanguages = ocrResult.detectedLanguages || [summaryLanguage];
 
     // 5. Store in database
     const tDbStart = Date.now();
@@ -1847,32 +2072,40 @@ ${rawText}
       const tSummaryStart = Date.now();
       let summaryEnglish = "";
       let summaryPreferredLanguage = "";
+      let summaryLanguage = normalizeLanguage(preferredLanguage);
+      let keyPoints = [];
 
       if (!env.useExternalOcrService) {
-        if (!preferredLanguage || preferredLanguage.toLowerCase() === "english") {
-          summaryEnglish = await this.generateSummary(ocrResult.rawText, "english");
-          summaryPreferredLanguage = summaryEnglish;
-        } else {
-          const [sumEng, sumPref] = await Promise.all([
-            this.generateSummary(ocrResult.rawText, "english"),
-            this.generateSummary(ocrResult.rawText, preferredLanguage),
-          ]);
-          summaryEnglish = sumEng;
-          summaryPreferredLanguage = sumPref;
-        }
+        const summaryResult = await this.synthesizeSummary({
+          rawText: ocrResult.rawText,
+          structuredData,
+          preferredLanguage,
+          detectedLanguages: ocrResult.detectedLanguages || [summaryLanguage],
+        });
+        summaryEnglish = summaryResult.summaryEnglish;
+        summaryPreferredLanguage = summaryResult.summaryInPreferredLanguage;
+        summaryLanguage = summaryResult.summaryLanguage;
+        keyPoints = summaryResult.keyPoints;
       } else {
-        // Remote service handles structuring and translation inside structuredData
         summaryEnglish = structuredData.summaryEnglish || structuredData.remarks || "";
         summaryPreferredLanguage =
           structuredData.summaryInPreferredLanguage ||
           structuredData.summaryEnglish ||
           structuredData.remarks ||
           "";
+        summaryLanguage = normalizeLanguage(preferredLanguage);
+        keyPoints = extractKeyPoints(
+          structuredData,
+          summaryPreferredLanguage || summaryEnglish,
+          summaryLanguage,
+        );
       }
       const summaryDurationMs = Date.now() - tSummaryStart;
-      console.log(`[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated.`);
+      console.log(
+        `[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated. Key points: ${keyPoints.length}.`,
+      );
 
-      // Ensure data contains both summaries & normalized documentType
+      // Ensure data contains both summaries, key points, & normalized documentType
       const analyzedDocumentType = normalizeDocumentType(
         structuredData?.documentType || structuredData?.reportType || uploadResult?.documentType,
       );
@@ -1880,6 +2113,10 @@ ${rawText}
       structuredData.reportType = analyzedDocumentType;
       structuredData.summaryEnglish = summaryEnglish;
       structuredData.summaryInPreferredLanguage = summaryPreferredLanguage;
+      structuredData.summary = summaryPreferredLanguage || summaryEnglish;
+      structuredData.summaryLanguage = summaryLanguage;
+      structuredData.keyPoints = keyPoints;
+      structuredData.detectedLanguages = ocrResult.detectedLanguages || [summaryLanguage];
 
       // 5. Update database
       const tDbStart = Date.now();

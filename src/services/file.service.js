@@ -1,3 +1,4 @@
+const fs = require("fs");
 const crypto = require("crypto");
 const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
 const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
@@ -39,11 +40,21 @@ class S3Service {
       }
     }
 
+    let body;
+    if (file.path && fs.existsSync(file.path)) {
+      body = fs.createReadStream(file.path);
+    } else if (file.buffer) {
+      body = file.buffer;
+    } else {
+      throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED);
+    }
+
     const command = new PutObjectCommand({
       Bucket: this.bucket,
       Key: fileKey,
-      Body: file.buffer,
+      Body: body,
       ContentType: file.mimetype,
+      ...(file.size ? { ContentLength: file.size } : {}),
     });
 
     await s3Client.send(command);

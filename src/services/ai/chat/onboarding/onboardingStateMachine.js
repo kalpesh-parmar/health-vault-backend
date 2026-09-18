@@ -169,18 +169,24 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  // const useDoc =
-  //   state.useDocumentData !== false &&
-  //   state.flowMode === "UPLOAD" &&
-  //   state.documentConfirmed !== false &&
-  //   (!!state.documentData || !!state.documentId);
+  const _useDoc =
+    state.useDocumentData !== false &&
+    state.flowMode === "UPLOAD" &&
+    state.documentConfirmed !== false &&
+    (!!state.documentData || !!state.documentId);
 
   const missingRequired = getMissingRequiredStep(state);
   if (missingRequired) {
     return missingRequired;
   }
 
-  if (state.flowMode === "SKIP") {
+  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing login/social profile to compare or confirm
+  const hasLoginProfile =
+    Boolean(state.loginData) ||
+    state.hasSocialData === true ||
+    ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
+
+  if (state.flowMode === "SKIP" || !hasLoginProfile) {
     state.profileConfirmed = true;
   } else if (!state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
@@ -202,6 +208,11 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
+    if (state.cancellationNotice) {
+      state.medicationFlowStarted = true;
+      return "MEDICINE_OPTIONS";
+    }
+
     const hasExtractedMedicines =
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);

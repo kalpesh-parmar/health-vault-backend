@@ -43,7 +43,8 @@ const documentRepository = require("../repositories/documentRepository");
 const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
-const { normalizeLanguage, formatDuration } = require("../utils/commonUtils");
+const { normalizeLanguage } = require("../utils/commonUtils");
+const { extractKeyPoints } = require("../helpers/summary.helper");
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
@@ -327,10 +328,21 @@ class DocumentOcrJobService {
 
       const summarizeDurationMs = Date.now() - tSummarizeStart;
 
+      const normSummaryLang = normalizeLanguage(preferredLanguage);
+      const keyPoints = extractKeyPoints(
+        structured,
+        summaryPreferredLanguage || summaryEnglish,
+        normSummaryLang,
+      );
+      const detectedLanguages = rawOcrData?.detectedLanguages || [normSummaryLang];
+
       structured.documentType = ocrResponse?.documentType || structured?.documentType;
       structured.summaryEnglish = summaryEnglish;
       structured.summaryInPreferredLanguage = summaryPreferredLanguage;
       structured.summary = summaryPreferredLanguage || summaryEnglish;
+      structured.summaryLanguage = normSummaryLang;
+      structured.keyPoints = keyPoints;
+      structured.detectedLanguages = detectedLanguages;
       if (!structured.summariesByLanguage) {
         structured.summariesByLanguage = {};
       }
@@ -362,7 +374,7 @@ class DocumentOcrJobService {
 
       const totalDurationMs = Date.now() - pipelineStartTime;
       const processingTimeSeconds = Number((totalDurationMs / 1000).toFixed(1));
-      const processingTimeFormatted = formatDuration(totalDurationMs);
+      const processingTimeFormatted = `${processingTimeSeconds}s`;
 
       const processingTimingsMs = {
         uploadCheckDurationMs,
@@ -389,10 +401,9 @@ class DocumentOcrJobService {
           graphsDetected: graphs.length,
           medications: structured.medications.length,
           pageCount: rawOcrData.pageCount,
-          processingSeconds: processingTimeSeconds,
-          processingTimeFormatted,
-          totalTimeTaken: processingTimeFormatted,
-          processingTimingsMs,
+          processingSeconds: rawOcrData.processingSeconds,
+          detectedLanguages,
+          summaryLanguage: normSummaryLang,
         },
         pendingSteps: 0,
         rawOcrData,
@@ -423,6 +434,8 @@ class DocumentOcrJobService {
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: updateOcrStatusByFileKey");
       const dbSyncDurationMs = Date.now() - tDbSyncStart;
+      // eslint-disable-next-line no-console
+      console.log(`[ocr-job] DB sync completed in ${dbSyncDurationMs}ms`);
 
       ocrProgressBus.publish(
         fileKey,
@@ -443,10 +456,6 @@ class DocumentOcrJobService {
 
       // eslint-disable-next-line no-console
       console.timeEnd("[OCR]: starting process");
-      // eslint-disable-next-line no-console
-      console.log(
-        `[ocr-job] [TIMING] Job ${jobId} (fileKey: ${fileKey}) completed in ${processingTimeFormatted} (${totalDurationMs}ms) (Upload Check: ${uploadCheckDurationMs}ms, OCR/Analysis: ${ocrRunDurationMs}ms, Summarization: ${summarizeDurationMs}ms, DB Sync: ${dbSyncDurationMs}ms)`,
-      );
 
       // Non-blocking fire-and-forget background embedding pipeline
       setImmediate(async () => {

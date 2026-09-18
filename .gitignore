@@ -9,3 +9,5 @@ __pycache__/
 tmp/
 docs/*.html
 poppler/
+uploads/
+tests/scratch/

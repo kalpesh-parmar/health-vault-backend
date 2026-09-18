@@ -55,7 +55,24 @@ const {
   createResponse,
 } = require("./onboarding/stepResponseBuilder");
 
+function deduplicateMedicines(meds) {
+  if (!Array.isArray(meds)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const m of meds) {
+    if (!m) continue;
+    const key = m.client_med_id || m.clientMedId || m.id;
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    result.push(m);
+  }
+  return result;
+}
+
 async function extractFieldFromMessage(fieldType, text, _lang) {
+  if (!text || typeof text !== "string" || text.trim().length === 0) {
+    return null;
+  }
   // Direct check for language independent skip patterns
   const lower = text.trim().toLowerCase();
   const skipPatterns = ["skip", "skip question", "skip_question", "question skip", "skipquestion"];
@@ -1409,9 +1426,64 @@ async function updateStateFromMessage(state, message, userId = null) {
         payload = {};
       }
 
+      if (payload.action === "DRAFT_SYNC" || payload.isSilent === true) {
+        if (Array.isArray(payload.medicinesToAdd)) {
+          state.medicinesToAdd = deduplicateMedicines(payload.medicinesToAdd);
+        } else if (Array.isArray(payload.medicines)) {
+          state.medicinesToAdd = deduplicateMedicines(payload.medicines);
+        }
+        state.currentStep = "ADD_MEDICINE";
+        state.activeMedicine = null;
+        state.currentMedicineIndex = undefined;
+        break;
+      }
+
+      const upperMsg = String(msg || "")
+        .trim()
+        .toUpperCase();
+      const isCancel =
+        upperMsg === "CANCEL" ||
+        upperMsg === "CANCEL_ADD_MEDICINE" ||
+        upperMsg === "CANCEL_TO_REVIEW" ||
+        payload?.action === "CANCEL" ||
+        payload?.actionType === "CANCEL" ||
+        payload?.actionType === "CANCEL_ADD_MEDICINE" ||
+        payload?.action === "CANCEL_TO_REVIEW" ||
+        payload?.key === "CANCEL";
+
+      if (isCancel) {
+        state.activeMedicine = null;
+        state.currentMedicineIndex = undefined;
+        state.medicinesToAdd = [];
+        state.currentStep = "MEDICINE_OPTIONS";
+        state.cancellationNotice = true;
+        break;
+      }
+
+      const isSaveAndReview =
+        payload.saveAndReview === true ||
+        payload.action === "SAVE_AND_REVIEW" ||
+        payload.actionType === "SAVE_AND_REVIEW";
+
+      if (isSaveAndReview && Array.isArray(payload.medicines)) {
+        state.medicinesToAdd = deduplicateMedicines(payload.medicines);
+      }
+
+      const isAddAndContinue =
+        payload.addAndContinue === true ||
+        payload.action === "ADD_AND_CONTINUE" ||
+        payload.actionType === "ADD_AND_CONTINUE";
+
       const medObj =
         payload.medicine ||
         (payload.name || payload.medicationName || payload.medication_name ? payload : null);
+
+      if (!medObj && isSaveAndReview) {
+        state.activeMedicine = null;
+        state.currentMedicineIndex = undefined;
+        state.currentStep = "REVIEW_MEDICINES_LIST";
+        break;
+      }
 
       if (medObj) {
         if (!state.medicinesToAdd) state.medicinesToAdd = [];
@@ -1426,7 +1498,7 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         const payloadMedId = payload.clientMedId || medObj.client_med_id || medObj.id;
         let matchedIndex = -1;
-        if (!isExplicitAddNew && payloadMedId && Array.isArray(state.medicinesToAdd)) {
+        if (payloadMedId && Array.isArray(state.medicinesToAdd)) {
           matchedIndex = state.medicinesToAdd.findIndex(
             (m) =>
               (m.id && m.id === payloadMedId) ||
@@ -1457,8 +1529,7 @@ async function updateStateFromMessage(state, message, userId = null) {
             state.medicinesToAdd[existingIdx].id ||
             `med_${Date.now()}`;
         } else {
-          // When adding a new medicine, generate a fresh unique ID so it never overwrites existing items
-          clientMedId = `med_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+          clientMedId = payloadMedId || `med_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         }
 
         const rawType = String(medObj.type || medObj.medicationType || "TABLET").toUpperCase();
@@ -1497,18 +1568,22 @@ async function updateStateFromMessage(state, message, userId = null) {
           console.warn("[OnboardingService] Medicine validation issue:", valErr.message);
         }
 
-        if (existingIdx >= 0 && existingIdx < state.medicinesToAdd.length) {
-          state.medicinesToAdd[existingIdx] = {
-            ...state.medicinesToAdd[existingIdx],
-            ...newMed,
-            selected: true,
-          };
-          newMed = state.medicinesToAdd[existingIdx];
-        } else {
-          state.medicinesToAdd.push({ ...newMed, selected: true, isSaved: false });
-        }
+        const finalMed = {
+          ...newMed,
+          selected: true,
+          isSaved: false,
+          dbId: null,
+          id: newMed.id,
+        };
 
-        state.activeMedicine = newMed;
+        if (existingIdx >= 0 && existingIdx < state.medicinesToAdd.length) {
+          state.medicinesToAdd[existingIdx] = finalMed;
+        } else {
+          state.medicinesToAdd.push(finalMed);
+        }
+        state.medicinesToAdd = deduplicateMedicines(state.medicinesToAdd);
+
+        state.activeMedicine = null;
         state.currentMedicineIndex = undefined;
 
         if (userId && Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0) {
@@ -1525,8 +1600,11 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         }
 
-        // Direct transition to REVIEW_MEDICINES_LIST with updated list
-        state.currentStep = "REVIEW_MEDICINES_LIST";
+        if (isAddAndContinue) {
+          state.currentStep = "ADD_MEDICINE";
+        } else {
+          state.currentStep = "REVIEW_MEDICINES_LIST";
+        }
       }
       break;
     }
@@ -1564,6 +1642,11 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (key === "ADD") {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
+        state.activeMedicine = null;
+        if (!Array.isArray(state.medicinesToAdd)) {
+          state.medicinesToAdd = [];
+        }
+        state.cancellationNotice = false;
       } else if (key === "DASHBOARD") {
         state.medicationFlowDone = true;
         state.isOnboardingCompleted = true;
@@ -1584,11 +1667,9 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "POST_ONBOARDING": {
       if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
         state.isOnboardingCompleted = false;
-        state.medicinesConfirmed = true; // Skip review step since we are starting a fresh medicine
-        state.medicinesSavedToDb = false;
-        state.medicinesToAdd = [{}];
-        state.currentMedicineIndex = 0;
-        state.currentStep = "ASK_MEDICINE_NAME";
+        state.activeMedicine = null;
+        state.currentMedicineIndex = undefined;
+        state.currentStep = "ADD_MEDICINE";
         break;
       } else if (msg === "GO_TO_DASHBOARD" || msg === "DASHBOARD") {
         state.isOnboardingCompleted = true;
@@ -1608,6 +1689,8 @@ async function updateStateFromMessage(state, message, userId = null) {
 async function saveOnboardingState(userId, state) {
   if (!userId) return;
 
+  const updateData = {};
+
   if (state.existingUserData) {
     const shouldWritePatientProfile =
       state.flowMode === "MANUAL" ||
@@ -1617,7 +1700,6 @@ async function saveOnboardingState(userId, state) {
         state.documentOwnershipConfirmed === true &&
         (state.profileConfirmed === true || !state.hasLoginData));
 
-    const updateData = {};
     if (shouldWritePatientProfile) {
       if (
         state.existingUserData.firstName !== undefined &&
@@ -1652,18 +1734,18 @@ async function saveOnboardingState(userId, state) {
       updateData.bloodGroup = state.existingUserData.bloodGroup;
     if (Array.isArray(state.existingUserData.allergies))
       updateData.allergies = state.existingUserData.allergies;
+  }
 
-    if (state.isOnboardingCompleted || state.hasSkipped) {
-      updateData.onboardingCompleted = true;
-    }
+  if (state.isOnboardingCompleted || state.hasSkipped) {
+    updateData.onboardingCompleted = true;
+  }
 
-    if (state.preferredLanguage) {
-      updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
-    }
+  if (state.preferredLanguage) {
+    updateData.preferredLanguage = normalizeLanguage(state.preferredLanguage);
+  }
 
-    if (Object.keys(updateData).length > 0) {
-      await patientRepository.updateById(userId, updateData);
-    }
+  if (Object.keys(updateData).length > 0) {
+    await patientRepository.updateById(userId, updateData);
   }
 
   // Persist onboarding state to database for resumption on app reopen
@@ -1798,7 +1880,22 @@ class OnboardingService {
     } else {
       msg = (message || "").trim();
     }
-    if (sessionId && msg) {
+    let parsedInputPayload = null;
+    try {
+      if (typeof message === "object" && message !== null) {
+        parsedInputPayload = message;
+      } else if (typeof msg === "string" && msg.startsWith("{")) {
+        parsedInputPayload = JSON.parse(msg);
+      }
+    } catch {
+      parsedInputPayload = null;
+    }
+    const isSilentCall =
+      parsedInputPayload?.isSilent === true ||
+      parsedInputPayload?.action === "DRAFT_SYNC" ||
+      parsedInputPayload?.actionType === "DRAFT_SYNC";
+
+    if (!isSilentCall && sessionId && msg) {
       await chatService.appendChatMessage({
         sessionId,
         role: "user",
@@ -1859,31 +1956,18 @@ class OnboardingService {
           docRow = rows[0] || null;
         }
 
-        if (docRow) {
-          // Handle async race: if extraction is in progress, poll up to 5 times (1s interval)
-          let attempts = 0;
-          while (docRow && docRow.ocrStatus === "in_progress" && attempts < 5) {
+        // Non-blocking status check: if completed, load structured data immediately
+        if (docRow && docRow.ocrStatus === "completed" && docRow.structuredExtractedData) {
+          const structured = docRow.structuredExtractedData;
+          state.loadedDocumentId = docRow.id;
+          state.documentId = docRow.id;
+          state.documentUploaded = true;
+          state.documentExtracted = true;
+          if (Array.isArray(structured.medications) && structured.medications.length > 0) {
+            state.foundMedicines = structured.medications;
             console.log(
-              `[OnboardingService] Document ${docRow.id} extraction in progress. Polling attempt ${attempts + 1}...`,
+              `[OnboardingService] Loaded ${state.foundMedicines.length} medications from DB document ${docRow.id}`,
             );
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            const rows = await db.select().from(document).where(eq(document.id, docRow.id));
-            docRow = rows[0] || null;
-            attempts++;
-          }
-
-          if (docRow && docRow.ocrStatus === "completed" && docRow.structuredExtractedData) {
-            const structured = docRow.structuredExtractedData;
-            state.loadedDocumentId = docRow.id;
-            state.documentId = docRow.id;
-            state.documentUploaded = true;
-            state.documentExtracted = true;
-            if (Array.isArray(structured.medications) && structured.medications.length > 0) {
-              state.foundMedicines = structured.medications;
-              console.log(
-                `[OnboardingService] Loaded ${state.foundMedicines.length} medications from DB document ${docRow.id}`,
-              );
-            }
           }
         }
       } catch (err) {
@@ -1975,7 +2059,11 @@ class OnboardingService {
             },
             gender: { value: patient.gender || null, verified: false, provenance: "profile" },
             dateOfBirth: {
-              value: patient.dateOfBirth ? patient.dateOfBirth.toISOString().split("T")[0] : null,
+              value: patient.dateOfBirth
+                ? typeof patient.dateOfBirth.toISOString === "function"
+                  ? patient.dateOfBirth.toISOString().split("T")[0]
+                  : String(patient.dateOfBirth).split("T")[0]
+                : null,
               verified: false,
               provenance: "profile",
             },
@@ -2136,7 +2224,7 @@ class OnboardingService {
       }
     }
 
-    if (!isInitCall && state.chatSessionId) {
+    if (!isInitCall && !isSilentCall && state.chatSessionId) {
       let resolvedLabel = null;
       if (state.currentStep && msg !== undefined && msg !== null) {
         try {
@@ -2405,7 +2493,7 @@ class OnboardingService {
     }
 
     // 3. Process incoming user message based on current expected step AFTER document data pre-loading
-    if (!isInitCall) {
+    if (!isInitCall && msg && msg.trim().length > 0) {
       await updateStateFromMessage(state, msg, userId);
     }
 
@@ -2491,7 +2579,7 @@ class OnboardingService {
     const response = await createResponse(nextStep, state);
 
     let assistantMsgCreatedAt = new Date().toISOString();
-    if (state.chatSessionId) {
+    if (!isSilentCall && state.chatSessionId) {
       const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
@@ -2542,6 +2630,7 @@ class OnboardingService {
       timestamp: new Date(assistantMsgCreatedAt).getTime(),
       state: state,
       canSkip: canSkipNow,
+      isSilent: isSilentCall,
       ...(completionMessage
         ? {
             completionMessage,

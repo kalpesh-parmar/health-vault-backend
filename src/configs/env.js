@@ -100,7 +100,8 @@ const env = Object.freeze({
   // Storage Buckets & Providers
   storageProvider: resolveStorageProvider(),
   awsBucketName: stringFromEnv("PATIENT_DOCUMENTS_BUCKET"),
-  maxFilesPerUpload: numberFromEnv("MAX_FILES_PER_UPLOAD", 5),
+  maxFilesPerUpload: numberFromEnv("MAX_FILES_PER_UPLOAD", 20),
+  uploadTempDir: stringFromEnv("UPLOAD_TEMP_DIR", path.resolve(process.cwd(), "uploads/temp")),
   documentMaxRetryAttempts: numberFromEnv("DOCUMENT_MAX_RETRY_ATTEMPTS", 3),
 
   // AWS S3
@@ -116,6 +117,10 @@ const env = Object.freeze({
   // Firebase
   firebaseProjectId: stringFromEnv("FIREBASE_PROJECT_ID"),
   firebaseCredentialsBase64: stringFromEnv("FIREBASE_CREDENTIALS_BASE64"),
+
+  // Redis (Optional - for distributed queue & pub/sub)
+  redisUrl: stringFromEnv("REDIS_URL"),
+  redisEnabled: booleanFromEnv("REDIS_ENABLED", Boolean(process.env.REDIS_URL)),
 
   // AI Settings (Local & Google Cloud / External)
   aiApiKey: stringFromEnv("AI_API_KEY"),

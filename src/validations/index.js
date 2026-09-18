@@ -46,6 +46,8 @@ const {
   documentUploadMulter,
   validateProfileUpload,
   validateDocumentUpload,
+  documentRetryUploadMulter,
+  validateDocumentRetry,
 } = require("./uploadValidation");
 
 function formatZodIssues(error) {
@@ -107,5 +109,7 @@ module.exports = {
   documentUploadMulter,
   validateProfileUpload,
   validateDocumentUpload,
+  documentRetryUploadMulter,
+  validateDocumentRetry,
   retryDocumentSchema,
 };

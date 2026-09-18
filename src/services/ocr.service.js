@@ -470,7 +470,8 @@ class V1Service {
 
         const isSkipAction =
           actionType === "SKIP_MEDICINES" ||
-          String(message || "").toUpperCase() === "SKIP" ||
+          (effectiveState?.currentStep === "REVIEW_MEDICINES_LIST" &&
+            String(message || "").toUpperCase() === "SKIP") ||
           actionData?.skipAll === true;
 
         if (isSkipAction && !isActiveOnboardingStep) {
@@ -1124,6 +1125,7 @@ class V1Service {
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
         console.log(`[UnifiedChat] Executing Onboarding State Machine for userId=${userId}`);
+        let effectiveMessage = message;
         let state = inputState;
         if (!state || Object.keys(state).length === 0) {
           state = dbState;
@@ -1210,10 +1212,19 @@ class V1Service {
           if (incomingStateCleaned.currentStep && dbState?.currentStep) {
             if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
               case3AuthoritativeStep = dbState.currentStep;
+              effectiveMessage = "";
             } else {
               case3AuthoritativeStep = incomingStateCleaned.currentStep;
             }
           }
+
+          const authoritativeMedicinesToAdd =
+            Array.isArray(incomingStateCleaned.medicinesToAdd) &&
+            incomingStateCleaned.medicinesToAdd.length > 0
+              ? incomingStateCleaned.medicinesToAdd
+              : Array.isArray(dbState?.medicinesToAdd)
+                ? dbState.medicinesToAdd
+                : [];
 
           state = {
             ...dbState,
@@ -1224,6 +1235,7 @@ class V1Service {
             medicationFlowDone: case3AuthoritativeMedicationFlowDone,
             medicinesConfirmed: case3AuthoritativeMedicinesConfirmed,
             completionMessageSent: case3AuthoritativeCompletionMessageSent,
+            medicinesToAdd: authoritativeMedicinesToAdd,
             ...(case3AuthoritativeCompletionMessageId
               ? { completionMessageId: case3AuthoritativeCompletionMessageId }
               : {}),
@@ -1246,8 +1258,8 @@ class V1Service {
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
 
-          // Generic forward transition: If currentStep is already satisfied in the authoritative state, advance to next step
-          if (isStepAlreadySatisfied(state.currentStep, state)) {
+          // Generic forward transition: If currentStep is already satisfied and no active message is provided, advance to next step
+          if (!message && isStepAlreadySatisfied(state.currentStep, state)) {
             state.currentStep = getNextRequiredOrOptionalStep(state);
           }
         }
@@ -1281,7 +1293,7 @@ class V1Service {
         }
 
         const onboardingResult = await onboardingService.chat(
-          message,
+          effectiveMessage,
           history,
           state,
           userId,
@@ -1314,6 +1326,12 @@ class V1Service {
           document: onboardingResult?.document || null,
         });
         responsePayload.state = onboardingResult?.state || state;
+        if (onboardingResult?.totalBuffered !== undefined) {
+          responsePayload.totalBuffered = onboardingResult.totalBuffered;
+        }
+        if (onboardingResult?.isSilent !== undefined) {
+          responsePayload.isSilent = onboardingResult.isSilent;
+        }
         if (onboardingResult?.completionMessage) {
           responsePayload.completionMessage = onboardingResult.completionMessage;
           responsePayload.completionMessageId = onboardingResult.completionMessageId;

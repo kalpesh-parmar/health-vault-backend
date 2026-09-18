@@ -80,15 +80,25 @@ function normalizeLanguage(lang) {
   return "english";
 }
 
-function formatDuration(ms) {
-  if (!ms || isNaN(ms)) return "0s";
-  const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+function stripReasoningTags(text) {
+  if (!text || typeof text !== "string") return "";
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+function isValidClinicalSummary(text, _patientName) {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+  if (clean.length < 5) return false;
+  const lower = clean.toLowerCase();
+  if (
+    lower.includes("unable to generate") ||
+    lower.includes("not available") ||
+    lower.includes("no medical summary") ||
+    lower.includes("error processing")
+  ) {
+    return false;
   }
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return true;
 }
 
 module.exports = {
@@ -99,5 +109,6 @@ module.exports = {
   parseDurationToDate,
   sanitizePatient,
   normalizeLanguage,
-  formatDuration,
+  stripReasoningTags,
+  isValidClinicalSummary,
 };

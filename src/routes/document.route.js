@@ -6,8 +6,12 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
 // const { idParamSchema } = require("../validations/commonValidation");
 const { downloadFileQuerySchema } = require("../validations/documentValidation");
-const { validateDocumentUpload, documentUploadMulter } = require("../validations");
-const { documentRetryUploadMulter } = require("../validations/uploadValidation");
+const {
+  validateDocumentUpload,
+  documentUploadMulter,
+  validateDocumentRetry,
+  documentRetryUploadMulter,
+} = require("../validations");
 
 const router = express.Router();
 
@@ -56,6 +60,12 @@ router.post(
   documentController.uploadDocuments,
 );
 
-router.post("/retry", verifyToken, documentRetryUploadMulter, documentController.retryDocument);
+router.post(
+  "/retry",
+  verifyToken,
+  documentRetryUploadMulter,
+  validateDocumentRetry,
+  documentController.retryDocument,
+);
 
 module.exports = router;

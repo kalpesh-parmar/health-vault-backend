@@ -689,12 +689,16 @@ async function executeAddDocumentAction({
   });
 
   let activeSessionId = sessionId;
-  if (!activeSessionId && isOnboardingCompleted) {
-    const newSession = await chatService.createSession({
-      userId,
-      title: docResult?.document?.fileName || "Document Chat",
-    });
-    activeSessionId = newSession?.id || null;
+  if (!activeSessionId && userId) {
+    try {
+      const newSession = await chatService.createSession({
+        userId,
+        title: docResult?.document?.fileName || "Medical Document",
+      });
+      activeSessionId = newSession?.id || null;
+    } catch (sErr) {
+      console.warn("[executeAddDocumentAction] Failed to initialize session:", sErr.message);
+    }
   }
 
   if (userId && !isOnboardingCompleted) {

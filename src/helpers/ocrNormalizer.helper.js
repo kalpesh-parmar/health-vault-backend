@@ -1,12 +1,16 @@
 const sharp = require("sharp");
+const { validateMedication } = require("./formulary.helper");
+const { stripThinking } = require("../utils/textCleanUtils");
 
 async function preprocessImage(imageBuffer) {
   try {
     console.log(
-      "[OcrService] Preprocessing image with Sharp: auto-orient, resize (max 1600px), converting to jpeg",
+      "[OcrService] Preprocessing image with Sharp: auto-orient, normalize contrast, sharpen, resize (max 1600px), converting to jpeg",
     );
     const processedBuffer = await sharp(imageBuffer)
       .rotate()
+      .normalize()
+      .sharpen({ sigma: 1, m1: 0.5, m2: 2 })
       .resize({
         width: 1600,
         height: 1600,
@@ -35,27 +39,72 @@ async function processInBatches(items, batchSize, processFn) {
   return results;
 }
 
+const MARKETING_PATTERNS = [
+  /download (?:our )?(?:mobile )?app/i,
+  /(?:get|flat) \d+% (?:off|discount)/i,
+  /promo(?:tion)? code|coupon code|use code [A-Z0-9]+/i,
+  /(?:call|contact|toll[- ]?free|helpline)[\s:]*(?:\+?\d{1,4}[- ]?)?1800[- ]?\d+/i,
+  /visit (?:our )?website|log on to (?:www\.)?/i,
+  /follow us on (?:facebook|instagram|twitter|linkedin|youtube)/i,
+  /serving humanity since \d{4}/i,
+  /trusted by [\d,.]+\s*[kKmM]?\+?\s*patients/i,
+  /nabh accredited (?:multi[- ]?speciality )?hospital/i,
+];
+
+const DISCLAIMER_PATTERNS = [
+  /not valid for medico-?legal (?:purposes|cases|proceedings)/i,
+  /this (?:report|prescription|document) is (?:an? )?electronically generated/i,
+  /requires no (?:physical )?signature|not valid without signature/i,
+  /results relate only to the specimen (?:received|tested)/i,
+  /(?:please |kindly )?correlate clinically(?: with clinical findings)?/i,
+  /subject to [a-zA-Z\s]+ jurisdiction/i,
+];
+
+const ASCII_NOISE_PATTERN = /^[|_\-.,:;~=\\/^#*`'"\s]{3,}$/;
+
 function cleanOcrText(text) {
   if (!text || typeof text !== "string") return "";
 
-  let cleaned = text;
-  // Strip <think>...</think> blocks
-  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  let cleaned = stripThinking(text);
 
-  // Split into lines to clean line-by-line reasoning
+  // Split into lines to clean line-by-line reasoning, non-clinical banners, and visual noise
   const lines = cleaned.split("\n");
   const filteredLines = lines.filter((line) => {
-    const trimmed = line.trim().toLowerCase();
+    const trimmed = line.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Preserve semantic diagram / figure descriptors
+    if (/^\[(?:DIAGRAM|FIGURE|CHART|IMAGE):/i.test(trimmed)) {
+      return true;
+    }
+
+    // Strip model internal thought intros
     if (
-      trimmed.startsWith("wait,") ||
-      trimmed.startsWith("let me check") ||
-      trimmed.startsWith("let me think") ||
-      trimmed.startsWith("let's see") ||
-      trimmed.startsWith("first, let's") ||
-      trimmed.startsWith("first, let me")
+      lower.startsWith("wait,") ||
+      lower.startsWith("let me check") ||
+      lower.startsWith("let me think") ||
+      lower.startsWith("let's see") ||
+      lower.startsWith("first, let's") ||
+      lower.startsWith("first, let me")
     ) {
       return false;
     }
+
+    // Filter repetitive ASCII visual noise
+    if (ASCII_NOISE_PATTERN.test(trimmed)) {
+      return false;
+    }
+
+    // Filter non-clinical marketing slogans & promo footers
+    if (MARKETING_PATTERNS.some((pat) => pat.test(trimmed))) {
+      return false;
+    }
+
+    // Filter boilerplate legal disclaimers
+    if (DISCLAIMER_PATTERNS.some((pat) => pat.test(trimmed))) {
+      return false;
+    }
+
     return true;
   });
 
@@ -246,7 +295,20 @@ function buildMedications(normalized) {
     }
   }
 
-  return medications.filter((m) => m.name);
+  return medications
+    .filter((m) => m.name)
+    .map((m) => {
+      const validated = validateMedication(m);
+      return {
+        ...m,
+        canonicalName: validated.canonicalName,
+        genericName: validated.genericName,
+        type: validated.type || m.type,
+        isFormularyMatch: validated.isFormularyMatch,
+        confidence: validated.confidence,
+        flaggedForReview: validated.flaggedForReview,
+      };
+    });
 }
 
 function buildLabResults(normalized) {

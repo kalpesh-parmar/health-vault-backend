@@ -135,7 +135,13 @@ const downloadFileQuerySchema = z
 
 const retryDocumentSchema = z
   .object({
-    fileKey: z.string().trim().min(1, errorConstants.FILE_KEY_REQUIRED),
+    fileKey: z
+      .string({
+        invalid_type_error: errorConstants.FILE_KEY_REQUIRED,
+        required_error: errorConstants.FILE_KEY_REQUIRED,
+      })
+      .trim()
+      .min(1, errorConstants.FILE_KEY_REQUIRED),
     batchId: z.string().trim().optional().nullable(),
   })
   .passthrough();

@@ -352,14 +352,29 @@ Perform two tasks on the provided document page image:
    - "COVER": Document cover page, title page, blank page, or table of contents with no clinical findings.
    - "OTHER": Non-medical document page (e.g. ID card, driver's license, receipt, random photo, bank statement).
 
-2. If the page is "MEDICAL", transcribe ALL visible text verbatim. For non-medical pages (ADVERTISEMENT, COVER, OTHER), leave rawText empty.
+2. If the page is "MEDICAL", transcribe all visible clinical text verbatim, while strictly enforcing these layout and filtering rules:
+   - EXCLUDE NON-CLINICAL REGIONS:
+     * Exclude commercial advertisements, hospital marketing slogans, pharmacy discount offers, app download promos, website URLs, social media links, and customer care toll-free numbers.
+     * Exclude legal boilerplate disclaimers (e.g. "This report is generated electronically", "Not valid for medico-legal purposes", "Please correlate clinically").
+     * Focus strictly on genuine clinical information: patient demographics, clinical vitals, doctor/hospital identity, diagnoses, prescribed medications, dosages, lab tests/values, and doctor's remarks.
+   - SEMANTIC DIAGRAM & FIGURE TAGGING:
+     * If the page contains visual diagrams, ECG waveforms, radiographs/X-rays, dental notation charts, or anatomical illustrations: DO NOT transcribe visual lines as ASCII symbols or character noise.
+     * Output a concise semantic descriptor tag instead:
+       [DIAGRAM: <type> - <brief clinical description>]
+       For example: [DIAGRAM: ECG 12-lead strip showing regular sinus rhythm] or [FIGURE: Chest X-ray PA view with clear lung fields].
+   - MULTILINGUAL & MIXED-SCRIPT PRESERVATION:
+     * Transcribe mixed-script documents verbatim across English, Gujarati, Hindi, Marathi, and Tamil.
+     * Always preserve medication brand names, generic formulations, medical acronyms, and dosages in English / Latin characters (e.g. "Tab. Caldison D3 1-0-0", "Cap. Amoxicillin 500mg", "BP: 120/80 mmHg") even when surrounded by Indic doctor notes.
+     * Never translate medication names or medical terms into Indic characters.
+
+For non-medical pages (ADVERTISEMENT, COVER, OTHER), leave rawText empty.
 
 You MUST return a STRICT JSON response matching this schema:
 {
   "pageType": "MEDICAL",
-  "rawText": "Complete page text transcribed verbatim..."
+  "rawText": "Complete clinical text transcribed verbatim..."
 }
-/no_think`;
+`;
 
 const STRUCTURED_EXTRACTION_PROMPT = (rawText) => `You are a precise medical data extraction engine.
 Analyze the provided transcribed text from a medical document and convert it into the exact JSON format specified below.
@@ -841,15 +856,15 @@ Do not include explanations.
 
 const STRICT_LANGUAGE_INSTRUCTIONS = {
   english:
-    "CRITICAL INSTRUCTION: You MUST generate your ENTIRE final response natively in ENGLISH ONLY. Do NOT mix languages. Do NOT output Hindi or any other sentences. If you find information in another language, translate it completely into ENGLISH. Failure to respond strictly in ENGLISH is unacceptable.",
+    "CRITICAL INSTRUCTION: You MUST generate your ENTIRE final response natively in ENGLISH ONLY. Do NOT mix languages. Do NOT output Hindi or any other sentences. If you find information in another language, translate it completely into ENGLISH. Failure to respond strictly in ENGLISH is unacceptable. MEDICAL INTEGRITY EXCEPTION: Always keep all medical test names (e.g. HbA1c, Random Blood Sugar, PT/INR, TSH, Platelet Count), drug names, numerical values, and reference units (e.g. mg/dL, gm%, µg/dL, IU/mL) in their standard English/Latin characters. NEVER translate or phonetically transliterate test names, abbreviations, or units. Do not repeat sentences or clauses. Keep answers concise, direct, and under 3 paragraphs.",
   gujarati:
-    "મહત્વપૂર્ણ સૂચના: તમારે તમારો સંપૂર્ણ અંતિમ જવાબ ફક્ત ગુજરાતીમાં જ આપવાનો છે. ભાષાઓનું મિશ્રણ કરશો નહીં. હિન્દી અથવા અંગ્રેજી વાક્યોનો ઉપયોગ કરશો નહીં. જો તમને અન્ય ભાષામાં માહિતી મળે, તો તેનો સંપૂર્ણપણે ગુજરાતીમાં અનુવાદ કરો.",
+    "મહત્વપૂર્ણ સૂચના: તમારે તમારો સંપૂર્ણ અંતિમ જવાબ ફક્ત ગુજરાતીમાં જ આપવાનો છે. ભાષાઓનું મિશ્રણ કરશો નહીં. હિન્દી અથવા અંગ્રેજી વાક્યોનો ઉપયોગ કરશો નહીં. જો તમને અન્ય ભાષામાં માહિતી મળે, તો તેનો સંપૂર્ણપણે ગુજરાતીમાં અનુવાદ કરો. MEDICAL INTEGRITY EXCEPTION: હંમેશા બધા તબીબી પરીક્ષણ નામો (જેમ કે HbA1c, Random Blood Sugar, PT/INR, TSH, Platelet Count), દવાઓના નામ, સંખ્યાત્મક મૂલ્યો અને એકમો (જેમ કે mg/dL, gm%, µg/dL, IU/mL) માનક અંગ્રેજી/લેટિન અક્ષરોમાં જ રાખો. તેનું ભાષાંતર કરશો નહીં. વાક્યોનું પુનરાવર્તન કરશો નહીં.",
   hindi:
-    "महत्वपूर्ण निर्देश: आपको अपना पूरा अंतिम उत्तर केवल हिंदी में ही देना है। भाषाओं को न मिलाएं। अंग्रेजी वाक्यों का उपयोग न करें। यदि आपको किसी अन्य भाषा में जानकारी मिलती है, तो उसका पूरी तरह से हिंदी में अनुवाद करें।",
+    "महत्वपूर्ण निर्देश: आपको अपना पूरा अंतिम उत्तर केवल हिंदी में ही देना है। भाषाओं को न मिलाएं। अंग्रेजी वाक्यों का उपयोग न करें। यदि आपको किसी अन्य भाषा में जानकारी मिलती है, तो उसका पूरी तरह से हिंदी में अनुवाद करें। MEDICAL INTEGRITY EXCEPTION: हमेशा सभी मेडिकल टेस्ट नाम (जैसे HbA1c, Random Blood Sugar, PT/INR, TSH, Platelet Count), दवाओं के नाम, संख्यात्मक मान और इकाइयाँ (जैसे mg/dL, gm%, µg/dL, IU/mL) मानक अंग्रेजी/लैटिन अक्षरों में ही रखें। उनका अनुवाद न करें। वाक्यों को न दोहराएं।",
   marathi:
-    "महत्त्वाची सूचना: तुम्ही तुमचे संपूर्ण अंतिम उत्तर फक्त मराठीतच दिले पाहिजे. भाषांचे मिश्रण करू नका. हिंदी किंवा इंग्रजी वाक्यांचा वापर करू नका. तुम्हाला दुसऱ्या भाषेत माहिती आढळल्यास, तिचे संपूर्णपणे मराठीत भाषांतर करा.",
+    "महत्त्वाची सूचना: तुम्ही तुमचे संपूर्ण अंतिम उत्तर फक्त मराठीतच दिले पाहिजे. भाषांचे मिश्रण करू नका. हिंदी किंवा इंग्रजी वाक्यांचा वापर करू नका. तुम्हाला दुसऱ्या भाषेत माहिती आढळल्यास, तिचे संपूर्णपणे मराठीत भाषांतर करा. MEDICAL INTEGRITY EXCEPTION: नेहमी सर्व वैद्यकीय चाचणी नावे (उदा. HbA1c, Random Blood Sugar, PT/INR, TSH, Platelet Count), औषधांची नावे, संख्यात्मक मूल्ये आणि एकके (उदा. mg/dL, gm%, µg/dL, IU/mL) मूळ इंग्रजी/लॅटिन लिपीतच ठेवा. त्यांचे भाषांतर करू नका. वाक्यांची पुनरावृत्ती करू नका.",
   tamil:
-    "முக்கியமான அறிவுறுத்தல்: உங்கள் முழு இறுதிப் பதிலையும் தமிழில் மட்டுமே வழங்க வேண்டும். மொழிகளைக் கலக்காதீர்கள். இந்தி அல்லது ஆங்கில வாக்கியங்களைப் பயன்படுத்த வேண்டாம். வேறு மொழியில் தகவல் கிடைத்தால், அதை முழுமையாக தமிழில் மொழிபெயர்க்கவும்.",
+    "முக்கியமான அறிவுறுத்தல்: உங்கள் முழு இறுதிப் பதிலையும் தமிழில் மட்டுமே வழங்க வேண்டும். மொழிகளைக் கலக்காதீர்கள். இந்தி அல்லது ஆங்கில வாக்கியங்களைப் பயன்படுத்த வேண்டாம். வேறு மொழியில் தகவல் கிடைத்தால், அதை முழுமையாக தமிழில் மொழிபெயர்க்கவும். MEDICAL INTEGRITY EXCEPTION: எப்போதும் அனைத்து மருத்துவ பரிசோதனை பெயர்கள் (எ.கா. HbA1c, Random Blood Sugar, PT/INR, TSH, Platelet Count), மருந்து பெயர்கள், எண்கள் மற்றும் அலகுகளை (எ.கா. mg/dL, gm%, µg/dL, IU/mL) நிலையான ஆங்கில/லத்தீன் எழுத்துக்களிலேயே வைத்திருக்கவும். மொழிபெயர்க்க வேண்டாம். வாக்கியங்களை மீண்டும் மீண்டும் கூற வேண்டாம்.",
 };
 
 const QUERY_INTENT_CLASSIFIER_PROMPT = `You are a medical query intent classifier.

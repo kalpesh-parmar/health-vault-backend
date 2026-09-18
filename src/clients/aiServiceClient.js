@@ -1,3 +1,4 @@
+const fs = require("fs");
 const FormData = require("form-data");
 const { createHttpClient } = require("../configs/http.config");
 const apiConfig = require("../configs/api.config");
@@ -75,9 +76,16 @@ class AiServiceClient {
   async validateMedicalDocument({ file, fileName, mimeType }) {
     const formData = new FormData();
 
-    formData.append("file", file, {
-      filename: fileName,
-      contentType: mimeType,
+    let filePayload = file;
+    if (typeof file === "string" && fs.existsSync(file)) {
+      filePayload = fs.createReadStream(file);
+    } else if (file && file.path && fs.existsSync(file.path)) {
+      filePayload = fs.createReadStream(file.path);
+    }
+
+    formData.append("file", filePayload, {
+      filename: fileName || (typeof file === "object" ? file.originalname : "document"),
+      contentType: mimeType || (typeof file === "object" ? file.mimetype : "application/pdf"),
     });
 
     return this.postWithRetry(this.endpoints.validateMedical, formData, {
