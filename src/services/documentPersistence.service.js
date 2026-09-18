@@ -277,12 +277,26 @@ class DocumentPersistenceService {
       safeGraphs.map((graph) => sanitizeGraphRow(graph, documentId, userId)),
     );
 
+    // Issue 4 Fix: If the caller provides confirmedMedicationIds (a list of medication
+    // IDs/names the user explicitly selected during onboarding review), only those are
+    // passed to the mapper for DB insertion. This prevents deselected AI-extracted
+    // medications from being silently re-inserted via addDocument.
+    // When confirmedMedicationIds is absent (undefined/null), all extracted medications
+    // are used — preserving existing behavior for all non-onboarding callers.
+    const allExtractedMedications = extractedStructuredData?.medications || [];
+    const confirmedMedicationIds = payload?.confirmedMedicationIds;
+    const medicationsToProcess = Array.isArray(confirmedMedicationIds)
+      ? allExtractedMedications.filter((m) =>
+          confirmedMedicationIds.includes(m.id || m.client_med_id || m.name),
+        )
+      : allExtractedMedications;
+
     const { rows: medicationRows, skipped: medicationSkipped } = medicationMapper.buildRows({
       defaults: {
         prescribedBy: extractedStructuredData?.doctorName || null,
         startDate: reportDateOrNow,
       },
-      medications: extractedStructuredData?.medications || [],
+      medications: medicationsToProcess,
       patientCode: patientObj.patientCode,
       userId,
     });

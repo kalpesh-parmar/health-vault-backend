@@ -224,6 +224,11 @@ async function executeAddDocumentAction({
   chatService,
   chatSessionRepository,
   ocrStatusEnum,
+  // Issue 5 Fix: Optional array of medicine IDs the user confirmed during onboarding review.
+  // When provided, only medicines matching these IDs get selected:true in the returned list.
+  // When null/undefined (default), falls back to marking all extracted medicines as selected:true
+  // — preserving existing behavior for all current callers that don't pass this param.
+  confirmedMedicineIds = null,
 }) {
   let filesList = [];
   if (Array.isArray(actionData?.files) && actionData.files.length > 0) {
@@ -499,7 +504,10 @@ async function executeAddDocumentAction({
       frequency: m.frequency || "ONCE",
       duration: m.duration || null,
       instructions: m.instructions || m.timing || null,
-      selected: true,
+      selected:
+        confirmedMedicineIds !== null
+          ? confirmedMedicineIds.includes(m.id || m.client_med_id || m.name)
+          : true,
       isSaved: false,
     }));
 

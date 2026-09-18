@@ -518,7 +518,11 @@ async function getLocalizedResponse(step, state) {
             value: "SKIP",
           },
         ],
+        // Full list for the review UI (FE manages checkbox state)
         medicines: state.medicinesToAdd || [],
+        // Issue 1 Fix: Pre-filtered list of medicines the user has NOT deselected.
+        // FE should use this field when rendering confirmed cards at MEDICINE_OPTIONS.
+        confirmedMedicines: (state.medicinesToAdd || []).filter((m) => m.selected !== false),
       };
 
     case "EDIT_MEDICINE":

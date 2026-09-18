@@ -156,6 +156,8 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
       return [];
     }
     if (trimmed && trimmed.length < 60 && !/[?!=]/.test(trimmed)) {
+      const looksLikeBloodGroup = /^(A|B|AB|O)[+-]$/i.test(trimmed.replace(/\s+/g, ""));
+      if (looksLikeBloodGroup) return null;
       const items = text
         .split(",")
         .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
@@ -294,6 +296,9 @@ User Input: "${text}"`,
       text.length < 50 &&
       !["skip", "no", "none"].includes(text.toLowerCase())
     ) {
+      if (["bloodGroup", "allergies", "gender"].includes(fieldType)) {
+        return null;
+      }
       console.warn(
         `[OnboardingService] AI explicitly returned null for ${fieldType}. Falling back to raw user input: "${text}"`,
       );
@@ -1119,8 +1124,13 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
           state.allergiesSkipped = true;
         } else if (msg.trim()) {
-          state.existingUserData.allergies = [msg.trim()];
-          state.allergiesSkipped = true;
+          const looksLikeBloodGroup = /^(A|B|AB|O)[+-]?\s*(positive|negative|pos|neg)?$/i.test(
+            msg.trim(),
+          );
+          if (!looksLikeBloodGroup) {
+            state.existingUserData.allergies = [msg.trim()];
+            state.allergiesSkipped = true;
+          }
         }
       }
       if (userId) {
@@ -1245,9 +1255,15 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (isConfirm) {
         state.medicinesConfirmed = true;
+        // Issue 3 Fix: Only fall back to "all" when NO explicit payload.selected is provided
+        // AND no medicine in the list has an explicit selected:false mark.
+        // Previously this fallback would select ALL medicines, including those the user unchecked.
         const selectedIds =
           payload.selected ||
-          (state.medicinesToAdd || []).map((m) => m.id || m.client_med_id).filter(Boolean);
+          (state.medicinesToAdd || [])
+            .filter((m) => m.selected !== false)
+            .map((m) => m.id || m.client_med_id)
+            .filter(Boolean);
 
         // Optionally update medicines if FE sends updated list in payload
         if (Array.isArray(payload.medicines)) {
@@ -1361,6 +1377,11 @@ async function updateStateFromMessage(state, message, userId = null) {
               }
             }
           }
+          // Issue 2 Fix: Remove deselected (selected:false) medicines that were not saved.
+          // This prevents confirmed-no medicines from appearing as cards in MEDICINE_OPTIONS.
+          state.medicinesToAdd = (state.medicinesToAdd || []).filter(
+            (m) => m.selected !== false || m.isSaved === true,
+          );
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (isAdd) {
@@ -1687,7 +1708,7 @@ async function saveOnboardingState(userId, state) {
     }
     if (state.existingUserData.bloodGroup)
       updateData.bloodGroup = state.existingUserData.bloodGroup;
-    if (Array.isArray(state.existingUserData.allergies))
+    if (Array.isArray(state.existingUserData.allergies) && state.allergiesSkipped === true)
       updateData.allergies = state.existingUserData.allergies;
   }
 
@@ -1801,6 +1822,10 @@ class OnboardingService {
     if (state.activeMedicine === undefined) state.activeMedicine = null;
     if (
       state.activeMedicine &&
+      // Issue 6 Fix: Only auto-promote activeMedicine into medicinesToAdd if the user
+      // explicitly confirmed it (isConfirmed:true). Draft/partial medicines (e.g. from
+      // DRAFT_SYNC or a cancelled ADD_MEDICINE form) must NOT be silently inserted.
+      state.activeMedicine.isConfirmed === true &&
       (state.activeMedicine.name || state.activeMedicine.medicationName)
     ) {
       const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
