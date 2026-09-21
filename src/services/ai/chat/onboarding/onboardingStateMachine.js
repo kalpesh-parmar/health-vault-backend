@@ -225,11 +225,6 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
-    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
-      state.medicationFlowStarted = true;
-      return "MEDICINE_OPTIONS";
-    }
-
     const hasExtractedMedicines =
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
@@ -244,6 +239,11 @@ function getNextRequiredOrOptionalStep(state) {
         state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
       }
       return "REVIEW_MEDICINES_LIST";
+    }
+
+    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
+      state.medicationFlowStarted = true;
+      return "MEDICINE_OPTIONS";
     }
 
     state.medicationFlowStarted = true;

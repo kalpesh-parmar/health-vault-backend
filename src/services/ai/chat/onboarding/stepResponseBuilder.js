@@ -558,12 +558,15 @@ async function getLocalizedResponse(step, state) {
             state.preferredLanguage,
           );
       const totalBuffered = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd.length : 0;
+      const medicinesForForm = state.isFreshAddMedicine ? [] : state.medicinesToAdd || [];
+      state.isFreshAddMedicine = false;
+
       return {
         action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         renderType: "MEDICINE_FORM",
         message,
         medicine: med || emptyMedTemplate,
-        medicines: state.medicinesToAdd || [],
+        medicines: medicinesForForm,
         totalBuffered,
       };
     }

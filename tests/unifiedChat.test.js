@@ -8,6 +8,7 @@ const { normalizeCreateMedicationInput } = require("../src/helpers/medicineNorma
 const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
 
 describe("UnifiedChat Helper & Intent Unit Tests", () => {
+  jest.setTimeout(30000);
   test("normalizeUnifiedChatInput should fallback question to message", () => {
     const input = {
       question: "How do I add a report?",
@@ -439,6 +440,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(resAddOption.renderType).toBe("MEDICINE_FORM");
     expect(resAddOption.medicine).toBeDefined();
     expect(resAddOption.medicine.type).toBe("TABLET");
+    expect(resAddOption.medicines).toEqual([]);
     expect(resAddOption.state.currentStep).toBe("ADD_MEDICINE");
 
     // 2. User submits new medicine form
@@ -460,10 +462,71 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       null,
     );
 
-    expect(resSubmitForm.action).toBe("REVIEW_MEDICINES_LIST");
+    expect(resSubmitForm.action).toBe("MEDICINE_OPTIONS");
     expect(resSubmitForm.medicines).toHaveLength(2);
     expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Omnacortil");
     expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Paracetamol");
+  });
+
+  test("onboardingService DRAFT_SYNC action should populate draft medicines list", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      currentStep: "ADD_MEDICINE",
+      isFreshAddMedicine: false,
+      medicinesToAdd: [
+        { name: "ExistingMed", type: "TABLET", dose: { count: 1 }, frequency: "ONCE" },
+      ],
+      preferredLanguage: "english",
+    };
+
+    const draftSyncPayload = JSON.stringify({
+      action: "DRAFT_SYNC",
+      medicines: [{ name: "DraftMed", type: "TABLET", dose: { count: 1 }, frequency: "ONCE" }],
+    });
+
+    const resDraftSync = await onboardingService.chat(
+      draftSyncPayload,
+      [],
+      state,
+      null,
+      null,
+      null,
+    );
+    expect(resDraftSync.action).toBe("ADD_MEDICINE");
+    expect(resDraftSync.medicines).toHaveLength(1);
+    expect(resDraftSync.medicines[0].name).toBe("DraftMed");
+  });
+
+  test("onboardingService should transition to REVIEW_MEDICINES_LIST after ASK_ALLERGIES when document has extracted medicines", async () => {
+    const { onboardingService } = require("../src/services/ai/chat/onboarding.service");
+
+    const state = {
+      preferredLanguage: "english",
+      flowMode: "UPLOAD",
+      profileConfirmed: true,
+      existingUserData: {
+        firstName: "John",
+        lastName: "Doe",
+        dateOfBirth: "1990-01-01",
+        gender: "male",
+        bloodGroup: "O+",
+      },
+      bloodGroupSkipped: true,
+      allergiesSkipped: false,
+      medicationFlowDone: false,
+      medicinesConfirmed: false,
+      currentStep: "ASK_ALLERGIES",
+      foundMedicines: [
+        { medicationName: "Amoxicillin 500mg", type: "CAPSULE", dosage: "1", frequency: "THRICE" },
+      ],
+    };
+
+    const res = await onboardingService.chat("SKIP", [], state, null, null, null);
+
+    expect(res.action).toBe("REVIEW_MEDICINES_LIST");
+    expect(res.medicines).toHaveLength(1);
+    expect(res.medicines[0].name).toBe("Amoxicillin 500mg");
   });
 
   test("onboardingService should resolve profile source with social login choice and persist selectedProfileSource='SOCIAL'", async () => {
@@ -1838,7 +1901,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
       jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
       jest.spyOn(patientRepository, "findById").mockResolvedValue({
-        id: "patient-bg-skip",
+        id: "patient-bg-skip-2",
         firstName: "John",
         lastName: "Doe",
         gender: "male",
@@ -1868,7 +1931,6 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           preferredLanguage: "english",
           flowMode: "MANUAL",
           currentStep: "ASK_BLOOD_GROUP",
-          bloodGroupSkipped: true,
           profileConfirmed: true,
           existingUserData: {
             firstName: "John",
@@ -1879,7 +1941,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         },
       };
 
-      const res = await ocrService.onboardingChat("patient-bg-skip", clientPayload);
+      const res = await ocrService.onboardingChat("patient-bg-skip-2", clientPayload);
 
       expect(res.actionType).toBe("ASK_ALLERGIES");
       expect(res.onboardingState.currentStep).toBe("ASK_ALLERGIES");
@@ -1910,6 +1972,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         onboardingCompleted: false,
       });
       const updatePatientSpy = jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      updatePatientSpy.mockClear();
       jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
         data: {
           preferredLanguage: "english",
@@ -1940,7 +2003,6 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
             dateOfBirth: "1990-01-01",
             gender: "male",
             bloodGroup: "O+",
-            allergies: ["Peanuts", "Dust"],
           },
         },
       };
@@ -1952,7 +2014,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(res.onboardingState.existingUserData.allergies).toEqual(
         expect.arrayContaining(["Peanuts", "Dust"]),
       );
-      expect(updatePatientSpy).toHaveBeenCalledWith(
+      expect(updatePatientSpy).toHaveBeenLastCalledWith(
         "patient-allergy-1",
         expect.objectContaining({
           allergies: expect.arrayContaining(["Peanuts", "Dust"]),

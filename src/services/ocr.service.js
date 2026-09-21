@@ -52,9 +52,9 @@ function isStepAlreadySatisfied(stepName, state) {
   }
   if (stepName === "ASK_ALLERGIES") {
     return (
-      state.allergiesSkipped === true ||
       (Array.isArray(state.existingUserData?.allergies) &&
-        state.existingUserData.allergies.length > 0)
+        state.existingUserData.allergies.length > 0) ||
+      state.allergiesSkipped === true
     );
   }
   if (
@@ -726,12 +726,10 @@ class V1Service {
                 dbId: med.id,
               });
             }
-            stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicinesSavedToDb = true;
-            stateToUpdate.medicationFlowDone = true;
           }
 
-          if (actionType === "CONFIRM_MEDICINES" || stateToUpdate.medicinesConfirmed) {
+          if (actionType === "CONFIRM_MEDICINES") {
             stateToUpdate.medicinesConfirmed = true;
             stateToUpdate.medicationFlowDone = true;
           } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
@@ -988,6 +986,13 @@ class V1Service {
               ? { useDocumentData }
               : {}),
             existingUserData: mergedUserData,
+            medicinesToAdd:
+              Array.isArray(incomingStateCleaned.medicinesToAdd) &&
+              incomingStateCleaned.medicinesToAdd.length > 0
+                ? incomingStateCleaned.medicinesToAdd
+                : Array.isArray(dbState?.medicinesToAdd) && dbState.medicinesToAdd.length > 0
+                  ? dbState.medicinesToAdd
+                  : incomingStateCleaned.medicinesToAdd || dbState?.medicinesToAdd || [],
           };
 
           if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
@@ -1063,6 +1068,14 @@ class V1Service {
           document: onboardingResult?.document || null,
         });
         responsePayload.state = onboardingResult?.state || state;
+        if (onboardingResult?.isSilent !== undefined) {
+          responsePayload.isSilent = onboardingResult.isSilent;
+        }
+        responsePayload.totalBuffered =
+          onboardingResult?.totalBuffered !== undefined
+            ? onboardingResult.totalBuffered
+            : (responsePayload.onboardingState?.medicinesToAdd || []).length;
+
         if (onboardingResult?.completionMessage) {
           responsePayload.completionMessage = onboardingResult.completionMessage;
           responsePayload.completionMessageId = onboardingResult.completionMessageId;
