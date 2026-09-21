@@ -2169,7 +2169,7 @@ class OnboardingService {
       try {
         const session = await chatService.createOnboardingSession({
           userId,
-          title: "Health Onboarding",
+          title: "Health Assistant",
           metadata: {
             type: "ONBOARDING",
           },

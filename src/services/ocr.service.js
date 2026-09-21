@@ -277,6 +277,20 @@ class V1Service {
         `[ONBOARDING PROFILE LOG] User ID: ${userId} | Patient DB Record: firstName="${patient?.firstName || ""}", lastName="${patient?.lastName || ""}", email="${patient?.email || ""}"`,
       );
 
+      // Resolve canonical session ID for the patient
+      let effectiveSessionId =
+        sessionId || inputState?.chatSessionId || dbState?.chatSessionId || null;
+      if (!effectiveSessionId && userId) {
+        try {
+          if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+            const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+            effectiveSessionId = canonical?.id || null;
+          }
+        } catch (sErr) {
+          console.warn("[UnifiedChat] Failed to get or create canonical session:", sErr.message);
+        }
+      }
+
       // CASE 1: ADD_DOCUMENT ACTION
       if (actionType === "ADD_DOCUMENT") {
         console.log(`[UnifiedChat] Executing ADD_DOCUMENT action for userId=${userId}`);
@@ -288,7 +302,7 @@ class V1Service {
         return executeAddDocumentAction({
           userId,
           actionData,
-          sessionId,
+          sessionId: effectiveSessionId,
           preferredLanguage: userPrefLang,
           isOnboardingCompleted,
           documentPersistenceService,
@@ -462,14 +476,7 @@ class V1Service {
 
         if (isSkipAction && !isActiveOnboardingStep) {
           const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED;
-          let activeSessionId = sessionId;
-          if (!activeSessionId && isOnboardingCompleted) {
-            const newSession = await chatService.createSession({
-              userId,
-              title: "Medication Chat",
-            });
-            activeSessionId = newSession?.id || null;
-          }
+          const activeSessionId = effectiveSessionId;
 
           if (activeSessionId) {
             await chatSessionRepository.appendMessage({
@@ -490,14 +497,7 @@ class V1Service {
         }
 
         if (isAddMedicineMsg && !hasMedicineActionData && !isActiveOnboardingStep) {
-          let activeSessionId = sessionId;
-          if (!activeSessionId && isOnboardingCompleted) {
-            const newSession = await chatService.createSession({
-              userId,
-              title: "Medication Chat",
-            });
-            activeSessionId = newSession?.id || null;
-          }
+          const activeSessionId = effectiveSessionId;
 
           return buildUnifiedResponse({
             mode: "ACTION",
@@ -782,11 +782,7 @@ class V1Service {
               ? `Medication '${createdMed.name}' has been added to your active medications.`
               : "Medication processed successfully.";
 
-        let activeSessionId = sessionId;
-        if (!activeSessionId && isOnboardingCompleted) {
-          const newSession = await chatService.createSession({ userId, title: "Medication Chat" });
-          activeSessionId = newSession?.id || null;
-        }
+        const activeSessionId = effectiveSessionId;
 
         if (activeSessionId) {
           await chatSessionRepository.appendMessage({
@@ -1067,6 +1063,13 @@ class V1Service {
           }
         }
 
+        if (
+          effectiveSessionId &&
+          (!state.chatSessionId || state.chatSessionId !== effectiveSessionId)
+        ) {
+          state.chatSessionId = effectiveSessionId;
+        }
+
         const onboardingResult = await onboardingService.chat(
           effectiveMessage,
           history,
@@ -1095,6 +1098,7 @@ class V1Service {
           explainer: onboardingResult?.explainer || null,
           loginSummary: onboardingResult?.loginSummary || null,
           documentSummary: onboardingResult?.documentSummary || null,
+          sessionId: onboardingResult?.state?.chatSessionId || effectiveSessionId,
           onboardingState: onboardingResult?.state || state,
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
@@ -1130,7 +1134,7 @@ class V1Service {
       const chatResult = await chatService.sendMessage({
         userId,
         question: promptText,
-        sessionId,
+        sessionId: effectiveSessionId,
         documentId,
         preferredLanguage: userLang,
         onChunk,
@@ -1141,7 +1145,7 @@ class V1Service {
         mode: "NORMAL_CHAT",
         actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
-        sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || sessionId,
+        sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || effectiveSessionId,
         citations: chatResult?.citations || [],
         suggestedAction: chatResult?.requireSelection
           ? "REQUIRE_DOCUMENT_SELECTION"
@@ -1232,7 +1236,17 @@ class V1Service {
     if (resumableState && resumableState.preferredLanguage) {
       resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
     }
-    const chatSessionId = resumableState?.chatSessionId || null;
+    let chatSessionId = resumableState?.chatSessionId || null;
+    if (!chatSessionId && userId) {
+      try {
+        if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+          const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+          chatSessionId = canonical?.id || null;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     let messages = [];
     if (chatSessionId) {
