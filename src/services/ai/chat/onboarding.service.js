@@ -1394,11 +1394,10 @@ async function updateStateFromMessage(state, message, userId = null) {
               }
             }
           }
-          // Issue 2 Fix: Remove deselected (selected:false) medicines that were not saved.
-          // This prevents confirmed-no medicines from appearing as cards in MEDICINE_OPTIONS.
-          state.medicinesToAdd = (state.medicinesToAdd || []).filter(
-            (m) => m.selected !== false || m.isSaved === true,
-          );
+          state.medicinesToAdd = [];
+          state.activeMedicine = null;
+          state.currentMedicineIndex = undefined;
+          state.medicinesConfirmed = true;
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (isAdd) {
