@@ -874,6 +874,7 @@ class V1Service {
       if (!isNormalChat) {
         console.log(`[UnifiedChat] Executing Onboarding State Machine for userId=${userId}`);
         let state = inputState;
+        let isStaleDuplicateSubmission = false;
         if (!state || Object.keys(state).length === 0) {
           state = dbState;
         } else {
@@ -955,10 +956,14 @@ class V1Service {
           const case3AuthoritativeCompletionMessageId =
             dbState?.completionMessageId || incomingStateCleaned.completionMessageId || null;
 
+          isStaleDuplicateSubmission = false;
           let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
           if (incomingStateCleaned.currentStep && dbState?.currentStep) {
             if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
               case3AuthoritativeStep = dbState.currentStep;
+              if (incomingStateCleaned.currentStep !== dbState.currentStep) {
+                isStaleDuplicateSubmission = true;
+              }
             } else {
               case3AuthoritativeStep = incomingStateCleaned.currentStep;
             }
@@ -967,6 +972,13 @@ class V1Service {
           state = {
             ...dbState,
             ...incomingStateCleaned,
+            medicinesToAdd:
+              isStaleDuplicateSubmission && Array.isArray(dbState?.medicinesToAdd)
+                ? dbState.medicinesToAdd
+                : Array.isArray(incomingStateCleaned.medicinesToAdd) &&
+                    incomingStateCleaned.medicinesToAdd.length > 0
+                  ? incomingStateCleaned.medicinesToAdd
+                  : dbState?.medicinesToAdd || [],
             currentStep: case3AuthoritativeStep,
             isOnboardingCompleted: case3AuthoritativeIsOnboardingCompleted,
             hasSkipped: case3AuthoritativeHasSkipped,
@@ -995,8 +1007,12 @@ class V1Service {
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
 
-          // Generic forward transition: If currentStep is already satisfied in the authoritative state, advance to next step
-          if (isStepAlreadySatisfied(state.currentStep, state)) {
+          // Generic forward transition: If currentStep is already satisfied in the authoritative persistent state (dbState), advance to next step.
+          // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
+          // Checking merged state caused premature step advancement before onboardingService.chat executed, causing the Blood Group answer
+          // to be executed against ASK_ALLERGIES.
+          if (isStepAlreadySatisfied(state.currentStep, dbState)) {
+            isStaleDuplicateSubmission = true;
             state.currentStep = getNextRequiredOrOptionalStep(state);
           }
         }
@@ -1029,13 +1045,35 @@ class V1Service {
           return responsePayload;
         }
 
+        let effectiveMessage = message;
+        let effectiveDisplayLabel = displayLabel;
+        if (isStaleDuplicateSubmission) {
+          effectiveMessage = null;
+          effectiveDisplayLabel = null;
+          if (dbState && Object.keys(dbState).length > 0) {
+            state = {
+              ...dbState,
+              ...state,
+              existingUserData: {
+                ...(state.existingUserData || {}),
+                ...(dbState.existingUserData || {}),
+                ...(patient?.bloodGroup ? { bloodGroup: patient.bloodGroup } : {}),
+                ...(patient?.allergies && patient.allergies.length > 0
+                  ? { allergies: patient.allergies }
+                  : {}),
+              },
+              currentStep: state.currentStep,
+            };
+          }
+        }
+
         const onboardingResult = await onboardingService.chat(
-          message,
+          effectiveMessage,
           history,
           state,
           userId,
           null,
-          displayLabel,
+          effectiveDisplayLabel,
         );
 
         const replyText =
@@ -1069,6 +1107,12 @@ class V1Service {
           responsePayload.completionAction = onboardingResult.completionAction;
         }
         responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
+        if (onboardingResult?.totalBuffered !== undefined) {
+          responsePayload.totalBuffered = onboardingResult.totalBuffered;
+        }
+        if (onboardingResult?.isSilent !== undefined) {
+          responsePayload.isSilent = onboardingResult.isSilent;
+        }
         responsePayload.canSkip =
           onboardingResult?.canSkip !== undefined
             ? onboardingResult.canSkip

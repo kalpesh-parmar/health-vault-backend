@@ -1361,6 +1361,10 @@ async function updateStateFromMessage(state, message, userId = null) {
               }
             }
           }
+          state.medicinesToAdd = [];
+          state.activeMedicine = null;
+          state.currentMedicineIndex = undefined;
+          state.medicinesConfirmed = true;
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (isAdd) {
@@ -1411,7 +1415,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (isCancel) {
         state.activeMedicine = null;
         state.currentMedicineIndex = undefined;
-        state.medicinesToAdd = [];
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m.isSaved === true);
         state.currentStep = "MEDICINE_OPTIONS";
         state.cancellationNotice = true;
         break;
@@ -1600,7 +1604,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
         state.activeMedicine = null;
-        state.medicinesToAdd = [];
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m.isSaved === true);
         state.cancellationNotice = false;
       } else if (key === "DASHBOARD") {
         state.medicationFlowDone = true;

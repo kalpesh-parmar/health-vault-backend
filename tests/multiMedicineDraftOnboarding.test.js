@@ -282,33 +282,20 @@ describe("Multi-Medicine Persistent Draft Onboarding Flow Tests", () => {
     // Must return to MEDICINE_OPTIONS
     expect(res.actionType).toBe("MEDICINE_OPTIONS");
     expect(res.onboardingState.currentStep).toBe("MEDICINE_OPTIONS");
-    // All confirmed medicines marked isSaved: true with dbId
-    expect(res.onboardingState.medicinesToAdd[0].isSaved).toBe(true);
-    expect(res.onboardingState.medicinesToAdd[0].dbId).toBe("db-med-1");
-    expect(res.onboardingState.medicinesToAdd[1].isSaved).toBe(true);
-    expect(res.onboardingState.medicinesToAdd[1].dbId).toBe("db-med-2");
+    // Completed draft session is reset after successful persistence (Requirements 8 & 12)
+    expect(res.onboardingState.medicinesToAdd).toEqual([]);
 
-    // Check dynamic option label in MEDICINE_OPTIONS: should say "Add More Medicines"
+    // Check dynamic option label in MEDICINE_OPTIONS: should say "Add Medicines" for fresh session
     const addOption = res.options.find((opt) => opt.key === "ADD");
     expect(addOption).toBeDefined();
-    expect(addOption.label).toBe("Add More Medicines");
+    expect(addOption.label).toBe("Add Medicines");
   });
 
-  test("Step 6: ADD_MORE_MEDICINES from MEDICINE_OPTIONS preserves existing confirmed medicines", async () => {
-    const confirmedMeds = [
-      {
-        id: "db-med-1",
-        name: "Metformin 500mg",
-        selected: true,
-        isSaved: true,
-        dbId: "db-med-1",
-      },
-    ];
-
+  test("Step 6: ADD / Add Medicines from MEDICINE_OPTIONS after confirmation begins a clean new session at Medicine #1", async () => {
     let storedDbState = {
       preferredLanguage: "english",
       currentStep: "MEDICINE_OPTIONS",
-      medicinesToAdd: confirmedMeds,
+      medicinesToAdd: [],
       profileConfirmed: true,
       isOnboardingCompleted: false,
     };
@@ -328,12 +315,11 @@ describe("Multi-Medicine Persistent Draft Onboarding Flow Tests", () => {
 
     const res = await ocrService.onboardingChat(userId, addMorePayload, null);
 
-    // Should transition to ADD_MEDICINE without resetting medicinesToAdd
+    // Should transition to ADD_MEDICINE with clean empty draft state
     expect(res.actionType).toBe("ADD_MEDICINE");
     expect(res.onboardingState.currentStep).toBe("ADD_MEDICINE");
-    expect(res.onboardingState.medicinesToAdd).toHaveLength(1);
-    expect(res.onboardingState.medicinesToAdd[0].name).toBe("Metformin 500mg");
-    expect(res.totalBuffered).toBe(1);
+    expect(res.onboardingState.medicinesToAdd).toHaveLength(0);
+    expect(res.totalBuffered).toBe(0);
   });
 
   test("Step 7: Cancel Behavior - CANCEL always routes to MEDICINE_OPTIONS (never directly to REVIEW_MEDICINES_LIST)", async () => {
@@ -596,5 +582,84 @@ describe("Multi-Medicine Persistent Draft Onboarding Flow Tests", () => {
       "Atorvastatin 20mg",
       "Aspirin 75mg",
     ]);
+  });
+
+  test("Step 11: CANCEL after Add More removes only unconfirmed drafts while preserving previously confirmed production medicines", async () => {
+    const mixedState = {
+      preferredLanguage: "english",
+      currentStep: "ADD_MEDICINE",
+      medicinesToAdd: [
+        {
+          id: "db-med-1",
+          client_med_id: "med-1",
+          name: "Metformin",
+          isSaved: true,
+          dbId: "db-med-1",
+        },
+        { id: "draft-4", client_med_id: "med-4", name: "New Unconfirmed Med", isSaved: false },
+      ],
+      profileConfirmed: true,
+      isOnboardingCompleted: false,
+    };
+
+    userOnboardingRepository.findByUserId.mockResolvedValue({
+      userId,
+      data: mixedState,
+    });
+    userOnboardingRepository.updateByUserId.mockResolvedValue({});
+
+    const res = await ocrService.onboardingChat(
+      userId,
+      { message: "CANCEL", state: mixedState },
+      null,
+    );
+
+    expect(res.actionType).toBe("MEDICINE_OPTIONS");
+    expect(res.onboardingState.currentStep).toBe("MEDICINE_OPTIONS");
+    // Confirmed medicine preserved, unconfirmed draft removed
+    expect(res.onboardingState.medicinesToAdd).toHaveLength(1);
+    expect(res.onboardingState.medicinesToAdd[0].id).toBe("db-med-1");
+    expect(res.onboardingState.medicinesToAdd[0].isSaved).toBe(true);
+  });
+
+  test("Step 12: mapOnboardingMedicationToDb preserves fractional dosePerIntake values and liquid unit structures", () => {
+    const { mapOnboardingMedicationToDb } = require("../src/helpers/medication.helper");
+    const mockPatient = { patientCode: "PAT100" };
+    const mockDefaults = { food_context: "AFTER_FOOD", medicationSchedule: {} };
+
+    // Case A: Fractional tablet count (e.g. 1.5)
+    const tabletPayload = {
+      name: "Paracetamol",
+      type: "TABLET",
+      dose: { count: 1.5 },
+      frequency: "Twice Daily",
+      client_med_id: "client-1",
+    };
+    const dbTablet = mapOnboardingMedicationToDb(
+      tabletPayload,
+      mockPatient,
+      "user-1",
+      mockDefaults,
+    );
+    expect(dbTablet.dosePerIntake).toBe(1.5);
+    expect(dbTablet.unit).toBe("TABLET");
+
+    // Case B: Liquid dosage with value and unit (e.g. 7.5 ml)
+    const liquidPayload = {
+      name: "Cough Syrup",
+      type: "SYRUP",
+      dose: { value: 7.5, unit: "ml" },
+      frequency: "Three Times Daily",
+      client_med_id: "client-2",
+    };
+    const dbLiquid = mapOnboardingMedicationToDb(
+      liquidPayload,
+      mockPatient,
+      "user-1",
+      mockDefaults,
+    );
+    expect(dbLiquid.dosePerIntake).toBe(7.5);
+    expect(dbLiquid.unit).toBe("ML");
+    expect(dbLiquid.medicationSchedule.dose).toEqual({ value: 7.5, unit: "ml" });
   });
 });

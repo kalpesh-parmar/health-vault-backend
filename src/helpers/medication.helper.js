@@ -129,21 +129,22 @@ function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options
   let unit = undefined;
 
   if (payload.type === "TABLET" || payload.type === "CAPSULE") {
-    value = payload.dose?.count;
+    value = payload.dose?.count !== undefined ? payload.dose?.count : payload.dose?.value;
     unit = payload.type.toLowerCase();
   } else {
-    value = payload.dose?.value;
-    unit = payload.dose?.unit;
+    value = payload.dose?.value !== undefined ? payload.dose?.value : payload.dose?.count;
+    unit = payload.dose?.unit || (payload.type ? payload.type.toLowerCase() : "unit");
   }
 
-  const dosePerIntake = Number.isInteger(value) ? value : null;
+  const parsedVal = typeof value === "number" ? value : parseFloat(value);
+  const dosePerIntake = Number.isFinite(parsedVal) && parsedVal > 0 ? parsedVal : null;
   const unitDb = unit ? unit.toUpperCase() : "TABLET";
 
   const foodContext = payload.foodContext || defaults.food_context;
   const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
 
   const frequencyCount = getFrequencyCount(payload.frequency);
-  const dailyConsumption = Math.ceil(value || 1) * frequencyCount;
+  const dailyConsumption = Math.ceil(dosePerIntake || 1) * frequencyCount;
 
   let timeSchedule;
   if (

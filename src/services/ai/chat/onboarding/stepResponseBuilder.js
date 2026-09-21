@@ -564,11 +564,13 @@ async function getLocalizedResponse(step, state) {
       };
     }
     case "MEDICINE_OPTIONS": {
-      const hasMedicines = Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0;
+      const hasUnconfirmedMeds =
+        Array.isArray(state.medicinesToAdd) &&
+        state.medicinesToAdd.some((m) => Boolean(m && !m.isSaved));
       const options = [
         {
           key: "ADD",
-          label: hasMedicines
+          label: hasUnconfirmedMeds
             ? await getLocalizedText(
                 "onboarding.medicineOptions.addMore",
                 "Add More Medicines",
