@@ -552,6 +552,38 @@ ${chunksContent}`;
     ctx.preferredLanguage = detectedLanguage;
   }
 
+  async _resolveAuxiliaryTranslation(ctx) {
+    const { question, detectedLanguage } = ctx;
+    ctx.rawQuestion = question;
+    ctx.englishQuestion = question;
+
+    if (detectedLanguage && detectedLanguage !== "english") {
+      try {
+        const transStartTime = Date.now();
+        const translated = await aiClient.translate(question, detectedLanguage, "english");
+        if (translated && typeof translated === "string" && translated.trim()) {
+          ctx.englishQuestion = translated.trim();
+          debugLogger.info(
+            `sendMessage: [AUXILIARY TRANSLATION] took ${Date.now() - transStartTime}ms`,
+            {
+              original: question,
+              english: ctx.englishQuestion,
+              language: detectedLanguage,
+            },
+          );
+        }
+      } catch (err) {
+        debugLogger.warn("sendMessage: Auxiliary query translation failed, using raw question", {
+          error: err.message,
+        });
+        ctx.englishQuestion = question;
+      }
+    }
+
+    ctx.cleanEnglishQuestion = ctx.englishQuestion.toLowerCase().replace(/[?.]/g, "").trim();
+    ctx.retrievalQuery = ctx.englishQuestion;
+  }
+
   async _resolveSession(ctx) {
     const { reqSessionId, userId, documentId } = ctx;
     let session;
@@ -2294,6 +2326,7 @@ ${chunksContent}`;
 
       await this._resolveQuestion(ctx);
       await this._resolveLanguage(ctx);
+      await this._resolveAuxiliaryTranslation(ctx);
       await this._resolveSession(ctx);
 
       const interceptedResult = await this._tryIntercepts(ctx);
