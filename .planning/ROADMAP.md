@@ -33,8 +33,13 @@ This roadmap details milestone **v1.0: Handle All App-Related User Questions (Om
 
 Plans:
 
-- [ ] 01-01: Audit 10-step chat lifecycle and integrate early query translation in `chat.service.js`.
-- [ ] 01-02: Ensure response translation adapter handles all 5 languages (English, Hindi, Gujarati, Marathi, Tamil) seamlessly.
+**Wave 1:**
+
+- [ ] 01-01: Audit 10-step chat lifecycle, standardize language normalization in commonUtils.js, and integrate early query translation in chat.service.js.
+
+**Wave 2 (blocked on Wave 1 completion):**
+
+- [ ] 01-02: Expand 5-language keyword dictionary in keywordDictionary.js, fix script mislabeling, and enforce detectedLanguage on template intercepts in chat.service.js.
 
 ### Phase 2: Omni-Domain Intent Detection & Semantic Routing
 
