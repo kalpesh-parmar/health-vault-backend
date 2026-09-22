@@ -2,7 +2,7 @@
 
 ## Overview
 
-This roadmap details milestone **v1.0: Handle All App-Related User Questions (Omni-Domain Multilingual Chatbot)**. It delivers an end-to-end, multi-domain conversational health assistant capable of answering user questions across Profile, Documents, Medications, Schedules, Reminders, Occurrences, Refills, and Notifications in English, Hindi, Gujarati, Marathi, and Tamil using verified user context.
+This roadmap details milestone **v1.0: Handle All App-Related User Questions**. It delivers a reliable, omni-domain, multilingual conversational health assistant capable of answering user questions across User Profile, Medical Profile, Documents/Reports, Medications, Schedules, Reminders, Occurrences, Notifications, and Refills in English, Hindi, Gujarati, Marathi, and Tamil using verified authenticated user context.
 
 ## Phases
 
@@ -11,116 +11,83 @@ This roadmap details milestone **v1.0: Handle All App-Related User Questions (Om
 - Integer phases (1, 2, 3, 4, 5): Planned milestone work
 - Decimal phases (1.1, 2.1): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Chatbot Pipeline Audit & Multilingual Translation Gateway** - Implement early query translation for Hindi, Gujarati, Marathi, and Tamil, establishing normalized `englishQuestion` for classification while preserving preferred response language.
-- [ ] **Phase 2: Omni-Domain Intent Detection & Semantic Routing** - Replace rigid string equality and exclusionary filters (`!hasDocReference`) with an additive multi-domain classifier supporting natural phrasing and cross-cutting intents.
-- [ ] **Phase 3: Domain Context Aggregation & Multi-Context Assembly** - Upgrade `buildDependencyAwareContext()` in `ragContext.service.js` to fetch and assemble data for all 7 application domains, supporting composite multi-domain prompts.
-- [ ] **Phase 4: Fact Grounding, Anti-Hallucination & Document RAG Parity** - Enforce strict database grounding directives, handle missing user data gracefully in all 5 languages, and preserve existing document RAG/summary flows.
-- [ ] **Phase 5: Multilingual Omni-Domain Automated Test Suite** - Implement comprehensive unit and integration tests across all 5 languages, single/multi-domain queries, missing-record fallbacks, and regression checks.
+- [ ] **Phase 1: Chatbot Pipeline Characterization, Multilingual Gateway & Debug Tracing** - Trace the end-to-end chatbot lifecycle, integrate early query translation gateway for all 5 languages, and implement observability tracing to diagnose and log the "Did I miss any medicine today?" flow.
+- [ ] **Phase 2: Intent & Domain Disambiguation (Occurrences vs. Prescriptions & Multi-Domain)** - Build granular domain and intent classification that cleanly separates general medications from medication occurrences, supports natural phrasing beyond exact keywords, and handles multi-domain queries.
+- [ ] **Phase 3: Context Aggregation Across All Domains & Multi-Context Assembly** - Upgrade `ragContext.service.js` to fetch and assemble targeted, minimal contexts for User Profile, Medical Profile, Documents/Reports, Medications, Occurrences, Notifications, and Refills, supporting multi-domain query synthesis.
+- [ ] **Phase 4: Fact Grounding, Zero-Hallucination & Document RAG Parity** - Enforce strict database grounding directives, handle missing user data gracefully in all 5 languages (explicitly stating no records exist), and preserve existing document RAG/summary flows.
+- [ ] **Phase 5: Omni-Domain Multilingual Verification & Test Suite** - Implement comprehensive automated tests across occurrence status, all 7 domains, multi-domain queries, 5 languages, missing data scenarios, and regression checks.
 
 ## Phase Details
 
-### Phase 1: Chatbot Pipeline Audit & Multilingual Translation Gateway
+### Phase 1: Chatbot Pipeline Characterization, Multilingual Gateway & Debug Tracing
 
-**Goal**: Ensure non-English questions (Hindi, Gujarati, Marathi, Tamil) are translated early in the pipeline so downstream intent routing and context builders operate on full vocabulary.
+**Goal**: Trace the 10-step chatbot pipeline, integrate early query translation for Hindi, Gujarati, Marathi, and Tamil, and implement detailed trace logging to isolate the exact point where "Did I miss any medicine today?" fails.
 **Depends on**: Nothing (first phase)
-**Requirements**: [I18N-01, I18N-02, I18N-03]
+**Requirements**: [I18N-01, I18N-02, I18N-03, DEBUG-01, DEBUG-02]
 **Success Criteria** (what must be TRUE):
 
-1. Language detector identifies user input language (`en`, `hi`, `gu`, `mr`, `ta`) in `chat.service.js:_resolveLanguage()`.
-2. Non-English queries are translated to English into `ctx.englishQuestion` via `aiClient.translate()` early in `_resolveQuestion()`.
-3. Raw query (`ctx.question`) and detected language are preserved for history and final response translation.
-   **Plans**: 2 plans
+1. Language detector identifies user input language (`en`, `hi`, `gu`, `mr`, `ta`) in `chat.service.js`.
+2. Non-English queries are translated to English into `ctx.englishQuestion` early in `_resolveQuestion()`, enabling unified downstream processing while preserving the raw input.
+3. Trace logging records every stage: Question → Language → Domain → Intent → Context Selection → DB Query → Retrieved Occurrences/Meds → Prompt → AI Response → Localized Reply.
+4. The pipeline specifically traces "Did I miss any medicine today?", logging where and why it currently deviates into generic medication lists.
 
-Plans:
+### Phase 2: Intent & Domain Disambiguation (Occurrences vs. Prescriptions & Multi-Domain)
 
-**Wave 1:**
-
-- [ ] 01-01: Audit 10-step chat lifecycle, standardize language normalization in commonUtils.js, and integrate early query translation in chat.service.js.
-
-**Wave 2 (blocked on Wave 1 completion):**
-
-- [ ] 01-02: Expand 5-language keyword dictionary in keywordDictionary.js, fix script mislabeling, and enforce detectedLanguage on template intercepts in chat.service.js.
-
-### Phase 2: Omni-Domain Intent Detection & Semantic Routing
-
-**Goal**: Build an additive multi-domain intent classifier that identifies single- and multi-domain queries across all application areas without keyword brittleness.
+**Goal**: Build an intent classifier that cleanly distinguishes between general medication information and today's medication occurrences (missed, taken, pending, upcoming, next dose, overdue), supports natural phrasing without exact keyword reliance, and handles multi-domain queries.
 **Depends on**: Phase 1
-**Requirements**: [ROUTING-01, ROUTING-02, ROUTING-03]
+**Requirements**: [OCCUR-01, OCCUR-02, OCCUR-03, OCCUR-04, INTENT-01, INTENT-04, MULTI-01]
 **Success Criteria** (what must be TRUE):
 
-1. Intent classifier returns an additive `Set` of active domains rather than a single mutually-exclusive enum.
-2. Queries mentioning documents and medications simultaneously (e.g. "Based on my report, what medicines am I taking?") activate both `DOCUMENTS` and `MEDICATIONS` domains.
-3. Natural language variations and synonyms resolve correctly without requiring exact string equality.
-   **Plans**: 2 plans
+1. "Did I miss any medicine today?" resolves to intent `MISSED_MEDICATION` and domain `medication_occurrence`.
+2. "What medicines do I take?" resolves to intent `MEDICATION_LIST` and domain `medication`.
+3. Questions asking about taken, pending, or next upcoming doses map to their respective occurrence intents.
+4. Composite questions spanning multiple domains (e.g. Report + Medications, Refill + Occurrences) return an additive set of domains and intents.
+5. Natural language variations and phrasing across all 5 languages map reliably without requiring rigid keyword equality.
 
-Plans:
+### Phase 3: Context Aggregation Across All Domains & Multi-Context Assembly
 
-- [ ] 02-01: Refactor `_tryIntercepts()` and `_analyzeIntent()` in `chat.service.js` to eliminate domain mutual-exclusion suppressions.
-- [ ] 02-02: Expand semantic intent matcher in `ragContext.service.js:detectContextGraph()` to support multi-domain detection on normalized English queries.
-
-### Phase 3: Domain Context Aggregation & Multi-Context Assembly
-
-**Goal**: Ensure `buildDependencyAwareContext()` reliably fetches and formats data for Profile, Documents, Medications, Reminders, Occurrences, Refills, and Notifications.
+**Goal**: Ensure `buildDependencyAwareContext()` in `ragContext.service.js` reliably queries and formats data for User Profile, Medical Profile, Documents/Reports, Medications, Occurrences, Notifications, and Refills, supporting multi-domain query synthesis.
 **Depends on**: Phase 2
-**Requirements**: [CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, CTX-06, CTX-07]
+**Requirements**: [INTENT-02, INTENT-03, MULTI-02]
 **Success Criteria** (what must be TRUE):
 
-1. Profile data (name, DOB, age, blood group, allergies, patient code, login type) is injected when profile intent is present.
-2. Medications, today's dosage occurrences (taken/missed/pending), and refill stock levels are accurately retrieved and injected.
-3. Recent medical reports, diagnoses, and lab test results are injected when document intent is present.
-4. Composite queries aggregate all matching domain blocks into `patientContextStr` for LLM synthesis.
-   **Plans**: 3 plans
+1. Profile data (name, DOB, age, blood group, allergies, patient code) is retrieved and formatted when profile intent is detected.
+2. Notification data (unread count, recent alerts) is retrieved and formatted when notification intent is detected.
+3. Occurrence queries retrieve today's actual dosage occurrences (`missed`, `taken`, `pending`, `next_dose`, `overdue`) reusing the existing occurrence calculation logic as the single source of truth.
+4. Multi-domain queries assemble composite, focused contexts without loading irrelevant domains or bloating prompt size.
 
-Plans:
+### Phase 4: Fact Grounding, Zero-Hallucination & Document RAG Parity
 
-- [ ] 03-01: Enhance Profile, Notification, and Document context blocks in `ragContext.service.js`.
-- [ ] 03-02: Enhance Medication, Occurrence (today's schedule/taken/missed), and Refill stock context blocks in `ragContext.service.js`.
-- [ ] 03-03: Integrate composite multi-domain context assembly and pass to LLM prompt.
-
-### Phase 4: Fact Grounding, Anti-Hallucination & Document RAG Parity
-
-**Goal**: Enforce strict fact grounding in LLM prompts, provide polite localized messages when records are missing, and preserve existing document RAG/summary flows.
+**Goal**: Enforce strict database grounding directives, handle missing user data gracefully in all 5 languages (explicitly stating no records exist), and preserve existing document RAG/summary flows.
 **Depends on**: Phase 3
 **Requirements**: [GROUND-01, GROUND-02, GROUND-03]
 **Success Criteria** (what must be TRUE):
 
-1. If a user has zero records for a queried domain (e.g. 0 active medicines), system clearly states no records exist in Health Vault rather than hallucinating.
-2. System instructions strictly forbid fabricating clinical data not present in the injected database context.
-3. Existing single-document RAG question-answering with `documentId` maintains exact citation and relevance behavior.
-   **Plans**: 2 plans
+1. All database queries and context generation strictly scope to the authenticated `userId`.
+2. When a user has zero records for a queried domain (e.g. 0 active medicines, 0 missed doses, 0 reports), the system clearly informs the user in their language that no records exist rather than hallucinating assumptions.
+3. Existing single-document RAG question-answering with `documentId` and document summary generation maintain exact functionality and citations.
 
-Plans:
+### Phase 5: Omni-Domain Multilingual Verification & Test Suite
 
-- [ ] 04-01: Enforce zero-hallucination prompt instructions and pre-localized missing-data templates in `chatReplies.js` and `prompts.js`.
-- [ ] 04-02: Verify and protect existing document RAG, summary generation, and vector retrieval paths from regression.
-
-### Phase 5: Multilingual Omni-Domain Automated Test Suite
-
-**Goal**: Build a rigorous test suite validating the chatbot across all 5 languages, single- and multi-domain questions, missing-data scenarios, and regression tests.
+**Goal**: Build a rigorous automated test suite validating occurrence status, all 7 domains, multi-domain queries, 5 languages, missing-data scenarios, and regression tests.
 **Depends on**: Phase 4
-**Requirements**: [TEST-01, TEST-02, TEST-03, TEST-04]
+**Requirements**: [TEST-01, TEST-02, TEST-03, TEST-04, TEST-05]
 **Success Criteria** (what must be TRUE):
 
-1. Automated tests verify domain resolution and factual answering for English, Hindi, Gujarati, Marathi, and Tamil questions.
-2. Automated tests verify multi-domain questions (e.g. Report + Medications, Refill + Occurrences).
-3. Automated tests verify missing-data handling (user with 0 medications, user without DOB).
+1. Automated unit tests verify occurrence-specific intents and verify they never return the generic medication list.
+2. Automated unit tests verify queries across English, Hindi, Gujarati, Marathi, and Tamil.
+3. Automated unit tests verify multi-domain queries and missing-data scenarios.
 4. Full test suite (`npm run test:unit`) passes with 0 failures.
-   **Plans**: 2 plans
-
-Plans:
-
-- [ ] 05-01: Implement multilingual omni-domain unit tests in `tests/unit/` covering all 7 domains across 5 languages.
-- [ ] 05-02: Execute full test suite (`npm run test:unit`) and verify zero regressions.
 
 ## Progress
 
 **Execution Order:**
 Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
-| Phase                                                        | Plans Complete | Status      | Completed |
-| ------------------------------------------------------------ | -------------- | ----------- | --------- |
-| 1. Chatbot Pipeline Audit & Multilingual Translation Gateway | 0/2            | Not started | -         |
-| 2. Omni-Domain Intent Detection & Semantic Routing           | 0/2            | Not started | -         |
-| 3. Domain Context Aggregation & Multi-Context Assembly       | 0/3            | Not started | -         |
-| 4. Fact Grounding, Anti-Hallucination & Document RAG Parity  | 0/2            | Not started | -         |
-| 5. Multilingual Omni-Domain Automated Test Suite             | 0/2            | Not started | -         |
+| Phase                                                                            | Plans Complete | Status      | Completed |
+| -------------------------------------------------------------------------------- | -------------- | ----------- | --------- |
+| 1. Chatbot Pipeline Characterization, Multilingual Gateway & Debug Tracing       | 0/2            | Not started | -         |
+| 2. Intent & Domain Disambiguation (Occurrences vs. Prescriptions & Multi-Domain) | 0/2            | Not started | -         |
+| 3. Context Aggregation Across All Domains & Multi-Context Assembly               | 0/3            | Not started | -         |
+| 4. Fact Grounding, Zero-Hallucination & Document RAG Parity                      | 0/2            | Not started | -         |
+| 5. Omni-Domain Multilingual Verification & Test Suite                            | 0/2            | Not started | -         |

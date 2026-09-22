@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Handle All App-Related User Questions
-status: planning
-last_updated: "2026-09-22T13:28:18.728Z"
+status: ready to plan
+last_updated: "2026-09-22T13:31:00.000Z"
 last_activity: 2026-09-22
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 11
   completed_plans: 0
   percent: 0
 ---
@@ -20,14 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-22)
 
 **Core value:** Reliable, compliant, and accurate clinical data extraction, semantic search retrieval, and medication tracking for patient healthcare management.
-**Current focus:** Phase 1: Chatbot Pipeline Audit & Multilingual Translation Gateway
+**Current focus:** Phase 1: Chatbot Pipeline Characterization, Multilingual Gateway & Debug Tracing
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-09-22 — Milestone v1.0 started
+Phase: Phase 1 of 5 (Chatbot Pipeline Characterization, Multilingual Gateway & Debug Tracing)
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-09-22 — Milestone v1.0 initialized with full requirements and roadmap
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -46,10 +48,10 @@ Last activity: 2026-09-22 — Milestone v1.0 started
 
 ### Decisions
 
-- Native Language Generation: LLM generates directly in detected language (`en`, `hi`, `gu`, `mr`, `ta`); NO post-generation translation step.
-- Multi-Language Keywords: Define comprehensive keywords across all 5 languages in `keywordDictionary.js`.
-- Pre-Localized Intercepts: Use `chatReplies.js` templates directly for deterministic replies.
-- Auxiliary Translation: Used solely as intelligent fallback when natural phrasing misses keywords.
+- Medication vs Occurrence: Distinguish general medication info (`MEDICATION_LIST`) from today's occurrences (`MISSED_MEDICATION`, `TAKEN_MEDICATION`, `PENDING_MEDICATION`, `NEXT_MEDICATION`).
+- Authenticated User Scoping: All data retrieval scoped strictly to `req.auth.userId`.
+- Zero-Hallucination: When user data is absent, state clearly that no records exist rather than hallucinating.
+- Multilingual Gateway: Normalize/translate non-English questions early to English for robust classification while preserving raw question and response language.
 
 ### Pending Todos
 
@@ -61,6 +63,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-22 17:45
-Stopped at: Phase 1 planned
-Resume file: .planning/phases/01-chatbot-pipeline-audit-multilingual-translation-gateway/01-01-PLAN.md
+Last session: 2026-09-22
+Stopped at: Milestone v1.0 initialized
+Resume command: /gsd-plan-phase 1
