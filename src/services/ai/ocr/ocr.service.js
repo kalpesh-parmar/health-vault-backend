@@ -341,7 +341,7 @@ class OcrService {
     }
 
     console.log(
-      `[OcrService] Processing ${base64Images.length} page(s) sequentially (batch size 1) with ${env.aiModel}...`,
+      `ocessing ${base64Images.length} page(s) sequentially (batch size 1) with ${env.aiModel}...`,
     );
 
     const pageTexts = await processInBatches(base64Images, 1, async (base64Image) => {

@@ -80,6 +80,73 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(normalized.totalQuantity).toBe(30);
   });
 
+  test("normalizeCreateMedicationInput should cleanly validate post-onboarding duplicate resolution payloads against createMedicationSchema", () => {
+    const { createMedicationSchema } = require("../src/validations/medicationValidation");
+
+    const replaceMedPayload = {
+      client_med_id: "extracted_med_1",
+      id: "extracted_med_1",
+      name: "pcm 500mg",
+      medicationName: "pcm 500mg",
+      type: "TABLET",
+      medicationType: "TABLET",
+      frequency: "ONCE",
+      dose: { count: 1 },
+      dosePerIntake: 1,
+      foodFrequency: "AFTER_FOOD",
+      resolution: "REPLACE",
+      startDate: "2026-09-21",
+      duration: "2 day",
+      notes: "",
+      prescribedBy: "",
+      totalQuantity: 10,
+      refillAlert: false,
+      medicationSchedule: [],
+      duplicateInfo: {
+        hasDuplicate: true,
+        matchedMedication: { id: "38c92b29-85d9-4313-ae24-b0dfb9fa9372" },
+      },
+      replaceMedicationId: "38c92b29-85d9-4313-ae24-b0dfb9fa9372",
+      medicineType: "TABLET",
+    };
+
+    const keepNewPayload = {
+      client_med_id: "extracted_med_3",
+      id: "extracted_med_3",
+      name: "syp namcold af",
+      medicationName: "syp namcold af",
+      type: "SYRUP",
+      medicationType: "SYRUP",
+      frequency: "ONCE",
+      dose: { value: 5, unit: "ml" },
+      dosePerIntake: 5,
+      foodFrequency: "AFTER_FOOD",
+      resolution: "KEEP_NEW",
+      startDate: "2026-09-21",
+      duration: "2 day",
+      notes: "",
+      prescribedBy: "",
+      totalQuantity: 10,
+      refillAlert: false,
+      medicationSchedule: [],
+      duplicateInfo: { hasDuplicate: false },
+      medicineType: "SYRUP",
+    };
+
+    const normReplace = normalizeCreateMedicationInput(replaceMedPayload);
+    expect(normReplace.resolution).toBe("REPLACE");
+    expect(normReplace.replaceMedicationId).toBe("38c92b29-85d9-4313-ae24-b0dfb9fa9372");
+    expect(normReplace.duplicateInfo).toBeUndefined();
+    expect(normReplace.medicineType).toBeUndefined();
+    expect(() => createMedicationSchema.parse(normReplace)).not.toThrow();
+
+    const normKeepNew = normalizeCreateMedicationInput(keepNewPayload);
+    expect(normKeepNew.resolution).toBeUndefined();
+    expect(normKeepNew.replaceMedicationId).toBeUndefined();
+    expect(normKeepNew.duplicateInfo).toBeUndefined();
+    expect(() => createMedicationSchema.parse(normKeepNew)).not.toThrow();
+  });
+
   test("executeAddDocumentAction should enqueue background OCR job when rawOcrData is missing", async () => {
     const mockDocumentOcrJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: "job-999", status: "QUEUED" }),

@@ -1626,7 +1626,7 @@ async function updateStateFromMessage(state, message, userId = null) {
               m.resolution !== "REMOVE_NEW",
           );
           if (unsavedMeds.length > 0 && userId) {
-            const bulkCreated = await medicationService.bulkCreate(userId, unsavedMeds);
+            const bulkCreated = (await medicationService.bulkCreate(userId, unsavedMeds)) || [];
 
             for (let i = 0; i < unsavedMeds.length; i++) {
               const created = bulkCreated[i];
