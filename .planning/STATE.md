@@ -1,13 +1,13 @@
 ---
 milestone: v1.0
 milestone_name: "Handle All App-Related User Questions (Omni-Domain Multilingual Chatbot)"
-status: "planning"
-current_phase: null
+status: "ready to plan"
+current_phase: 1
 current_plan: null
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 11
   completed_plans: 0
   percent: 0
 ---
@@ -19,14 +19,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-22)
 
 **Core value:** Reliable, compliant, and accurate clinical data extraction, semantic search retrieval, and medication tracking for patient healthcare management.
-**Current focus:** Milestone v1.0 — Handle All App-Related User Questions (Omni-Domain Multilingual Chatbot)
+**Current focus:** Phase 1: Chatbot Pipeline Audit & Multilingual Translation Gateway
 
 ## Current Position
 
-Phase: Not started (defining requirements & roadmap)
-Plan: —
-Status: Defining requirements & roadmap
-Last activity: 2026-09-22 — Milestone v1.0 started
+Phase: Phase 1 of 5 (Chatbot Pipeline Audit & Multilingual Translation Gateway)
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-09-22 — Milestone v1.0 roadmap created (5 phases, 20 requirements, 11 plans)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -47,9 +47,10 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-- Extend existing `chat.service.js` and `ragContext.service.js` rather than building a separate chatbot.
-- Support multi-domain context resolution (questions matching multiple app domains pull combined contexts).
-- Support 5 languages: English, Hindi, Gujarati, Marathi, and Tamil with translation and language detection.
+- Early query translation: Translate non-English queries (`hi`, `gu`, `mr`, `ta`) to English for domain routing while preserving original query and language for response localization.
+- Additive multi-domain intent set resolution rather than mutually-exclusive single choice.
+- Eliminate artificial suppressions (`!hasDocReference`) to support cross-domain queries.
+- Zero-hallucination guardrails: Explicitly inform user when records are absent.
 
 ### Pending Todos
 
@@ -57,11 +58,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Keyword-based intent detection fails on natural variations and non-English inputs.
-- Single-domain routing restricts prompts from answering multi-domain questions.
+None.
 
 ## Session Continuity
 
-Last session: 2026-09-22 16:28
-Stopped at: Milestone v1.0 initialized, creating REQUIREMENTS.md and ROADMAP.md
+Last session: 2026-09-22 16:32
+Stopped at: Milestone v1.0 roadmap created, ready to plan Phase 1
 Resume file: None
