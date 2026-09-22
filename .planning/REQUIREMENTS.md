@@ -5,47 +5,59 @@
 
 ## v1 Requirements
 
-Requirements for milestone v1.0: Vector Embedding Dimension & Pipeline Alignment.
+Requirements for milestone **v1.0: Handle All App-Related User Questions (Omni-Domain Multilingual Chatbot)**.
 
-### Schema & Documentation Alignment
+### Pipeline & Multilingual Normalization (I18N)
 
-- [ ] **SCHEMA-01**: Document intelligence schema in `src/models/documentIntelligence.js` defines `vector("embedding", { dimensions: 1024 })` and code comments are aligned to 1024 dimensions.
-- [ ] **SCHEMA-02**: Project specification in `AGENTS.md` Section 4 is updated to declare 1024-dimension vector embeddings matching the database table.
-- [ ] **SCHEMA-03**: Codebase reference documents (`.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/CONCERNS.md`) are updated to mark vector dimension mismatch resolved.
+- [ ] **I18N-01**: User query language is detected using ML language detection supporting English, Hindi, Gujarati, Marathi, and Tamil.
+- [ ] **I18N-02**: Non-English queries are translated to English early in the pipeline (`englishQuestion`), enabling robust semantic classification and vector search while preserving raw input for user display.
+- [ ] **I18N-03**: Final chatbot answers are localized and delivered in the user's detected or preferred language across all 5 supported languages.
 
-### Environment & Configuration
+### Omni-Domain Intent & Routing (ROUTING)
 
-- [ ] **CONFIG-01**: `src/configs/env.js` parses and exports `embeddingDim` (default 1024) and `embeddingModel` (default `bge-large-en-v1.5`).
-- [ ] **CONFIG-02**: `.env.example` documents `EMBEDDING_DIM` and `EMBEDDING_MODEL` with usage guidelines.
+- [ ] **ROUTING-01**: Intent classifier resolves queries into an additive domain set (`PROFILE`, `DOCUMENTS`, `MEDICATIONS`, `REMINDERS`, `OCCURRENCES`, `REFILLS`, `NOTIFICATIONS`) rather than mutually-exclusive single choices.
+- [ ] **ROUTING-02**: Eliminate artificial domain suppression (e.g. `!hasDocReference` suppressing medication/reminder checks), enabling multi-domain intent detection.
+- [ ] **ROUTING-03**: Intent detection matches natural language phrasing, synonyms, and variations without requiring exact string equality.
 
-### Embedding Generation & Client Layer
+### Domain Context Assembly (CONTEXT)
 
-- [ ] **CLIENT-01**: `src/clients/ollamaClient.js` implements the `embeddings(prompt, model)` method communicating with `/api/embeddings`.
-- [ ] **CLIENT-02**: `src/services/ai/chat/embedding.service.js` integrates clean fallback between Ollama and `aiServiceClient.embedText()`.
-- [ ] **CLIENT-03**: `src/helpers/embedding.helper.js` normalizes vector dimensions to `env.embeddingDim` and logs a structured warning when padding occurs.
+- [ ] **CTX-01**: System retrieves and injects complete patient profile information (name, DOB, age, blood group, allergies, patient code, login type) when profile intent is detected.
+- [ ] **CTX-02**: System retrieves active medications, dosages, frequencies, food instructions, and ongoing schedules when medication intent is detected.
+- [ ] **CTX-03**: System retrieves today's dosage occurrences (taken, missed, pending, overdue) and upcoming reminder times when reminder/occurrence intent is detected.
+- [ ] **CTX-04**: System retrieves remaining pill stock, refill dates, and low-stock warnings when refill intent is detected.
+- [ ] **CTX-05**: System retrieves recent medical reports, diagnoses, lab test results, and doctor names when document intent is detected.
+- [ ] **CTX-06**: System retrieves unread alerts and system notifications when notification intent is detected.
+- [ ] **CTX-07**: When queries span multiple domains, system aggregates all matching domain contexts into a single comprehensive prompt.
 
-### Testing & Verification
+### Fact Grounding & Anti-Hallucination (GROUNDING)
 
-- [ ] **TEST-01**: Unit tests verify `normalizeVectorDimension` correctly handles exact length (1024), shorter length (padding), and longer length (slicing).
-- [ ] **TEST-02**: Unit tests verify `ollamaClient.embeddings` formatting and error handling.
-- [ ] **TEST-03**: Full unit test suite passes (`npm run test:unit`) with zero regression failures.
+- [ ] **GROUND-01**: Answers are generated strictly using authenticated user database records without hallucinating missing medications, reports, or profile data.
+- [ ] **GROUND-02**: When a user queries a domain with zero database records (e.g. no active medications or no uploaded reports), the system clearly informs the user in their language that no records exist.
+- [ ] **GROUND-03**: Existing single-document RAG question-answering and summary flows remain fully functional without regressions.
+
+### Testing & Verification (TEST)
+
+- [ ] **TEST-01**: Automated unit tests verify domain detection across English, Hindi, Gujarati, Marathi, and Tamil queries.
+- [ ] **TEST-02**: Automated unit tests verify multi-domain queries combining Documents + Medications, Medications + Refills + Reminders, and Profile + Allergies.
+- [ ] **TEST-03**: Automated unit tests verify proper handling when user data is missing (0 medications, 0 reports, empty profile fields).
+- [ ] **TEST-04**: Full regression suite passes (`npm run test:unit`) ensuring zero degradation to existing document RAG, summaries, or crons.
 
 ## v2 Requirements
 
 Deferred to future releases:
 
-### Extended AI & Retrieval
+### Advanced Clinical Conversational Features
 
-- **RAG-01**: Add hybrid sparse-dense search combining PostgreSQL full-text search (tsvector) with pgvector cosine similarity.
-- **RAG-02**: Implement automated re-indexing CLI to re-embed historical document chunks when switching embedding models.
+- **VOICE-01**: Direct voice-to-voice multilingual consultation using Whisper and TTS endpoints.
+- **ACTION-01**: Conversational mutation execution (e.g. "Mark my morning Metformin as taken" via chat).
 
 ## Out of Scope
 
-| Feature                                               | Reason                                                                           |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
-| External vector database migration (Pinecone/Qdrant)  | PostgreSQL pgvector is already integrated and preserves transactional integrity. |
-| Modifying conversational onboarding state transitions | Onboarding state machine is strictly decoupled from vector embeddings.           |
-| Altering medication reminder recurrence rules         | Unrelated to vector dimension alignment.                                         |
+| Feature                                                                 | Reason                                                                                 |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Building a parallel standalone chatbot microservice                     | Must extend and refine existing Express `chat.service.js` and `ragContext.service.js`. |
+| Modifying deterministic onboarding step transitions                     | Onboarding state machine is strictly decoupled from general chat.                      |
+| Altering medication recurrence cron calculations in `medicationCron.js` | Cron scheduling is working; chat only reads occurrences and schedules.                 |
 
 ## Traceability
 
@@ -53,22 +65,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase   | Status  |
 | ----------- | ------- | ------- |
-| SCHEMA-01   | Phase 1 | Pending |
-| SCHEMA-02   | Phase 1 | Pending |
-| SCHEMA-03   | Phase 1 | Pending |
-| CONFIG-01   | Phase 1 | Pending |
-| CONFIG-02   | Phase 1 | Pending |
-| CLIENT-01   | Phase 2 | Pending |
-| CLIENT-02   | Phase 2 | Pending |
-| CLIENT-03   | Phase 2 | Pending |
-| TEST-01     | Phase 3 | Pending |
-| TEST-02     | Phase 3 | Pending |
-| TEST-03     | Phase 3 | Pending |
+| I18N-01     | Phase 1 | Pending |
+| I18N-02     | Phase 1 | Pending |
+| I18N-03     | Phase 1 | Pending |
+| ROUTING-01  | Phase 2 | Pending |
+| ROUTING-02  | Phase 2 | Pending |
+| ROUTING-03  | Phase 2 | Pending |
+| CTX-01      | Phase 3 | Pending |
+| CTX-02      | Phase 3 | Pending |
+| CTX-03      | Phase 3 | Pending |
+| CTX-04      | Phase 3 | Pending |
+| CTX-05      | Phase 3 | Pending |
+| CTX-06      | Phase 3 | Pending |
+| CTX-07      | Phase 3 | Pending |
+| GROUND-01   | Phase 4 | Pending |
+| GROUND-02   | Phase 4 | Pending |
+| GROUND-03   | Phase 4 | Pending |
+| TEST-01     | Phase 5 | Pending |
+| TEST-02     | Phase 5 | Pending |
+| TEST-03     | Phase 5 | Pending |
+| TEST-04     | Phase 5 | Pending |
 
 **Coverage:**
 
-- v1 requirements: 11 total
-- Mapped to phases: 11
+- v1 requirements: 20 total
+- Mapped to phases: 20
 - Unmapped: 0 ✓
 
 ---
