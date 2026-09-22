@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-09-22)
 Phase: Phase 1 of 5 (Chatbot Pipeline Audit & Multilingual Translation Gateway)
 Plan: 0 of 2 in current phase
 Status: Ready to plan
-Last activity: 2026-09-22 — Milestone v1.0 roadmap created (5 phases, 20 requirements, 11 plans)
+Last activity: 2026-09-22 — Phase 1 context gathered (multilingual keywords & direct generation locked)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -47,10 +47,10 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-- Early query translation: Translate non-English queries (`hi`, `gu`, `mr`, `ta`) to English for domain routing while preserving original query and language for response localization.
-- Additive multi-domain intent set resolution rather than mutually-exclusive single choice.
-- Eliminate artificial suppressions (`!hasDocReference`) to support cross-domain queries.
-- Zero-hallucination guardrails: Explicitly inform user when records are absent.
+- Native Language Generation: LLM generates directly in detected language (`en`, `hi`, `gu`, `mr`, `ta`); NO post-generation translation step.
+- Multi-Language Keywords: Define comprehensive keywords across all 5 languages in `keywordDictionary.js`.
+- Pre-Localized Intercepts: Use `chatReplies.js` templates directly for deterministic replies.
+- Auxiliary Translation: Used solely as intelligent fallback when natural phrasing misses keywords.
 
 ### Pending Todos
 
@@ -62,6 +62,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-22 16:32
-Stopped at: Milestone v1.0 roadmap created, ready to plan Phase 1
-Resume file: None
+Last session: 2026-09-22 17:19
+Stopped at: Phase 1 context gathered
+Resume file: .planning/phases/01-chatbot-pipeline-audit-multilingual-translation-gateway/01-CONTEXT.md
