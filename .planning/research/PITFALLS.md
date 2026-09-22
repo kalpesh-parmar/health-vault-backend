@@ -1,39 +1,43 @@
-# Pitfalls Research
+# Pitfalls Research: Chatbot Multi-Domain & Multilingual Failures
 
-**Domain:** Clinical Vector Embeddings & Semantic Retrieval
+**Domain:** Multilingual Healthcare Chatbot
 **Researched:** 2026-09-22
 **Confidence:** HIGH
 
-## Common Pitfalls
+## Common Pitfalls & Root Cause Analysis
 
-### 1. PostgreSQL Dimension Mismatch Error (Fatal 500)
+### 1. The Language Barrier in Intent Classification
 
-- **What happens:** PostgreSQL pgvector columns require an exact dimension constraint, e.g. `vector(1024)`. If an application tries to insert an array with 384 or 768 elements without padding, PostgreSQL rejects the transaction with:
-  `ERROR: different vector dimensions 384 and 1024`.
-- **Why it matters:** Document processing jobs fail catastrophically and get marked as `FAILED`, stopping patient record indexing.
-- **Prevention strategy:** Always pass generated vectors through `normalizeVectorDimension(vector, env.embeddingDim || 1024)` before database submission.
+- **Root Cause:** Intent matching algorithms rely on `cleanQuestion.includes(...)` against hardcoded string arrays (`keywordDictionary.js`) that only contain English and a few Gujarati words.
+- **Symptom:** Questions in Hindi, Marathi, and Tamil completely fail to trigger any intercept or domain classification, falling back to empty context or generic "Information not found".
+- **Prevention:** Perform early normalized translation: translate non-English queries to English as `englishQuestion` for internal domain detection, entity extraction, and vector matching. Preserve original query and detected language for user-facing responses.
 
-### 2. Semantic Degradation from Naive Zero-Padding
+### 2. Multi-Domain Context Starvation
 
-- **What happens:** When an embedding of dimension 384 (like `all-MiniLM-L6-v2`) is zero-padded to 1024, more than 60% of the vector consists of trailing zeros. When calculating cosine similarity:
-  `cos(θ) = (A · B) / (||A|| ||B||)`
-  The dot product only uses the first 384 dimensions, but the norms in the denominator are affected if vectors have differing numbers of zeros, skewing relevance scores.
-- **Why it matters:** Can lead to low similarity scores and missed clinical context during RAG retrieval.
-- **Prevention strategy:** Recommend matching the native embedding model to the target dimension (1024), e.g., `bge-large-en-v1.5` or `mxbai-embed-large`. Use zero-padding strictly as a protective fallback for development environments, logging a warning when padding occurs.
+- **Root Cause:** The `hasDocReference` check in `chat.service.js:976-987` explicitly suppresses `isReminderQuery`, `isRefillQuery`, and `isNotificationQuery`. If a user mentions "report" alongside "medicine" or "refill", the system forces a single-document RAG mode and starves the model of database medication and refill records.
+- **Symptom:** Cross-domain questions like _"Based on my report, what medicines am I taking?"_ answer using only OCR chunks and cannot correlate with active prescriptions in the database.
+- **Prevention:** Convert domain routing from a mutually-exclusive `if/else` hierarchy to an additive `Set` of active domains (e.g. `['DOCUMENTS', 'MEDICATIONS']`). When multiple domains are detected, fetch and combine all relevant context blocks.
 
-### 3. Missing Client Method (`TypeError: ... is not a function`)
+### 3. Rigid Keyword Exactness vs Natural Language Variation
 
-- **What happens:** `src/services/ai/chat/embedding.service.js:19` invokes `ollamaClient.embeddings(cleanText, env.embeddingModel)`, but `ollamaClient.js` does not have an `embeddings` method.
-- **Why it matters:** In production or test environments where Ollama is called, this throws an unhandled TypeError.
-- **Prevention strategy:** Implement `embeddings(prompt, model)` on `OllamaClient` using Ollama's native `/api/embeddings` endpoint, and add unit tests verifying the method's interface.
+- **Root Cause:** Using exact equality or fragile `.includes()` (e.g. `AGE_KEYWORDS.includes(cleanQuestion)`). Variations such as "Tell me my age please" or "How old is my account?" fail the check.
+- **Symptom:** Users feel the bot is "dumb" because slightly altering sentence structure produces a fallback failure.
+- **Prevention:** Use semantic pattern matching and synonym sets (`src/utils/synonyms.js:containsEntity`) rather than exact array equality.
 
-### 4. Divergence Between Code and Architectural Documentation
+### 4. Hallucination on Missing User Records
 
-- **What happens:** Code comments in `documentIntelligence.js` mention 384 dimensions, `AGENTS.md` Section 4 mentions 768 dimensions, and Drizzle schema defines 1024 dimensions.
-- **Why it matters:** Engineers or AI agents writing new queries might assume 768 dimensions and introduce schema conflicts or broken test fixtures.
-- **Prevention strategy:** Update `AGENTS.md`, schema comments, and codebase documentation in this milestone to uniformly declare 1024 as the standard dimension.
+- **Root Cause:** When a user queries a domain where they have no database records (e.g. no uploaded documents or no active medications), generic prompts can lead the LLM to invent placeholder medications or give misleading advice.
+- **Symptom:** Generating fictional prescriptions or dates.
+- **Prevention:** Inject explicit negative constraints into the prompt context:
+  `=== ACTIVE PROFILE MEDICATIONS: 0 records found. STRICT INSTRUCTION: Tell the user they have no active medications. DO NOT invent medicines.`
+  For direct intercepts, return verified pre-localized "no records found" templates from `chatReplies.js`.
+
+### 5. Translation Latency and Circular Degradation
+
+- **Root Cause:** Translating back and forth multiple times or translating large paragraphs sentence-by-sentence synchronously degrades response time.
+- **Prevention:** Perform query translation once at input resolution; keep domain prompts in English; stream translated chunks or let the multilingual model generate natively in the target language when possible.
 
 ---
 
-_Pitfalls research for: Clinical Vector Embeddings & Semantic Retrieval_
+_Pitfalls research for: Multilingual Healthcare Chatbot_
 _Researched: 2026-09-22_
