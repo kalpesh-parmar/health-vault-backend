@@ -1,98 +1,101 @@
 # Requirements: Health Vault Backend
 
 **Defined:** 2026-09-22
+**Milestone:** v1.0 Handle All App-Related User Questions
 **Core Value:** Reliable, compliant, and accurate clinical data extraction, semantic search retrieval, and medication tracking for patient healthcare management.
 
 ## v1 Requirements
 
-Requirements for milestone **v1.0: Handle All App-Related User Questions (Omni-Domain Multilingual Chatbot)**.
+Requirements for milestone **v1.0: Handle All App-Related User Questions**.
 
-### Pipeline & Multilingual Normalization (I18N)
+### Medication Occurrences vs. General Medications (OCCUR)
 
-- [ ] **I18N-01**: User query language is detected using ML language detection supporting English, Hindi, Gujarati, Marathi, and Tamil.
-- [ ] **I18N-02**: Non-English queries are translated to English early in the pipeline (`englishQuestion`), enabling robust semantic classification and vector search while preserving raw input for user display.
-- [ ] **I18N-03**: Final chatbot answers are localized and delivered in the user's detected or preferred language across all 5 supported languages.
+- [ ] **OCCUR-01**: System cleanly differentiates general medication queries (medication list, dosage, frequency) from medication occurrence queries (today's status, missed, taken, pending, next dose, overdue).
+- [ ] **OCCUR-02**: Questions regarding missed doses ("Did I miss any medicine today?", "Did I skip a dose today?") retrieve today's actual `missed` occurrences for the authenticated user, never returning the generic medication list.
+- [ ] **OCCUR-03**: Questions regarding taken, pending, or next upcoming doses ("Which medicines did I take today?", "Which medicines are still pending?", "When is my next medicine?") retrieve today's `taken`, `pending`, or next upcoming dose records from the authenticated user's occurrence data.
+- [ ] **OCCUR-04**: Occurrence retrieval reuses the existing medication occurrence calculation logic (`todayOccurrences`, `taken`, `missed`, `pending`) as the authoritative source of truth.
 
-### Omni-Domain Intent & Routing (ROUTING)
+### Domain & Intent Classification (INTENT)
 
-- [ ] **ROUTING-01**: Intent classifier resolves queries into an additive domain set (`PROFILE`, `DOCUMENTS`, `MEDICATIONS`, `REMINDERS`, `OCCURRENCES`, `REFILLS`, `NOTIFICATIONS`) rather than mutually-exclusive single choices.
-- [ ] **ROUTING-02**: Eliminate artificial domain suppression (e.g. `!hasDocReference` suppressing medication/reminder checks), enabling multi-domain intent detection.
-- [ ] **ROUTING-03**: Intent detection matches natural language phrasing, synonyms, and variations without requiring exact string equality.
+- [ ] **INTENT-01**: Intent detection engine classifies queries into both structured domains and specific intents (`MEDICATION_LIST`, `MEDICATION_DETAILS`, `MEDICATION_SCHEDULE`, `NEXT_MEDICATION`, `MISSED_MEDICATION`, `TAKEN_MEDICATION`, `PENDING_MEDICATION`, `MEDICATION_STATUS_TODAY`, `MEDICATION_REFILL`, `PROFILE_QUERY`, `DOCUMENT_QUERY`, `NOTIFICATION_QUERY`).
+- [ ] **INTENT-02**: System accurately handles User Profile and Medical Profile questions ("What is my age?", "What information is stored in my profile?", blood group, allergies).
+- [ ] **INTENT-03**: System accurately handles Notification queries ("What notifications do I have?", "How many unread notifications do I have?").
+- [ ] **INTENT-04**: Intent detection supports natural language phrasing, variations, and synonyms without relying exclusively on exact keyword matches.
 
-### Domain Context Assembly (CONTEXT)
+### Multi-Domain Queries (MULTI)
 
-- [ ] **CTX-01**: System retrieves and injects complete patient profile information (name, DOB, age, blood group, allergies, patient code, login type) when profile intent is detected.
-- [ ] **CTX-02**: System retrieves active medications, dosages, frequencies, food instructions, and ongoing schedules when medication intent is detected.
-- [ ] **CTX-03**: System retrieves today's dosage occurrences (taken, missed, pending, overdue) and upcoming reminder times when reminder/occurrence intent is detected.
-- [ ] **CTX-04**: System retrieves remaining pill stock, refill dates, and low-stock warnings when refill intent is detected.
-- [ ] **CTX-05**: System retrieves recent medical reports, diagnoses, lab test results, and doctor names when document intent is detected.
-- [ ] **CTX-06**: System retrieves unread alerts and system notifications when notification intent is detected.
-- [ ] **CTX-07**: When queries span multiple domains, system aggregates all matching domain contexts into a single comprehensive prompt.
+- [ ] **MULTI-01**: Classifier detects composite queries requiring multiple application domains (e.g. Document + Medication, Refill + Medication Occurrence) and returns an additive set of domains and intents.
+- [ ] **MULTI-02**: Context builder aggregates minimal, relevant context from each matched domain into the AI prompt without loading unneeded domains.
 
-### Fact Grounding & Anti-Hallucination (GROUNDING)
+### Multilingual Support (I18N)
 
-- [ ] **GROUND-01**: Answers are generated strictly using authenticated user database records without hallucinating missing medications, reports, or profile data.
-- [ ] **GROUND-02**: When a user queries a domain with zero database records (e.g. no active medications or no uploaded reports), the system clearly informs the user in their language that no records exist.
-- [ ] **GROUND-03**: Existing single-document RAG question-answering and summary flows remain fully functional without regressions.
+- [ ] **I18N-01**: Intent and domain detection functions equivalently across English, Hindi, Gujarati, Marathi, and Tamil without duplicated per-language business logic.
+- [ ] **I18N-02**: Non-English queries are normalized/translated early for intent routing and clinical reasoning while preserving the user's raw input.
+- [ ] **I18N-03**: Final answers are delivered in the user's detected or preferred response language via the existing language conversion flow.
+
+### Fact Grounding & Data Scoping (GROUND)
+
+- [ ] **GROUND-01**: All database queries and context generation strictly scope to the authenticated patient's `userId`.
+- [ ] **GROUND-02**: System instructions enforce zero-hallucination; when requested data does not exist (e.g., zero missed medicines, no notifications, no uploaded reports), the system explicitly states that no records exist rather than generating an assumed answer.
+- [ ] **GROUND-03**: Minimal context selection rule is enforced so the LLM prompt contains only the data necessary to answer the detected intent(s).
+
+### Pipeline Observability & Debugging (DEBUG)
+
+- [ ] **DEBUG-01**: System provides comprehensive end-to-end trace logging for the chatbot pipeline (Question → Language → Domain → Intent → Context Selection → DB Query → Retrieved Occurrences/Meds → Prompt → AI Response → Localized Reply).
+- [ ] **DEBUG-02**: Trace and verify specifically the failing query "Did I miss any medicine today?", validating every stage through to correct missed-occurrence answering.
 
 ### Testing & Verification (TEST)
 
-- [ ] **TEST-01**: Automated unit tests verify domain detection across English, Hindi, Gujarati, Marathi, and Tamil queries.
-- [ ] **TEST-02**: Automated unit tests verify multi-domain queries combining Documents + Medications, Medications + Refills + Reminders, and Profile + Allergies.
-- [ ] **TEST-03**: Automated unit tests verify proper handling when user data is missing (0 medications, 0 reports, empty profile fields).
-- [ ] **TEST-04**: Full regression suite passes (`npm run test:unit`) ensuring zero degradation to existing document RAG, summaries, or crons.
-
-## v2 Requirements
-
-Deferred to future releases:
-
-### Advanced Clinical Conversational Features
-
-- **VOICE-01**: Direct voice-to-voice multilingual consultation using Whisper and TTS endpoints.
-- **ACTION-01**: Conversational mutation execution (e.g. "Mark my morning Metformin as taken" via chat).
+- [ ] **TEST-01**: Unit tests verify occurrence-specific intents (`MISSED_MEDICATION`, `TAKEN_MEDICATION`, `PENDING_MEDICATION`, `NEXT_MEDICATION`, `MEDICATION_STATUS_TODAY`) and ensure they do not fall back to generic medication lists.
+- [ ] **TEST-02**: Unit tests verify single-domain questions across all domains (Profile, Medical Profile, Documents, Medications, Schedules, Reminders, Occurrences, Notifications, Refills).
+- [ ] **TEST-03**: Unit tests verify equivalent queries across all 5 languages (English, Hindi, Gujarati, Marathi, Tamil).
+- [ ] **TEST-04**: Unit tests verify multi-domain queries (e.g. Report + Medications, Refills + Occurrences).
+- [ ] **TEST-05**: Automated regression suite confirms zero breaking changes to existing Document RAG, document Q&A, OCR summaries, and onboarding flows (`npm run test:unit`).
 
 ## Out of Scope
 
-| Feature                                                                 | Reason                                                                                 |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Building a parallel standalone chatbot microservice                     | Must extend and refine existing Express `chat.service.js` and `ragContext.service.js`. |
-| Modifying deterministic onboarding step transitions                     | Onboarding state machine is strictly decoupled from general chat.                      |
-| Altering medication recurrence cron calculations in `medicationCron.js` | Cron scheduling is working; chat only reads occurrences and schedules.                 |
+| Feature                                          | Reason                                                                      |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| Separate standalone chatbot microservice         | Must extend existing Express `chat.service.js` and `ragContext.service.js`. |
+| Modifying onboarding state machine transitions   | Onboarding state engine is strictly decoupled from chat.                    |
+| Altering medication cron recurrence calculations | Cron jobs already manage occurrences; chat only queries them.               |
+| Chat-based database mutations                    | Read-only conversational assistance for this milestone.                     |
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
-
 | Requirement | Phase   | Status  |
 | ----------- | ------- | ------- |
+| OCCUR-01    | Phase 2 | Pending |
+| OCCUR-02    | Phase 2 | Pending |
+| OCCUR-03    | Phase 2 | Pending |
+| OCCUR-04    | Phase 2 | Pending |
+| INTENT-01   | Phase 2 | Pending |
+| INTENT-02   | Phase 3 | Pending |
+| INTENT-03   | Phase 3 | Pending |
+| INTENT-04   | Phase 2 | Pending |
+| MULTI-01    | Phase 2 | Pending |
+| MULTI-02    | Phase 3 | Pending |
 | I18N-01     | Phase 1 | Pending |
 | I18N-02     | Phase 1 | Pending |
 | I18N-03     | Phase 1 | Pending |
-| ROUTING-01  | Phase 2 | Pending |
-| ROUTING-02  | Phase 2 | Pending |
-| ROUTING-03  | Phase 2 | Pending |
-| CTX-01      | Phase 3 | Pending |
-| CTX-02      | Phase 3 | Pending |
-| CTX-03      | Phase 3 | Pending |
-| CTX-04      | Phase 3 | Pending |
-| CTX-05      | Phase 3 | Pending |
-| CTX-06      | Phase 3 | Pending |
-| CTX-07      | Phase 3 | Pending |
 | GROUND-01   | Phase 4 | Pending |
 | GROUND-02   | Phase 4 | Pending |
 | GROUND-03   | Phase 4 | Pending |
+| DEBUG-01    | Phase 1 | Pending |
+| DEBUG-02    | Phase 1 | Pending |
 | TEST-01     | Phase 5 | Pending |
 | TEST-02     | Phase 5 | Pending |
 | TEST-03     | Phase 5 | Pending |
 | TEST-04     | Phase 5 | Pending |
+| TEST-05     | Phase 5 | Pending |
 
 **Coverage:**
 
-- v1 requirements: 20 total
-- Mapped to phases: 20
+- v1 requirements: 23 total
+- Mapped to phases: 23
 - Unmapped: 0 ✓
 
 ---
 
 _Requirements defined: 2026-09-22_
-_Last updated: 2026-09-22 after initial definition_
+_Last updated: 2026-09-22_
