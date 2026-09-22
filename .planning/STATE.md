@@ -1,13 +1,13 @@
 ---
 milestone: v1.0
 milestone_name: "Vector Embedding Dimension & Pipeline Alignment"
-status: planning
-current_phase: null
+status: "ready to plan"
+current_phase: 1
 current_plan: null
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
-  total_plans: 0
+  total_plans: 5
   completed_plans: 0
   percent: 0
 ---
@@ -19,14 +19,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-22)
 
 **Core value:** Reliable, compliant, and accurate clinical data extraction, semantic search retrieval, and medication tracking for patient healthcare management.
-**Current focus:** Defining requirements & roadmap for milestone v1.0
+**Current focus:** Phase 1: Schema, Configuration & Documentation Standardization
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-09-22 — Milestone v1.0 started
+Phase: Phase 1 of 3 (Schema, Configuration & Documentation Standardization)
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-09-22 — Milestone v1.0 roadmap created (3 phases, 11 requirements)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -49,6 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 
 - Standardize on 1024-dim vector embeddings across Drizzle schema, models, helpers, and services.
 - Expose `EMBEDDING_DIM` & `EMBEDDING_MODEL` in `src/configs/env.js` and `.env.example`.
+- Implement `ollamaClient.embeddings` with fallback to `aiServiceClient.embedText()`.
 
 ### Pending Todos
 
@@ -56,11 +57,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Vector embedding dimension mismatch between DB schema (1024), code comments (384), and AGENTS.md (768).
-- `ollamaClient` missing `embeddings` method.
+None.
 
 ## Session Continuity
 
-Last session: 2026-09-22 15:42
-Stopped at: Milestone v1.0 initialized, creating REQUIREMENTS.md
+Last session: 2026-09-22 15:46
+Stopped at: Milestone v1.0 roadmap created, ready to plan Phase 1
 Resume file: None
