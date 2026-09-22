@@ -271,6 +271,8 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
+        page,
+        limit,
       } = normalizedInput;
 
       // Fetch user profile and existing onboarding state
@@ -1358,6 +1360,8 @@ class V1Service {
         sessionId,
         documentId,
         preferredLanguage: userLang,
+        page,
+        limit,
         onChunk,
         abortSignal,
       });

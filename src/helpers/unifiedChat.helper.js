@@ -24,6 +24,8 @@ function normalizeUnifiedChatInput(body = {}) {
     displayLabel = null,
     preferredLanguage,
     fromScreen = null,
+    page = null,
+    limit = null,
   } = body || {};
 
   const normalizedMessage =
@@ -36,6 +38,9 @@ function normalizeUnifiedChatInput(body = {}) {
           ? JSON.stringify(question)
           : String(question).trim()
         : "";
+
+  const parsedPage = page ? Number(page) : actionData?.page ? Number(actionData.page) : null;
+  const parsedLimit = limit ? Number(limit) : actionData?.limit ? Number(actionData.limit) : null;
 
   return {
     actionType: actionType ? String(actionType).trim().toUpperCase() : null,
@@ -52,6 +57,8 @@ function normalizeUnifiedChatInput(body = {}) {
         ? normalizeLanguage(state.preferredLanguage)
         : null,
     fromScreen: fromScreen || (state && state.fromScreen) || null,
+    page: parsedPage && Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : null,
+    limit: parsedLimit && Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
   };
 }
 

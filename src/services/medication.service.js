@@ -228,9 +228,30 @@ class MedicationService {
     return existingMedication;
   }
 
-  // GET MEDICATION LIST
-  async getMedicationList(userId) {
-    return medicationRepository.findAll(userId);
+  // GET MEDICATION LIST (PAGINATED ARRAY)
+  async getMedicationList(userId, payload = {}) {
+    const pageNumber = Math.max(1, Number(payload.page || payload.pageNumber || 1));
+    const pageLimit = Math.max(1, Number(payload.limit || payload.pageLimit || 20));
+
+    const records = await medicationRepository.findAll(userId);
+    const safeRecords = Array.isArray(records) ? records : [];
+    const totalRecords = safeRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalRecords / pageLimit));
+    const safePageNumber = Math.min(pageNumber, totalPages);
+    const startIndex = (safePageNumber - 1) * pageLimit;
+    const data = safeRecords.slice(startIndex, startIndex + pageLimit);
+
+    return {
+      data,
+      page: {
+        pageLimit,
+        pageNumber: safePageNumber,
+        totalPages,
+        totalRecords,
+        hasNextPage: safePageNumber < totalPages,
+        hasPrevPage: safePageNumber > 1,
+      },
+    };
   }
 
   // FILTER LIST

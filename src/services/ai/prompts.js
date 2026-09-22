@@ -33,7 +33,7 @@ const LOCALIZED_HEADINGS = {
     needsAttention: "Needs Attention",
     abnormal: "Abnormal",
     smartQAPrefix:
-      'First, start by stating: "We found your information in this report: [Report Name]. In this document, the patient name is [Name] and age is [Age]." Then, provide the detailed answer.',
+      'First, start by stating: "We found information in this report: [Report Name]. In this document, the patient name listed is [Name] and age is [Age]." Then, provide the detailed answer.',
   },
   gujarati: {
     answer: "🩺 ઉત્તર",
@@ -51,7 +51,7 @@ const LOCALIZED_HEADINGS = {
     needsAttention: "ધ્યાન આપવાની જરૂર",
     abnormal: "અસામાન્ય",
     smartQAPrefix:
-      'પ્રથમ, આ મુજબ શરૂઆત કરો: "અમને આ રિપોર્ટમાં તમારી માહિતી મળી છે: [Report Name]. આ દસ્તાવેજમાં, દર્દીનું નામ [Name] છે અને ઉંમર [Age] વર્ષ છે." ત્યારબાદ, વિગતવાર જવાબ આપો.',
+      'પ્રથમ, આ મુજબ શરૂઆત કરો: "અમને આ રિપોર્ટમાં માહિતી મળી છે: [Report Name]. આ દસ્તાવેજમાં, દર્દીનું દર્શાવેલ નામ [Name] છે અને ઉંમર [Age] વર્ષ છે." ત્યારબાદ, વિગતવાર જવાબ આપો.',
   },
   hindi: {
     answer: "🩺 उत्तर",
@@ -69,7 +69,7 @@ const LOCALIZED_HEADINGS = {
     needsAttention: "ध्यान देने की आवश्यकता",
     abnormal: "असामान्य",
     smartQAPrefix:
-      'सबसे पहले, इस प्रकार शुरुआत करें: "हमें इस रिपोर्ट में आपकी जानकारी मिली है: [Report Name]। इस दस्तावेज़ में, मरीज़ का नाम [Name] है और उम्र [Age] वर्ष है।" उसके बाद, विस्तृत उत्तर दें।',
+      'सबसे पहले, इस प्रकार शुरुआत करें: "हमें इस रिपोर्ट में जानकारी मिली है: [Report Name]। इस दस्तावेज़ में, मरीज़ का नाम [Name] है और उम्र [Age] वर्ष है।" उसके बाद, विस्तृत उत्तर दें।',
   },
   marathi: {
     answer: "🩺 उत्तर",
@@ -87,7 +87,7 @@ const LOCALIZED_HEADINGS = {
     needsAttention: "लक्ष देण्याची गरज",
     abnormal: "असामान्य",
     smartQAPrefix:
-      'प्रथम, अशी सुरुवात करा: "आम्हाला या अहवालात तुमची माहिती मिळाली आहे: [Report Name]. या दस्तऐवजात, रुग्णाचे नाव [Name] आहे आणि वय [Age] वर्षे आहे." त्यानंतर, सविस्तर उत्तर द्या.',
+      'प्रथम, अशी सुरुवात करा: "आम्हाला या अहवालात माहिती मिळाली आहे: [Report Name]. या दस्तऐवजात, रुग्णाचे नाव [Name] आहे आणि वय [Age] वर्षे आहे." त्यानंतर, सविस्तर उत्तर द्या.',
   },
   tamil: {
     answer: "🩺 பதில்",
@@ -105,7 +105,7 @@ const LOCALIZED_HEADINGS = {
     needsAttention: "கவனம் தேவை",
     abnormal: "அசாதாரணமானது",
     smartQAPrefix:
-      'முதலில், இவ்வாறு தொடங்கவும்: "இந்த அறிக்கையில் உங்கள் தகவலைக் கண்டறிந்துள்ளோம்: [Report Name]. இந்த ஆவணத்தில், நோயாளியின் பெயர் [Name] மற்றும் வயது [Age] ஆண்டுகள்." பின்னர், விரிவான பதிலை வழங்கவும்.',
+      'முதலில், இவ்வாறு தொடங்கவும்: "இந்த அறிக்கையில் தகவலைக் கண்டறிந்துள்ளோம்: [Report Name]. இந்த ஆவணத்தில், நோயாளியின் பெயர் [Name] மற்றும் வயது [Age] ஆண்டுகள்." பின்னர், விரிவான பதிலை வழங்கவும்.',
   },
 };
 
@@ -154,7 +154,8 @@ CRITICAL EXTRACTION RULES:
 5. If a report has an entity marked as NOT_FOUND_VERIFIED in the SYSTEM COVERAGE REPORT, explicitly say it was searched but not found in that report. If a report is marked as NOT_VERIFIED, state that it could not be retrieved/verified/checked rather than claiming the test is absent.
 6. NEVER guess or hallucinate values. Use ONLY the information contained in the retrieved context.
 7. For "FULL_DOCUMENT" or "summary" questions, preserve ALL meaningful findings from the supplied context without silently dropping report-specific details.
-8. NEVER use the user's profile name in your response unless it matches the patient name in the document. If the document does not explicitly state the patient's name, refer to them simply as 'the patient'. Do not refuse to answer just because the patient name is missing.
+8. LOGGED-IN USER vs DOCUMENT PATIENT SEPARATION: The logged-in app user's profile details (from database) are separate from patient names printed inside uploaded medical reports (which may belong to relatives or family members). When asked about the logged-in user's profile (name, age, blood group, allergies, etc.), ALWAYS use the official database user profile context. Never state or substitute patient names printed inside medical reports as the user's profile name.
+9. PAGINATED LIST RESPONSES: Whenever asked to list medications, documents, reminders, notifications, or refills, ALWAYS present the output as an array list accompanied by pagination summary metadata (Total Records, Current Page, Page Limit, Total Pages), regardless of whether there is 1 item or 100+ items.
 ${coverageStr ? `\nSYSTEM COVERAGE REPORT:\nThe system attempted to find specific entities in the selected documents. Use this to definitively state if something is found, not found, or not retrieved:\n${coverageStr}\n` : ""}
 CRITICAL FORMATTING RULES:
 To ensure the UI renders your response correctly, you MUST strictly use the following Markdown headings based on the user's intent. Do not add extra conversational filler outside these sections.

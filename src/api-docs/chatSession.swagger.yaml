@@ -55,11 +55,15 @@ components:
             type: string
           nullable: true
         stream: { type: boolean, default: false }
+        page: { type: integer, minimum: 1, default: 1, nullable: true }
+        limit: { type: integer, minimum: 1, nullable: true }
       example:
         question: "What is my blood sugar level?"
         documentId: ["doc_id_1", "doc_id_2"]
         sessionId: "123e4567-e89b-12d3-a456-426614174000"
         stream: true
+        page: 1
+        limit: 10
 
 paths:
   /chat/session:

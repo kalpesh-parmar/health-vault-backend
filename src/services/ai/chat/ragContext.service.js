@@ -2,13 +2,49 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const { containsEntity } = require("../../../utils/synonyms");
+const { hasAny, toIsoDateOnly } = require("./chatHelpers");
 
-// Debug logger
-const debugLogger = {
-  // eslint-disable-next-line no-console
-  info: (msg, data) => console.log(`[DEBUG] ${msg}`, JSON.stringify(data, null, 2)),
-  // eslint-disable-next-line no-console
-  error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
+const patientRepository = require("../../../repositories/patientRepository");
+const medicationRepository = require("../../../repositories/medicationRepository");
+const refillRepository = require("../../../repositories/refillRepository");
+const occurrenceRepository = require("../../../repositories/medicationReminderOccurrenceRepository");
+const documentRepository = require("../../../repositories/documentRepository");
+const notificationRepository = require("../../../repositories/notificationRepository");
+
+const { debugLogger } = require("../../../utils/debugLogger");
+const keywordDictionary = require("../../../constants/keywordDictionary");
+
+const REPORT_AGE_LABELS = {
+  english: {
+    today: "Today",
+    day: (n) => (n === 1 ? "1 day old" : `${n} days old`),
+    month: (n) => (n === 1 ? "1 month old" : `${n} months old`),
+    year: (n) => (n === 1 ? "1 year old" : `${n} years old`),
+  },
+  gujarati: {
+    today: "આજનો",
+    day: (n) => `${n} દિવસ જૂનો`,
+    month: (n) => `${n} મહિના જૂનો`,
+    year: (n) => `${n} વર્ષ જૂનો`,
+  },
+  hindi: {
+    today: "आज का",
+    day: (n) => `${n} दिन पुराना`,
+    month: (n) => `${n} महीने पुराना`,
+    year: (n) => `${n} साल पुराना`,
+  },
+  marathi: {
+    today: "आजचा",
+    day: (n) => `${n} दिवस जुना`,
+    month: (n) => `${n} महिने जुना`,
+    year: (n) => `${n} वर्षे जुना`,
+  },
+  tamil: {
+    today: "இன்றைய",
+    day: (n) => `${n} நாள் பழமையானது`,
+    month: (n) => `${n} மாதங்கள் பழமையானது`,
+    year: (n) => `${n} ஆண்டுகள் பழமையானது`,
+  },
 };
 
 /**
@@ -32,133 +68,592 @@ function getReportAgeString(reportDate, language) {
   const normLang = normalizeLanguage(language);
 
   if (diffDays <= 0) {
-    const todayLabels = {
-      english: "Today",
-      gujarati: "આજનો",
-      hindi: "आज का",
-      marathi: "आजचा",
-      tamil: "இன்றைய",
-    };
-    return todayLabels[normLang] || todayLabels.english;
+    return REPORT_AGE_LABELS[normLang]?.today || REPORT_AGE_LABELS.english.today;
   }
+
+  const labels = REPORT_AGE_LABELS[normLang];
+  if (!labels) return "";
 
   if (diffDays < 30) {
-    if (normLang === "english") {
-      return diffDays === 1 ? "1 day old" : `${diffDays} days old`;
-    } else if (normLang === "gujarati") {
-      return `${diffDays} દિવસ જૂનો`;
-    } else if (normLang === "hindi") {
-      return `${diffDays} दिन पुराना`;
-    } else if (normLang === "marathi") {
-      return `${diffDays} दिवस जुना`;
-    } else if (normLang === "tamil") {
-      return `${diffDays} நாள் பழமையானது`;
-    }
+    return labels.day(diffDays);
   }
 
-  const diffMonths = Math.floor(diffDays / 30);
   if (diffDays < 365) {
-    if (normLang === "english") {
-      return diffMonths === 1 ? "1 month old" : `${diffMonths} months old`;
-    } else if (normLang === "gujarati") {
-      return `${diffMonths} મહિના જૂનો`;
-    } else if (normLang === "hindi") {
-      return `${diffMonths} महीने पुराना`;
-    } else if (normLang === "marathi") {
-      return `${diffMonths} महिने जुना`;
-    } else if (normLang === "tamil") {
-      return `${diffMonths} மாதங்கள் பழமையானது`;
-    }
+    return labels.month(Math.floor(diffDays / 30));
   }
 
-  const diffYears = Math.floor(diffDays / 365);
-  if (normLang === "english") {
-    return diffYears === 1 ? "1 year old" : `${diffYears} years old`;
-  } else if (normLang === "gujarati") {
-    return `${diffYears} વર્ષ જૂનો`;
-  } else if (normLang === "hindi") {
-    return `${diffYears} साल पुराना`;
-  } else if (normLang === "marathi") {
-    return `${diffYears} वर्षे जुना`;
-  } else if (normLang === "tamil") {
-    return `${diffYears} ஆண்டுகள் பழமையானது`;
-  }
-
-  return "";
+  return labels.year(Math.floor(diffDays / 365));
 }
 
 /**
- * Smart context builder for patient profile active medications.
- * Implements capping (top 25) and dynamic keyword matching for 1,000+ scale.
- *
- * @param {Array} medications - Array of medication DB records
- * @param {string} userQuestion - User question string
- * @returns {string} Formatted active medications context text
+ * Detects required context domains based on multi-lingual keywords in user question.
+ * @param {string} question - User question text
+ * @returns {Set<string>} Set of domain names ('PROFILE', 'MEDICATIONS', 'REFILLS', 'REMINDERS', 'DOCUMENTS', 'NOTIFICATIONS')
  */
-function buildMedicationsContext(medications = [], userQuestion = "") {
-  if (!Array.isArray(medications) || medications.length === 0) {
-    return "Active Profile Medications:\nNone";
-  }
+function detectContextGraph(question = "") {
+  const q = String(question || "").toLowerCase();
+  const domains = new Set();
 
-  const cleanQuestion = String(userQuestion || "").toLowerCase();
-  const totalCount = medications.length;
+  const reminderKeywords = keywordDictionary.REMINDER;
+  const refillKeywords = keywordDictionary.REFILL;
+  const docKeywords = keywordDictionary.DOCUMENT;
+  const notifKeywords = keywordDictionary.NOTIFICATION;
+  const profileKeywords = keywordDictionary.PROFILE;
+  const medKeywords = keywordDictionary.MEDICATION;
+  const overviewKeywords = keywordDictionary.OVERVIEW;
 
-  let selectedMeds = [];
+  if (hasAny(q, reminderKeywords)) domains.add("REMINDERS");
+  if (hasAny(q, refillKeywords)) domains.add("REFILLS");
+  if (hasAny(q, docKeywords)) domains.add("DOCUMENTS");
+  if (hasAny(q, notifKeywords)) domains.add("NOTIFICATIONS");
+  if (hasAny(q, profileKeywords)) domains.add("PROFILE");
+  if (hasAny(q, medKeywords)) domains.add("MEDICATIONS");
 
-  if (totalCount <= 25) {
-    selectedMeds = medications;
+  if (domains.size === 0 || hasAny(q, overviewKeywords)) {
+    domains.add("PROFILE");
+    domains.add("MEDICATIONS");
+    domains.add("REMINDERS");
+    domains.add("REFILLS");
+    domains.add("DOCUMENTS");
   } else {
-    // Rank/search: prioritize medications matching user question words
-    const matchedMeds = medications.filter((med) => {
-      if (!med.medicationName) return false;
-      const medNameClean = med.medicationName.toLowerCase().trim();
-      if (cleanQuestion.includes(medNameClean)) return true;
-      const words = medNameClean.split(/\s+/).filter((w) => w.length > 2);
-      return words.some((w) => cleanQuestion.includes(w));
-    });
-    const matchedIds = new Set(matchedMeds.map((m) => m.id));
-    const remainingMeds = medications.filter((m) => !matchedIds.has(m.id));
-
-    const maxRemaining = Math.max(0, 25 - matchedMeds.length);
-    selectedMeds = [...matchedMeds, ...remainingMeds.slice(0, maxRemaining)];
+    domains.add("PROFILE");
   }
 
-  const formattedList = selectedMeds
-    .map((m) => {
-      const name = m.medicationName || "Unknown Medicine";
-      const type = m.medicationType ? ` (${m.medicationType})` : "";
-      const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
-      const unit = m.unit ? ` ${m.unit}` : "";
-      const doseStr = dose || unit ? `: ${dose}${unit}` : "";
-      const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
-      const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+  if (domains.has("REFILLS")) {
+    domains.add("MEDICATIONS");
+  }
 
-      let scheduleStr = "";
-      if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
-        const times = Object.entries(m.medicationSchedule)
-          .filter(([, v]) => v)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join(", ");
-        if (times) scheduleStr = `, Schedule: [${times}]`;
+  debugLogger.info("detectContextGraph: Selected domains for user question", {
+    question: q.substring(0, 100),
+    domains: Array.from(domains),
+  });
+
+  return domains;
+}
+
+/**
+ * Wraps any item array with standardized pagination metadata.
+ * Always returns an object containing `{ data: Array, page: { pageNumber, pageLimit, totalPages, totalRecords, hasNextPage, hasPrevPage } }`.
+ *
+ * @param {Array} items - Raw list of items
+ * @param {object} [options] - Options object containing page / limit settings
+ * @returns {{ data: Array, page: { pageNumber: number, pageLimit: number, totalPages: number, totalRecords: number, hasNextPage: boolean, hasPrevPage: boolean } }}
+ */
+function paginateArray(items = [], options = {}) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const pageLimit = Math.max(1, Number(options.limit || options.pageLimit || 20));
+  const reqPage = Math.max(1, Number(options.page || options.pageNumber || 1));
+  const totalRecords = safeItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageLimit));
+  const safePageNumber = Math.min(reqPage, totalPages);
+
+  const startIndex = (safePageNumber - 1) * pageLimit;
+  const slicedData = safeItems.slice(startIndex, startIndex + pageLimit);
+
+  return {
+    data: slicedData,
+    page: {
+      pageNumber: safePageNumber,
+      pageLimit,
+      totalPages,
+      totalRecords,
+      hasNextPage: safePageNumber < totalPages,
+      hasPrevPage: safePageNumber > 1,
+    },
+  };
+}
+
+/**
+ * Dependency-aware context builder for patient profile, medications, refills, reminders, documents, and notifications.
+ * Executes independent queries in parallel via Promise.all and dependent queries sequentially.
+ * Always formats list domains as paginated arrays with pagination metadata.
+ *
+ * @param {string} userId - User/patient UUID
+ * @param {string} userQuestion - Raw question from user
+ * @param {object} [options] - Optional pagination parameters
+ * @returns {Promise<string>} Formatted markdown context string
+ */
+async function buildDependencyAwareContext(userId, userQuestion = "", options = {}) {
+  if (!userId) return "";
+
+  const domains = detectContextGraph(userQuestion);
+  debugLogger.info("buildDependencyAwareContext: Detected domains", {
+    userId,
+    domains: Array.from(domains),
+    question: userQuestion?.substring(0, 100),
+  });
+
+  // --- PHASE 1: Independent Domain Queries (Executed in parallel via Promise.all) ---
+  const fetchTasks = {};
+
+  fetchTasks.patient = options.patient
+    ? Promise.resolve(options.patient)
+    : patientRepository.findById(userId);
+
+  if (domains.has("MEDICATIONS")) {
+    fetchTasks.medications = medicationRepository.findAll(userId);
+  }
+
+  if (domains.has("REMINDERS")) {
+    fetchTasks.todayOccurrences = occurrenceRepository.findTodayOccurrences
+      ? occurrenceRepository.findTodayOccurrences(userId)
+      : Promise.resolve([]);
+  }
+
+  if (domains.has("DOCUMENTS")) {
+    fetchTasks.documents = documentRepository.getSummaryByUserId
+      ? documentRepository.getSummaryByUserId(userId)
+      : Promise.resolve([]);
+  }
+
+  if (domains.has("NOTIFICATIONS")) {
+    fetchTasks.notifications = notificationRepository.list
+      ? notificationRepository.list({ userId, sort: { orderBy: "desc" } })
+      : Promise.resolve([]);
+  }
+
+  const phase1Results = {};
+  const taskEntries = Object.entries(fetchTasks);
+  const resolvedValues = await Promise.all(
+    taskEntries.map(([, task]) =>
+      task.catch((err) => {
+        debugLogger.error("buildDependencyAwareContext: Task failed", { error: err.message });
+        return null;
+      }),
+    ),
+  );
+
+  taskEntries.forEach(([key], index) => {
+    phase1Results[key] = resolvedValues[index];
+  });
+
+  const patient = phase1Results.patient;
+  const medications = phase1Results.medications || [];
+  const todayOccurrences = phase1Results.todayOccurrences || [];
+  const documents = phase1Results.documents || [];
+  const notifications = phase1Results.notifications || [];
+
+  // --- PHASE 2: Dependent Domain Queries (Executed sequentially using Phase 1 outputs) ---
+  const refillMap = new Map();
+  if (domains.has("REFILLS") && medications.length > 0) {
+    const refillPromises = medications.map(async (med) => {
+      try {
+        const latestRefill = refillRepository.findLatestRefillByMedicationId
+          ? await refillRepository.findLatestRefillByMedicationId(med.id)
+          : null;
+        if (latestRefill) {
+          refillMap.set(med.id, latestRefill);
+        }
+      } catch (err) {
+        debugLogger.error("buildDependencyAwareContext: Refill fetch failed for med", {
+          medId: med.id,
+          error: err.message,
+        });
       }
+    });
+    await Promise.all(refillPromises);
+  }
 
-      const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
-      const notes = m.notes ? `, Notes: ${m.notes}` : "";
+  function formatLocalTime(value) {
+    if (!value) return null;
+    return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
 
-      return `- ${name}${type}${doseStr}${freq}${food}${scheduleStr}${doctor}${notes}`;
-    })
-    .join("\n");
+  const isTaken = (o) => o.status === "TAKEN" || o.status === "COMPLETED";
+  const isMissed = (o) => o.status === "SKIPPED" || o.status === "MISSED" || o.isOverdue;
+  const isPending = (o) => o.status === "PENDING" && !o.isOverdue;
 
-  const header =
-    totalCount > 25
-      ? `Active Profile Medications (Total: ${totalCount}, Showing top 25 most relevant):`
-      : `Active Profile Medications (${totalCount}):`;
+  function formatMedicationPagination(page) {
+    if (page.totalRecords === 0) {
+      return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Records: 0 | Page Limit: ${page.pageLimit}]`;
+    }
+    return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Records: ${page.totalRecords} | Page Limit: ${page.pageLimit} | Has Next Page: ${page.hasNextPage ? "Yes" : "No"}]`;
+  }
 
-  return `${header}\n${formattedList}`;
+  function formatReminderPagination(page, { takenCount, missedCount, pendingCount }) {
+    if (page.totalRecords === 0) {
+      return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Scheduled Today: 0 | Page Limit: ${page.pageLimit}]`;
+    }
+    return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Scheduled Today: ${page.totalRecords} (Completed/Taken: ${takenCount}, Missed/Overdue: ${missedCount}, Pending/Future Doses Remaining: ${pendingCount}) | Page Limit: ${page.pageLimit} | Has Next Page: ${page.hasNextPage ? "Yes" : "No"}]`;
+  }
+
+  function formatDocumentPagination(page) {
+    if (page.totalRecords === 0) {
+      return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Uploaded Documents: 0 | Page Limit: ${page.pageLimit}]`;
+    }
+    return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Uploaded Documents: ${page.totalRecords} | Page Limit: ${page.pageLimit} | Has Next Page: ${page.hasNextPage ? "Yes" : "No"}]`;
+  }
+
+  function formatNotificationPagination(page, { readCount, unreadCount }) {
+    if (page.totalRecords === 0) {
+      return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Notifications: 0 | Page Limit: ${page.pageLimit}]`;
+    }
+    return `Pagination Metadata: [Page ${page.pageNumber} of ${page.totalPages} | Total Notifications: ${page.totalRecords} (Read: ${readCount}, Unread: ${unreadCount}) | Page Limit: ${page.pageLimit} | Has Next Page: ${page.hasNextPage ? "Yes" : "No"}]`;
+  }
+
+  function buildProfileBlock(patient) {
+    const dobStr = patient.dateOfBirth ? toIsoDateOnly(patient.dateOfBirth) : "Unknown";
+    const allergiesStr =
+      patient.allergies && Array.isArray(patient.allergies) && patient.allergies.length > 0
+        ? patient.allergies.join(", ")
+        : "None";
+
+    const officialFullName =
+      `${patient.firstName || ""} ${patient.lastName || ""}`.trim() ||
+      patient.fullName ||
+      patient.userName ||
+      "Unknown";
+
+    const countryCodeStr = patient.countryCode || "";
+    const mobileStr = patient.mobile || "";
+    const fullPhoneStr =
+      countryCodeStr || mobileStr ? `${countryCodeStr}${mobileStr}`.trim() : "None";
+    const emailStr = patient.email || "None";
+    const firebaseUidStr = patient.firebaseUid || "None";
+
+    let loginTypeDesc = "";
+    if (patient.firebaseUid || (mobileStr && countryCodeStr)) {
+      if (patient.email) {
+        loginTypeDesc = `Mobile OTP via Firebase Auth (${fullPhoneStr}) [Primary] and Email (${emailStr})`;
+      } else {
+        loginTypeDesc = `Mobile OTP via Firebase Authentication (Phone: ${fullPhoneStr}, Firebase UID: ${firebaseUidStr})`;
+      }
+    } else if (patient.email) {
+      loginTypeDesc = `Email & Password Authentication (Email: ${emailStr})`;
+    } else {
+      loginTypeDesc = `Standard Profile Account`;
+    }
+
+    const regDateStr = patient.createdAt ? toIsoDateOnly(patient.createdAt) : "Unknown";
+
+    const lastLoginStr = patient.lastLoginAt
+      ? patient.lastLoginAt instanceof Date
+        ? patient.lastLoginAt.toISOString()
+        : String(patient.lastLoginAt)
+      : "Unknown";
+
+    return (
+      `=== OFFICIAL LOGGED-IN USER PROFILE & AUTHENTICATION (DATABASE) ===\n` +
+      `Patient Code: ${patient.patientCode || "N/A"}\n` +
+      `Registered Account Profile Name: "${officialFullName}"\n` +
+      `Username: ${patient.userName || officialFullName}\n` +
+      `First Name: ${patient.firstName || "N/A"}\n` +
+      `Last Name: ${patient.lastName || "N/A"}\n` +
+      `Email Address: ${emailStr}\n` +
+      `Mobile Phone: ${fullPhoneStr}\n` +
+      `Firebase Unique ID: ${firebaseUidStr}\n` +
+      `Login Method / Authentication Type: ${loginTypeDesc}\n` +
+      `Gender: ${patient.gender || "Unknown"}\n` +
+      `Date of Birth: ${dobStr}\n` +
+      `Blood Group: ${patient.bloodGroup || "Unknown"}\n` +
+      `Allergies: ${allergiesStr}\n` +
+      `Account Status: ${patient.status || "ACTIVE"}\n` +
+      `Mobile Verified: ${(patient.isMobileVerified ?? patient.isVerified) ? "Yes" : "No"}\n` +
+      `Email Verified: ${patient.isEmailVerified ? "Yes" : "No"}\n` +
+      `Onboarding Completed: ${patient.onboardingCompleted ? "Yes" : "No"}\n` +
+      `Preferred Language: ${patient.preferredLanguage || "english"}\n` +
+      `Account Registration Date: ${regDateStr}\n` +
+      `Last Login Timestamp: ${lastLoginStr}\n\n` +
+      `STRICT PROFILE & AUTH INSTRUCTIONS:\n` +
+      `1. The official name of the logged-in app user is strictly "${officialFullName}". Whenever asked for the user's name or profile name, you MUST answer with "${officialFullName}". NEVER use doctor names or patient names printed inside uploaded medical reports.\n` +
+      `2. When asked what login method, authentication type, or how the user logged in (e.g. mobile vs email or Firebase UID), answer based on "Login Method / Authentication Type" above.\n` +
+      `3. If the user asks for all details, patient code, username, DOB, allergies, blood group, email, phone, or verification status, state the exact details from this official database block.`
+    );
+  }
+
+  function buildMedicationBlock(medications, refillMap, domains, options) {
+    const medPaginated = paginateArray(medications, options.medications || options);
+    const { data: pageMeds, page } = medPaginated;
+
+    if (page.totalRecords === 0) {
+      return (
+        `=== ACTIVE PROFILE MEDICATIONS & REFILL DETAILS (PAGINATED ARRAY) ===\n` +
+        `Active Profile Medications:\n` +
+        `${formatMedicationPagination(page)}\n` +
+        `Data Array: []\n` +
+        `Status: No active medications found in profile.`
+      );
+    }
+
+    const medListFormatted = pageMeds
+      .map((m, idx) => {
+        const itemIndex = (page.pageNumber - 1) * page.pageLimit + idx + 1;
+        const name = m.medicationName || "Unknown Medicine";
+        const type = m.medicationType ? ` (${m.medicationType})` : "";
+        const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
+        const unit = m.unit ? ` ${m.unit}` : "";
+        const doseStr = dose || unit ? `: ${dose}${unit}` : "";
+        const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
+        const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+        const dailyConsumptionStr = m.dailyConsumption
+          ? `, Daily Consumption: ${m.dailyConsumption} ${m.unit || "unit(s)"}/day`
+          : "";
+
+        const startDateStr = m.startDate ? String(m.startDate).split("T")[0] : "Not specified";
+        const rawEndDate = m.endDate ? String(m.endDate).split("T")[0] : null;
+        let endDateStr = "Not specified";
+        if (rawEndDate && m.ongoing) {
+          endDateStr = `${rawEndDate} (Treatment is Ongoing)`;
+        } else if (rawEndDate) {
+          endDateStr = rawEndDate;
+        } else if (m.ongoing) {
+          endDateStr = "Ongoing (No fixed end date)";
+        }
+        const ongoingStatusStr = m.ongoing ? "Yes (Ongoing)" : "No (Fixed Duration)";
+
+        let scheduleStr = "";
+        if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
+          const times = Object.entries(m.medicationSchedule)
+            .filter(([, v]) => v)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(", ");
+          if (times) scheduleStr = `, Schedule: [${times}]`;
+        }
+
+        const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
+        let refillInfo = "";
+        let calculatedRemainingInfo = "";
+
+        const refillObj = refillMap.get(m.id);
+        const baseQty = refillObj?.afterRefillRemainingQuantity ?? m.totalQuantity ?? null;
+        const baseDate = refillObj?.createdAt
+          ? new Date(refillObj.createdAt)
+          : m.startDate
+            ? new Date(m.startDate)
+            : null;
+
+        if (baseQty !== null && baseDate && !isNaN(baseDate.getTime()) && m.dailyConsumption) {
+          const today = new Date();
+          const daysPassed = Math.max(0, Math.floor((today - baseDate) / (1000 * 60 * 60 * 24)));
+          const estimatedConsumed = daysPassed * m.dailyConsumption;
+          const estimatedRemaining = Math.max(0, baseQty - estimatedConsumed);
+          calculatedRemainingInfo = `\n  • Dynamic Estimated Stock Remaining: ~${estimatedRemaining} ${m.unit || "unit(s)"} (Calculated from base ${baseQty} - ${daysPassed} days × ${m.dailyConsumption}/day consumed since ${baseDate.toISOString().split("T")[0]})`;
+        }
+
+        if (domains.has("REFILLS")) {
+          if (refillObj) {
+            const refillDate = refillObj.createdAt
+              ? toIsoDateOnly(new Date(refillObj.createdAt))
+              : "N/A";
+            refillInfo = `\n  • Refill Record (Last Refill: ${refillDate}):\n    - Before Refill: Remaining = ${refillObj.beforeRefillRemainingQuantity}, Total = ${refillObj.beforeRefillTotalQuantity}\n    - Refill Added Quantity: +${refillObj.refillQuantity}\n    - After Refill: Remaining = ${refillObj.afterRefillRemainingQuantity}, Total = ${refillObj.afterRefillTotalQuantity}`;
+          } else {
+            refillInfo = `\n  • Refills Remaining: ${m.refillCount ?? "N/A"}`;
+          }
+        }
+
+        return `${itemIndex}. - ${name}${type}${doseStr}${freq}${food}${dailyConsumptionStr}\n  Status: Ongoing=${ongoingStatusStr} | Start Date: ${startDateStr} | End Date: ${endDateStr}${scheduleStr}${doctor}${refillInfo}${calculatedRemainingInfo}`;
+      })
+      .join("\n");
+
+    return (
+      `=== ACTIVE PROFILE MEDICATIONS & REFILL DETAILS (PAGINATED ARRAY) ===\n` +
+      `Active Profile Medications:\n` +
+      `${formatMedicationPagination(page)}\n` +
+      `Data Array (Showing ${pageMeds.length} items):\n${medListFormatted}`
+    );
+  }
+
+  function buildReminderBlock(todayOccurrences, options) {
+    const reminderPaginated = paginateArray(todayOccurrences, options.reminders || options);
+    const { data: pageOccurrences, page } = reminderPaginated;
+
+    if (page.totalRecords === 0) {
+      return (
+        `=== MEDICATION REMINDERS STATUS TODAY (PAGINATED ARRAY) ===\n` +
+        `${formatReminderPagination(page, {})}\n` +
+        `Data Array: []\n` +
+        `Status: No doses scheduled for today.`
+      );
+    }
+
+    const taken = todayOccurrences.filter(isTaken);
+    const missed = todayOccurrences.filter(isMissed);
+    const pending = todayOccurrences.filter(isPending);
+
+    const paginationStr = formatReminderPagination(page, {
+      takenCount: taken.length,
+      missedCount: missed.length,
+      pendingCount: pending.length,
+    });
+
+    let occurrenceStr =
+      `=== MEDICATION REMINDERS STATUS TODAY (PAGINATED ARRAY) ===\n` +
+      `${paginationStr}\n` +
+      `Data Array (Page Items: ${pageOccurrences.length}):`;
+
+    const pageTaken = pageOccurrences.filter(isTaken);
+    const pageMissed = pageOccurrences.filter(isMissed);
+    const pagePending = pageOccurrences.filter(isPending);
+
+    if (pageTaken.length > 0) {
+      occurrenceStr +=
+        `\nCompleted/Taken Doses (Page ${page.pageNumber}):\n` +
+        pageTaken
+          .map((o) => {
+            const timeStr = formatLocalTime(o.completedAt) || "recorded time";
+            return `- ${o.medicationName || "Medication"} (Completed at ${timeStr})`;
+          })
+          .join("\n");
+    }
+
+    if (pageMissed.length > 0) {
+      occurrenceStr +=
+        `\nMissed/Overdue Doses (Page ${page.pageNumber}):\n` +
+        pageMissed
+          .map((o) => {
+            const timeStr = formatLocalTime(o.actualMedicationTime) || "scheduled time";
+            return `- ${o.medicationName || "Medication"} (Scheduled at ${timeStr}, Status: ${o.status})`;
+          })
+          .join("\n");
+    }
+
+    if (pagePending.length > 0) {
+      occurrenceStr +=
+        `\nPending / Future Doses Remaining (Page ${page.pageNumber}):\n` +
+        pagePending
+          .map((o) => {
+            const timeStr = formatLocalTime(o.actualMedicationTime) || "scheduled time";
+            return `- ${o.medicationName || "Medication"} (Scheduled at ${timeStr})`;
+          })
+          .join("\n");
+    }
+
+    return occurrenceStr;
+  }
+
+  function buildDocumentBlock(documents, options) {
+    const docPaginated = paginateArray(documents, options.documents || options);
+    const { data: pageDocs, page } = docPaginated;
+
+    if (page.totalRecords === 0) {
+      return (
+        `=== MEDICAL DOCUMENTS CATALOG (PAGINATED ARRAY) ===\n` +
+        `${formatDocumentPagination(page)}\n` +
+        `Data Array: []\n` +
+        `Status: No documents uploaded.`
+      );
+    }
+
+    const typeCounts = {};
+    const failedDocs = [];
+    const completedDocs = [];
+    const pendingDocs = [];
+
+    documents.forEach((d) => {
+      const type = d.documentType || "general";
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+
+      const statusStr = String(d.ocrStatus || "completed").toLowerCase();
+      if (statusStr === "failed") {
+        failedDocs.push(d);
+      } else if (statusStr === "completed") {
+        completedDocs.push(d);
+      } else {
+        pendingDocs.push(d);
+      }
+    });
+
+    const typeSummary = Object.entries(typeCounts)
+      .map(([t, c]) => `${t}: ${c}`)
+      .join(", ");
+
+    const docList = pageDocs
+      .map((d, index) => {
+        const itemIndex = (page.pageNumber - 1) * page.pageLimit + index + 1;
+        const dateStr = d.reportDate
+          ? String(d.reportDate).split("T")[0]
+          : d.createdAt
+            ? new Date(d.createdAt).toISOString().split("T")[0]
+            : "Unknown";
+        const statusText = d.ocrStatus ? ` [OCR Status: ${String(d.ocrStatus).toUpperCase()}]` : "";
+        const remarksText = d.remarks ? ` (Remarks: "${d.remarks}")` : "";
+        return `${itemIndex}. File Name: "${d.fileName || "File"}" (Category: ${d.documentType || "document"}, Report Date: ${dateStr})${statusText}${remarksText}`;
+      })
+      .join("\n");
+
+    let statusSummary =
+      `=== MEDICAL DOCUMENTS CATALOG (PAGINATED ARRAY) ===\n` +
+      `${formatDocumentPagination(page)}\n` +
+      `Category Breakdown: [${typeSummary}]\nStatus Overview: Successfully Completed = ${completedDocs.length}, Processing/Pending = ${pendingDocs.length}, Failed = ${failedDocs.length}`;
+
+    if (failedDocs.length > 0) {
+      statusSummary +=
+        `\n\nFailed Documents Details (${failedDocs.length}):\n` +
+        failedDocs
+          .map((fd) => {
+            const dateStr = fd.reportDate
+              ? String(fd.reportDate).split("T")[0]
+              : fd.createdAt
+                ? new Date(fd.createdAt).toISOString().split("T")[0]
+                : "Unknown";
+            const reason = fd.remarks || "Low image scan quality or text extraction error";
+            return `- File: "${fd.fileName}" (Category: ${fd.documentType || "general"}, Date: ${dateStr})\n  Failure Reason: ${reason}`;
+          })
+          .join("\n");
+    }
+
+    return `${statusSummary}\n\nUploaded Document List Array (Page ${page.pageNumber}):\n${docList}\n\nSTRICT DOCUMENT LISTING INSTRUCTION: When asked to list uploaded documents, state the total count (${page.totalRecords}) and current page (${page.pageNumber} of ${page.totalPages}), and list the exact File Names provided in the Uploaded Document List Array above. Do NOT use names extracted from report body text.`;
+  }
+
+  function buildNotificationBlock(notifications, options) {
+    const notifPaginated = paginateArray(notifications, options.notifications || options);
+    const { data: pageNotifs, page } = notifPaginated;
+
+    if (page.totalRecords === 0) {
+      return (
+        `=== NOTIFICATIONS SUMMARY (PAGINATED ARRAY) ===\n` +
+        `${formatNotificationPagination(page, {})}\n` +
+        `Data Array: []\n` +
+        `Status: No notifications.`
+      );
+    }
+
+    const readCount = notifications.filter((n) => n.isRead === true).length;
+    const unreadCount = notifications.filter((n) => n.isRead !== true).length;
+    const notifList = pageNotifs
+      .map((n) => {
+        const statusStr = n.isRead ? "READ" : "UNREAD";
+        const timeStr = n.createdAt ? new Date(n.createdAt).toISOString().split("T")[0] : "";
+        return `- [${statusStr}] [${timeStr}] ${n.title || "Notification"}: ${n.body || n.message || ""}`;
+      })
+      .join("\n");
+
+    return (
+      `=== NOTIFICATIONS SUMMARY (PAGINATED ARRAY) ===\n` +
+      `${formatNotificationPagination(page, { readCount, unreadCount })}\n` +
+      `Data Array (Page ${page.pageNumber}):\n${notifList}`
+    );
+  }
+
+  // --- PHASE 3: Merge Context Blocks ---
+  const contextParts = [];
+
+  if (patient) {
+    contextParts.push(buildProfileBlock(patient));
+  }
+
+  if (domains.has("MEDICATIONS")) {
+    contextParts.push(buildMedicationBlock(medications, refillMap, domains, options));
+  }
+
+  if (domains.has("REMINDERS")) {
+    contextParts.push(buildReminderBlock(todayOccurrences, options));
+  }
+
+  if (domains.has("DOCUMENTS")) {
+    contextParts.push(buildDocumentBlock(documents, options));
+  }
+
+  if (domains.has("NOTIFICATIONS")) {
+    contextParts.push(buildNotificationBlock(notifications, options));
+  }
+
+  return contextParts.join("\n\n");
 }
 
 /**
  * Extracts recognized clinical and biomarker entities from user text.
+
  * @param {string} question - Query text
  * @returns {Array<string>} List of matched entity keys
  */
@@ -261,56 +756,45 @@ class RagContextService {
 
       if (summaryChunks.length === 0) {
         // PARALLEL RETRIEVAL (Per Document + Per Entity)
-        const queryPromises = [];
-
+        const retrievalTasks = [];
         for (const dId of finalDocumentIds) {
           if (medicalEntities.length > 0) {
             for (const entity of medicalEntities) {
-              queryPromises.push(
-                (async () => {
-                  try {
-                    const chunks = await intelligenceRepository.searchSimilarChunks({
-                      userId,
-                      queryEmbedding,
-                      limit: 10,
-                      documentIds: [dId],
-                      keywords: [entity],
-                    });
-                    return { dId, entity, chunks, success: true };
-                  } catch (err) {
-                    debugLogger.error(
-                      `Failed to retrieve chunks for doc ${dId} and entity ${entity}`,
-                      {
-                        error: err.message,
-                      },
-                    );
-                    return { dId, entity, chunks: [], success: false };
-                  }
-                })(),
-              );
+              retrievalTasks.push({ dId, entity, limit: 10, keywords: [entity] });
             }
           } else {
-            queryPromises.push(
-              (async () => {
-                try {
-                  const chunks = await intelligenceRepository.searchSimilarChunks({
-                    userId,
-                    queryEmbedding,
-                    limit: 20,
-                    documentIds: [dId],
-                  });
-                  return { dId, entity: null, chunks, success: true };
-                } catch (err) {
-                  // eslint-disable-next-line no-console
-                  console.log("err", err);
-                  return { dId, entity: null, chunks: [], success: false };
-                }
-              })(),
-            );
+            retrievalTasks.push({ dId, entity: null, limit: 20 });
           }
         }
 
-        const queryResults = await Promise.all(queryPromises);
+        const queryResults = await Promise.all(
+          retrievalTasks.map(async ({ dId, entity, limit, keywords }) => {
+            try {
+              const queryParams = {
+                userId,
+                queryEmbedding,
+                limit,
+                documentIds: [dId],
+              };
+              if (keywords) {
+                queryParams.keywords = keywords;
+              }
+              const chunks = await intelligenceRepository.searchSimilarChunks(queryParams);
+              return { dId, entity, chunks, success: true };
+            } catch (err) {
+              if (entity) {
+                debugLogger.error(`Failed to retrieve chunks for doc ${dId} and entity ${entity}`, {
+                  error: err.message,
+                });
+              } else {
+                debugLogger.error(`Failed to retrieve chunks for doc ${dId}`, {
+                  error: err.message,
+                });
+              }
+              return { dId, entity, chunks: [], success: false };
+            }
+          }),
+        );
 
         // Track retrieval status and calculate detailed statuses
         let retrievedCount = 0;
@@ -387,6 +871,7 @@ class RagContextService {
         // 3. Selection Algorithm (Coverage-Aware)
         const chunksPerDoc = new Map();
         const finalSelection = [];
+        const finalSelectionIds = new Set();
 
         // Sort globally first
         filteredChunks.sort((a, b) => (a.distance || 0) - (b.distance || 0));
@@ -405,8 +890,9 @@ class RagContextService {
 
           const count = chunksPerDoc.get(docIdStr) || 0;
           if (hasEntity && count < 4) {
-            if (!finalSelection.includes(c)) {
+            if (!finalSelectionIds.has(c)) {
               finalSelection.push(c);
+              finalSelectionIds.add(c);
               chunksPerDoc.set(docIdStr, count + 1);
             }
           }
@@ -419,8 +905,9 @@ class RagContextService {
           const docIdStr = String(c.documentId);
           const count = chunksPerDoc.get(docIdStr) || 0;
 
-          if (count < 6 && !finalSelection.includes(c)) {
+          if (count < 6 && !finalSelectionIds.has(c)) {
             finalSelection.push(c);
+            finalSelectionIds.add(c);
             chunksPerDoc.set(docIdStr, count + 1);
           }
         }
@@ -490,9 +977,11 @@ class RagContextService {
 const ragContextService = new RagContextService();
 
 module.exports = {
+  paginateArray,
   getReportAgeString,
-  buildMedicationsContext,
   getMedicalEntityKeywords,
+  detectContextGraph,
+  buildDependencyAwareContext,
   RagContextService,
   ragContextService,
 };

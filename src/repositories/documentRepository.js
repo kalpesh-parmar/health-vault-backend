@@ -253,10 +253,23 @@ class DocumentRepository {
     return result[0] || null;
   }
 
-  async createMany(dataArray, tx = null) {
-    if (!dataArray || dataArray.length === 0) return [];
-    const client = tx || db;
-    return client.insert(document).values(dataArray).returning();
+  async getSummaryByUserId(userId) {
+    const docs = await db
+      .select({
+        id: document.id,
+        fileName: document.fileName,
+        documentType: document.documentType,
+        fileType: document.fileType,
+        reportDate: document.reportDate,
+        ocrStatus: document.ocrStatus,
+        remarks: document.remarks,
+        createdAt: document.createdAt,
+      })
+      .from(document)
+      .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+      .orderBy(desc(document.createdAt));
+
+    return docs;
   }
 }
 

@@ -215,6 +215,19 @@ paths:
                 state:
                   type: object
                   description: Onboarding state dictionary to track missing fields
+                page:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                  nullable: true
+                  description: Page number for paginated listings (e.g. documents, medications)
+                  example: 1
+                limit:
+                  type: integer
+                  minimum: 1
+                  nullable: true
+                  description: Maximum items per page for listings (defaults to all items if omitted)
+                  example: 10
       responses:
         "200":
           description: AI response and updated state
