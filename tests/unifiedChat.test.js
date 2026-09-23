@@ -76,7 +76,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(normalized.dosePerIntake).toBe(1);
     expect(normalized.frequency).toBe("Three Times Daily");
     expect(normalized.medicationSchedule.Morning).toBe("09:00:00");
-    expect(normalized.totalQuantity).toBe(30);
+    expect(normalized.totalQuantity).toBe(10);
   });
 
   test("executeAddDocumentAction should enqueue background OCR job when rawOcrData is missing", async () => {

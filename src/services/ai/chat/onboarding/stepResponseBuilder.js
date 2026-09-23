@@ -467,18 +467,22 @@ async function getLocalizedResponse(step, state) {
         title: null,
         subtitle: await getLocalizedText(
           "onboarding.askAllergies.message",
-          "Do you have any allergies? You can skip this question.",
+          "Do you have any known allergies?",
           state.preferredLanguage,
         ),
         message: await getLocalizedText(
           "onboarding.askAllergies.message",
-          "Do you have any allergies? You can skip this question.",
+          "Do you have any known allergies?",
           state.preferredLanguage,
         ),
         options: [
           {
-            label: await getLocalizedText("onboarding.skip", "Skip", state.preferredLanguage),
-            value: "SKIP",
+            label: await getLocalizedText("onboarding.yes", "Yes", state.preferredLanguage),
+            value: "YES",
+          },
+          {
+            label: await getLocalizedText("onboarding.no", "No", state.preferredLanguage),
+            value: "NO",
           },
         ],
       };
@@ -539,7 +543,7 @@ async function getLocalizedResponse(step, state) {
         notes: "",
         prescribed_by: "",
         refill_alert: false,
-        total_quantity: 30,
+        total_quantity: 10,
       };
       const message = med
         ? await getLocalizedText(
@@ -673,6 +677,13 @@ async function getLocalizedResponse(step, state) {
 
     case "COMPLETE":
     case "POST_ONBOARDING": {
+      if (state.completionMessageSent || state.isOnboardingCompleted) {
+        return {
+          action: step,
+          message: "",
+          options: [],
+        };
+      }
       return {
         action: step,
         message: await getLocalizedText(

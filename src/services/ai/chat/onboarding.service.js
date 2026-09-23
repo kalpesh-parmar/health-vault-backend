@@ -137,6 +137,14 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     }
   } else if (fieldType === "allergies") {
     const trimmed = text.trim().toLowerCase();
+    const upperCompact = text.trim().toUpperCase().replace(/\s+/g, "");
+    if (bloodGroupTypeValues.includes(upperCompact)) {
+      return [];
+    }
+    const affirmativeSet = ["yes", "yeah", "yep", "true", "ha", "haa", "હા", "हाँ", "होय", "ஆம்"];
+    if (affirmativeSet.includes(trimmed)) {
+      return null;
+    }
     const negativeSet = [
       "no",
       "none",
@@ -151,20 +159,34 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
       "કોઈ એલર્જી નથી",
       "नहीं",
       "कोई एलर्जी नहीं",
+      "नाही",
+      "இல்லை",
     ];
     if (negativeSet.includes(trimmed)) {
       return [];
     }
     if (trimmed && trimmed.length < 60 && !/[?!=]/.test(trimmed)) {
-      const items = text
+      const rawItems = text
         .split(",")
         .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
         .filter(Boolean);
+      const items = rawItems.filter((i) => {
+        const iUpper = i.toUpperCase().replace(/\s+/g, "");
+        const iLower = i.toLowerCase();
+        return (
+          !bloodGroupTypeValues.includes(iUpper) &&
+          !affirmativeSet.includes(iLower) &&
+          !negativeSet.includes(iLower)
+        );
+      });
       if (
         items.length > 0 &&
         items.every((i) => i.length < 30 && (!i.includes(" ") || i.split(" ").length <= 3))
       ) {
         return items;
+      }
+      if (rawItems.length > 0 && items.length === 0) {
+        return [];
       }
     }
   }
@@ -378,6 +400,14 @@ async function updateStateFromMessage(state, message, userId = null) {
       state.currentStep === "POST_ONBOARDING")
   ) {
     state.currentStep = "REVIEW_MEDICINES_LIST";
+  }
+
+  const compactMsg = typeof msg === "string" ? msg.trim().toUpperCase().replace(/\s+/g, "") : "";
+  if (
+    bloodGroupTypeValues.includes(compactMsg) &&
+    (!state.existingUserData?.bloodGroup || !state.currentStep)
+  ) {
+    state.currentStep = "ASK_BLOOD_GROUP";
   }
 
   if (!state.currentStep) return;
@@ -1047,6 +1077,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         const norm = upperVal.replace(/\s+/g, "");
         if (bloodGroupTypeValues.includes(norm)) {
           state.existingUserData.bloodGroup = norm;
+          state.bloodGroupSkipped = false;
         } else {
           const extractedBg = await extractFieldFromMessage(
             "bloodGroup",
@@ -1057,9 +1088,16 @@ async function updateStateFromMessage(state, message, userId = null) {
             const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
             if (bloodGroupTypeValues.includes(bgVal)) {
               state.existingUserData.bloodGroup = bgVal;
+              state.bloodGroupSkipped = false;
             }
           }
         }
+      }
+      // Guarantee allergies field is not contaminated by blood group
+      if (Array.isArray(state.existingUserData.allergies)) {
+        state.existingUserData.allergies = state.existingUserData.allergies.filter(
+          (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+        );
       }
       if (userId) {
         try {
@@ -1078,6 +1116,75 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_ALLERGIES": {
+      let rawVal = msg;
+      let parsedPayload = null;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          parsedPayload = parsed;
+          rawVal = String(
+            parsed.value || parsed.key || parsed.label || parsed.option || parsed.message || msg,
+          ).trim();
+        }
+      } catch {
+        // Not a JSON string payload
+      }
+
+      const normUpper = String(rawVal).trim().toUpperCase().replace(/\s+/g, "");
+      // Defensive check: If rawVal is a blood group token, route it to bloodGroup!
+      if (bloodGroupTypeValues.includes(normUpper)) {
+        if (!state.existingUserData.bloodGroup) {
+          state.existingUserData.bloodGroup = normUpper;
+          state.bloodGroupSkipped = false;
+          if (userId) {
+            try {
+              await patientRepository.updateById(userId, { bloodGroup: normUpper });
+            } catch (bgErr) {
+              console.warn(
+                "[OnboardingService] Immediate DB update for rerouted bloodGroup failed:",
+                bgErr.message,
+              );
+            }
+          }
+        }
+        if (Array.isArray(state.existingUserData.allergies)) {
+          state.existingUserData.allergies = state.existingUserData.allergies.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
+        }
+        state.allergiesSkipped = false;
+        state.currentStep = "ASK_ALLERGIES";
+        break;
+      }
+
+      const affirmativePatterns = [
+        "YES",
+        "YEP",
+        "YEAH",
+        "TRUE",
+        "HA",
+        "HAA",
+        "હા",
+        "हाँ",
+        "होय",
+        "ஆம்",
+      ];
+      if (
+        affirmativePatterns.includes(normUpper) ||
+        affirmativePatterns.includes(String(rawVal).trim())
+      ) {
+        // User selected YES indicating intent to enter allergies.
+        // Do NOT save "YES" as an allergy! Keep allergies clean and stay at ASK_ALLERGIES.
+        if (Array.isArray(state.existingUserData.allergies)) {
+          state.existingUserData.allergies = state.existingUserData.allergies.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
+        }
+        state.allergiesSkipped = false;
+        state.currentStep = "ASK_ALLERGIES";
+        break;
+      }
+
       const negativePatterns = [
         "no",
         "none",
@@ -1087,39 +1194,74 @@ async function updateStateFromMessage(state, message, userId = null) {
         "n/a",
         "nothing",
         "na",
+        "not_sure",
+        "not sure",
+        "i'm not sure",
+        "im not sure",
+        "not-sure",
         "ના",
         "નથી",
         "કોઈ એલર્જી નથી",
+        "ખબર નથી",
+        "મને ખબર નથી",
         "नहीं",
         "कोई एलर्जी नहीं",
+        "पता नहीं",
+        "मालूम नहीं",
+        "नाही",
+        "இல்லை",
       ];
       const isNegative =
         isSkip ||
-        msg.toUpperCase() === "SKIP" ||
-        negativePatterns.includes(msg.trim().toLowerCase());
+        normUpper === "SKIP" ||
+        normUpper === "NO" ||
+        normUpper === "NOT_SURE" ||
+        negativePatterns.includes(String(rawVal).trim().toLowerCase());
 
       if (isNegative) {
         state.allergiesSkipped = true;
         state.existingUserData.allergies = [];
+      } else if (parsedPayload && Array.isArray(parsedPayload.allergies)) {
+        const cleanList = parsedPayload.allergies
+          .map((a) => (typeof a === "string" ? a.trim() : ""))
+          .filter(
+            (a) =>
+              Boolean(a) &&
+              !bloodGroupTypeValues.includes(a.toUpperCase().replace(/\s+/g, "")) &&
+              !affirmativePatterns.includes(a.toUpperCase()),
+          );
+        state.existingUserData.allergies = cleanList;
+        state.allergiesSkipped = true;
       } else {
         const allergiesVal = await extractFieldFromMessage(
           "allergies",
-          msg,
+          rawVal,
           state.preferredLanguage,
         );
         if (Array.isArray(allergiesVal)) {
-          state.existingUserData.allergies = allergiesVal;
+          state.existingUserData.allergies = allergiesVal.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
           state.allergiesSkipped = true;
         } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
           const parsed = allergiesVal
             .replace(/^\[|\]$/g, "")
             .split(",")
             .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
-            .filter(Boolean);
-          state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
+            .filter(
+              (s) =>
+                Boolean(s) &&
+                !bloodGroupTypeValues.includes(s.toUpperCase().replace(/\s+/g, "")) &&
+                !affirmativePatterns.includes(s.toUpperCase()),
+            );
+          state.existingUserData.allergies = parsed;
           state.allergiesSkipped = true;
-        } else if (msg.trim()) {
-          state.existingUserData.allergies = [msg.trim()];
+        } else if (
+          String(rawVal).trim() &&
+          !bloodGroupTypeValues.includes(normUpper) &&
+          !affirmativePatterns.includes(normUpper)
+        ) {
+          state.existingUserData.allergies = [String(rawVal).trim()];
           state.allergiesSkipped = true;
         }
       }
@@ -2123,6 +2265,13 @@ class OnboardingService {
         }
       }
     }
+    // If incoming message is a blood group and bloodGroup is not yet set, prioritize ASK_BLOOD_GROUP step
+    const incomingBgNorm =
+      typeof msg === "string" ? msg.trim().toUpperCase().replace(/\s+/g, "") : "";
+    if (bloodGroupTypeValues.includes(incomingBgNorm) && !state.existingUserData?.bloodGroup) {
+      state.currentStep = "ASK_BLOOD_GROUP";
+    }
+
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
       state.currentStep = computeCurrentStep(state);
@@ -2523,6 +2672,16 @@ class OnboardingService {
     }
 
     state.canSkip = canSkipNow;
+    if (state.isOnboardingCompleted && userId) {
+      try {
+        await patientRepository.updateById(userId, { onboardingCompleted: true });
+      } catch (patientErr) {
+        console.warn(
+          "[OnboardingService] Failed to persist patient onboardingCompleted:",
+          patientErr.message,
+        );
+      }
+    }
 
     const nextStep = getNextStep(state);
     if (nextStep && nextStep !== "COMPLETE" && nextStep !== "POST_ONBOARDING") {
@@ -2536,7 +2695,15 @@ class OnboardingService {
     const response = await createResponse(nextStep, state);
 
     let assistantMsgCreatedAt = new Date().toISOString();
-    if (!isSilentCall && state.chatSessionId) {
+    const shouldAppendMessage =
+      !isSilentCall &&
+      state.chatSessionId &&
+      response.message &&
+      response.message.trim().length > 0 &&
+      nextStep !== "COMPLETE" &&
+      nextStep !== "POST_ONBOARDING";
+
+    if (shouldAppendMessage) {
       const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,

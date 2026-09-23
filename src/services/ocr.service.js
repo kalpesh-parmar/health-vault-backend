@@ -38,10 +38,11 @@ const {
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
 const { and, eq, desc } = require("drizzle-orm");
+const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
 
 function isStepAlreadySatisfied(stepName, state) {
   if (!stepName || !state) return false;
-  if (state.isOnboardingCompleted === true) return true;
+  if (state.isOnboardingCompleted === true && state.medicationFlowDone === true) return true;
   if (stepName === "ASK_BLOOD_GROUP") {
     return (
       state.bloodGroupSkipped === true ||
@@ -844,6 +845,8 @@ class V1Service {
         message === "ASK_REPORT" ||
         message === "ASK_ABOUT_REPORT" ||
         actionType === "ASK_REPORT" ||
+        actionType === "ADD_MEDICINE" ||
+        message === "ADD_MEDICINE" ||
         inputState?.currentStep === "ASK_REPORT";
 
       const isNormalChat =
@@ -910,6 +913,23 @@ class V1Service {
           const isProfileConfirmedInDb =
             dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
 
+          const sanitizeAllergies = (list) => {
+            if (!Array.isArray(list)) return undefined;
+            return list.filter(
+              (item) =>
+                typeof item === "string" &&
+                !bloodGroupTypeValues.includes(item.trim().toUpperCase().replace(/\s+/g, "")),
+            );
+          };
+
+          const rawAllergies = Array.isArray(incomingUserDataCleaned.allergies)
+            ? incomingUserDataCleaned.allergies
+            : Array.isArray(dbExistingUserData.allergies)
+              ? dbExistingUserData.allergies
+              : undefined;
+          const mergedAllergies =
+            rawAllergies !== undefined ? sanitizeAllergies(rawAllergies) : undefined;
+
           const mergedUserData =
             isProfileConfirmedInDb && !incomingStateCleaned.edited
               ? {
@@ -918,10 +938,7 @@ class V1Service {
                   ...(incomingUserDataCleaned.bloodGroup
                     ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
                     : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
+                  ...(mergedAllergies !== undefined ? { allergies: mergedAllergies } : {}),
                 }
               : {
                   ...dbExistingUserData,
@@ -929,10 +946,7 @@ class V1Service {
                   ...(incomingUserDataCleaned.bloodGroup
                     ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
                     : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
+                  ...(mergedAllergies !== undefined ? { allergies: mergedAllergies } : {}),
                 };
 
           const case3AuthoritativeIsOnboardingCompleted =
@@ -998,10 +1012,22 @@ class V1Service {
             existingUserData: mergedUserData,
           };
 
+          const compactMessage =
+            typeof message === "string" ? message.trim().toUpperCase().replace(/\s+/g, "") : "";
+          const isBloodGroupSubmission = bloodGroupTypeValues.includes(compactMessage);
+
           if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+
+          if (
+            !state.currentStep &&
+            isBloodGroupSubmission &&
+            !dbState.existingUserData?.bloodGroup
+          ) {
+            state.currentStep = "ASK_BLOOD_GROUP";
+          }
 
           // Generic forward transition: If currentStep is already satisfied in the authoritative persistent state (dbState), advance to next step.
           // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
@@ -1023,6 +1049,16 @@ class V1Service {
           }
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
+          if (userId) {
+            try {
+              await patientRepository.updateById(userId, { onboardingCompleted: true });
+            } catch (err) {
+              console.warn(
+                "[OcrService] Failed to update patient onboardingCompleted flag on skip:",
+                err.message,
+              );
+            }
+          }
           if (!state.currentStep && dbState && dbState.currentStep) {
             state.currentStep = dbState.currentStep;
           }
@@ -1256,7 +1292,21 @@ class V1Service {
         limit: 100,
         direction: "after",
       });
-      messages = result.items || [];
+      messages = (result.items || []).filter((m) => {
+        if (m.role === "assistant") {
+          const action = m.metadata?.action;
+          const text = (m.content || "").toLowerCase();
+          if (
+            action === "COMPLETE" ||
+            action === "POST_ONBOARDING" ||
+            text.includes("thank you! onboarding is complete") ||
+            text.includes("thank you! your onboarding is complete")
+          ) {
+            return false;
+          }
+        }
+        return true;
+      });
     }
 
     let documentsName = [];

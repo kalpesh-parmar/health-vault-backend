@@ -642,7 +642,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     }
   }
   if (input.totalQuantity === undefined || input.totalQuantity === null) {
-    input.totalQuantity = 30;
+    input.totalQuantity = 10;
   }
   if (!input.startDate) {
     const now = new Date();
