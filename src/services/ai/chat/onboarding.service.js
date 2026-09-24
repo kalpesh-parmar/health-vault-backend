@@ -1330,13 +1330,17 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "REVIEW_MEDICINES_LIST": {
       let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        const upper = String(msg || "")
-          .trim()
-          .toUpperCase();
-        payload = { value: upper };
+      if (typeof msg === "object" && msg !== null) {
+        payload = msg;
+      } else {
+        try {
+          payload = JSON.parse(msg);
+        } catch {
+          const upper = String(msg || "")
+            .trim()
+            .toUpperCase();
+          payload = { value: upper };
+        }
       }
 
       const val = String(payload.value || payload.action || payload.key || msg || "")
@@ -1507,6 +1511,8 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.activeMedicine = null;
           state.currentMedicineIndex = undefined;
           state.medicinesConfirmed = true;
+          state.medicinesSavedToDb = true;
+          state.medicationFlowDone = true;
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (isAdd) {
@@ -1523,10 +1529,14 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        payload = {};
+      if (typeof msg === "object" && msg !== null) {
+        payload = msg;
+      } else {
+        try {
+          payload = JSON.parse(msg);
+        } catch {
+          payload = {};
+        }
       }
 
       if (payload.action === "DRAFT_SYNC" || payload.isSilent === true) {
@@ -1996,13 +2006,7 @@ class OnboardingService {
       parsedInputPayload?.action === "DRAFT_SYNC" ||
       parsedInputPayload?.actionType === "DRAFT_SYNC";
 
-    if (!isSilentCall && sessionId && msg) {
-      await chatService.appendChatMessage({
-        sessionId,
-        role: "user",
-        content: msg,
-      });
-    }
+    // Legacy duplicate appendChatMessage removed: canonical message persistence with resolvedLabel and metadata is handled at line 2362
     // Ensure state fields are initialized
     if (!state.existingUserData) {
       state.existingUserData = {
@@ -2096,8 +2100,8 @@ class OnboardingService {
       if (userId) {
         const patient = await patientRepository.findById(userId);
         if (patient) {
-          const providers = await authProviderRepository.findByUserId(userId);
-          const providerNames = providers.map((p) => p.provider);
+          const providers = (await authProviderRepository.findByUserId(userId)) || [];
+          const providerNames = Array.isArray(providers) ? providers.map((p) => p.provider) : [];
 
           let primaryProvider = "email";
           if (providerNames.includes("google")) {
@@ -2315,18 +2319,22 @@ class OnboardingService {
     }
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
     if (userId && !state.chatSessionId) {
-      try {
-        const session = await chatService.createOnboardingSession({
-          userId,
-          title: "Health Assistant",
-          metadata: {
-            type: "ONBOARDING",
-          },
-        });
-        state.chatSessionId = session.id;
-        console.log(`[OnboardingService] Created new onboarding chat session: ${session.id}`);
-      } catch (err) {
-        console.error("[OnboardingService] Failed to create onboarding session:", err);
+      if (sessionId) {
+        state.chatSessionId = sessionId;
+      } else {
+        try {
+          const session = await chatService.createOnboardingSession({
+            userId,
+            title: "Health Assistant",
+            metadata: {
+              type: "ONBOARDING",
+            },
+          });
+          state.chatSessionId = session.id;
+          console.log(`[OnboardingService] Created new onboarding chat session: ${session.id}`);
+        } catch (err) {
+          console.error("[OnboardingService] Failed to create onboarding session:", err);
+        }
       }
     }
 
@@ -2337,7 +2345,8 @@ class OnboardingService {
           const prevResponse = await createResponse(state.currentStep, state);
           if (prevResponse && Array.isArray(prevResponse.options)) {
             const matchedOpt = prevResponse.options.find(
-              (opt) => opt && String(opt.value).toLowerCase() === String(msg).toLowerCase(),
+              (opt) =>
+                opt && String(opt.value || opt.key).toLowerCase() === String(msg).toLowerCase(),
             );
             if (matchedOpt && matchedOpt.label) {
               resolvedLabel = matchedOpt.label;
@@ -2684,10 +2693,19 @@ class OnboardingService {
     }
 
     const nextStep = getNextStep(state);
-    if (nextStep && nextStep !== "COMPLETE" && nextStep !== "POST_ONBOARDING") {
+    if (
+      nextStep &&
+      nextStep !== "COMPLETE" &&
+      nextStep !== "POST_ONBOARDING" &&
+      nextStep !== "REGISTER_USER"
+    ) {
       state.currentStep = nextStep;
-    } else if (nextStep === "COMPLETE" || nextStep === "POST_ONBOARDING") {
-      state.currentStep = nextStep;
+    } else if (
+      nextStep === "COMPLETE" ||
+      nextStep === "POST_ONBOARDING" ||
+      nextStep === "REGISTER_USER"
+    ) {
+      state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
       state.isOnboardingCompleted = true;
     }
     await saveOnboardingState(userId, state);
@@ -2701,7 +2719,8 @@ class OnboardingService {
       response.message &&
       response.message.trim().length > 0 &&
       nextStep !== "COMPLETE" &&
-      nextStep !== "POST_ONBOARDING";
+      nextStep !== "POST_ONBOARDING" &&
+      nextStep !== "REGISTER_USER";
 
     if (shouldAppendMessage) {
       const savedMsg = await chatService.appendChatMessage({

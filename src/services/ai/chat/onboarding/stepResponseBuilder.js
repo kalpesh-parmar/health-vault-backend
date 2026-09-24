@@ -604,6 +604,7 @@ async function getLocalizedResponse(step, state) {
       ) {
         options.push({
           key: "DASHBOARD",
+          value: "DASHBOARD",
           label: await getLocalizedText(
             "onboarding.medicineOptions.goToDashboard",
             "Go to Dashboard",
@@ -616,6 +617,7 @@ async function getLocalizedResponse(step, state) {
       if (hasDocument) {
         options.push({
           key: "ASK_REPORT",
+          value: "ASK_REPORT",
           label: await getLocalizedText(
             "onboarding.medicineOptions.askAboutReport",
             "Ask About My Report",
@@ -675,17 +677,28 @@ async function getLocalizedResponse(step, state) {
       return payload;
     }
 
+    case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {
       if (state.completionMessageSent || state.isOnboardingCompleted) {
         return {
-          action: step,
+          action:
+            step === "REGISTER_USER"
+              ? state.flowMode === "MANUAL"
+                ? "COMPLETE"
+                : "POST_ONBOARDING"
+              : step,
           message: "",
           options: [],
         };
       }
       return {
-        action: step,
+        action:
+          step === "REGISTER_USER"
+            ? state.flowMode === "MANUAL"
+              ? "COMPLETE"
+              : "POST_ONBOARDING"
+            : step,
         message: await getLocalizedText(
           "onboarding.complete.message",
           "Thank you! Onboarding is complete.",

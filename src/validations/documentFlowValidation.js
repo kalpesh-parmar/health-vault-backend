@@ -155,7 +155,10 @@ const sessionListQuerySchema = z
 const unifiedChatSchema = z.object({
   actionType: z.string().trim().optional().nullable(),
   actionData: z.record(z.any()).optional().nullable(),
-  message: z.string().trim().max(4000).optional().nullable(),
+  message: z
+    .union([z.string().trim().max(4000), z.record(z.any())])
+    .optional()
+    .nullable(),
   question: z.string().trim().max(4000).optional().nullable(),
   sessionId: z.string().uuid().optional().nullable(),
   documentId: z
