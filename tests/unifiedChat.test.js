@@ -82,6 +82,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
   test("normalizeCreateMedicationInput should cleanly validate post-onboarding duplicate resolution payloads against createMedicationSchema", () => {
     const { createMedicationSchema } = require("../src/validations/medicationValidation");
+    const todayStr = new Date().toISOString().split("T")[0];
 
     const replaceMedPayload = {
       client_med_id: "extracted_med_1",
@@ -95,7 +96,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       dosePerIntake: 1,
       foodFrequency: "AFTER_FOOD",
       resolution: "REPLACE",
-      startDate: "2026-09-21",
+      startDate: todayStr,
       duration: "2 day",
       notes: "",
       prescribedBy: "",
@@ -122,7 +123,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       dosePerIntake: 5,
       foodFrequency: "AFTER_FOOD",
       resolution: "KEEP_NEW",
-      startDate: "2026-09-21",
+      startDate: todayStr,
       duration: "2 day",
       notes: "",
       prescribedBy: "",
@@ -529,7 +530,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       null,
     );
 
-    expect(resSubmitForm.action).toBe("MEDICINE_OPTIONS");
+    expect(resSubmitForm.action).toBe("REVIEW_MEDICINES_LIST");
     expect(resSubmitForm.medicines).toHaveLength(2);
     expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Omnacortil");
     expect(resSubmitForm.medicines.map((m) => m.name)).toContain("Paracetamol");

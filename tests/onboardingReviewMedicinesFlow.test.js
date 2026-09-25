@@ -303,8 +303,9 @@ describe("Onboarding Review Medicines Flow Tests (Flows A - G)", () => {
     });
 
     const resSubmit = await onboardingService.chat(submitPayload, [], resAdd.state, userId);
-    expect(resSubmit.action).toBe("MEDICINE_OPTIONS");
-    expect(resSubmit.action).not.toBe("REVIEW_MEDICINES_LIST");
+    expect(resSubmit.action).toBe("REVIEW_MEDICINES_LIST");
+    expect(resSubmit.medicines).toHaveLength(2);
+    expect(resSubmit.medicines.map((m) => m.name)).toContain("New Single Med");
   });
 
   // Test 10 (Edge Cases): Idempotency, duplicate medicine names

@@ -1617,7 +1617,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.isFreshAddMedicine = false;
         } else if (isSaveAndReview) {
           state.currentStep = "REVIEW_MEDICINES_LIST";
-        } else if (isSaveMedicines || state.openedFromMedicineOptions) {
+        } else if (isSaveMedicines) {
           const unsavedMeds = (state.medicinesToAdd || []).filter(
             (m) =>
               m.selected !== false &&

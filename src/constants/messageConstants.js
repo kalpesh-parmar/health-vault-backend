@@ -93,6 +93,9 @@ const messageConstants = Object.freeze({
   MEDICATIONS_CONFIRMED_SUCCESS:
     "Selected medications have been added to your active list successfully.",
   MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",
+  MEDICATIONS_REVIEW_SKIPPED_PROMPT: "Medication review skipped. How can I help you next?",
+  OPTION_ASK_REPORT: "Ask About My Report",
+  OPTION_UPLOAD_DOCUMENT: "Upload Another Document",
   VALIDATE_DOCUMENT_FORMAT: "Validate document format",
   CHECK_DOCUMENT_IS_MEDICAL: "Checking whether the document is a medical document",
   OCR_PAGE_OF_TOTAL_PAGE: (page = 0, totalPages = 0) => `OCR page ${page} of ${totalPages}`,

@@ -198,6 +198,7 @@ const createMedicationSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    refillAlert: z.boolean().optional(),
     resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
     replaceMedicationId: z.string().optional(),
   })
@@ -257,6 +258,7 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
+    refillAlert: z.boolean().optional(),
     resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
     replaceMedicationId: z.string().optional(),
   })

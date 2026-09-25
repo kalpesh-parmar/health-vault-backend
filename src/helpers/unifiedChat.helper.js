@@ -606,6 +606,7 @@ async function executeAddDocumentAction({
         documentId: docResult?.document?.id,
         documentSummary,
         documentsName: batchDocumentsName,
+        medicines: extractedMedicines || [],
       },
     });
   }

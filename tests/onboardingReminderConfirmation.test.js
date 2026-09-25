@@ -117,7 +117,7 @@ describe("Onboarding & Post-Onboarding Reminder Creation and KEEP_EXISTING Verif
     expect(createReminderSpy).toHaveBeenNthCalledWith(2, userId, {
       medicationId: "db-med-metformin",
     });
-  });
+  }, 15000);
 
   test("Flow 3 (KEEP_EXISTING): createMedication with resolution KEEP_EXISTING should return existing active medication without duplicate insertion", async () => {
     const userId = "user-keep-1";

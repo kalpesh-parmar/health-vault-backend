@@ -679,7 +679,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     startDate = startDate.split("T")[0];
   }
 
-  let foodFrequency = input.foodFrequency;
+  let foodFrequency = input.foodFrequency || input.food_context || input.foodContext;
   if (!foodFrequency) foodFrequency = "AFTER_FOOD";
 
   let resolution = input.resolution;
@@ -715,6 +715,8 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.endDate) result.endDate = input.endDate;
   if (input.reminderBeforeMinutes !== undefined)
     result.reminderBeforeMinutes = input.reminderBeforeMinutes;
+  const refillAlert = input.refillAlert ?? input.refill_alert;
+  if (refillAlert !== undefined) result.refillAlert = Boolean(refillAlert);
   if (resolution) result.resolution = resolution;
   if (replaceMedicationId) result.replaceMedicationId = replaceMedicationId;
 

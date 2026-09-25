@@ -22,14 +22,12 @@ const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardi
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
 const { normalizeLanguage } = require("../utils/commonUtils");
-const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
 const { errorConstants } = require("../constants/errorConstants");
 const { inferFileType } = require("../helpers/document.helper");
 const documentPersistenceService = require("./documentPersistence.service");
 const documentOcrJobService = require("./documentOcrJob.service");
 const medicationService = require("./medication.service");
-const medicationReminderService = require("./medicationReminder.service");
 const { chatService } = require("./ai/chat/chat.service");
 const {
   buildUnifiedResponse,
@@ -409,6 +407,40 @@ class V1Service {
         }
       }
 
+      let isSkipMsg = false;
+      if (message || actionType === "SKIP_MEDICINES") {
+        try {
+          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
+          if (
+            parsedMsg &&
+            (parsedMsg.skipAll === true ||
+              parsedMsg.action === "SKIP" ||
+              parsedMsg.value === "SKIP" ||
+              parsedMsg.actionType === "SKIP_MEDICINES")
+          ) {
+            isSkipMsg = true;
+          }
+        } catch {
+          // Ignore JSON parse error
+        }
+
+        const msgStr = String(message || "")
+          .trim()
+          .toUpperCase();
+        const actStr = String(actionType || "")
+          .trim()
+          .toUpperCase();
+
+        if (
+          actStr === "SKIP_MEDICINES" ||
+          msgStr === "SKIP" ||
+          msgStr === "SKIP_ALL" ||
+          msgStr.includes("SKIP")
+        ) {
+          isSkipMsg = true;
+        }
+      }
+
       let currentOnboardingStep = effectiveState?.currentStep || null;
       const hasUnconfirmedMedicines =
         !isOnboardingCompleted &&
@@ -447,6 +479,7 @@ class V1Service {
         actionType === "SHOW_EXTRACTED_MEDICINES" ||
         isMedicineSelectionMsg ||
         isAddMedicineMsg ||
+        isSkipMsg ||
         hasMedicineActionData ||
         (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0);
 
@@ -457,11 +490,12 @@ class V1Service {
 
         const isSkipAction =
           actionType === "SKIP_MEDICINES" ||
+          isSkipMsg ||
           String(message || "").toUpperCase() === "SKIP" ||
           actionData?.skipAll === true;
 
         if (isSkipAction && !isActiveOnboardingStep) {
-          const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED;
+          const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED_PROMPT;
           let activeSessionId = sessionId;
           if (!activeSessionId && isOnboardingCompleted) {
             const newSession = await chatService.createSession({
@@ -477,7 +511,7 @@ class V1Service {
               userId,
               role: "assistant",
               content: replyText,
-              metadata: { actionType: "SKIP_MEDICINES" },
+              metadata: { actionType: "SKIP_MEDICINES", status: "SKIPPED" },
             });
           }
 
@@ -499,11 +533,114 @@ class V1Service {
             activeSessionId = newSession?.id || null;
           }
 
+          let existingMeds =
+            Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
+              ? actionData.medicines
+              : Array.isArray(actionData?.medicinesToAdd) && actionData.medicinesToAdd.length > 0
+                ? actionData.medicinesToAdd
+                : Array.isArray(body?.medicines) && body.medicines.length > 0
+                  ? body.medicines
+                  : Array.isArray(body?.medicinesToAdd) && body.medicinesToAdd.length > 0
+                    ? body.medicinesToAdd
+                    : null;
+
+          if (!existingMeds && typeof message === "string" && message.trim().startsWith("{")) {
+            try {
+              const parsedMsg = JSON.parse(message);
+              if (Array.isArray(parsedMsg?.medicines) && parsedMsg.medicines.length > 0) {
+                existingMeds = parsedMsg.medicines;
+              } else if (
+                Array.isArray(parsedMsg?.medicinesToAdd) &&
+                parsedMsg.medicinesToAdd.length > 0
+              ) {
+                existingMeds = parsedMsg.medicinesToAdd;
+              }
+            } catch {
+              // Ignore JSON parse error
+            }
+          }
+
+          if (!existingMeds && activeSessionId) {
+            try {
+              const messages = await chatSessionRepository.listMessages({
+                sessionId: activeSessionId,
+                userId,
+                limit: 10,
+              });
+              if (Array.isArray(messages)) {
+                const msgWithMeds = messages.find(
+                  (msg) =>
+                    msg?.metadata &&
+                    Array.isArray(msg.metadata.medicines) &&
+                    msg.metadata.medicines.length > 0,
+                );
+                if (msgWithMeds) {
+                  existingMeds = msgWithMeds.metadata.medicines;
+                }
+              }
+            } catch (chatMsgErr) {
+              console.warn(
+                "[UnifiedChat] Chat messages lookup for medicines warning:",
+                chatMsgErr.message,
+              );
+            }
+          }
+
+          if (!existingMeds && userId) {
+            try {
+              const [latestDoc] = await db
+                .select()
+                .from(document)
+                .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
+                .orderBy(desc(document.createdAt))
+                .limit(1);
+
+              if (latestDoc && latestDoc.structuredExtractedData) {
+                const struct = latestDoc.structuredExtractedData;
+                const extracted = struct.medications || struct.structuredData?.medications || [];
+                if (Array.isArray(extracted) && extracted.length > 0) {
+                  existingMeds = extracted.map((m, idx) => ({
+                    id: m.id || m.client_med_id || `doc_med_${idx}`,
+                    client_med_id: m.client_med_id || m.id || `doc_med_${idx}`,
+                    name: m.name || m.medicationName || "Medical Document Medicine",
+                    medicationName: m.name || m.medicationName || "Medical Document Medicine",
+                    type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                    medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                    dose: m.dose || { count: m.dosage ? parseFloat(m.dosage) || 1 : 1 },
+                    dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
+                    frequency: m.frequency || "ONCE",
+                    duration: m.duration || null,
+                    notes: m.notes || m.instructions || m.timing || "",
+                    prescribed_by: m.prescribed_by || m.prescribedBy || "",
+                    refill_alert: Boolean(m.refill_alert || m.refillAlert),
+                    total_quantity: m.total_quantity || m.totalQuantity || 30,
+                    selected: m.selected !== false,
+                    source: m.source || "OCR",
+                    medicationSchedule: m.medicationSchedule || {
+                      times: ["08:00"],
+                      reminderTimes: ["08:00"],
+                      dose: { count: 1 },
+                      source: "OCR",
+                      refillAlert: false,
+                      foodContext: "AFTER_FOOD",
+                    },
+                  }));
+                }
+              }
+            } catch (docErr) {
+              console.warn(
+                "[UnifiedChat] Document lookup for existing meds warning:",
+                docErr.message,
+              );
+            }
+          }
+
           return buildUnifiedResponse({
             mode: "ACTION",
             actionType: "ADD_MEDICINE",
             reply: "Please enter the medication details:",
             sessionId: activeSessionId,
+            medicines: existingMeds || [],
             options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
           });
         }
@@ -672,40 +809,30 @@ class V1Service {
             }
 
             try {
-              const normalizedMedData = normalizeCreateMedicationInput(medData);
-              const med = await medicationService.createMedication(userId, normalizedMedData, {
-                skipDuplicateCheck: true,
-              });
+              const { medication: med } = await medicationService.saveMedicationWithReminder(
+                userId,
+                medData,
+                { skipDuplicateCheck: true },
+              );
               if (med && med.id) {
                 createdMeds.push(med);
-                try {
-                  await medicationReminderService.createReminder(userId, { medicationId: med.id });
-                } catch (rErr) {
-                  console.error("[UnifiedChat] Error creating reminder for bulk medicine:", rErr);
-                }
               }
             } catch (mErr) {
               console.error("[UnifiedChat] Error creating individual medicine from list:", mErr);
             }
           }
         } else if (hasMedicineActionData) {
-          const normalizedActionData = normalizeCreateMedicationInput(actionData);
-          const createdMed = await medicationService.createMedication(
-            userId,
-            normalizedActionData,
-            {
-              skipDuplicateCheck: true,
-            },
-          );
-          if (createdMed && createdMed.id) {
-            createdMeds.push(createdMed);
-            try {
-              await medicationReminderService.createReminder(userId, {
-                medicationId: createdMed.id,
-              });
-            } catch (e) {
-              console.error("[UnifiedChat] Error creating reminder:", e);
+          try {
+            const { medication: createdMed } = await medicationService.saveMedicationWithReminder(
+              userId,
+              actionData,
+              { skipDuplicateCheck: true },
+            );
+            if (createdMed && createdMed.id) {
+              createdMeds.push(createdMed);
             }
+          } catch (e) {
+            console.error("[UnifiedChat] Error creating reminder:", e);
           }
         }
         const createdMed = createdMeds[0] || null;
@@ -795,9 +922,6 @@ class V1Service {
             metadata: {
               mode: "ACTION",
               actionType: "CONFIRM_MEDICINES",
-              medicationIds: createdMeds.map((m) => m.id),
-              medicines: createdMeds,
-              medication: createdMed,
             },
           });
         }

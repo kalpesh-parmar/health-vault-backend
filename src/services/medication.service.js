@@ -2,6 +2,7 @@ const { errorConstants } = require("../constants/errorConstants");
 const { NotFoundException } = require("../exceptions/appError");
 const medicationRepository = require("../repositories/medicationRepository");
 const patientRepository = require("../repositories/patientRepository");
+const medicationReminderService = require("./medicationReminder.service");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const {
@@ -17,7 +18,10 @@ const { calculateMedicationValues } = require("../utils/medicationCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillRepository");
 const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
-const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
+const {
+  normalizeMedicine,
+  normalizeCreateMedicationInput,
+} = require("../helpers/medicineNormalize.helper");
 const {
   findMedicationDuplicates,
   mapOnboardingMedicationToDb,
@@ -28,13 +32,8 @@ const {
 class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload, options = {}) {
-    /*
-    // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
     const normalizedInput = normalizeCreateMedicationInput(payload);
     const validData = await validateSchema(createMedicationSchema, normalizedInput);
-    */
-
-    const validData = await validateSchema(createMedicationSchema, payload);
     const patient = await patientRepository.findById(userId);
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
@@ -82,6 +81,24 @@ class MedicationService {
       startDate,
     });
     return medication;
+  }
+  // SAVE MEDICATION WITH REMINDER (SHARED ORCHESTRATOR HELPER)
+  async saveMedicationWithReminder(userId, payload, options = {}) {
+    const medication = await this.createMedication(userId, payload, options);
+    let reminder = null;
+    if (medication && medication.id) {
+      try {
+        reminder = await medicationReminderService.createReminder(userId, {
+          medicationId: medication.id,
+        });
+      } catch (err) {
+        console.error(
+          `[MedicationService] Failed to create reminder for medication ${medication.id}:`,
+          err.message,
+        );
+      }
+    }
+    return { medication, reminder };
   }
 
   // UPDATE MEDICATION
