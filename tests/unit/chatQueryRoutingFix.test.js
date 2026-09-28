@@ -5,6 +5,8 @@ const medicationRepository = require("../../src/repositories/medicationRepositor
 const documentRepository = require("../../src/repositories/documentRepository");
 const occurrenceRepository = require("../../src/repositories/medicationReminderOccurrenceRepository");
 const notificationRepository = require("../../src/repositories/notificationRepository");
+const userOnboardingRepository = require("../../src/repositories/userOnboardingRepository");
+const aiClient = require("../../src/services/ai/clients/aiClient.service");
 
 describe("Chat Query Routing Fix Tests", () => {
   const mockUserId = "test-routing-user-123";
@@ -13,6 +15,11 @@ describe("Chat Query Routing Fix Tests", () => {
   beforeEach(() => {
     jest.restoreAllMocks();
 
+    // Prevent real HTTP call to language detection endpoint
+    jest.spyOn(aiClient, "detectLanguage").mockResolvedValue("english");
+
+    // Prevent real DB call to userOnboarding in _resolveLanguage
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue(null);
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: mockUserId,
       firstName: "Kalpesh",

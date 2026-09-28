@@ -10,10 +10,21 @@ const reminderNotificationService = require("./reminderNotification.service");
 const { reminderTypes } = require("../enums/reminderTypes");
 
 class ReminderService {
-  //WRAP TWO FUNCTION IN ONE
+  //WRAP THREE FUNCTION IN ONE
   async processReminders() {
     await this.sendReminder();
     await this.sendRefillAlert();
+    await this.processOverdueOccurrences();
+  }
+
+  // 3. PROCESS OVERDUE OCCURRENCES (ONLY UPDATES IS_OVERDUE = TRUE, NO NOTIFICATIONS)
+  async processOverdueOccurrences() {
+    try {
+      return await medicationReminderOccurrenceRepository.markPendingOccurrencesOverdue();
+    } catch (err) {
+      console.error("processOverdueOccurrences failed:", err);
+      return 0;
+    }
   }
   // 1. SEND REMINDERS (EVERY MINUTE)
   async sendReminder() {

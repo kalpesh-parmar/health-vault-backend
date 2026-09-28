@@ -193,7 +193,7 @@ describe("Direct Database Intercepts (Bypass LLM)", () => {
       const res = await chatService.sendMessage({
         userId: mockUserId,
         sessionId: mockSessionId,
-        question: "how many refills do i have",
+        question: "what is my refill status",
       });
 
       expect(res.reply).toContain("Medication Refill Status:");

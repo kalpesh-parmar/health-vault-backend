@@ -1,6 +1,7 @@
 const { sql, eq, and, asc, desc, ilike, or } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { refillCount } = require("../models/refillCount");
+const { medication } = require("../models/medication");
 
 const filterSortColumnMap = Object.freeze({
   createdAt: refillCount.createdAt,
@@ -99,8 +100,82 @@ class refillRepository {
     const result = await db
       .select()
       .from(refillCount)
-      .where(and(eq(refillCount.userId, userId), eq(refillCount.softDelete, false)));
-    return result[0] || null;
+      .where(and(eq(refillCount.userId, userId), eq(refillCount.softDelete, false)))
+      .orderBy(desc(refillCount.createdAt));
+    return result;
+  }
+  async findAllByUserId(userId) {
+    try {
+      const query = db
+        .select({
+          id: refillCount.id,
+          userId: refillCount.userId,
+          medicationId: refillCount.medicationId,
+          medicationName: medication.medicationName,
+          unit: medication.unit,
+          beforeRefillTotalQuantity: refillCount.beforeRefillTotalQuantity,
+          beforeRefillRemainingQuantity: refillCount.beforeRefillRemainingQuantity,
+          refillQuantity: refillCount.refillQuantity,
+          afterRefillTotalQuantity: refillCount.afterRefillTotalQuantity,
+          afterRefillRemainingQuantity: refillCount.afterRefillRemainingQuantity,
+          createdAt: refillCount.createdAt,
+          updatedAt: refillCount.updatedAt,
+        })
+        .from(refillCount);
+
+      if (typeof query.innerJoin === "function") {
+        return await query
+          .innerJoin(medication, eq(medication.id, refillCount.medicationId))
+          .where(and(eq(refillCount.userId, String(userId)), eq(refillCount.softDelete, false)))
+          .orderBy(desc(refillCount.createdAt));
+      }
+    } catch {
+      // Fall through to simple query
+    }
+
+    return db
+      .select()
+      .from(refillCount)
+      .where(and(eq(refillCount.userId, String(userId)), eq(refillCount.softDelete, false)))
+      .orderBy(desc(refillCount.createdAt));
+  }
+  async findLatestByUserId(userId) {
+    try {
+      const query = db
+        .select({
+          id: refillCount.id,
+          userId: refillCount.userId,
+          medicationId: refillCount.medicationId,
+          medicationName: medication.medicationName,
+          unit: medication.unit,
+          beforeRefillTotalQuantity: refillCount.beforeRefillTotalQuantity,
+          beforeRefillRemainingQuantity: refillCount.beforeRefillRemainingQuantity,
+          refillQuantity: refillCount.refillQuantity,
+          afterRefillTotalQuantity: refillCount.afterRefillTotalQuantity,
+          afterRefillRemainingQuantity: refillCount.afterRefillRemainingQuantity,
+          createdAt: refillCount.createdAt,
+        })
+        .from(refillCount);
+
+      if (typeof query.innerJoin === "function") {
+        const results = await query
+          .innerJoin(medication, eq(medication.id, refillCount.medicationId))
+          .where(and(eq(refillCount.userId, String(userId)), eq(refillCount.softDelete, false)))
+          .orderBy(desc(refillCount.createdAt))
+          .limit(1);
+        return results[0] || null;
+      }
+    } catch {
+      // Fall through to simple query
+    }
+
+    const results = await db
+      .select()
+      .from(refillCount)
+      .where(and(eq(refillCount.userId, String(userId)), eq(refillCount.softDelete, false)))
+      .orderBy(desc(refillCount.createdAt))
+      .limit(1);
+    return results[0] || null;
   }
   async findAllWithFilters({ filter = {}, page = {}, sort = {}, userId }) {
     const where = buildRefillCountFilters(filter, userId);

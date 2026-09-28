@@ -14,9 +14,7 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
-const { db } = require("../../../configs/db");
-const { document } = require("../../../models/document");
-const { eq, desc } = require("drizzle-orm");
+const documentRepository = require("../../../repositories/documentRepository");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 const { toDbDate } = require("../../../utils/dateUtils");
 
@@ -1944,16 +1942,9 @@ class OnboardingService {
           /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
         let docRow = null;
         if (state.documentId && UUID_REGEX.test(String(state.documentId))) {
-          const rows = await db.select().from(document).where(eq(document.id, state.documentId));
-          docRow = rows[0] || null;
+          docRow = await documentRepository.findById(state.documentId);
         } else if (userId && UUID_REGEX.test(String(userId))) {
-          const rows = await db
-            .select()
-            .from(document)
-            .where(eq(document.userId, userId))
-            .orderBy(desc(document.createdAt))
-            .limit(1);
-          docRow = rows[0] || null;
+          docRow = await documentRepository.findLatestActiveDocumentByUserId(userId);
         }
 
         // Non-blocking status check: if completed, load structured data immediately
@@ -2271,7 +2262,7 @@ class OnboardingService {
         `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
       );
       try {
-        const [doc] = await db.select().from(document).where(eq(document.id, state.documentId));
+        const doc = await documentRepository.findById(state.documentId);
 
         const extracted = doc?.structuredExtractedData;
         const hasStructuredData =

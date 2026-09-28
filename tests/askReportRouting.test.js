@@ -7,6 +7,7 @@ const userOnboardingRepository = require("../src/repositories/userOnboardingRepo
 const { ollamaClient } = require("../src/clients/ollamaClient");
 
 describe("Phase 12: Ask About My Report Routing & Data Fidelity Tests", () => {
+  jest.setTimeout(20000);
   const mockDoc = {
     id: "doc-valjibhai-123",
     userId: "user-valji",

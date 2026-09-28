@@ -207,11 +207,18 @@ module.exports = {
 };
 */
 
+const idParamSchema = z
+  .object({
+    id: z.string().uuid(),
+  })
+  .strict();
+
 module.exports = {
   addDocumentSchema,
   batchFileKeySchema,
   createChatSessionSchema,
   fileKeySchema,
+  idParamSchema,
   runOcrSchema,
   sendChatMessageSchema,
   sessionListQuerySchema,

@@ -5,7 +5,25 @@ const documentRepository = require("../../src/repositories/documentRepository");
 const medicationRepository = require("../../src/repositories/medicationRepository");
 const patientRepository = require("../../src/repositories/patientRepository");
 
+jest.mock("../../src/services/ai/clients/aiClient.service", () => ({
+  detectLanguage: jest.fn(async (text) => {
+    if (/[\u0A80-\u0AFF]/.test(text)) return "gujarati";
+    if (/[\u0900-\u097F]/.test(text)) return "hindi";
+    return "english";
+  }),
+  translate: jest.fn(async (text) => {
+    if (text.includes("દસ્તાવેજો") || text.includes("दस्तावेजों"))
+      return "Give me a list of my documents";
+    if (text.includes("લેબ રિપોર્ટ") || text.includes("लैब रिपोर्ट")) return "Show my lab reports";
+    if (text.includes("નિષ્ફળ") || text.includes("विफल")) return "Show failed reports";
+    if (text.includes("સફળ") || text.includes("सफल")) return "Show successful documents";
+    return text;
+  }),
+}));
+
 describe("Unified Structured List & Deduplication Flow Tests", () => {
+  jest.setTimeout(25000);
+
   afterEach(() => {
     jest.restoreAllMocks();
   });

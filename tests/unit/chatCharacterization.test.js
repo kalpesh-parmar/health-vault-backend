@@ -41,6 +41,10 @@ function mockDbSelect(result = []) {
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject),
   };
   db.select.mockReturnValue(chain);
+  documentRepository.getSummaryByUserId.mockResolvedValue(result);
+  documentRepository.findLatestActiveDocumentByUserId.mockResolvedValue(result[0] || null);
+  documentRepository.findActiveDocumentById.mockResolvedValue(result[0] || null);
+  documentRepository.findDocumentsByIds.mockResolvedValue(result);
   return chain;
 }
 

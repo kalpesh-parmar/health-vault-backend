@@ -1465,13 +1465,32 @@ class V1Service {
 
     let messages = [];
     if (chatSessionId) {
-      const result = await chatSessionRepository.listMessages({
-        sessionId: chatSessionId,
-        userId,
-        limit: 100,
-        direction: "after",
-      });
-      messages = result.items || [];
+      let cursor = null;
+      let hasMore = true;
+      const MAX_PAGES = 100;
+      let pageCount = 0;
+
+      while (hasMore && pageCount < MAX_PAGES) {
+        pageCount += 1;
+        const result = await chatSessionRepository.listMessages({
+          sessionId: chatSessionId,
+          userId,
+          limit: 100,
+          direction: "after",
+          cursor,
+        });
+
+        const items = result?.items || [];
+        if (items.length > 0) {
+          messages.push(...items);
+        }
+
+        if (result?.nextCursor && result.nextCursor !== cursor && items.length > 0) {
+          cursor = result.nextCursor;
+        } else {
+          hasMore = false;
+        }
+      }
     }
 
     let documentsName = [];

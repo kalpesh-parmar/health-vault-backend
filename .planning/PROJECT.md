@@ -8,19 +8,20 @@ Health Vault is a secure, AI-powered healthcare portal backend designed to manag
 
 Reliable, compliant, and accurate clinical data extraction, semantic search retrieval, and medication tracking for patient healthcare management.
 
-## Current Milestone: v1.0 Handle All App-Related User Questions
+## Current Milestone: v1.1 Precise Omni-Domain Answers, Occurrence Accuracy & 60-Question Multilingual Validation
 
-**Goal:** Improve the current chatbot/general-question flow so that it reliably understands and answers user questions across all core application areas (User Profile, Medical Profile, Documents/Reports, Medications, Schedules, Reminders, Occurrences, Notifications, Refills) in English, Hindi, Gujarati, Marathi, and Tamil using verified user context.
+**Goal:** Resolve context inaccuracies, occurrence calculations, and noisy prompt metadata to deliver strictly concise, exact answers across Profile, Medications, Reminders, Notifications, Refills, and Documents in English, Gujarati, Hindi, Marathi, and Tamil, validated by a comprehensive 60-question test matrix without breaking existing application flows.
 
 **Target features:**
 
-- **Medication Occurrence vs. Medication Distinction**: Accurately differentiate general medication questions ("What medicines do I take?") from occurrence/reminder questions ("Did I miss any medicine today?", "Which medicines did I take today?", "When is my next medicine?"), querying actual today's dosage occurrences (`missed`, `taken`, `pending`, `upcoming`) rather than falling back to the generic medication list.
-- **Robust Domain & Intent Classification**: Implement an additive multi-domain, multi-intent classification engine that supports natural phrasing and variations beyond rigid keyword matching across English, Hindi, Gujarati, Marathi, and Tamil.
-- **Comprehensive Omni-Domain Coverage**: Deep context retrieval for User Profile (age, DOB, blood group, allergies), Documents (uploaded reports, lab values, doctor names), Medications (dosage, frequency), Occurrences (taken, missed, pending, next dose, overdue), Notifications (unread count, recent alerts), and Refills (pill counts, low-stock warnings).
-- **Multi-Domain Context Synthesis**: Detect composite questions that span multiple domains (e.g. "Based on my latest report, which medicines am I currently taking?", "Which medicines need a refill and when is my next dose?") and assemble minimal, relevant multi-context prompts.
-- **Strict Data Grounding & Anti-Hallucination**: Query strictly against authenticated `userId` and explicitly inform users in their preferred language when records do not exist, never hallucinating assumptions or unverified clinical data.
-- **Multilingual Equivalence & Seamless I18N**: Uniform intent and domain handling across English, Hindi, Gujarati, Marathi, and Tamil without duplicated business logic, preserving the application's existing preferred-language response delivery.
-- **Zero Regressions & Traceability**: Preserve existing Document RAG semantic retrieval, document summaries, OCR pipelines, and cron jobs. Ensure end-to-end debugging observability from question input to final localized output.
+- **End Date & Stored Calculation**: Use stored end dates from the medications table directly in context/replies rather than flawed dynamic calculations.
+- **Accurate Intake & Status Counts**: If a dose was taken, do NOT count it as missed. Overdue doses that are not taken count as missed. Provide exact taken/pending/missed counts.
+- **Targeted & Exact Intent Responses**: When asked about missed medicines, return only missed; when asked for the next reminder, return only the next upcoming reminder; avoid unrelated dumps.
+- **Refill Tracking & Proper Data Grounding**: Eliminate "Refills Remaining - N/A"; query actual refill records and display correct refill quantities/history according to user queries.
+- **Clean Document Citations & Page Meta Removal**: Return exact document/report names and strip out internal artifact text (e.g., "(the current page is 1 of 1)").
+- **Multilingual Consistency (5 Languages)**: Ensure exact, concise answers work reliably in English, Gujarati, Hindi, Marathi, and Tamil.
+- **Flow Preservation**: Preserve existing onboarding state machines, OCR pipelines, and document RAG flows without regressions.
+- **60-Question Omni-Domain Validation Suite**: Automated test coverage validating all 60 specific questions across Profile (10), Medications (14), Reminders/Occurrences (10), Notifications (10), Refills (10), and Documents (10).
 
 ## Requirements
 
@@ -35,29 +36,26 @@ Reliable, compliant, and accurate clinical data extraction, semantic search retr
 
 ### Active
 
-- [ ] **DEBUG-TRACE**: Trace and log end-to-end the failing "Did I miss any medicine today?" flow through language, domain, intent, context, database query, prompt, LLM response, and translation.
-- [ ] **I18N-DETECT**: Detect input language and normalize natural query phrasing across English, Hindi, Gujarati, Marathi, and Tamil.
-- [ ] **INTENT-DETECT**: Implement domain and intent classification supporting single and multi-intent queries (`MEDICATION_LIST`, `MISSED_MEDICATION`, `TAKEN_MEDICATION`, `PENDING_MEDICATION`, `NEXT_MEDICATION`, `MEDICATION_REFILL`, `PROFILE_QUERY`, `DOCUMENT_QUERY`, `NOTIFICATION_QUERY`).
-- [ ] **OCCURRENCE-CTX**: Query and inject today's actual medication occurrences (`missed`, `taken`, `pending`, `next_dose`, `overdue`) from the database, resolving the missed medicine bug.
-- [ ] **OMNI-CTX**: Retrieve targeted context for User Profile, Medical Profile, Documents/Reports, Medications, Notifications, and Refills.
-- [ ] **MULTI-CTX**: Assemble composite contexts when user queries bridge multiple domains (e.g. Report + Medications, Refill + Occurrences).
-- [ ] **DATA-GROUNDING**: Enforce strict authenticated user data scoping and zero-hallucination responses when data is missing.
-- [ ] **I18N-REPLY**: Deliver responses in the user's preferred or detected language with high quality.
-- [ ] **REGRESSION-PARITY**: Ensure existing Document RAG Q&A, document summarization, and OCR flows remain unaffected.
-- [ ] **TEST-MATRIX**: Comprehensive automated test suite verifying occurrence status, all 7 domains, multi-domain queries, 5 languages, missing data scenarios, and regression tests.
+- [ ] **MED-ENDDATE**: Use stored `endDate` from the medications table directly in context and replies rather than flawed dynamic end date calculations.
+- [ ] **OCCUR-STATUS**: Differentiate taken vs missed vs pending vs overdue: doses marked `taken` are excluded from missed; overdue un-taken doses are counted as missed. Return accurate counts for each.
+- [ ] **INTENT-TARGET**: When user asks specific questions (e.g. missed medications, next reminder, refill status), provide targeted answers without dumping unrelated lists or generic responses.
+- [ ] **REFILL-DATA**: Resolve refills using the database/table directly, eliminating "Refills Remaining - N/A", and reporting actual refill quantities/history.
+- [ ] **DOC-CLEAN**: Provide accurate document/report names and strip internal artifact text (e.g., `(the current page is 1 of 1)` and system prompt noise).
+- [ ] **I18N-5LANG**: Ensure accurate understanding and concise reply delivery across English, Gujarati, Hindi, Marathi, and Tamil.
+- [ ] **FLOW-PARITY**: Zero regressions in onboarding state machines, OCR processing, and document RAG pipelines.
+- [ ] **TEST-60MATRIX**: Implement automated testing covering all 60 specific test questions across Profile, Medications, Reminders/Occurrences, Notifications, Refills, and Documents in the 5 languages.
 
 ### Out of Scope
 
-- Creating a parallel, completely separate chatbot service outside Express (must extend existing `chat.service.js` and `ragContext.service.js`).
 - Modifying deterministic patient onboarding state machine transitions (`onboardingStateMachine.js`).
 - Altering core medication recurrence cron calculations in `src/jobs/medicationCron.js`.
-- Chat-based mutations or direct actions (e.g. marking a medicine taken via chat).
+- Chat-based database mutations or direct actions (e.g. marking a medicine taken via chat).
 
 ## Context
 
 - The application has an existing chatbot in `src/services/ai/chat/chat.service.js` and `src/services/ai/chat/ragContext.service.js`.
-- Currently, when users ask occurrence questions like "Did I miss any medicine today?", the system misclassifies or falls back to a generic medication list inquiry because it lacks granular intent detection and occurrence-specific context generation.
-- Queries phrased naturally or in Indian vernaculars (Hindi, Gujarati, Marathi, Tamil) struggle against rigid keyword matching in `keywordDictionary.js`.
+- Users test specific questions across Profile, Medications, Reminders, Notifications, Refills, and Documents in 5 languages (English, Hindi, Gujarati, Marathi, Tamil).
+- Known defects to fix: dynamic end date calculation errors, incorrect status logic between taken and missed/overdue, "Refills Remaining - N/A" fallback placeholders, document citations showing internal page number metadata like `(the current page is 1 of 1)`.
 
 ## Constraints
 
@@ -69,12 +67,12 @@ Reliable, compliant, and accurate clinical data extraction, semantic search retr
 
 ## Key Decisions
 
-| Decision                                              | Rationale                                                                                                      | Outcome   |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------- |
-| Differentiate `medication` vs `medication_occurrence` | General medication info (schedule, dose, list) is distinct from today's intake status (missed, taken, pending) | — Pending |
-| Multi-intent domain set resolution                    | Questions can span multiple domains simultaneously, requiring composite context injection                      | — Pending |
-| Multilingual semantic intent matching                 | Indian vernacular queries (hi, gu, mr, ta) must reliably resolve without duplicating business logic            | — Pending |
-| Reuse existing occurrence calculation logic           | Use the existing source of truth for dosage occurrences (`todayOccurrences`, `taken`, `missed`, `pending`)     | — Pending |
+| Decision | Rationale | Outcome |
+| -------- | --------- | ------- |
+| Stored `endDate` on medication | Use DB stored end date directly rather than recalculating | — Pending |
+| Overdue non-taken is missed | Any past dosage occurrence not marked `taken` is counted as `missed` | — Pending |
+| Precise targeted extraction | Strip unrelated domain context when query is specific (e.g. next reminder only) | — Pending |
+| Document artifact sanitization | Filter out system metadata like `(the current page is 1 of 1)` before response formatting | — Pending |
 
 ## Evolution
 
@@ -97,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 
 ---
 
-_Last updated: 2026-09-22 after milestone v1.0 initialization_
+_Last updated: 2026-09-24 after milestone v1.1 initialization_

@@ -784,6 +784,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       userId: "user-med-123",
       question: "list my medications",
       sessionId: "session-med-123",
+      limit: 1,
     });
 
     expect(ollamaCalled).toBe(false);

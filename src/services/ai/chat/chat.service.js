@@ -2,9 +2,6 @@ const { env } = require("../../../configs/env");
 const { messageConstants } = require("../../../constants/messageConstants");
 const { InvalidRequestException, NotFoundException } = require("../../../exceptions/appError");
 const chatSessionRepository = require("../../../repositories/chatSessionRepository");
-const { db } = require("../../../configs/db");
-const { document } = require("../../../models/document");
-const { eq, desc, inArray, and } = require("drizzle-orm");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { normalizeDocumentType } = require("../../../enums/documentType");
 const { ollamaClient } = require("../../../clients/ollamaClient");
@@ -22,7 +19,6 @@ const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const { containsEntity } = require("../../../utils/synonyms");
 const { toDbDateOnlyString } = require("../../../utils/dateUtils");
-const { calculateRemainingQuantity } = require("../../../utils/remainingQuantityCalculation");
 const { triageService, EMERGENCY_WARNING_I18N } = require("./triage.service");
 const {
   ragContextService,
@@ -33,7 +29,18 @@ const {
 } = require("./ragContext.service");
 
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
-const { pickLang, hasAny, toIsoDateOnly } = require("./chatHelpers");
+const {
+  pickLang,
+  hasAny,
+  toIsoDateOnly,
+  formatMedicationSchedule,
+  sanitizeChatResponse,
+  formatDocumentType,
+  humanizeFoodFreq,
+  humanizeFrequency,
+} = require("./chatHelpers");
+const { chatClassifier } = require("./chatClassifier.service");
+const { chatFastPath } = require("./chatFastPath.service");
 
 const { debugLogger } = require("../../../utils/debugLogger");
 const keywordDictionary = require("../../../constants/keywordDictionary");
@@ -48,8 +55,9 @@ const {
   PREDEFINED_QUESTIONS_I18N,
   PROFILE_REPLY_I18N,
   REMINDER_REPLY_I18N,
-  REFILL_REPLY_I18N,
   NOTIFICATION_REPLY_I18N,
+  MEDICATION_REPLY_I18N,
+  DOCUMENT_REPLY_I18N,
 } = require("../../../constants/chatReplies");
 
 const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
@@ -74,7 +82,27 @@ function isProfileQuestion(question = "") {
     .toLowerCase()
     .trim();
 
-  const isDocPatientQuestion = hasAny(q, keywordDictionary.PROFILE_EXCLUSIONS);
+  const multiDomainExclusions = [
+    "report",
+    "reports",
+    "document",
+    "documents",
+    "medicine",
+    "medicines",
+    "medication",
+    "medications",
+    "reminder",
+    "reminders",
+    "notification",
+    "notifications",
+    "refill",
+    "refills",
+  ];
+  if (hasAny(q, multiDomainExclusions)) return false;
+
+  const isDocPatientQuestion = keywordDictionary.PROFILE_EXCLUSIONS
+    ? hasAny(q, keywordDictionary.PROFILE_EXCLUSIONS)
+    : false;
 
   if (isDocPatientQuestion) return false;
 
@@ -418,16 +446,28 @@ ${chunksContent}`;
   }
 
   async createSession({ userId, documentId, title }) {
-    return chatSessionRepository.createSession({
+    const session = await chatSessionRepository.createSession({
       documentId: documentId || null,
       lastMessageAt: new Date(),
       title: title?.slice(0, 255) || "New chat",
       userId,
     });
+    if (session && "documentId" in session) {
+      delete session.documentId;
+    }
+    return session;
   }
 
   async listSessions({ userId, cursor, limit }) {
-    return chatSessionRepository.listSessions({ cursor, limit, userId });
+    const result = await chatSessionRepository.listSessions({ cursor, limit, userId });
+    const items = (result.items || []).map((session) => {
+      if ("documentId" in session) {
+        const { documentId: _docId, ...rest } = session;
+        return rest;
+      }
+      return session;
+    });
+    return { ...result, items };
   }
 
   async listMessages({ sessionId, userId, cursor, limit, direction }) {
@@ -656,30 +696,9 @@ ${chunksContent}`;
     if (isSummaryRequest) {
       let targetDoc = null;
       if (documentId && documentId.length > 0) {
-        const docs = await db
-          .select()
-          .from(document)
-          .where(
-            and(
-              eq(document.id, documentId[0]),
-              eq(document.userId, userId),
-              eq(document.softDelete, false),
-            ),
-          )
-          .limit(1);
-        if (docs.length > 0) {
-          targetDoc = docs[0];
-        }
+        targetDoc = await documentRepository.findActiveDocumentById(documentId[0], userId);
       } else {
-        const docs = await db
-          .select()
-          .from(document)
-          .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
-          .orderBy(desc(document.createdAt))
-          .limit(1);
-        if (docs.length > 0) {
-          targetDoc = docs[0];
-        }
+        targetDoc = await documentRepository.findLatestActiveDocumentByUserId(userId);
       }
 
       const userMessage = await this._appendUserMessage({
@@ -849,6 +868,37 @@ ${chunksContent}`;
       .replace(/\bliist\b/g, "list")
       .replace(/\bremaing\b/g, "remaining")
       .replace(/\bquntity\b/g, "quantity");
+
+    // --- Universal Multilingual Classification & Deterministic Fast-Path Engine ---
+    const classification = chatClassifier.classify({
+      rawQuestion: ctx.question,
+      englishQuestion: ctx.englishQuestion,
+      detectedLanguage: ctx.detectedLanguage,
+      documentId: ctx.documentId,
+    });
+    ctx.classification = classification;
+
+    if (classification.isFastPathEligible) {
+      debugLogger.info("sendMessage: [FAST-PATH ROUTING]", {
+        fastPathType: classification.fastPathType,
+        domains: Array.from(classification.domains),
+      });
+      const fastResult = await chatFastPath.execute(ctx, classification);
+      if (fastResult) {
+        return fastResult;
+      }
+    }
+
+    // If the question spans multiple domains, skip all single-domain deterministic intercepts to assemble universal context
+    if (classification.isMultiDomain) {
+      debugLogger.info(
+        "sendMessage: Multi-domain detected, skipping single-domain intercepts to build universal context",
+        {
+          domains: Array.from(classification.domains || []),
+        },
+      );
+      return null;
+    }
 
     // Intercept 3: Profile Query (Direct from DB - No LLM)
     const isProfile = isProfileQuestion(cleanQuestion) || isProfileQuestion(normalizedQuestion);
@@ -1075,10 +1125,53 @@ ${chunksContent}`;
         (lowerQuestion.includes("list") || lowerQuestion.includes("liist")));
 
     if (isMedicationListRequest) {
+      const labels = pickLang(MEDICATION_REPLY_I18N, detectedLanguage);
       const allMeds = await medicationRepository.findAll(userId);
       const reqPage = ctx.page || 1;
       const reqLimit = ctx.limit || (allMeds.length > 0 ? allMeds.length : 20);
       const { data: pageMeds, page } = paginateArray(allMeds, { page: reqPage, limit: reqLimit });
+
+      const formatMedItem = (m) => {
+        const name = m.medicationName || "Medicine";
+        const lines = [`• **${name}**`];
+
+        if (m.dosePerIntake) {
+          lines.push(
+            `  - ${labels.dosageLabel || "Dose"}: ${m.dosePerIntake} ${m.unit || ""}`.trimEnd(),
+          );
+        }
+        if (m.frequency) {
+          const freqStr = humanizeFrequency(m.frequency, detectedLanguage) || m.frequency;
+          lines.push(`  - ${labels.frequencyLabel || "Frequency"}: ${freqStr}`);
+        }
+        const formattedSched = formatMedicationSchedule(m.medicationSchedule, detectedLanguage);
+        if (formattedSched) {
+          lines.push(`  - ${labels.scheduleLabel || "Schedule"}: ${formattedSched}`);
+        }
+        const foodLabel = humanizeFoodFreq(m.foodFrequency, detectedLanguage);
+        if (foodLabel) {
+          lines.push(`  - ${labels.instructionLabel || "Food"}: ${foodLabel}`);
+        }
+        if (m.endDate) {
+          lines.push(`  - ${labels.endDateLabel || "End Date"}: ${toDbDateOnlyString(m.endDate)}`);
+        } else if (m.ongoing) {
+          lines.push(`  - ${labels.endDateLabel || "End Date"}: Ongoing`);
+        }
+
+        return lines.join("\n");
+      };
+
+      let replyText = "";
+      if (!pageMeds || pageMeds.length === 0) {
+        replyText = labels.noMeds;
+      } else {
+        const lines = pageMeds.map(formatMedItem);
+        replyText = `**${labels.titleAll}**\n${lines.join("\n")}`;
+      }
+
+      if (onChunk && replyText) {
+        await streamTextLikeChat(replyText, onChunk, abortSignal, 10);
+      }
 
       const structuredPayload = {
         items: pageMeds.map((m) => ({
@@ -1090,13 +1183,15 @@ ${chunksContent}`;
           endDate: toDbDateOnlyString(m.endDate),
         })),
         pagination: page,
+        text: replyText,
+        formattedText: replyText,
       };
 
       const { userMessage, aiMessage } = await this._saveExchange({
         userId,
         sessionId,
         question,
-        content: JSON.stringify(structuredPayload),
+        content: replyText,
         metadata: {
           mode: "STRUCTURED_LIST",
           task: "MEDICATION_LIST",
@@ -1174,6 +1269,7 @@ ${chunksContent}`;
       !isNotificationRelated;
 
     if (isDocumentCatalogListing) {
+      const labels = pickLang(DOCUMENT_REPLY_I18N, detectedLanguage);
       let allDocs = await documentRepository.getSummaryByUserId(userId);
 
       // Apply document type filter if detected
@@ -1206,6 +1302,23 @@ ${chunksContent}`;
       const reqLimit = ctx.limit || (allDocs.length > 0 ? allDocs.length : 20);
       const { data: pageDocs, page } = paginateArray(allDocs, { page: reqPage, limit: reqLimit });
 
+      let formattedText = "";
+      if (pageDocs.length === 0) {
+        formattedText = typeFilter || statusFilter ? labels.noMatchingDocs : labels.noDocs;
+      } else {
+        const headerTitle = typeFilter || statusFilter ? labels.titleFiltered : labels.title;
+        const lines = pageDocs.map((d, idx) => {
+          const dateStr = d.reportDate ? ` . ${toIsoDateOnly(d.reportDate)}` : "";
+          const catStr = formatDocumentType(d.documentType);
+          return `${idx + 1}. **${d.fileName}** • ${catStr}${dateStr}`;
+        });
+        formattedText = `**${headerTitle}**\n${lines.join("\n")}`;
+      }
+
+      if (onChunk && formattedText) {
+        await streamTextLikeChat(formattedText, onChunk, abortSignal, 10);
+      }
+
       const structuredPayload = {
         items: pageDocs.map((d) => {
           let formattedDate = null;
@@ -1222,13 +1335,15 @@ ${chunksContent}`;
           };
         }),
         pagination: page,
+        text: formattedText,
+        formattedText,
       };
 
       const { userMessage, aiMessage } = await this._saveExchange({
         userId,
         sessionId,
         question,
-        content: JSON.stringify(structuredPayload),
+        content: formattedText,
         metadata: {
           mode: "STRUCTURED_LIST",
           task: "DOCUMENT_LIST",
@@ -1530,10 +1645,10 @@ ${chunksContent}`;
     const { detectedLanguage, userId, sessionId, question, onChunk, abortSignal } = ctx;
     const labels = pickLang(REMINDER_REPLY_I18N, detectedLanguage);
 
-    const occurrences = occurrenceRepository.findTodayOccurrences
-      ? await occurrenceRepository.findTodayOccurrences(userId)
-      : occurrenceRepository.findAllOccurrences
-        ? await occurrenceRepository.findAllOccurrences(userId)
+    const occurrences = occurrenceRepository.findAllOccurrences
+      ? await occurrenceRepository.findAllOccurrences(userId)
+      : occurrenceRepository.findTodayOccurrences
+        ? await occurrenceRepository.findTodayOccurrences(userId)
         : [];
 
     let replyText = "";
@@ -1563,9 +1678,8 @@ ${chunksContent}`;
           const name = m.medicationName || "Medicine";
           const dose = m.dosePerIntake ? `${m.dosePerIntake} ${m.unit || ""}`.trim() : "";
           const freq = m.frequency ? `, ${m.frequency}` : "";
-          const sched = m.medicationSchedule
-            ? ` (${Array.isArray(m.medicationSchedule) ? m.medicationSchedule.join(", ") : JSON.stringify(m.medicationSchedule)})`
-            : "";
+          const formattedSched = formatMedicationSchedule(m.medicationSchedule);
+          const sched = formattedSched ? ` (${formattedSched})` : "";
           return `${idx + 1}. **${name}**${dose ? `: ${dose}` : ""}${freq}${sched}`;
         });
         replyText =
@@ -1576,11 +1690,16 @@ ${chunksContent}`;
         replyText = labels.noReminders;
       }
     } else {
-      const takenCount = occurrences.filter((o) => o.status === "TAKEN").length;
-      const missedCount = occurrences.filter((o) => o.status === "MISSED").length;
-      const pendingCount = occurrences.filter((o) => o.status === "PENDING" || !o.status).length;
+      const isTaken = (o) => o.status === "TAKEN" || o.status === "COMPLETED";
+      const isMissed = (o) => o.status === "SKIPPED" || o.status === "MISSED" || o.isOverdue;
+      const isPending = (o) => !isTaken(o) && !isMissed(o);
+
+      const takenCount = occurrences.filter(isTaken).length;
+      const missedCount = occurrences.filter(isMissed).length;
+      const pendingCount = occurrences.filter(isPending).length;
 
       const scheduleLines = occurrences.map((o, idx) => {
+        const medName = o.medicationName || o.medication?.medicationName || "Medication";
         let timeStr = "Scheduled Time";
         if (o.actualMedicationTime) {
           try {
@@ -1592,9 +1711,13 @@ ${chunksContent}`;
             timeStr = String(o.actualMedicationTime);
           }
         }
-        const medName = o.medicationName || "Medicine";
-        const status = o.status || "PENDING";
-        return `${idx + 1}. **${medName}** at ${timeStr} - [${status}]`;
+        let st = labels.pending || "Pending";
+        if (isTaken(o)) {
+          st = labels.taken || "Taken";
+        } else if (isMissed(o)) {
+          st = labels.missed || "Missed";
+        }
+        return `${idx + 1}. **${medName}** at ${timeStr} - ${st}`;
       });
 
       replyText =
@@ -1636,93 +1759,7 @@ ${chunksContent}`;
   }
 
   async _handleRefillIntercept(ctx) {
-    const { detectedLanguage, userId, sessionId, question, onChunk, abortSignal } = ctx;
-    const labels = pickLang(REFILL_REPLY_I18N, detectedLanguage);
-
-    const allMeds = await medicationRepository.findAll(userId);
-    let replyText = "";
-    let processedMeds = allMeds || [];
-
-    if (!allMeds || allMeds.length === 0) {
-      replyText = labels.noMeds;
-    } else {
-      processedMeds = await Promise.all(
-        allMeds.map(async (m) => {
-          let remaining = m.remainingQuantity;
-          if (remaining === undefined || remaining === null) {
-            try {
-              remaining = await calculateRemainingQuantity(m);
-            } catch {
-              remaining = m.totalQuantity ?? 0;
-            }
-          }
-          return { ...m, remainingQuantity: remaining };
-        }),
-      );
-
-      const lowStockMeds = processedMeds.filter((m) => {
-        const hasLowRemaining =
-          m.remainingQuantity !== null &&
-          m.remainingQuantity !== undefined &&
-          m.refillWarningThreshold !== null &&
-          m.refillWarningThreshold !== undefined
-            ? Number(m.remainingQuantity) <= Number(m.refillWarningThreshold)
-            : Number(m.remainingQuantity) <= 5;
-        const hasLowRefills =
-          m.refillCount !== null && m.refillCount !== undefined && Number(m.refillCount) <= 1;
-        return hasLowRemaining || hasLowRefills;
-      });
-
-      const medLines = processedMeds.map((m, idx) => {
-        const name = m.medicationName || "Medicine";
-        const remaining = m.remainingQuantity ?? m.totalQuantity ?? "N/A";
-        const refills = m.refillCount ?? "N/A";
-        const unit = m.unit ? ` ${m.unit}` : "";
-        return `${idx + 1}. **${name}**: ${labels.remainingStock} = ${remaining}${unit}, ${labels.refillsLeft} = ${refills}`;
-      });
-
-      if (lowStockMeds.length > 0) {
-        const warningLines = lowStockMeds.map(
-          (m) => `- ⚠️ **${m.medicationName}**: ${m.remainingQuantity ?? 0} remaining`,
-        );
-        replyText =
-          `**${labels.title}**\n\n` +
-          `**${labels.lowStock}**\n` +
-          warningLines.join("\n") +
-          `\n\n` +
-          medLines.join("\n");
-      } else {
-        replyText = `**${labels.title}**\n` + `${labels.sufficientStock}\n\n` + medLines.join("\n");
-      }
-    }
-
-    if (onChunk) {
-      await streamTextLikeChat(replyText, onChunk, abortSignal, 10);
-    }
-
-    const { userMessage, aiMessage } = await this._saveExchange({
-      userId,
-      sessionId,
-      question,
-      content: replyText,
-      metadata: {
-        mode: "GENERAL_HEALTH",
-        task: "REFILL_STATUS",
-        emergency: false,
-        documentId: [],
-        medications: processedMeds,
-      },
-      citations: [],
-    });
-
-    return {
-      ai: aiMessage,
-      user: userMessage,
-      reply: replyText,
-      mode: "GENERAL_HEALTH",
-      emergency: false,
-      citations: [],
-    };
+    return chatFastPath.handleRefillStock(ctx, ctx.classification);
   }
 
   async _handleNotificationIntercept(ctx) {
@@ -1817,6 +1854,10 @@ ${chunksContent}`;
     const intentStartTime = Date.now();
 
     const lowerQuestion = ctx.retrievalQuery.toLowerCase();
+    const cleanDocQuestion = lowerQuestion
+      .replace(/\bprofile\b/gi, "")
+      .replace(/પ્રોફાઇલ/g, "")
+      .replace(/प्रोफाइल/g, "");
 
     const documentKeywords = keywordDictionary.DOCUMENT;
     const fullDocKeywords = keywordDictionary.DOCUMENT_FULL;
@@ -1826,13 +1867,21 @@ ${chunksContent}`;
     const hasExplicitCompare = hasAny(lowerQuestion, explicitCompareKeywords);
     const hasSummary = hasAny(lowerQuestion, SUMMARY_KEYWORDS);
     const hasAllScope = hasAny(lowerQuestion, allScopeKeywords);
-    const hasDocument = hasAny(lowerQuestion, documentKeywords);
-    const hasFullDoc = hasAny(lowerQuestion, fullDocKeywords);
+    const hasDocument = hasAny(cleanDocQuestion, documentKeywords);
+    const hasFullDoc = hasAny(cleanDocQuestion, fullDocKeywords);
 
     let intentReason = "DEFAULT";
     const isProfile = isProfileQuestion(ctx.retrievalQuery);
 
-    if (isProfile) {
+    if (
+      ctx.classification?.isMultiDomain &&
+      !hasExplicitCompare &&
+      (!ctx.documentId || ctx.documentId.length === 0)
+    ) {
+      intent = "GENERAL";
+      documentScope = "NONE";
+      intentReason = "MULTI_DOMAIN_QUERY";
+    } else if (isProfile && !ctx.classification?.isMultiDomain) {
       intent = "GENERAL";
       documentScope = "NONE";
       intentReason = "USER_PROFILE_QUERY";
@@ -1910,17 +1959,7 @@ ${chunksContent}`;
       if (documentId && documentId.length > 0) {
         finalDocumentIds = documentId;
       } else {
-        const recentDocs = await db
-          .select({
-            id: document.id,
-            fileName: document.fileName,
-            documentType: document.documentType,
-            reportDate: document.reportDate,
-            createdAt: document.createdAt,
-          })
-          .from(document)
-          .where(eq(document.userId, userId))
-          .orderBy(desc(document.createdAt));
+        const recentDocs = (await documentRepository.getSummaryByUserId(userId)) || [];
 
         if (recentDocs.length === 0) {
           intent = "GENERAL";
@@ -2048,16 +2087,8 @@ ${chunksContent}`;
 
     const docNameMap = {};
     if (finalDocumentIds && finalDocumentIds.length > 0) {
-      const finalDocsMetadata = await db
-        .select({
-          id: document.id,
-          fileName: document.fileName,
-          reportDate: document.reportDate,
-          documentType: document.documentType,
-          structuredExtractedData: document.structuredExtractedData,
-        })
-        .from(document)
-        .where(inArray(document.id, finalDocumentIds));
+      const finalDocsMetadata =
+        (await documentRepository.findDocumentsByIds(finalDocumentIds)) || [];
       finalDocsMetadata.forEach((d) => {
         docNameMap[d.id] = d;
       });
@@ -2100,7 +2131,12 @@ ${chunksContent}`;
     // Build dependency-aware universal context (Profile, Medications, Refills, Reminders, Documents, Notifications)
     let patientContextStr = "";
     try {
-      patientContextStr = await buildDependencyAwareContext(userId, question, { patient: p });
+      patientContextStr = await buildDependencyAwareContext(userId, question, {
+        patient: p,
+        domains: ctx.classification?.domains,
+        targetDate: ctx.classification?.entities?.targetDate,
+        englishQuestion: ctx.englishQuestion,
+      });
     } catch (err) {
       debugLogger.error("sendMessage: Failed to build dependency-aware app context", {
         error: err.message,
@@ -2109,8 +2145,11 @@ ${chunksContent}`;
 
     if (patientContextStr) {
       patientContextStr += `\n\nIMPORTANT INSTRUCTION: Use the above patient profile, active medications, refill counts, reminder schedules, document catalog, and notification information ONLY to answer the user's specific question.`;
-      if (isProfile) {
+      if (isProfile && !ctx.classification?.isMultiDomain) {
         patientContextStr += `\n\nCRITICAL PROFILE INSTRUCTION: The user is asking about their official logged-in account profile. You MUST answer using ONLY the database user profile details in === OFFICIAL LOGGED-IN USER PROFILE & AUTHENTICATION (DATABASE) ===. NEVER state or substitute patient names, ages, or details printed on uploaded medical reports.`;
+      } else if (ctx.classification?.isMultiDomain) {
+        const activeDomains = Array.from(ctx.classification.domains || []).join(", ");
+        patientContextStr += `\n\nMULTI-DOMAIN INSTRUCTION: The user is asking about multiple areas (${activeDomains}). You MUST answer all parts of the user's question using the corresponding sections in the patient context above. Clearly structure your answer covering each requested area.`;
       }
     }
 
@@ -2248,9 +2287,11 @@ ${chunksContent}`;
       userMessage,
     } = ctx;
 
+    const sanitizedText = sanitizeChatResponse(assistantText);
+
     const aiMessage = await chatSessionRepository.appendMessage({
       citations: [],
-      content: assistantText,
+      content: sanitizedText,
       metadata: {
         mode,
         emergency: isEmergency,
@@ -2269,7 +2310,7 @@ ${chunksContent}`;
     return {
       ai: aiMessage,
       citations: [],
-      reply: assistantText,
+      reply: sanitizedText,
       user: userMessage,
       mode,
       emergency: isEmergency,

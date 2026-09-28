@@ -255,7 +255,11 @@ async function validateDocumentRetry(req, _res, next) {
     return next();
   } catch (error) {
     if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlink(req.file.path, () => {});
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        // ignore cleanup error
+      }
     }
     return next(error);
   }

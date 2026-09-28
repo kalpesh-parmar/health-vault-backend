@@ -139,7 +139,9 @@ Only if needed.
 ${headings.tip}
 Provide one practical and encouraging tip.
 
-11. You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages.${language.toLowerCase() === "english" ? " Write cleanly and purely in ENGLISH." : " DO NOT include English or other language sentences."} If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.`;
+11. MEDICATION END DATES: The End Date provided in the medication record is the official database value. NEVER recalculate, estimate, or modify the end date based on duration, remaining quantity, or today's date. Always return the stored End Date exactly as provided in the context.
+12. OCCURRENCE AND REMINDER STATUS INTEGRITY: If a dose occurrence is marked [TAKEN] or COMPLETED, it is NEVER counted as missed, even if previously overdue. Overdue doses that are not marked taken MUST be reported as missed. When reporting counts, ensure Total = Taken + Pending + Missed accurately matches the patient context.
+13. You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages.${language.toLowerCase() === "english" ? " Write cleanly and purely in ENGLISH." : " DO NOT include English or other language sentences."} If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.`;
 };
 
 const RAG_PROMPT_TEMPLATE = (context, language = "english", coverageStr = "") => {
@@ -155,7 +157,8 @@ CRITICAL EXTRACTION RULES:
 6. NEVER guess or hallucinate values. Use ONLY the information contained in the retrieved context.
 7. For "FULL_DOCUMENT" or "summary" questions, preserve ALL meaningful findings from the supplied context without silently dropping report-specific details.
 8. LOGGED-IN USER vs DOCUMENT PATIENT SEPARATION: The logged-in app user's profile details (from database) are separate from patient names printed inside uploaded medical reports (which may belong to relatives or family members). When asked about the logged-in user's profile (name, age, blood group, allergies, etc.), ALWAYS use the official database user profile context. Never state or substitute patient names printed inside medical reports as the user's profile name.
-9. PAGINATED LIST RESPONSES: Whenever asked to list medications, documents, reminders, notifications, or refills, ALWAYS present the output as an array list accompanied by pagination summary metadata (Total Records, Current Page, Page Limit, Total Pages), regardless of whether there is 1 item or 100+ items.
+9. MEDICATION END DATES: The End Date provided in the medication record is the official database value. NEVER recalculate, estimate, or modify the end date based on duration, remaining quantity, or today's date. Always return the stored End Date exactly as provided in the context.
+10. OCCURRENCE AND REMINDER STATUS INTEGRITY: If a dose occurrence is marked [TAKEN] or COMPLETED, it is NEVER counted as missed, even if previously overdue. Overdue doses that are not marked taken MUST be reported as missed. When reporting counts, ensure Total = Taken + Pending + Missed accurately matches the patient context.
 ${coverageStr ? `\nSYSTEM COVERAGE REPORT:\nThe system attempted to find specific entities in the selected documents. Use this to definitively state if something is found, not found, or not retrieved:\n${coverageStr}\n` : ""}
 CRITICAL FORMATTING RULES:
 To ensure the UI renders your response correctly, you MUST strictly use the following Markdown headings based on the user's intent. Do not add extra conversational filler outside these sections.

@@ -1,4 +1,4 @@
-const { and, asc, count, desc, eq, ilike, or, sql, isNull } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, inArray, or, sql, isNull } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
@@ -161,6 +161,41 @@ class DocumentRepository {
       .select()
       .from(document)
       .where(and(eq(document.id, id), eq(document.softDelete, false)))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findActiveDocumentById(id, userId) {
+    const result = await db
+      .select()
+      .from(document)
+      .where(and(eq(document.id, id), eq(document.userId, userId), eq(document.softDelete, false)))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findDocumentsByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    return db
+      .select({
+        id: document.id,
+        fileName: document.fileName,
+        reportDate: document.reportDate,
+        documentType: document.documentType,
+        structuredExtractedData: document.structuredExtractedData,
+      })
+      .from(document)
+      .where(and(inArray(document.id, ids), eq(document.softDelete, false)));
+  }
+
+  async findLatestActiveDocumentByUserId(userId) {
+    const result = await db
+      .select()
+      .from(document)
+      .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+      .orderBy(desc(document.createdAt))
       .limit(1);
 
     return result[0] || null;

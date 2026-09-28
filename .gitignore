@@ -10,4 +10,6 @@ tmp/
 docs/*.html
 poppler/
 uploads/
-tests/scratch/
+tests/scratch/
+.agent/
+.planning/

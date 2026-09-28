@@ -33,6 +33,8 @@ const messageConstants = Object.freeze({
   REMINDER_SENT: "Reminder sent successfully",
   SESSION_CREATED: "Session created successfully",
   SESSION_FETCHED: "Session fetched successfully",
+  SESSION_MESSAGES_FETCHED: "Messages fetched",
+  SESSION_DELETED: "Session deleted",
   SUMMARY_CREATED: "Summary generated succesfully",
   TOKEN_REFRESHED: "Token refreshed successfully",
   PATIENT_PROFILE_FETCHED: "Patient profile fetched successfully",

@@ -2,7 +2,13 @@ const DocumentIntelligenceRepository = require("../../../repositories/documentIn
 const intelligenceRepository = new DocumentIntelligenceRepository();
 const { normalizeLanguage } = require("../../../utils/commonUtils");
 const { containsEntity } = require("../../../utils/synonyms");
-const { hasAny, toIsoDateOnly } = require("./chatHelpers");
+const {
+  hasAny,
+  toIsoDateOnly,
+  isOccurrenceTaken,
+  isOccurrenceMissed,
+  isOccurrencePending,
+} = require("./chatHelpers");
 
 const patientRepository = require("../../../repositories/patientRepository");
 const medicationRepository = require("../../../repositories/medicationRepository");
@@ -90,8 +96,9 @@ function getReportAgeString(reportDate, language) {
  * @param {string} question - User question text
  * @returns {Set<string>} Set of domain names ('PROFILE', 'MEDICATIONS', 'REFILLS', 'REMINDERS', 'DOCUMENTS', 'NOTIFICATIONS')
  */
-function detectContextGraph(question = "") {
+function detectContextGraph(question = "", options = {}) {
   const q = String(question || "").toLowerCase();
+  const engQ = String(options.englishQuestion || "").toLowerCase();
   const domains = new Set();
 
   const reminderKeywords = keywordDictionary.REMINDER;
@@ -102,21 +109,21 @@ function detectContextGraph(question = "") {
   const medKeywords = keywordDictionary.MEDICATION;
   const overviewKeywords = keywordDictionary.OVERVIEW;
 
-  if (hasAny(q, reminderKeywords)) domains.add("REMINDERS");
-  if (hasAny(q, refillKeywords)) domains.add("REFILLS");
-  if (hasAny(q, docKeywords)) domains.add("DOCUMENTS");
-  if (hasAny(q, notifKeywords)) domains.add("NOTIFICATIONS");
-  if (hasAny(q, profileKeywords)) domains.add("PROFILE");
-  if (hasAny(q, medKeywords)) domains.add("MEDICATIONS");
+  const matches = (keywords) => hasAny(q, keywords) || (engQ && hasAny(engQ, keywords));
 
-  if (domains.size === 0 || hasAny(q, overviewKeywords)) {
+  if (matches(reminderKeywords)) domains.add("REMINDERS");
+  if (matches(refillKeywords)) domains.add("REFILLS");
+  if (matches(docKeywords)) domains.add("DOCUMENTS");
+  if (matches(notifKeywords)) domains.add("NOTIFICATIONS");
+  if (matches(profileKeywords)) domains.add("PROFILE");
+  if (matches(medKeywords)) domains.add("MEDICATIONS");
+
+  if (domains.size === 0 || matches(overviewKeywords)) {
     domains.add("PROFILE");
     domains.add("MEDICATIONS");
     domains.add("REMINDERS");
     domains.add("REFILLS");
     domains.add("DOCUMENTS");
-  } else {
-    domains.add("PROFILE");
   }
 
   if (domains.has("REFILLS")) {
@@ -176,7 +183,13 @@ function paginateArray(items = [], options = {}) {
 async function buildDependencyAwareContext(userId, userQuestion = "", options = {}) {
   if (!userId) return "";
 
-  const domains = detectContextGraph(userQuestion);
+  const domains =
+    options.domains instanceof Set
+      ? options.domains
+      : Array.isArray(options.domains)
+        ? new Set(options.domains)
+        : detectContextGraph(userQuestion, options);
+
   debugLogger.info("buildDependencyAwareContext: Detected domains", {
     userId,
     domains: Array.from(domains),
@@ -186,18 +199,29 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
   // --- PHASE 1: Independent Domain Queries (Executed in parallel via Promise.all) ---
   const fetchTasks = {};
 
-  fetchTasks.patient = options.patient
-    ? Promise.resolve(options.patient)
-    : patientRepository.findById(userId);
+  if (domains.has("PROFILE")) {
+    fetchTasks.patient = options.patient
+      ? Promise.resolve(options.patient)
+      : patientRepository.findById(userId);
+  }
 
   if (domains.has("MEDICATIONS")) {
     fetchTasks.medications = medicationRepository.findAll(userId);
   }
 
   if (domains.has("REMINDERS")) {
-    fetchTasks.todayOccurrences = occurrenceRepository.findTodayOccurrences
-      ? occurrenceRepository.findTodayOccurrences(userId)
-      : Promise.resolve([]);
+    if (options.targetDate && occurrenceRepository.findOccurrencesByDate) {
+      fetchTasks.todayOccurrences = occurrenceRepository.findOccurrencesByDate(
+        userId,
+        options.targetDate,
+      );
+    } else {
+      fetchTasks.todayOccurrences = occurrenceRepository.findAllOccurrences
+        ? occurrenceRepository.findAllOccurrences(userId)
+        : occurrenceRepository.findTodayOccurrences
+          ? occurrenceRepository.findTodayOccurrences(userId)
+          : Promise.resolve([]);
+    }
   }
 
   if (domains.has("DOCUMENTS")) {
@@ -216,7 +240,7 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
   const taskEntries = Object.entries(fetchTasks);
   const resolvedValues = await Promise.all(
     taskEntries.map(([, task]) =>
-      task.catch((err) => {
+      Promise.resolve(task).catch((err) => {
         debugLogger.error("buildDependencyAwareContext: Task failed", { error: err.message });
         return null;
       }),
@@ -259,9 +283,9 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
     return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  const isTaken = (o) => o.status === "TAKEN" || o.status === "COMPLETED";
-  const isMissed = (o) => o.status === "SKIPPED" || o.status === "MISSED" || o.isOverdue;
-  const isPending = (o) => o.status === "PENDING" && !o.isOverdue;
+  const isTaken = isOccurrenceTaken;
+  const isMissed = isOccurrenceMissed;
+  const isPending = isOccurrencePending;
 
   function formatMedicationPagination(page) {
     if (page.totalRecords === 0) {
@@ -393,7 +417,7 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
         const rawEndDate = m.endDate ? String(m.endDate).split("T")[0] : null;
         let endDateStr = "Not specified";
         if (rawEndDate && m.ongoing) {
-          endDateStr = `${rawEndDate} (Treatment is Ongoing)`;
+          endDateStr = `${rawEndDate} (Ongoing treatment)`;
         } else if (rawEndDate) {
           endDateStr = rawEndDate;
         } else if (m.ongoing) {
@@ -427,21 +451,22 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
           const daysPassed = Math.max(0, Math.floor((today - baseDate) / (1000 * 60 * 60 * 24)));
           const estimatedConsumed = daysPassed * m.dailyConsumption;
           const estimatedRemaining = Math.max(0, baseQty - estimatedConsumed);
-          calculatedRemainingInfo = `\n  • Dynamic Estimated Stock Remaining: ~${estimatedRemaining} ${m.unit || "unit(s)"} (Calculated from base ${baseQty} - ${daysPassed} days × ${m.dailyConsumption}/day consumed since ${baseDate.toISOString().split("T")[0]})`;
+          calculatedRemainingInfo = `\n  • Estimated Stock Remaining: ~${estimatedRemaining} ${m.unit || "unit(s)"}`;
         }
 
         if (domains.has("REFILLS")) {
           if (refillObj) {
             const refillDate = refillObj.createdAt
               ? toIsoDateOnly(new Date(refillObj.createdAt))
-              : "N/A";
+              : "Recent";
             refillInfo = `\n  • Refill Record (Last Refill: ${refillDate}):\n    - Before Refill: Remaining = ${refillObj.beforeRefillRemainingQuantity}, Total = ${refillObj.beforeRefillTotalQuantity}\n    - Refill Added Quantity: +${refillObj.refillQuantity}\n    - After Refill: Remaining = ${refillObj.afterRefillRemainingQuantity}, Total = ${refillObj.afterRefillTotalQuantity}`;
           } else {
-            refillInfo = `\n  • Refills Remaining: ${m.refillCount ?? "N/A"}`;
+            const recordedCount = m.refillCount ?? 0;
+            refillInfo = `\n  • Refills Recorded: ${recordedCount}`;
           }
         }
 
-        return `${itemIndex}. - ${name}${type}${doseStr}${freq}${food}${dailyConsumptionStr}\n  Status: Ongoing=${ongoingStatusStr} | Start Date: ${startDateStr} | End Date: ${endDateStr}${scheduleStr}${doctor}${refillInfo}${calculatedRemainingInfo}`;
+        return `${itemIndex}. - ${name}${type}${doseStr}${freq}${food}${dailyConsumptionStr}\n  Status: Ongoing=${ongoingStatusStr} | Start Date: ${startDateStr} | Authoritative Stored End Date: ${endDateStr}${scheduleStr}${doctor}${refillInfo}${calculatedRemainingInfo}`;
       })
       .join("\n");
 
@@ -592,7 +617,7 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
           .join("\n");
     }
 
-    return `${statusSummary}\n\nUploaded Document List Array (Page ${page.pageNumber}):\n${docList}\n\nSTRICT DOCUMENT LISTING INSTRUCTION: When asked to list uploaded documents, state the total count (${page.totalRecords}) and current page (${page.pageNumber} of ${page.totalPages}), and list the exact File Names provided in the Uploaded Document List Array above. Do NOT use names extracted from report body text.`;
+    return `${statusSummary}\n\nUploaded Document List Array:\n${docList}\n\nSTRICT DOCUMENT LISTING INSTRUCTION: When asked to list uploaded documents, state the total count (${page.totalRecords}) and list the exact File Names provided in the Uploaded Document List Array above. Do NOT state internal page numbers, and do NOT use names extracted from report body text.`;
   }
 
   function buildNotificationBlock(notifications, options) {
@@ -628,7 +653,7 @@ async function buildDependencyAwareContext(userId, userQuestion = "", options = 
   // --- PHASE 3: Merge Context Blocks ---
   const contextParts = [];
 
-  if (patient) {
+  if (patient && domains.has("PROFILE")) {
     contextParts.push(buildProfileBlock(patient));
   }
 
