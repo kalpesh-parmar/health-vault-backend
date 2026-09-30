@@ -186,7 +186,7 @@ function getNextRequiredOrOptionalStep(state) {
     state.hasSocialData === true ||
     ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
 
-  if (state.flowMode === "SKIP" || !hasLoginProfile) {
+  if (state.flowMode === "SKIP" || state.flowMode === "MANUAL" || !_useDoc || !hasLoginProfile) {
     state.profileConfirmed = true;
   } else if (!state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";

@@ -99,27 +99,42 @@ function throwDuplicateConflict(dupCheck) {
 }
 
 function mapFrequencyToDb(frequency) {
+  if (!frequency || typeof frequency !== "string") return "Once Daily";
+  const upper = frequency.trim().toUpperCase().replace(/\s+/g, "_");
   const map = {
     ONCE: "Once Daily",
+    ONCE_DAILY: "Once Daily",
     TWICE: "Twice Daily",
+    TWICE_DAILY: "Twice Daily",
     THRICE: "Three Times Daily",
-    "Once Daily": "Once Daily",
-    "Twice Daily": "Twice Daily",
-    "Three Times Daily": "Three Times Daily",
+    THREE_TIMES_DAILY: "Three Times Daily",
+    AS_NEEDED: "As Needed",
+    "ONCE DAILY": "Once Daily",
+    "TWICE DAILY": "Twice Daily",
+    "THREE TIMES DAILY": "Three Times Daily",
+    "AS NEEDED": "As Needed",
   };
-  return map[frequency] || "Once Daily";
+  if (map[frequency]) return map[frequency];
+  if (map[upper]) return map[upper];
+  if (upper.includes("THREE") || upper.includes("THRICE") || upper.includes("TID"))
+    return "Three Times Daily";
+  if (upper.includes("TWICE") || upper.includes("BID") || upper.includes("BD"))
+    return "Twice Daily";
+  if (upper.includes("ONCE") || upper.includes("QD") || upper.includes("OD")) return "Once Daily";
+  if (upper.includes("NEED")) return "As Needed";
+  return "Once Daily";
 }
 
 function getFrequencyCount(frequency) {
+  if (!frequency || typeof frequency !== "string") return 1;
+  const dbFreq = mapFrequencyToDb(frequency);
   const map = {
-    ONCE: 1,
-    TWICE: 2,
-    THRICE: 3,
     "Once Daily": 1,
     "Twice Daily": 2,
     "Three Times Daily": 3,
+    "As Needed": 1,
   };
-  return map[frequency] || 1;
+  return map[dbFreq] || 1;
 }
 
 function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options = {}) {
@@ -140,28 +155,101 @@ function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options
   const dosePerIntake = Number.isInteger(value) ? value : payload.dosePerIntake || null;
   const unitDb = unit ? unit.toUpperCase() : payload.unit ? payload.unit.toUpperCase() : "TABLET";
 
-  const foodContext = payload.foodContext || payload.food_context || defaults.food_context;
-  const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
+  const foodContext =
+    payload.foodFrequency ||
+    payload.food_frequency ||
+    payload.foodContext ||
+    payload.food_context ||
+    defaults.food_context ||
+    "AFTER_FOOD";
+  const foodFrequency =
+    String(foodContext).toUpperCase() === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
 
   const frequencyCount = getFrequencyCount(payload.frequency);
   const dailyConsumption = payload.dailyConsumption || Math.ceil(value || 1) * frequencyCount;
 
-  let timeSchedule;
+  function formatHHMMSS(t) {
+    if (!t || typeof t !== "string") return "08:00:00";
+    const parts = t.trim().split(":");
+    const hh = parts[0].padStart(2, "0");
+    const mm = (parts[1] || "00").padStart(2, "0");
+    const ss = (parts[2] || "00").padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  let timeSchedule = null;
+  const rawSched = payload.medicationSchedule;
+  const rawTimes =
+    Array.isArray(rawSched) && rawSched.length > 0
+      ? rawSched
+      : Array.isArray(rawSched?.times) && rawSched.times.length > 0
+        ? rawSched.times
+        : Array.isArray(rawSched?.reminderTimes) && rawSched.reminderTimes.length > 0
+          ? rawSched.reminderTimes
+          : Array.isArray(payload.reminderTimes) && payload.reminderTimes.length > 0
+            ? payload.reminderTimes
+            : Array.isArray(payload.times) && payload.times.length > 0
+              ? payload.times
+              : Array.isArray(payload.medicationTime) && payload.medicationTime.length > 0
+                ? payload.medicationTime
+                : null;
+
   if (
-    payload.medicationSchedule &&
-    (payload.medicationSchedule.Morning ||
-      payload.medicationSchedule.Noon ||
-      payload.medicationSchedule.Night ||
-      payload.medicationSchedule.Custom)
+    rawSched &&
+    typeof rawSched === "object" &&
+    !Array.isArray(rawSched) &&
+    (rawSched.Morning ||
+      rawSched.morning ||
+      rawSched.Noon ||
+      rawSched.noon ||
+      rawSched.Night ||
+      rawSched.night ||
+      rawSched.Custom ||
+      rawSched.custom)
   ) {
-    timeSchedule = {
-      Morning: payload.medicationSchedule.Morning,
-      Noon: payload.medicationSchedule.Noon,
-      Night: payload.medicationSchedule.Night,
-      Custom: payload.medicationSchedule.Custom,
-    };
-  } else {
-    timeSchedule = defaults.medicationSchedule;
+    timeSchedule = {};
+    if (rawSched.Morning || rawSched.morning) {
+      timeSchedule.Morning = formatHHMMSS(rawSched.Morning || rawSched.morning);
+    }
+    if (rawSched.Noon || rawSched.noon) {
+      timeSchedule.Noon = formatHHMMSS(rawSched.Noon || rawSched.noon);
+    }
+    if (rawSched.Night || rawSched.night) {
+      timeSchedule.Night = formatHHMMSS(rawSched.Night || rawSched.night);
+    }
+    if (rawSched.Custom || rawSched.custom) {
+      const c = rawSched.Custom || rawSched.custom;
+      timeSchedule.Custom = Array.isArray(c) ? c.map(formatHHMMSS) : [formatHHMMSS(c)];
+    }
+  } else if (Array.isArray(rawTimes) && rawTimes.length > 0) {
+    timeSchedule = {};
+    rawTimes.forEach((t) => {
+      const timeStr = formatHHMMSS(t);
+      const hour = parseInt(timeStr.split(":")[0], 10);
+      if (hour < 12 && !timeSchedule.Morning) timeSchedule.Morning = timeStr;
+      else if (hour >= 12 && hour < 17 && !timeSchedule.Noon) timeSchedule.Noon = timeStr;
+      else if (hour >= 17 && !timeSchedule.Night) timeSchedule.Night = timeStr;
+      else {
+        if (!timeSchedule.Custom) timeSchedule.Custom = [];
+        timeSchedule.Custom.push(timeStr);
+      }
+    });
+  }
+
+  if (!timeSchedule || Object.keys(timeSchedule).length === 0) {
+    if (frequencyDb === "Three Times Daily") {
+      timeSchedule = { Morning: "08:00:00", Noon: "14:00:00", Night: "20:00:00" };
+    } else if (frequencyDb === "Twice Daily") {
+      timeSchedule = { Morning: "08:00:00", Night: "20:00:00" };
+    } else if (
+      defaults &&
+      defaults.medicationSchedule &&
+      Object.keys(defaults.medicationSchedule).length > 0
+    ) {
+      timeSchedule = defaults.medicationSchedule;
+    } else {
+      timeSchedule = { Morning: "08:00:00" };
+    }
   }
 
   const medicationSchedule = {

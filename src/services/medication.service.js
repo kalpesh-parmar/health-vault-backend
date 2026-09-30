@@ -397,6 +397,7 @@ class MedicationService {
 
   // Onboarding Helper: get times and food frequency defaults
   applyDefaults(frequency) {
+    const dbFreq = this._mapFrequencyToDb(frequency);
     const defaultSchedules = {
       ONCE: { Morning: "08:00:00" },
       TWICE: { Morning: "08:00:00", Night: "20:00:00" },
@@ -404,9 +405,11 @@ class MedicationService {
       "Once Daily": { Morning: "08:00:00" },
       "Twice Daily": { Morning: "08:00:00", Night: "20:00:00" },
       "Three Times Daily": { Morning: "08:00:00", Noon: "14:00:00", Night: "20:00:00" },
+      "As Needed": { Morning: "08:00:00" },
     };
 
-    const schedule = defaultSchedules[frequency] || { Morning: "08:00:00" };
+    const schedule = defaultSchedules[dbFreq] ||
+      defaultSchedules[frequency] || { Morning: "08:00:00" };
 
     return {
       medicationSchedule: schedule,
@@ -420,27 +423,42 @@ class MedicationService {
   }
 
   _mapFrequencyToDb(frequency) {
+    if (!frequency || typeof frequency !== "string") return "Once Daily";
+    const upper = frequency.trim().toUpperCase().replace(/\s+/g, "_");
     const map = {
       ONCE: "Once Daily",
+      ONCE_DAILY: "Once Daily",
       TWICE: "Twice Daily",
+      TWICE_DAILY: "Twice Daily",
       THRICE: "Three Times Daily",
-      "Once Daily": "Once Daily",
-      "Twice Daily": "Twice Daily",
-      "Three Times Daily": "Three Times Daily",
+      THREE_TIMES_DAILY: "Three Times Daily",
+      AS_NEEDED: "As Needed",
+      "ONCE DAILY": "Once Daily",
+      "TWICE DAILY": "Twice Daily",
+      "THREE TIMES DAILY": "Three Times Daily",
+      "AS NEEDED": "As Needed",
     };
-    return map[frequency] || "Once Daily";
+    if (map[frequency]) return map[frequency];
+    if (map[upper]) return map[upper];
+    if (upper.includes("THREE") || upper.includes("THRICE") || upper.includes("TID"))
+      return "Three Times Daily";
+    if (upper.includes("TWICE") || upper.includes("BID") || upper.includes("BD"))
+      return "Twice Daily";
+    if (upper.includes("ONCE") || upper.includes("QD") || upper.includes("OD")) return "Once Daily";
+    if (upper.includes("NEED")) return "As Needed";
+    return "Once Daily";
   }
 
   _getFrequencyCount(frequency) {
+    if (!frequency || typeof frequency !== "string") return 1;
+    const dbFreq = this._mapFrequencyToDb(frequency);
     const map = {
-      ONCE: 1,
-      TWICE: 2,
-      THRICE: 3,
       "Once Daily": 1,
       "Twice Daily": 2,
       "Three Times Daily": 3,
+      "As Needed": 1,
     };
-    return map[frequency] || 1;
+    return map[dbFreq] || 1;
   }
 
   // Onboarding Helper: map fields and save single medication

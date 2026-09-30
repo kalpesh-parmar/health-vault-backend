@@ -25,6 +25,13 @@ const FREQUENCY_TO_DB_MAP = {
   "Once Daily": frequencyType.ONCE_DAILY,
   "Twice Daily": frequencyType.TWICE_DAILY,
   "Three Times Daily": frequencyType.THREE_TIMES_DAILY,
+  "ONCE DAILY": frequencyType.ONCE_DAILY,
+  "TWICE DAILY": frequencyType.TWICE_DAILY,
+  "THREE TIMES DAILY": frequencyType.THREE_TIMES_DAILY,
+  "AS NEEDED": frequencyType.AS_NEEDED,
+  "ONCE A DAY": frequencyType.ONCE_DAILY,
+  "TWICE A DAY": frequencyType.TWICE_DAILY,
+  "THREE TIMES A DAY": frequencyType.THREE_TIMES_DAILY,
 };
 
 /**
@@ -562,6 +569,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
 function normalizeCreateMedicationInput(payload = {}) {
   const input = { ...payload };
 
+  const medicationName =
+    input.medicationName || input.name || input.medicineName || "Medical Document Medicine";
+  input.medicationName = medicationName;
+
   let medicationType = String(
     input.medicationType || input.type || input.medicineType || "TABLET",
   ).toUpperCase();
@@ -585,22 +596,53 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.instructions && !input.notes) {
     input.notes = String(input.instructions).slice(0, 1000);
   }
-  if (input.dose && input.dosePerIntake === undefined) {
-    input.dosePerIntake =
-      typeof input.dose === "object"
-        ? input.dose.count || input.dose.value || 1
-        : Number(input.dose) || 1;
+  let dosePerIntake = input.dosePerIntake;
+  if (dosePerIntake === undefined || dosePerIntake === null) {
+    if (typeof input.dose === "object" && input.dose !== null) {
+      dosePerIntake = input.dose.count || input.dose.value || 1;
+    } else if (input.dose !== undefined) {
+      dosePerIntake = Number(input.dose) || 1;
+    } else {
+      dosePerIntake = 1;
+    }
   }
-  if (input.frequency && FREQUENCY_TO_DB_MAP[input.frequency]) {
-    input.frequency = FREQUENCY_TO_DB_MAP[input.frequency];
-  } else if (input.frequency && FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()]) {
-    input.frequency = FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()];
-  }
+  input.dosePerIntake = dosePerIntake;
+  const rawFreq = input.frequency;
+  const upperFreq =
+    typeof rawFreq === "string" ? rawFreq.trim().toUpperCase().replace(/\s+/g, "_") : "";
 
-  let frequency =
-    FREQUENCY_TO_DB_MAP[input.frequency] ||
-    FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()] ||
-    frequencyType.ONCE_DAILY;
+  let frequency = frequencyType.ONCE_DAILY;
+  if (FREQUENCY_TO_DB_MAP[rawFreq]) {
+    frequency = FREQUENCY_TO_DB_MAP[rawFreq];
+  } else if (FREQUENCY_TO_DB_MAP[upperFreq]) {
+    frequency = FREQUENCY_TO_DB_MAP[upperFreq];
+  } else if (
+    upperFreq.includes("THREE") ||
+    upperFreq.includes("THRICE") ||
+    upperFreq.includes("TID") ||
+    upperFreq.includes("3_TIME") ||
+    upperFreq.includes("3_TIMES")
+  ) {
+    frequency = frequencyType.THREE_TIMES_DAILY;
+  } else if (
+    upperFreq.includes("TWICE") ||
+    upperFreq.includes("BID") ||
+    upperFreq.includes("BD") ||
+    upperFreq.includes("2_TIME") ||
+    upperFreq.includes("2_TIMES")
+  ) {
+    frequency = frequencyType.TWICE_DAILY;
+  } else if (
+    upperFreq.includes("ONCE") ||
+    upperFreq.includes("QD") ||
+    upperFreq.includes("OD") ||
+    upperFreq.includes("1_TIME") ||
+    upperFreq.includes("1_TIMES")
+  ) {
+    frequency = frequencyType.ONCE_DAILY;
+  } else if (upperFreq.includes("NEED") || upperFreq.includes("PRN")) {
+    frequency = frequencyType.AS_NEEDED;
+  }
 
   function formatHHMMSS(t) {
     if (!t || typeof t !== "string") return "09:00:00";
@@ -625,16 +667,40 @@ function normalizeCreateMedicationInput(payload = {}) {
       medicationSchedule.Custom ||
       medicationSchedule.custom);
 
-  if (!hasValidScheduleKeys) {
+  if (hasValidScheduleKeys) {
+    const formattedSched = {};
+    if (medicationSchedule.Morning || medicationSchedule.morning) {
+      formattedSched.Morning = formatHHMMSS(
+        medicationSchedule.Morning || medicationSchedule.morning,
+      );
+    }
+    if (medicationSchedule.Noon || medicationSchedule.noon) {
+      formattedSched.Noon = formatHHMMSS(medicationSchedule.Noon || medicationSchedule.noon);
+    }
+    if (medicationSchedule.Night || medicationSchedule.night) {
+      formattedSched.Night = formatHHMMSS(medicationSchedule.Night || medicationSchedule.night);
+    }
+    if (medicationSchedule.Custom || medicationSchedule.custom) {
+      const c = medicationSchedule.Custom || medicationSchedule.custom;
+      formattedSched.Custom = Array.isArray(c) ? c.map(formatHHMMSS) : [formatHHMMSS(c)];
+    }
+    medicationSchedule = formattedSched;
+  } else {
     const rawTimes =
-      Array.isArray(medicationSchedule?.times) && medicationSchedule.times.length > 0
-        ? medicationSchedule.times
-        : Array.isArray(medicationSchedule?.reminderTimes) &&
-            medicationSchedule.reminderTimes.length > 0
-          ? medicationSchedule.reminderTimes
-          : Array.isArray(input.reminderTimes) && input.reminderTimes.length > 0
-            ? input.reminderTimes
-            : null;
+      Array.isArray(medicationSchedule) && medicationSchedule.length > 0
+        ? medicationSchedule
+        : Array.isArray(medicationSchedule?.times) && medicationSchedule.times.length > 0
+          ? medicationSchedule.times
+          : Array.isArray(medicationSchedule?.reminderTimes) &&
+              medicationSchedule.reminderTimes.length > 0
+            ? medicationSchedule.reminderTimes
+            : Array.isArray(input.reminderTimes) && input.reminderTimes.length > 0
+              ? input.reminderTimes
+              : Array.isArray(input.times) && input.times.length > 0
+                ? input.times
+                : Array.isArray(input.medicationTime) && input.medicationTime.length > 0
+                  ? input.medicationTime
+                  : null;
 
     if (Array.isArray(rawTimes) && rawTimes.length > 0) {
       const newSched = {};
@@ -679,6 +745,21 @@ function normalizeCreateMedicationInput(payload = {}) {
     startDate = startDate.split("T")[0];
   }
 
+  let foodFrequency = input.foodFrequency || input.food_context || input.foodContext;
+  input.foodFrequency = foodFrequency === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
+
+  let prescribedBy = input.prescribedBy || input.prescribed_by || null;
+  if (prescribedBy) input.prescribedBy = prescribedBy;
+
+  let refillAlert = input.refillAlert ?? input.refill_alert;
+  if (refillAlert !== undefined) input.refillAlert = Boolean(refillAlert);
+
+  input.medicationType = medicationType;
+  input.frequency = frequency;
+  input.medicationSchedule = medicationSchedule;
+  input.totalQuantity = totalQuantity;
+  input.startDate = startDate;
+
   // Construct clean object containing ONLY allowed keys for createMedicationSchema .strict() validation
   const allowedKeys = [
     "medicationName",
@@ -696,6 +777,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     "notes",
     "resolution",
     "replaceMedicationId",
+    "refillAlert",
   ];
 
   const cleanInput = {};
