@@ -120,7 +120,7 @@ describe("Multilingual Summary Unit Tests", () => {
 
       const llmPrompt = ollamaClient.generate.mock.calls[0][0];
       expect(llmPrompt).toContain(
-        "Translate the following medical report/prescription summary into natural, fluent Gujarati",
+        "Translate the following user query or medical text into natural, fluent Gujarati",
       );
       expect(llmPrompt).toContain("Doctor names");
       expect(llmPrompt).toContain("Medicine / drug names");

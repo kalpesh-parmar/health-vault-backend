@@ -69,11 +69,11 @@ function sanitizePatient(patient) {
 function normalizeLanguage(lang) {
   if (!lang) return "english";
   const clean = String(lang).toLowerCase().trim();
-  if (clean === "en" || clean === "eng") return "english";
-  if (clean === "gu" || clean === "guj") return "gujarati";
-  if (clean === "hi" || clean === "hin") return "hindi";
-  if (clean === "mr" || clean === "mar") return "marathi";
-  if (clean === "ta" || clean === "tam") return "tamil";
+  if (clean === "en" || clean === "eng" || clean === "english") return "english";
+  if (clean === "gu" || clean === "guj" || clean === "gujarati") return "gujarati";
+  if (clean === "hi" || clean === "hin" || clean === "hindi") return "hindi";
+  if (clean === "mr" || clean === "mar" || clean === "marathi") return "marathi";
+  if (clean === "ta" || clean === "tam" || clean === "tamil") return "tamil";
 
   const valid = ["english", "gujarati", "hindi", "marathi", "tamil"];
   if (valid.includes(clean)) return clean;

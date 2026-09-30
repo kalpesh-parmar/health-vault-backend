@@ -302,7 +302,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   const rawTiming = med.timing || med.when || med.timeOfDay || "";
   const rawInstructions = med.instructions || med.notes || "";
   const rawDuration = med.duration || "";
-  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 0;
+  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 1;
 
   const needsReview = {
     name: false,
@@ -493,7 +493,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   };
 
   // 7. Stable client_med_id for OCR
-  const clientMedId = med.client_med_id || med.clientMedId || `doc_med_${index}`;
+  const clientMedId = med.client_med_id || med.clientMedId || med.id || `doc_med_${index + 1}`;
 
   const row = {
     bestTaken: [foodFrequency],
@@ -562,9 +562,6 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
 function normalizeCreateMedicationInput(payload = {}) {
   const input = { ...payload };
 
-  const medicationName =
-    input.medicationName || input.name || input.medicineName || "Medical Document Medicine";
-
   let medicationType = String(
     input.medicationType || input.type || input.medicineType || "TABLET",
   ).toUpperCase();
@@ -582,19 +579,22 @@ function normalizeCreateMedicationInput(payload = {}) {
     else if (medicationType.includes("DROP")) medicationType = medictationType.DROPS;
     else medicationType = medictationType.TABLET;
   }
-
-  let notes = input.notes || input.instructions || null;
-  if (notes) notes = String(notes).slice(0, 1000);
-
-  let dosePerIntake = input.dosePerIntake;
-  if (dosePerIntake === undefined || dosePerIntake === null) {
-    if (typeof input.dose === "object" && input.dose !== null) {
-      dosePerIntake = input.dose.count || input.dose.value || 1;
-    } else if (input.dose !== undefined) {
-      dosePerIntake = Number(input.dose) || 1;
-    } else {
-      dosePerIntake = 1;
-    }
+  if (!input.medicationType && input.type) {
+    input.medicationType = String(input.type).toUpperCase();
+  }
+  if (input.instructions && !input.notes) {
+    input.notes = String(input.instructions).slice(0, 1000);
+  }
+  if (input.dose && input.dosePerIntake === undefined) {
+    input.dosePerIntake =
+      typeof input.dose === "object"
+        ? input.dose.count || input.dose.value || 1
+        : Number(input.dose) || 1;
+  }
+  if (input.frequency && FREQUENCY_TO_DB_MAP[input.frequency]) {
+    input.frequency = FREQUENCY_TO_DB_MAP[input.frequency];
+  } else if (input.frequency && FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()]) {
+    input.frequency = FREQUENCY_TO_DB_MAP[String(input.frequency).toUpperCase()];
   }
 
   let frequency =
@@ -679,48 +679,33 @@ function normalizeCreateMedicationInput(payload = {}) {
     startDate = startDate.split("T")[0];
   }
 
-  let foodFrequency = input.foodFrequency || input.food_context || input.foodContext;
-  if (!foodFrequency) foodFrequency = "AFTER_FOOD";
+  // Construct clean object containing ONLY allowed keys for createMedicationSchema .strict() validation
+  const allowedKeys = [
+    "medicationName",
+    "medicationType",
+    "prescribedBy",
+    "dosePerIntake",
+    "frequency",
+    "medicationSchedule",
+    "foodFrequency",
+    "startDate",
+    "endDate",
+    "ongoing",
+    "totalQuantity",
+    "reminderBeforeMinutes",
+    "notes",
+    "resolution",
+    "replaceMedicationId",
+  ];
 
-  let resolution = input.resolution;
-  if (!["REPLACE", "KEEP_EXISTING", "EDIT"].includes(resolution)) {
-    resolution = undefined;
+  const cleanInput = {};
+  for (const key of allowedKeys) {
+    if (input[key] !== undefined) {
+      cleanInput[key] = input[key];
+    }
   }
 
-  let replaceMedicationId =
-    input.replaceMedicationId ||
-    input.targetMedicationId ||
-    input.matchedMedicationId ||
-    input.duplicateInfo?.matchedMedication?.id;
-
-  if (resolution !== "REPLACE") {
-    replaceMedicationId = undefined;
-  }
-
-  const result = {
-    medicationName,
-    medicationType,
-    dosePerIntake,
-    frequency,
-    medicationSchedule,
-    foodFrequency,
-    startDate,
-    totalQuantity,
-    ongoing: input.ongoing ?? true,
-  };
-
-  if (notes) result.notes = notes;
-  if (input.prescribedBy || input.prescribed_by)
-    result.prescribedBy = input.prescribedBy || input.prescribed_by;
-  if (input.endDate) result.endDate = input.endDate;
-  if (input.reminderBeforeMinutes !== undefined)
-    result.reminderBeforeMinutes = input.reminderBeforeMinutes;
-  const refillAlert = input.refillAlert ?? input.refill_alert;
-  if (refillAlert !== undefined) result.refillAlert = Boolean(refillAlert);
-  if (resolution) result.resolution = resolution;
-  if (replaceMedicationId) result.replaceMedicationId = replaceMedicationId;
-
-  return result;
+  return cleanInput;
 }
 
 module.exports = {

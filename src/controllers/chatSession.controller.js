@@ -3,48 +3,25 @@ const { AbortController } = global;
 const { messageConstants } = require("../constants/messageConstants");
 const { paginatedSuccessResponse, successResponse } = require("../helpers/generalResponse");
 const { chatService } = require("../services/ai");
-const { validateSchema } = require("../validations");
-const {
-  createChatSessionSchema,
-  sendChatMessageSchema,
-  sessionListQuerySchema,
-  sessionMessagesQuerySchema,
-} = require("../validations/documentFlowValidation");
 
 async function createSession(req, res) {
-  const data = await validateSchema(createChatSessionSchema, req.body);
-  const session = await chatService.createSession({ ...data, userId: req.auth.userId });
-
-  if (session && "documentId" in session) {
-    delete session.documentId;
-  }
-
+  const session = await chatService.createSession({ ...req.body, userId: req.auth.userId });
   return successResponse(res, session, messageConstants.SESSION_CREATED, StatusCodes.CREATED);
 }
 
 async function listSessions(req, res) {
-  const data = await validateSchema(sessionListQuerySchema, req.query);
-  const result = await chatService.listSessions({ ...data, userId: req.auth.userId });
-
-  const mappedItems = result.items.map((session) => {
-    if ("documentId" in session) {
-      return { ...session, documentId: undefined };
-    }
-    return session;
-  });
-
+  const result = await chatService.listSessions({ ...req.query, userId: req.auth.userId });
   return paginatedSuccessResponse(
     res,
-    mappedItems,
+    result.items,
     { nextCursor: result.nextCursor },
     messageConstants.SESSION_FETCHED,
   );
 }
 
 async function listMessages(req, res) {
-  const data = await validateSchema(sessionMessagesQuerySchema, req.query);
   const result = await chatService.listMessages({
-    ...data,
+    ...req.query,
     sessionId: req.params.id,
     userId: req.auth.userId,
   });
@@ -52,12 +29,12 @@ async function listMessages(req, res) {
     res,
     result.items,
     { nextCursor: result.nextCursor },
-    "Messages fetched",
+    messageConstants.SESSION_MESSAGES_FETCHED,
   );
 }
 
 async function sendMessage(req, res) {
-  const data = await validateSchema(sendChatMessageSchema, req.body);
+  const data = req.body;
 
   if (data.stream === true) {
     res.setHeader("Content-Type", "text/event-stream");
@@ -125,7 +102,7 @@ async function deleteSession(req, res) {
     sessionId: req.params.id,
     userId: req.auth.userId,
   });
-  return successResponse(res, result, "Session deleted");
+  return successResponse(res, result, messageConstants.SESSION_DELETED);
 }
 
 module.exports = { createSession, deleteSession, listMessages, listSessions, sendMessage };

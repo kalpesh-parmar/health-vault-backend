@@ -169,7 +169,7 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  const useDoc =
+  const _useDoc =
     state.useDocumentData !== false &&
     state.flowMode === "UPLOAD" &&
     state.documentConfirmed !== false &&
@@ -180,33 +180,16 @@ function getNextRequiredOrOptionalStep(state) {
     return missingRequired;
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing profile to compare with the document and a mismatch exists
+  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing login/social profile to compare or confirm
   const hasLoginProfile =
     Boolean(state.loginData) ||
     state.hasSocialData === true ||
     ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
 
-  const { hasMismatch } = getProfileMismatches(state);
-
-  if (
-    state.flowMode === "UPLOAD" &&
-    useDoc &&
-    hasLoginProfile &&
-    hasMismatch &&
-    !state.profileConfirmed
-  ) {
-    return "RESOLVE_PROFILE_SOURCE";
-  }
-
-  // In flow with no profile mismatch, or in MANUAL/SKIP flow: auto-confirm profile
-  if (
-    state.flowMode === "MANUAL" ||
-    state.flowMode === "SKIP" ||
-    !useDoc ||
-    !hasLoginProfile ||
-    !hasMismatch
-  ) {
+  if (state.flowMode === "SKIP" || !hasLoginProfile) {
     state.profileConfirmed = true;
+  } else if (!state.profileConfirmed) {
+    return "RESOLVE_PROFILE_SOURCE";
   }
 
   // HARD RULE: Once state.profileConfirmed === true, REQUIRED questions and RESOLVE_PROFILE_SOURCE must NEVER be returned again.

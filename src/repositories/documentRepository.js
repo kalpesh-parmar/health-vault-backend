@@ -1,4 +1,4 @@
-const { and, asc, count, desc, eq, ilike, or, sql, isNull } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, inArray, or, sql, isNull } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
@@ -36,7 +36,7 @@ function buildDocumentFilters(filters = {}, userId) {
   }
 
   if (filters.documentType) {
-    conditions.push(document.documentType.eq(filters.documentType.trim()));
+    conditions.push(eq(document.documentType, filters.documentType.trim()));
   }
 
   if (filters.fileType) {
@@ -166,6 +166,41 @@ class DocumentRepository {
     return result[0] || null;
   }
 
+  async findActiveDocumentById(id, userId) {
+    const result = await db
+      .select()
+      .from(document)
+      .where(and(eq(document.id, id), eq(document.userId, userId), eq(document.softDelete, false)))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
+  async findDocumentsByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    return db
+      .select({
+        id: document.id,
+        fileName: document.fileName,
+        reportDate: document.reportDate,
+        documentType: document.documentType,
+        structuredExtractedData: document.structuredExtractedData,
+      })
+      .from(document)
+      .where(and(inArray(document.id, ids), eq(document.softDelete, false)));
+  }
+
+  async findLatestActiveDocumentByUserId(userId) {
+    const result = await db
+      .select()
+      .from(document)
+      .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+      .orderBy(desc(document.createdAt))
+      .limit(1);
+
+    return result[0] || null;
+  }
+
   async findAll({ userId, ...filters }) {
     const sortColumn = documentSortColumns[filters.sortBy] || document.createdAt;
     const orderBy = filters.sortOrder === "asc" ? asc(sortColumn) : desc(sortColumn);
@@ -200,10 +235,10 @@ class DocumentRepository {
   async findAllByFilterSortAndPagination({ filter = {}, page, sort = {}, userId }) {
     const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
-    const pageNumber = page?.pageNumber ?? 1;
-    const pageLimit = page?.pageLimit ?? 10;
-
-    const offset = (pageNumber - 1) * pageLimit;
+    const rawPageNumber = page?.pageNumber ?? 1;
+    const pageLimit = Math.max(1, page?.pageLimit ?? 10);
+    const effectivePageNumber = Math.max(1, rawPageNumber);
+    const offset = Math.max(0, (effectivePageNumber - 1) * pageLimit);
     const limit = pageLimit;
 
     const data = await db
@@ -253,10 +288,23 @@ class DocumentRepository {
     return result[0] || null;
   }
 
-  async createMany(dataArray, tx = null) {
-    if (!dataArray || dataArray.length === 0) return [];
-    const client = tx || db;
-    return client.insert(document).values(dataArray).returning();
+  async getSummaryByUserId(userId) {
+    const docs = await db
+      .select({
+        id: document.id,
+        fileName: document.fileName,
+        documentType: document.documentType,
+        fileType: document.fileType,
+        reportDate: document.reportDate,
+        ocrStatus: document.ocrStatus,
+        remarks: document.remarks,
+        createdAt: document.createdAt,
+      })
+      .from(document)
+      .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+      .orderBy(desc(document.createdAt));
+
+    return docs;
   }
 }
 

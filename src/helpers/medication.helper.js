@@ -128,23 +128,23 @@ function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options
   let value = undefined;
   let unit = undefined;
 
-  if (payload.type === "TABLET" || payload.type === "CAPSULE") {
-    value = payload.dose?.count !== undefined ? payload.dose?.count : payload.dose?.value;
-    unit = payload.type.toLowerCase();
+  const medType = payload.type || payload.medicationType || "";
+  if (medType === "TABLET" || medType === "CAPSULE") {
+    value = payload.dose?.count || payload.dosePerIntake || payload.dose?.value;
+    unit = medType.toLowerCase();
   } else {
-    value = payload.dose?.value !== undefined ? payload.dose?.value : payload.dose?.count;
-    unit = payload.dose?.unit || (payload.type ? payload.type.toLowerCase() : "unit");
+    value = payload.dose?.value || payload.dosePerIntake || payload.dose?.count;
+    unit = payload.dose?.unit || payload.unit;
   }
 
-  const parsedVal = typeof value === "number" ? value : parseFloat(value);
-  const dosePerIntake = Number.isFinite(parsedVal) && parsedVal > 0 ? parsedVal : null;
-  const unitDb = unit ? unit.toUpperCase() : "TABLET";
+  const dosePerIntake = Number.isInteger(value) ? value : payload.dosePerIntake || null;
+  const unitDb = unit ? unit.toUpperCase() : payload.unit ? payload.unit.toUpperCase() : "TABLET";
 
-  const foodContext = payload.foodContext || defaults.food_context;
+  const foodContext = payload.foodContext || payload.food_context || defaults.food_context;
   const foodFrequency = foodContext === "BEFORE_FOOD" ? "BEFORE_FOOD" : "AFTER_FOOD";
 
   const frequencyCount = getFrequencyCount(payload.frequency);
-  const dailyConsumption = Math.ceil(dosePerIntake || 1) * frequencyCount;
+  const dailyConsumption = payload.dailyConsumption || Math.ceil(value || 1) * frequencyCount;
 
   let timeSchedule;
   if (
@@ -168,29 +168,45 @@ function mapOnboardingMedicationToDb(payload, patient, userId, defaults, options
     ...timeSchedule,
     dose: { value, unit },
     source: payload.source || "MANUAL",
-    refillAlert: !!payload.refill_alert,
+    refillAlert: payload.refillAlert !== undefined ? !!payload.refillAlert : !!payload.refill_alert,
     foodContext: foodFrequency,
   };
+
+  const rawTotalQty =
+    payload.totalQuantity !== undefined
+      ? payload.totalQuantity
+      : payload.total_quantity !== undefined
+        ? payload.total_quantity
+        : payload.quantity !== undefined
+          ? payload.quantity
+          : payload.qty !== undefined
+            ? payload.qty
+            : 1;
 
   return {
     userId,
     patientCode: patient.patientCode,
-    medicationName: payload.name,
-    medicationType: payload.type,
-    prescribedBy: payload.prescribed_by || null,
+    medicationName: payload.medicationName || payload.name,
+    medicationType: payload.medicationType || payload.type,
+    prescribedBy: payload.prescribedBy || payload.prescribed_by || null,
     dosePerIntake,
     frequency: frequencyDb,
     medicationSchedule,
     foodFrequency,
     startDate: payload.startDate ? new Date(payload.startDate) : new Date(),
-    endDate: null,
-    ongoing: options.ongoing !== undefined ? options.ongoing : false,
-    totalQuantity: payload.total_quantity !== undefined ? payload.total_quantity : 0,
+    endDate: payload.endDate ? new Date(payload.endDate) : null,
+    ongoing:
+      options.ongoing !== undefined
+        ? options.ongoing
+        : payload.ongoing !== undefined
+          ? payload.ongoing
+          : false,
+    totalQuantity: Number(rawTotalQty) > 0 ? Number(rawTotalQty) : 1,
     unit: unitDb,
     dailyConsumption,
     reminderBeforeMinutes: payload.reminderBeforeMinutes || 5,
-    notes: payload.notes || null,
-    clientMedId: payload.client_med_id,
+    notes: payload.notes || payload.instructions || null,
+    clientMedId: payload.clientMedId || payload.client_med_id,
     softDelete: false,
   };
 }

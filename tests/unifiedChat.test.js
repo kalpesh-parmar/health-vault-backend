@@ -830,6 +830,9 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       ...msg,
     }));
 
+    const aiClient = require("../src/services/ai/clients/aiClient.service");
+    jest.spyOn(aiClient, "detectLanguage").mockResolvedValue("english");
+
     let capturedPrompt = "";
     jest.spyOn(ollamaClient, "chat").mockImplementation(async (messages) => {
       const sysMsg = messages.find((m) => m.role === "system");
@@ -850,6 +853,81 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(capturedPrompt).toContain("BEFORE_FOOD");
     expect(capturedPrompt).toContain("Dr. Dave");
     expect(result.reply).toBe("Metformin should be taken before food as prescribed.");
+
+    jest.restoreAllMocks();
+  });
+
+  test("chatService sendMessage should intercept 'list my medications' and return structured medication list without calling LLM", async () => {
+    const patientRepository = require("../src/repositories/patientRepository");
+    const medicationRepository = require("../src/repositories/medicationRepository");
+    const chatSessionRepository = require("../src/repositories/chatSessionRepository");
+    const { ollamaClient } = require("../src/clients/ollamaClient");
+
+    let ollamaCalled = false;
+    jest.spyOn(ollamaClient, "chat").mockImplementation(async () => {
+      ollamaCalled = true;
+      return "LLM response";
+    });
+
+    jest.spyOn(patientRepository, "findById").mockResolvedValue({
+      id: "user-med-123",
+      firstName: "Test",
+      lastName: "User",
+      preferredLanguage: "english",
+    });
+
+    jest.spyOn(medicationRepository, "findAll").mockResolvedValue([
+      {
+        id: "med-1",
+        medicationName: "Metformin",
+        medicationType: "TABLET",
+        dosePerIntake: 500,
+        unit: "mg",
+        frequency: "twice daily",
+        prescribedBy: "Dr. Smith",
+      },
+      {
+        id: "med-2",
+        medicationName: "Lisinopril",
+        medicationType: "TABLET",
+        dosePerIntake: 10,
+        unit: "mg",
+        frequency: "once daily",
+        prescribedBy: "Dr. Jones",
+      },
+    ]);
+
+    jest
+      .spyOn(chatSessionRepository, "listSessions")
+      .mockResolvedValue({ items: [{ id: "session-med-123" }] });
+    jest
+      .spyOn(chatSessionRepository, "findSessionById")
+      .mockResolvedValue({ id: "session-med-123" });
+    jest.spyOn(chatSessionRepository, "listMessages").mockResolvedValue({ items: [] });
+    jest.spyOn(chatSessionRepository, "appendMessage").mockImplementation(async (msg) => ({
+      id: "msg-med-1",
+      ...msg,
+    }));
+
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    const result = await chatService.sendMessage({
+      userId: "user-med-123",
+      question: "list my medications",
+      sessionId: "session-med-123",
+      limit: 1,
+    });
+
+    expect(ollamaCalled).toBe(false);
+    expect(result.mode).toBe("STRUCTURED_LIST");
+    expect(result.reply).toBeDefined();
+    expect(typeof result.reply).toBe("object");
+    expect(result.reply.items).toHaveLength(1);
+    expect(result.reply.items[0].name).toBe("Metformin");
+    expect(result.reply.pagination).toBeDefined();
+    expect(result.reply.pagination.totalRecords).toBe(2);
+    expect(result.reply.pagination.totalPages).toBe(2);
+    expect(result.reply.pagination.pageNumber).toBe(1);
 
     jest.restoreAllMocks();
   });
@@ -1262,7 +1340,15 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         },
       };
 
-      const res = await onboardingService.chat("male", [], state, "p-gender-test");
+      let res = await onboardingService.chat("male", [], state, "p-gender-test");
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+      res = await onboardingService.chat(
+        JSON.stringify({ source: "MANUAL" }),
+        [],
+        res.state,
+        "p-gender-test",
+      );
 
       // 1. User remains on onboarding chat screen, next question is ASK_BLOOD_GROUP
       expect(res.action).toBe("ASK_BLOOD_GROUP");
@@ -1333,7 +1419,14 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           },
         };
 
-        const res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        let res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+        res = await onboardingService.chat(
+          JSON.stringify({ source: "MANUAL" }),
+          [],
+          res.state,
+          `user-${lang}`,
+        );
         expect(res.canSkip).toBe(true);
         expect(res.completionMessage).toBe(expectedMsg);
         expect(res.state.completionMessageSent).toBe(true);

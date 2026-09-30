@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Any
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AI_SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -26,18 +26,24 @@ class Settings(BaseSettings):
     app_name: str = "Health Vault Unified AI Service"
     environment: str = Field(default="development", alias="NODE_ENV")
     log_level: str = "INFO"
-    cors_origins: list[str] = Field(default=["*"], alias="CORS_ORIGINS")
+    cors_origins: list[str] | str = Field(default=["*"], alias="CORS_ORIGINS")
 
-    @model_validator(mode="before")
+    @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            val = data.get("CORS_ORIGINS") or data.get("cors_origins")
-            if isinstance(val, str):
-                parsed = [origin.strip() for origin in val.split(",") if origin.strip()]
-                data["CORS_ORIGINS"] = parsed
-                data["cors_origins"] = parsed
-        return data
+    def parse_cors_origins(cls, val: Any) -> list[str]:
+        if isinstance(val, str):
+            if val.startswith("[") and val.endswith("]"):
+                try:
+                    import json
+                    parsed = json.loads(val)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except Exception:
+                    pass
+            return [origin.strip() for origin in val.split(",") if origin.strip()]
+        if isinstance(val, list):
+            return [str(item).strip() for item in val if str(item).strip()]
+        return ["*"]
 
     database_url: str = Field(alias="DATABASE_URL")
 

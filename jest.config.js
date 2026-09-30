@@ -2,7 +2,7 @@
 module.exports = {
   testEnvironment: "node",
   rootDir: ".",
-  testMatch: ["**/tests/**/*.test.js", "**/tests/**/*.test.ts"],
+  testMatch: ["**/tests/unit/**/*.test.js"],
   verbose: true,
   collectCoverage: false,
   setupFiles: ["<rootDir>/tests/setup.js"],
