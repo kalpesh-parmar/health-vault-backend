@@ -6,6 +6,7 @@ const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
 const { normalizeMedicine } = require("./medicineNormalize.helper");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -87,6 +88,8 @@ function buildUnifiedResponse({
   explainer = null,
   loginSummary = null,
   documentSummary = null,
+  loginProvider = null,
+  sourceComparison = null,
 }) {
   return {
     mode,
@@ -98,6 +101,8 @@ function buildUnifiedResponse({
     explainer,
     loginSummary,
     documentSummary,
+    loginProvider,
+    sourceComparison,
     sessionId,
     onboardingState,
     state: onboardingState,
@@ -702,11 +707,16 @@ async function executeAddDocumentAction({
   let activeSessionId = sessionId;
   if (!activeSessionId && userId) {
     try {
-      const newSession = await chatService.createSession({
-        userId,
-        title: docResult?.document?.fileName || "Medical Document",
-      });
-      activeSessionId = newSession?.id || null;
+      if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+        const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+        activeSessionId = canonical?.id || null;
+      } else if (chatService && typeof chatService.createSession === "function") {
+        const newSession = await chatService.createSession({
+          userId,
+          title: "Health Assistant",
+        });
+        activeSessionId = newSession?.id || null;
+      }
     } catch (sErr) {
       console.warn("[executeAddDocumentAction] Failed to initialize session:", sErr.message);
     }
@@ -734,7 +744,6 @@ async function executeAddDocumentAction({
       (Array.isArray(docResult?.document) ? docResult.document[0]?.id : null);
     if (createdDocId) {
       try {
-        const userOnboardingRepository = require("../repositories/userOnboardingRepository");
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
         if (onboardingRecord) {
           const updatedData = {

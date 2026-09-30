@@ -411,8 +411,18 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       };
       dbStates["user-103"] = state;
 
-      state.currentStep = "ASK_BLOOD_GROUP";
-      let res = await onboardingService.chat("A+", [], state, "user-103");
+      state.currentStep = "RESOLVE_PROFILE_SOURCE";
+      let res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        state,
+        "user-103",
+      );
+      state = res.state;
+      expect(state.profileConfirmed).toBe(true);
+      expect(res.action).toBe("ASK_BLOOD_GROUP");
+
+      res = await onboardingService.chat("A+", [], state, "user-103");
       state = res.state;
       expect(res.action).toBe("ASK_ALLERGIES");
 
@@ -501,15 +511,17 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       res = await onboardingService.chat("male", [], state, "user-104");
       state = res.state;
       expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(res.mode).toBe("CONFIRM");
 
-      // Confirm profile details
+      // Profile Confirmation Card
       res = await onboardingService.chat(
-        JSON.stringify({ source: "MANUAL" }),
+        JSON.stringify({ confirmed: true }),
         [],
         state,
         "user-104",
       );
       state = res.state;
+      expect(state.profileConfirmed).toBe(true);
       expect(res.action).toBe("ASK_BLOOD_GROUP");
 
       // Optional Q1: Blood Group
@@ -623,6 +635,282 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       let res2 = await onboardingService.chat("GO_TO_DASHBOARD", [], state2, "user-105");
       expect(res2.state.isOnboardingCompleted).toBe(true);
       expect(res2.state.currentStep).toBe("COMPLETE");
+    });
+
+    test("Selecting 'Go to Dashboard' persists user response and does not append redundant assistant message", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: true,
+        medicationFlowDone: false,
+        medicinesConfirmed: false,
+        currentStep: "MEDICINE_OPTIONS",
+        chatSessionId: "session-1",
+        completionMessageSent: true,
+      };
+      dbStates["user-105-dash"] = state;
+
+      const appendSpy = jest.spyOn(chatService, "appendChatMessage");
+      appendSpy.mockClear();
+
+      let res = await onboardingService.chat(
+        "DASHBOARD",
+        [],
+        state,
+        "user-105-dash",
+        "session-1",
+        "Go to Dashboard",
+      );
+
+      expect(res.state.isOnboardingCompleted).toBe(true);
+      expect(res.state.currentStep).toBe("COMPLETE");
+
+      // Verify user message was appended with 'Go to Dashboard'
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(appendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-1",
+          userId: "user-105-dash",
+          role: "user",
+          content: "Go to Dashboard",
+          metadata: expect.objectContaining({
+            rawValue: "DASHBOARD",
+          }),
+        }),
+      );
+
+      // Verify assistant message was NOT appended
+      const assistantCalls = appendSpy.mock.calls.filter((call) => call[0].role === "assistant");
+      expect(assistantCalls.length).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // FLOW: HYBRID ONBOARDING ALLERGY QUESTION UX
+  // =========================================================================
+  describe("Flow: Hybrid Onboarding Allergy Question UX", () => {
+    const baseValidProfileData = {
+      firstName: "John",
+      lastName: "Doe",
+      dateOfBirth: "1990-01-01",
+      gender: "male",
+      bloodGroup: "O+",
+    };
+
+    test("ASK_ALLERGIES step returns exactly 2 options (Yes, No) and prompt", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: false,
+        existingUserData: { ...baseValidProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-allergy-1"] = state;
+
+      const res = await onboardingService.chat("hello", [], state, "user-allergy-1");
+      expect(res.action).toBe("ASK_ALLERGIES");
+      expect(res.message).toBe("Do you have any known allergies?");
+      expect(Array.isArray(res.options)).toBe(true);
+      expect(res.options.length).toBe(2);
+
+      const optionValues = res.options.map((o) => o.value);
+      expect(optionValues).toEqual(["YES", "NO"]);
+    });
+
+    test("Choice 1: User selects NO at ASK_ALLERGIES -> persists empty array, marks skipped, advances", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: false,
+        existingUserData: { ...baseValidProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-allergy-2"] = state;
+
+      const res = await onboardingService.chat("NO", [], state, "user-allergy-2");
+      expect(res.state.allergiesSkipped).toBe(true);
+      expect(res.state.existingUserData.allergies).toEqual([]);
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+    });
+
+    test("Choice 2: User selects NOT_SURE at ASK_ALLERGIES -> persists empty array, marks skipped, advances", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: false,
+        existingUserData: { ...baseValidProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-allergy-3"] = state;
+
+      const res = await onboardingService.chat("NOT_SURE", [], state, "user-allergy-3");
+      expect(res.state.allergiesSkipped).toBe(true);
+      expect(res.state.existingUserData.allergies).toEqual([]);
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+    });
+
+    test("Choice 3: User submits multiple allergies as JSON payload -> persists array, marks skipped, advances", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: false,
+        existingUserData: { ...baseValidProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-allergy-4"] = state;
+
+      const payload = JSON.stringify({
+        action: "ASK_ALLERGIES",
+        allergies: ["Peanuts", "Dust", "Penicillin"],
+      });
+      const res = await onboardingService.chat(payload, [], state, "user-allergy-4");
+      expect(res.state.allergiesSkipped).toBe(true);
+      expect(res.state.existingUserData.allergies).toEqual(["Peanuts", "Dust", "Penicillin"]);
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+    });
+
+    test("Backward Compatibility: Legacy comma-separated text -> persists parsed array", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: true,
+        allergiesSkipped: false,
+        existingUserData: { ...baseValidProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-allergy-5"] = state;
+
+      const res = await onboardingService.chat("Peanuts, Pollen", [], state, "user-allergy-5");
+      expect(res.state.allergiesSkipped).toBe(true);
+      expect(res.state.existingUserData.allergies).toEqual(["Peanuts", "Pollen"]);
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+    });
+  });
+
+  // =========================================================================
+  // FLOW: BLOOD GROUP -> ALLERGY STATE TRANSITION & ISOLATION
+  // =========================================================================
+  describe("Flow: Blood Group -> Allergy State Transition & Isolation", () => {
+    const baseProfileData = {
+      firstName: "Kalpesh",
+      lastName: "Parmar",
+      dateOfBirth: "1992-05-15",
+      gender: "male",
+    };
+
+    test("Answering Blood Group 'B+' advances strictly to ASK_ALLERGIES with clean allergies and Yes/No chips", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: false,
+        allergiesSkipped: false,
+        existingUserData: { ...baseProfileData },
+        currentStep: "ASK_BLOOD_GROUP",
+      };
+      dbStates["user-bg-iso-1"] = state;
+
+      const res = await onboardingService.chat("B+", [], state, "user-bg-iso-1");
+      expect(res.action).toBe("ASK_ALLERGIES");
+      expect(res.message).toBe("Do you have any known allergies?");
+      expect(res.options.map((o) => o.value)).toEqual(["YES", "NO"]);
+      expect(res.state.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.state.existingUserData.bloodGroup).toBe("B+");
+      expect(res.state.existingUserData.allergies).toBeUndefined();
+      expect(res.state.allergiesSkipped).toBe(false);
+    });
+
+    test("Selecting 'YES' at ASK_ALLERGIES does NOT save 'YES' as an allergy and remains on ASK_ALLERGIES", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: false,
+        allergiesSkipped: false,
+        existingUserData: { ...baseProfileData, bloodGroup: "B+" },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-bg-iso-2"] = state;
+
+      const res = await onboardingService.chat("YES", [], state, "user-bg-iso-2");
+      expect(res.action).toBe("ASK_ALLERGIES");
+      expect(res.state.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.state.existingUserData.bloodGroup).toBe("B+");
+      expect(res.state.existingUserData.allergies).toBeUndefined();
+      expect(res.state.allergiesSkipped).toBe(false);
+    });
+
+    test("Submitting allergy payload after YES advances to MEDICINE_OPTIONS with complete field isolation", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: false,
+        allergiesSkipped: false,
+        existingUserData: { ...baseProfileData, bloodGroup: "B+" },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-bg-iso-3"] = state;
+
+      const payload = JSON.stringify({
+        action: "ASK_ALLERGIES",
+        allergies: ["Dust", "Pollen"],
+      });
+      const res = await onboardingService.chat(payload, [], state, "user-bg-iso-3");
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.state.existingUserData.bloodGroup).toBe("B+");
+      expect(res.state.existingUserData.allergies).toEqual(["Dust", "Pollen"]);
+      expect(res.state.allergiesSkipped).toBe(true);
+    });
+
+    test("Selecting 'NO' at ASK_ALLERGIES after 'B+' advances to MEDICINE_OPTIONS with empty allergies array", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: false,
+        allergiesSkipped: false,
+        existingUserData: { ...baseProfileData, bloodGroup: "B+" },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-bg-iso-4"] = state;
+
+      const res = await onboardingService.chat("NO", [], state, "user-bg-iso-4");
+      expect(res.action).toBe("MEDICINE_OPTIONS");
+      expect(res.state.existingUserData.bloodGroup).toBe("B+");
+      expect(res.state.existingUserData.allergies).toEqual([]);
+      expect(res.state.allergiesSkipped).toBe(true);
+    });
+
+    test("Defensive disambiguation: Sending 'B+' when currentStep was ASK_ALLERGIES routes to bloodGroup without corrupting allergies", async () => {
+      let state = {
+        preferredLanguage: "english",
+        flowMode: "MANUAL",
+        profileConfirmed: true,
+        bloodGroupSkipped: false,
+        allergiesSkipped: false,
+        existingUserData: { ...baseProfileData },
+        currentStep: "ASK_ALLERGIES",
+      };
+      dbStates["user-bg-iso-5"] = state;
+
+      const res = await onboardingService.chat("B+", [], state, "user-bg-iso-5");
+      expect(res.action).toBe("ASK_ALLERGIES");
+      expect(res.state.currentStep).toBe("ASK_ALLERGIES");
+      expect(res.state.existingUserData.bloodGroup).toBe("B+");
+      expect(res.state.existingUserData.allergies).toBeUndefined();
+      expect(res.state.allergiesSkipped).toBe(false);
     });
   });
 });

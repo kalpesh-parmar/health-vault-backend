@@ -2,7 +2,7 @@ const { errorConstants } = require("../constants/errorConstants");
 const { NotFoundException } = require("../exceptions/appError");
 const medicationRepository = require("../repositories/medicationRepository");
 const patientRepository = require("../repositories/patientRepository");
-const medicationReminderService = require("./medicationReminder.service");
+// const medicationReminderService = require("./medicationReminder.service");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const {
@@ -15,13 +15,14 @@ const {
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
+const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const refillCountRepository = require("../repositories/refillRepository");
-const { calculateRemainingQuantity } = require("../utils/remainingQuantityCalculation");
 const {
   normalizeMedicine,
   normalizeCreateMedicationInput,
 } = require("../helpers/medicineNormalize.helper");
+const medicationReminderService = require("./medicationReminder.service");
 const {
   findMedicationDuplicates,
   mapOnboardingMedicationToDb,
@@ -476,21 +477,172 @@ class MedicationService {
     return await medicationRepository.insert(mappedData);
   }
 
-  // Onboarding Helper: map, validate, and bulk save multiple medications in a transaction
-  async bulkCreate(userId, payloadList = []) {
+  // Canonical Helper: map, validate, and bulk save multiple medications supporting KEEP_NEW, KEEP_EXISTING, REPLACE, and EDIT
+  async bulkCreate(userId, payloadList = [], _options = {}) {
     const patient = await patientRepository.findById(userId);
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
 
-    const mappedList = payloadList.map((payload) => {
-      const defaults = this.applyDefaults(payload.frequency);
-      return mapOnboardingMedicationToDb(payload, patient, userId, defaults, {
-        ongoing: true,
-      });
-    });
+    const created = [];
+    const updated = [];
+    const kept = [];
 
-    return await medicationRepository.bulkInsert(mappedList);
+    for (const rawItem of payloadList) {
+      if (!rawItem) continue;
+
+      let medData =
+        typeof rawItem === "object" && rawItem !== null
+          ? { ...rawItem }
+          : { id: rawItem, selected: true };
+
+      if (
+        medData.selected === false ||
+        medData.resolution === "KEEP_EXISTING" ||
+        medData.resolution === "REMOVE_NEW"
+      ) {
+        kept.push(medData);
+        continue;
+      }
+
+      const normalized = normalizeCreateMedicationInput(medData);
+      const res = normalized.resolution || "KEEP_NEW";
+
+      if (res === "KEEP_EXISTING") {
+        kept.push(medData);
+        continue;
+      }
+
+      if (res === "REPLACE") {
+        const targetId =
+          normalized.replaceMedicationId ||
+          medData.replaceMedicationId ||
+          medData.targetMedicationId ||
+          medData.duplicateInfo?.matchedMedication?.id ||
+          medData.matchedMedicationId;
+
+        if (targetId) {
+          try {
+            await this.deleteMedication(targetId, userId);
+          } catch (delErr) {
+            console.warn(
+              `[MedicationService] Soft-delete warning for replaced med ${targetId}:`,
+              delErr.message,
+            );
+          }
+        }
+
+        try {
+          const med = await this.createMedication(userId, normalized, { skipDuplicateCheck: true });
+          if (med && med.id) {
+            created.push(med);
+            try {
+              await medicationReminderService.createReminder(userId, { medicationId: med.id });
+            } catch (rErr) {
+              console.warn(
+                `[MedicationService] Error creating reminder for replaced med ${med.id}:`,
+                rErr.message,
+              );
+            }
+          }
+        } catch (cErr) {
+          console.error("[MedicationService] Error creating replaced medication:", cErr.message);
+        }
+        continue;
+      }
+
+      if (res === "EDIT") {
+        const targetId =
+          normalized.replaceMedicationId ||
+          medData.replaceMedicationId ||
+          medData.targetMedicationId ||
+          medData.duplicateInfo?.matchedMedication?.id ||
+          medData.matchedMedicationId;
+
+        if (targetId) {
+          try {
+            const upd = await this.updateMedication(targetId, userId, normalized, {
+              skipDuplicateCheck: true,
+            });
+            if (upd && upd.id) {
+              updated.push(upd);
+            }
+          } catch (uErr) {
+            console.warn(
+              `[MedicationService] Error updating medication ${targetId}:`,
+              uErr.message,
+            );
+            // Fallback to insert if target medication update fails
+            try {
+              const med = await this.createMedication(userId, normalized, {
+                skipDuplicateCheck: true,
+              });
+              if (med && med.id) {
+                created.push(med);
+                try {
+                  await medicationReminderService.createReminder(userId, { medicationId: med.id });
+                } catch (rErr) {
+                  console.warn(
+                    `[MedicationService] Error creating reminder for fallback med ${med.id}:`,
+                    rErr.message,
+                  );
+                }
+              }
+            } catch (fbErr) {
+              console.error("[MedicationService] Fallback create failed:", fbErr.message);
+            }
+          }
+        } else {
+          try {
+            const med = await this.createMedication(userId, normalized, {
+              skipDuplicateCheck: true,
+            });
+            if (med && med.id) {
+              created.push(med);
+              try {
+                await medicationReminderService.createReminder(userId, { medicationId: med.id });
+              } catch (rErr) {
+                console.warn(
+                  `[MedicationService] Error creating reminder for med ${med.id}:`,
+                  rErr.message,
+                );
+              }
+            }
+          } catch (cErr) {
+            console.error("[MedicationService] Error creating medication:", cErr.message);
+          }
+        }
+        continue;
+      }
+
+      // Default: KEEP_NEW
+      try {
+        const med = await this.createMedication(userId, normalized, { skipDuplicateCheck: true });
+        if (med && med.id) {
+          created.push(med);
+          try {
+            await medicationReminderService.createReminder(userId, { medicationId: med.id });
+          } catch (rErr) {
+            console.warn(
+              `[MedicationService] Error creating reminder for med ${med.id}:`,
+              rErr.message,
+            );
+          }
+        }
+      } catch (cErr) {
+        console.error("[MedicationService] Error creating new medication:", cErr.message);
+      }
+    }
+
+    const result = [...created];
+    result.created = created;
+    result.updated = updated;
+    result.kept = kept;
+    result.createdCount = created.length;
+    result.updatedCount = updated.length;
+    result.keptCount = kept.length;
+    result.totalProcessed = payloadList.length;
+    return result;
   }
 
   // CHECK DUPLICATE MEDICATION

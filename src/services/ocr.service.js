@@ -13,6 +13,7 @@ const documentRepository = require("../repositories/documentRepository");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const patientRepository = require("../repositories/patientRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const authProviderRepository = require("../repositories/authProviderRepository");
 const {
   onboardingService,
   canSkipOnboarding,
@@ -21,8 +22,9 @@ const {
 const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardingStateMachine");
 const { ocrService } = require("./ai/ocr/ocr.service");
 const uploadFileService = require("./uploadFile.service");
-const { normalizeLanguage, formatDuration } = require("../utils/commonUtils");
-const { normalizeMedicine } = require("../helpers/medicineNormalize.helper");
+const { getLocalizedText } = require("../helpers/onboarding.helper");
+const { normalizeLanguage } = require("../utils/commonUtils");
+const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize.helper");
 const { messageConstants } = require("../constants/messageConstants");
 const { errorConstants } = require("../constants/errorConstants");
 const { inferFileType } = require("../helpers/document.helper");
@@ -37,11 +39,12 @@ const {
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
 const { and, eq, desc } = require("drizzle-orm");
-const medicationRepository = require("../repositories/medicationRepository");
+const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
+const { ToWords } = require("to-words");
 
 function isStepAlreadySatisfied(stepName, state) {
   if (!stepName || !state) return false;
-  if (state.isOnboardingCompleted === true) return true;
+  if (state.isOnboardingCompleted === true && state.medicationFlowDone === true) return true;
   if (stepName === "ASK_BLOOD_GROUP") {
     return (
       state.bloodGroupSkipped === true ||
@@ -52,9 +55,9 @@ function isStepAlreadySatisfied(stepName, state) {
   }
   if (stepName === "ASK_ALLERGIES") {
     return (
+      state.allergiesSkipped === true ||
       (Array.isArray(state.existingUserData?.allergies) &&
-        state.existingUserData.allergies.length > 0) ||
-      state.allergiesSkipped === true
+        state.existingUserData.allergies.length > 0)
     );
   }
   if (
@@ -140,7 +143,7 @@ class V1Service {
 
       const duration = Date.now() - startTime;
       console.log(
-        `[ocrService] [${requestId}] [TIMING] Fast sync upload & validation complete in ${duration}ms for document ${documentRow.id}. Background OCR & summary processing started.`,
+        `[v1Controller] [${requestId}] Exit - async ocrExtract start success. Duration: ${duration}ms`,
       );
 
       return {
@@ -203,19 +206,10 @@ class V1Service {
       structData?.remarks ||
       "";
 
-    const processingTimeMs = structData?.processingTimingsMs?.totalDurationMs;
-    const processingTimeSeconds = processingTimeMs
-      ? Number((processingTimeMs / 1000).toFixed(1))
-      : null;
-    const processingTimeFormatted = processingTimeMs ? formatDuration(processingTimeMs) : null;
-
     return {
       documentId: docRow.id,
       status,
       summary,
-      processingTimeSeconds,
-      processingTimeFormatted,
-      totalTimeTaken: processingTimeFormatted,
       document: {
         id: docRow.id,
         fileName: docRow.fileName,
@@ -267,8 +261,6 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
-        page,
-        limit,
       } = normalizedInput;
 
       // Fetch user profile and existing onboarding state
@@ -277,6 +269,7 @@ class V1Service {
       const dbState = onboardingRecord?.data || {};
       const isOnboardingCompleted =
         patient?.onboardingCompleted ||
+        patient?.isOnboardingCompleted ||
         dbState?.isOnboardingCompleted === true ||
         dbState?.currentStep === "COMPLETE" ||
         dbState?.currentStep === "POST_ONBOARDING" ||
@@ -287,6 +280,20 @@ class V1Service {
       console.log(
         `[ONBOARDING PROFILE LOG] User ID: ${userId} | Patient DB Record: firstName="${patient?.firstName || ""}", lastName="${patient?.lastName || ""}", email="${patient?.email || ""}"`,
       );
+
+      // Resolve canonical session ID for the patient
+      let effectiveSessionId =
+        sessionId || inputState?.chatSessionId || dbState?.chatSessionId || null;
+      if (!effectiveSessionId && userId) {
+        try {
+          if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+            const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+            effectiveSessionId = canonical?.id || null;
+          }
+        } catch (sErr) {
+          console.warn("[UnifiedChat] Failed to get or create canonical session:", sErr.message);
+        }
+      }
 
       // CASE 1: ADD_DOCUMENT ACTION
       if (actionType === "ADD_DOCUMENT") {
@@ -299,7 +306,7 @@ class V1Service {
         return executeAddDocumentAction({
           userId,
           actionData,
-          sessionId,
+          sessionId: effectiveSessionId,
           preferredLanguage: userPrefLang,
           isOnboardingCompleted,
           documentPersistenceService,
@@ -317,14 +324,22 @@ class V1Service {
             )
           : {};
 
+      const isAddingMedicine =
+        actionType === "ADD_MEDICINE" ||
+        actionType === "SAVE_AND_REVIEW" ||
+        cleanedInputState.currentStep === "ADD_MEDICINE" ||
+        cleanedInputState.currentStep === "REVIEW_MEDICINES_LIST";
+
       const authoritativeIsOnboardingCompleted =
         dbState?.isOnboardingCompleted === true || cleanedInputState.isOnboardingCompleted === true;
       const authoritativeHasSkipped =
         dbState?.hasSkipped === true || cleanedInputState.hasSkipped === true;
-      const authoritativeMedicationFlowDone =
-        dbState?.medicationFlowDone === true || cleanedInputState.medicationFlowDone === true;
-      const authoritativeMedicinesConfirmed =
-        dbState?.medicinesConfirmed === true || cleanedInputState.medicinesConfirmed === true;
+      const authoritativeMedicationFlowDone = isAddingMedicine
+        ? false
+        : dbState?.medicationFlowDone === true || cleanedInputState.medicationFlowDone === true;
+      const authoritativeMedicinesConfirmed = isAddingMedicine
+        ? false
+        : dbState?.medicinesConfirmed === true || cleanedInputState.medicinesConfirmed === true;
       const authoritativeProfileConfirmed =
         dbState?.profileConfirmed === true || cleanedInputState.profileConfirmed === true;
       const authoritativeBloodGroupSkipped =
@@ -345,6 +360,12 @@ class V1Service {
         }
       }
 
+      let effectiveMedicinesToAdd =
+        cleanedInputState.medicinesToAdd || dbState?.medicinesToAdd || [];
+      if (isAddingMedicine && Array.isArray(effectiveMedicinesToAdd)) {
+        effectiveMedicinesToAdd = effectiveMedicinesToAdd.filter((m) => !m.isSaved && !m.dbId);
+      }
+
       const effectiveState = {
         ...(dbState || {}),
         ...cleanedInputState,
@@ -356,6 +377,9 @@ class V1Service {
         bloodGroupSkipped: authoritativeBloodGroupSkipped,
         allergiesSkipped: authoritativeAllergiesSkipped,
         completionMessageSent: authoritativeCompletionMessageSent,
+        ...(Array.isArray(effectiveMedicinesToAdd)
+          ? { medicinesToAdd: effectiveMedicinesToAdd }
+          : {}),
         ...(authoritativeCompletionMessageId
           ? { completionMessageId: authoritativeCompletionMessageId }
           : {}),
@@ -420,39 +444,15 @@ class V1Service {
         }
       }
 
-      let isSkipMsg = false;
-      if (message || actionType === "SKIP_MEDICINES") {
-        try {
-          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
-          if (
-            parsedMsg &&
-            (parsedMsg.skipAll === true ||
-              parsedMsg.action === "SKIP" ||
-              parsedMsg.value === "SKIP" ||
-              parsedMsg.actionType === "SKIP_MEDICINES")
-          ) {
-            isSkipMsg = true;
-          }
-        } catch {
-          // Ignore JSON parse error
-        }
-
-        const msgStr = String(message || "")
-          .trim()
-          .toUpperCase();
-        const actStr = String(actionType || "")
-          .trim()
-          .toUpperCase();
-
-        if (
-          actStr === "SKIP_MEDICINES" ||
-          msgStr === "SKIP" ||
-          msgStr === "SKIP_ALL" ||
-          msgStr.includes("SKIP")
-        ) {
-          isSkipMsg = true;
-        }
-      }
+      const hasMedicineActionData = Boolean(
+        actionData &&
+        typeof actionData === "object" &&
+        (actionData.name ||
+          actionData.medicationName ||
+          actionData.medicine ||
+          actionData.dose ||
+          actionData.frequency),
+      );
 
       let currentOnboardingStep = effectiveState?.currentStep || null;
       const hasUnconfirmedMedicines =
@@ -464,37 +464,35 @@ class V1Service {
       if (isAddMedicineMsg) {
         currentOnboardingStep = "ADD_MEDICINE";
         effectiveState.currentStep = "ADD_MEDICINE";
-      } else if (isMedicineSelectionMsg || (!currentOnboardingStep && hasUnconfirmedMedicines)) {
+      } else if (
+        actionType === "SAVE_AND_REVIEW" ||
+        actionType === "REVIEW_MEDICINES_LIST" ||
+        isMedicineSelectionMsg ||
+        (!currentOnboardingStep && hasUnconfirmedMedicines)
+      ) {
         currentOnboardingStep = "REVIEW_MEDICINES_LIST";
         effectiveState.currentStep = "REVIEW_MEDICINES_LIST";
       }
 
-      const isActiveOnboardingStep =
-        (!isOnboardingCompleted ||
-          (isOnboardingCompleted && !effectiveState?.medicationFlowDone)) &&
-        ((Boolean(currentOnboardingStep) &&
-          currentOnboardingStep !== "COMPLETE" &&
-          currentOnboardingStep !== "POST_ONBOARDING" &&
-          effectiveState?.medicationFlowDone !== true) ||
-          isAddMedicineMsg ||
-          hasUnconfirmedMedicines);
-
-      // CASE 2: MEDICINE ACTIONS (ADD_MEDICINE, CONFIRM_MEDICINES, SKIP_MEDICINES, REVIEW_MEDICINES_LIST, SHOW_EXTRACTED_MEDICINES)
-      const hasMedicineActionData =
-        actionData &&
-        typeof actionData === "object" &&
-        (actionData.medicationName || actionData.name || actionData.medicine);
-
       const isMedicineAction =
         actionType === "CONFIRM_MEDICINES" ||
+        actionType === "SAVE_AND_REVIEW" ||
         actionType === "SKIP_MEDICINES" ||
         actionType === "REVIEW_MEDICINES_LIST" ||
         actionType === "SHOW_EXTRACTED_MEDICINES" ||
         isMedicineSelectionMsg ||
         isAddMedicineMsg ||
-        isSkipMsg ||
         hasMedicineActionData ||
         (actionData && Array.isArray(actionData.medicines) && actionData.medicines.length > 0);
+
+      const isActiveOnboardingStep =
+        !isOnboardingCompleted &&
+        ((Boolean(currentOnboardingStep) &&
+          currentOnboardingStep !== "COMPLETE" &&
+          currentOnboardingStep !== "POST_ONBOARDING") ||
+          isMedicineAction ||
+          isAddMedicineMsg ||
+          hasUnconfirmedMedicines);
 
       if (isMedicineAction) {
         console.log(
@@ -503,22 +501,12 @@ class V1Service {
 
         const isSkipAction =
           actionType === "SKIP_MEDICINES" ||
-          isSkipMsg ||
           String(message || "").toUpperCase() === "SKIP" ||
-          (effectiveState?.currentStep === "REVIEW_MEDICINES_LIST" &&
-            String(message || "").toUpperCase() === "SKIP") ||
           actionData?.skipAll === true;
 
         if (isSkipAction && !isActiveOnboardingStep) {
-          const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED_PROMPT;
-          let activeSessionId = sessionId;
-          if (!activeSessionId && isOnboardingCompleted) {
-            const newSession = await chatService.createSession({
-              userId,
-              title: "Medication Chat",
-            });
-            activeSessionId = newSession?.id || null;
-          }
+          const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED;
+          const activeSessionId = effectiveSessionId;
 
           if (activeSessionId) {
             await chatSessionRepository.appendMessage({
@@ -526,7 +514,7 @@ class V1Service {
               userId,
               role: "assistant",
               content: replyText,
-              metadata: { actionType: "SKIP_MEDICINES", status: "SKIPPED" },
+              metadata: { actionType: "SKIP_MEDICINES" },
             });
           }
 
@@ -539,125 +527,223 @@ class V1Service {
         }
 
         if (isAddMedicineMsg && !hasMedicineActionData && !isActiveOnboardingStep) {
-          let activeSessionId = sessionId;
-          if (!activeSessionId && isOnboardingCompleted) {
-            const newSession = await chatService.createSession({
+          let activeSessionId = effectiveSessionId;
+          if (!activeSessionId && userId) {
+            try {
+              if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+                const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+                activeSessionId = canonical?.id || null;
+              }
+            } catch (sErr) {
+              console.warn(
+                "[UnifiedChat] Failed to get canonical session for ADD_MEDICINE:",
+                sErr.message,
+              );
+            }
+          }
+
+          const userPrefLang =
+            patient?.preferredLanguage ||
+            inputState?.preferredLanguage ||
+            dbState?.preferredLanguage ||
+            "english";
+
+          const replyPrompt = await getLocalizedText(
+            "onboarding.addMedicine.messageNew",
+            "Please enter the new medication details:",
+            userPrefLang,
+          );
+
+          if (activeSessionId) {
+            let userContent = displayLabel;
+            if (
+              !userContent ||
+              (typeof userContent === "string" &&
+                (userContent.trim().startsWith("{") || userContent.trim().startsWith("[")))
+            ) {
+              userContent =
+                typeof message === "string" &&
+                !message.trim().startsWith("{") &&
+                message.trim().length > 0
+                  ? message
+                  : await getLocalizedText(
+                      "onboarding.medicineOptions.addMedicines",
+                      "Add Medicines",
+                      userPrefLang,
+                    );
+            }
+
+            // Turn 1: User "Add Medicines"
+            await chatSessionRepository.appendMessage({
+              sessionId: activeSessionId,
               userId,
-              title: "Medication Chat",
+              role: "user",
+              content: userContent,
+              metadata: {
+                action: "ADD_MEDICINE",
+                actionType: "ADD_MEDICINE",
+                rawValue: message || actionType,
+              },
             });
-            activeSessionId = newSession?.id || null;
-          }
 
-          let existingMeds =
-            Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
-              ? actionData.medicines
-              : Array.isArray(actionData?.medicinesToAdd) && actionData.medicinesToAdd.length > 0
-                ? actionData.medicinesToAdd
-                : Array.isArray(body?.medicines) && body.medicines.length > 0
-                  ? body.medicines
-                  : Array.isArray(body?.medicinesToAdd) && body.medicinesToAdd.length > 0
-                    ? body.medicinesToAdd
-                    : null;
-
-          if (!existingMeds && typeof message === "string" && message.trim().startsWith("{")) {
-            try {
-              const parsedMsg = JSON.parse(message);
-              if (Array.isArray(parsedMsg?.medicines) && parsedMsg.medicines.length > 0) {
-                existingMeds = parsedMsg.medicines;
-              } else if (
-                Array.isArray(parsedMsg?.medicinesToAdd) &&
-                parsedMsg.medicinesToAdd.length > 0
-              ) {
-                existingMeds = parsedMsg.medicinesToAdd;
-              }
-            } catch {
-              // Ignore JSON parse error
-            }
-          }
-
-          if (!existingMeds && activeSessionId) {
-            try {
-              const messages = await chatSessionRepository.listMessages({
-                sessionId: activeSessionId,
-                userId,
-                limit: 10,
-              });
-              if (Array.isArray(messages)) {
-                const msgWithMeds = messages.find(
-                  (msg) =>
-                    msg?.metadata &&
-                    Array.isArray(msg.metadata.medicines) &&
-                    msg.metadata.medicines.length > 0,
-                );
-                if (msgWithMeds) {
-                  existingMeds = msgWithMeds.metadata.medicines;
-                }
-              }
-            } catch (chatMsgErr) {
-              console.warn(
-                "[UnifiedChat] Chat messages lookup for medicines warning:",
-                chatMsgErr.message,
-              );
-            }
-          }
-
-          if (!existingMeds && userId) {
-            try {
-              const [latestDoc] = await db
-                .select()
-                .from(document)
-                .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
-                .orderBy(desc(document.createdAt))
-                .limit(1);
-
-              if (latestDoc && latestDoc.structuredExtractedData) {
-                const struct = latestDoc.structuredExtractedData;
-                const extracted = struct.medications || struct.structuredData?.medications || [];
-                if (Array.isArray(extracted) && extracted.length > 0) {
-                  existingMeds = extracted.map((m, idx) => ({
-                    id: m.id || m.client_med_id || `doc_med_${idx}`,
-                    client_med_id: m.client_med_id || m.id || `doc_med_${idx}`,
-                    name: m.name || m.medicationName || "Medical Document Medicine",
-                    medicationName: m.name || m.medicationName || "Medical Document Medicine",
-                    type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-                    medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-                    dose: m.dose || { count: m.dosage ? parseFloat(m.dosage) || 1 : 1 },
-                    dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
-                    frequency: m.frequency || "ONCE",
-                    duration: m.duration || null,
-                    notes: m.notes || m.instructions || m.timing || "",
-                    prescribed_by: m.prescribed_by || m.prescribedBy || "",
-                    refill_alert: Boolean(m.refill_alert || m.refillAlert),
-                    total_quantity: m.total_quantity || m.totalQuantity || 30,
-                    selected: m.selected !== false,
-                    source: m.source || "OCR",
-                    medicationSchedule: m.medicationSchedule || {
-                      times: ["08:00"],
-                      reminderTimes: ["08:00"],
-                      dose: { count: 1 },
-                      source: "OCR",
-                      refillAlert: false,
-                      foodContext: "AFTER_FOOD",
-                    },
-                  }));
-                }
-              }
-            } catch (docErr) {
-              console.warn(
-                "[UnifiedChat] Document lookup for existing meds warning:",
-                docErr.message,
-              );
-            }
+            // Turn 2: Assistant ADD_MEDICINE prompt
+            await chatSessionRepository.appendMessage({
+              sessionId: activeSessionId,
+              userId,
+              role: "assistant",
+              content: replyPrompt,
+              metadata: {
+                mode: "ACTION",
+                action: "ADD_MEDICINE",
+                actionType: "ADD_MEDICINE",
+                options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
+              },
+            });
           }
 
           return buildUnifiedResponse({
             mode: "ACTION",
             actionType: "ADD_MEDICINE",
-            reply: "Please enter the medication details:",
+            reply: replyPrompt,
             sessionId: activeSessionId,
-            medicines: existingMeds || [],
             options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
           });
+        }
+
+        if (actionType === "SAVE_AND_REVIEW") {
+          let activeSessionId = effectiveSessionId;
+          if (!activeSessionId && userId) {
+            try {
+              if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+                const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+                activeSessionId = canonical?.id || null;
+              }
+            } catch (sErr) {
+              console.warn(
+                "[UnifiedChat] Failed to get canonical session for SAVE_AND_REVIEW:",
+                sErr.message,
+              );
+            }
+          }
+
+          const reviewMeds =
+            Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
+              ? actionData.medicines
+              : actionData?.medicine
+                ? [actionData.medicine]
+                : effectiveState?.medicinesToAdd || [];
+
+          if (!isActiveOnboardingStep) {
+            const userLang =
+              preferredLanguage ||
+              patient?.preferredLanguage ||
+              effectiveState?.preferredLanguage ||
+              "english";
+            const reviewPrompt = await getLocalizedText(
+              "onboarding.reviewMedicinesList.reviewPrompt",
+              "Please review your medicines:",
+              userLang,
+            );
+
+            if (activeSessionId) {
+              let userSaveContent = displayLabel;
+              if (
+                !userSaveContent ||
+                (typeof userSaveContent === "string" &&
+                  (userSaveContent.trim().startsWith("{") ||
+                    userSaveContent.trim().startsWith("[")))
+              ) {
+                userSaveContent =
+                  typeof message === "string" &&
+                  !message.trim().startsWith("{") &&
+                  message.trim().length > 0
+                    ? message
+                    : await getLocalizedText(
+                        "onboarding.addMedicine.saveMedicines",
+                        "Save Medicines",
+                        userLang,
+                      );
+              }
+
+              // Turn 3: User "Save Medicines"
+              await chatSessionRepository.appendMessage({
+                sessionId: activeSessionId,
+                userId,
+                role: "user",
+                content: userSaveContent,
+                metadata: {
+                  action: "SAVE_AND_REVIEW",
+                  actionType: "SAVE_AND_REVIEW",
+                  rawValue: actionData || { action: "SAVE_AND_REVIEW", medicines: reviewMeds },
+                },
+              });
+
+              // Turn 4: Assistant REVIEW_MEDICINES_LIST
+              await chatSessionRepository.appendMessage({
+                sessionId: activeSessionId,
+                userId,
+                role: "assistant",
+                content: reviewPrompt,
+                metadata: {
+                  mode: "ACTION",
+                  actionType: "REVIEW_MEDICINES_LIST",
+                  action: "REVIEW_MEDICINES_LIST",
+                  medicines: reviewMeds,
+                },
+              });
+            }
+
+            return buildUnifiedResponse({
+              mode: "ACTION",
+              actionType: "REVIEW_MEDICINES_LIST",
+              reply: reviewPrompt,
+              medicines: reviewMeds,
+              sessionId: activeSessionId,
+              onboardingState: {
+                ...effectiveState,
+                currentStep: "REVIEW_MEDICINES_LIST",
+                medicinesToAdd: reviewMeds,
+                isOnboardingCompleted: true,
+              },
+            });
+          }
+
+          // Pre-onboarding: pure in-memory state transition to REVIEW_MEDICINES_LIST without DB writes
+          const stateToUpdate = { ...effectiveState };
+          stateToUpdate.currentStep = "REVIEW_MEDICINES_LIST";
+          stateToUpdate.medicinesConfirmed = false;
+          stateToUpdate.medicinesSavedToDb = false;
+          stateToUpdate.medicationFlowDone = false;
+          stateToUpdate.medicinesToAdd = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+
+          const onboardingResult = await onboardingService.chat(
+            message || actionData || "",
+            history,
+            stateToUpdate,
+            userId,
+            null,
+            displayLabel,
+          );
+
+          const responsePayload = buildUnifiedResponse({
+            mode: "ONBOARDING",
+            actionType: onboardingResult?.action || "REVIEW_MEDICINES_LIST",
+            reply: onboardingResult?.message || onboardingResult?.reply || "",
+            onboardingState: onboardingResult?.state || stateToUpdate,
+            options: onboardingResult?.options || [],
+            medicines: onboardingResult?.medicines || onboardingResult?.state?.medicinesToAdd || [],
+            sessionId: effectiveSessionId,
+          });
+          if (onboardingResult?.completionMessage) {
+            responsePayload.completionMessage = onboardingResult.completionMessage;
+            responsePayload.completionMessageId = onboardingResult.completionMessageId;
+            responsePayload.completionAction = onboardingResult.completionAction;
+          }
+          responsePayload.canSkip =
+            onboardingResult?.canSkip !== undefined
+              ? onboardingResult.canSkip
+              : canSkipOnboarding(onboardingResult?.state || stateToUpdate);
+          return responsePayload;
         }
 
         let createdMeds = [];
@@ -667,6 +753,30 @@ class V1Service {
             : Array.isArray(body?.medicines) && body.medicines.length > 0
               ? body.medicines
               : null;
+
+        // Parse message if sent as structured object
+        if (!medsToProcess && typeof message === "object" && message !== null) {
+          if (Array.isArray(message.medicines) && message.medicines.length > 0) {
+            medsToProcess = message.medicines;
+          } else if (message.medicine && typeof message.medicine === "object") {
+            medsToProcess = [message.medicine];
+          } else if (Array.isArray(message.selected) && message.selected.length > 0) {
+            medsToProcess = message.selected.map((sItem) =>
+              typeof sItem === "object" ? sItem : { id: sItem, selected: true },
+            );
+          }
+        }
+
+        // Check actionData.selected
+        if (
+          !medsToProcess &&
+          Array.isArray(actionData?.selected) &&
+          actionData.selected.length > 0
+        ) {
+          medsToProcess = actionData.selected.map((sItem) =>
+            typeof sItem === "object" ? sItem : { id: sItem, selected: true },
+          );
+        }
 
         // Parse message JSON string if payload sent in message body
         if (!medsToProcess && typeof message === "string" && message.trim().startsWith("{")) {
@@ -686,14 +796,13 @@ class V1Service {
           }
         }
 
-        // Post-onboarding fallback: if reviewing or confirming post-onboarding document medications and medsToProcess is still empty
+        // Post-onboarding fallback: if confirming post-onboarding document medications and medsToProcess is still empty
         if (
           !isActiveOnboardingStep &&
           (!medsToProcess || medsToProcess.length === 0) &&
           userId &&
           (actionType === "CONFIRM_MEDICINES" ||
             actionType === "REVIEW_MEDICINES_LIST" ||
-            actionType === "SHOW_EXTRACTED_MEDICINES" ||
             String(message || "").toUpperCase() === "CONFIRM" ||
             String(message || "").toUpperCase() === "CONFIRM_SELECTED")
         ) {
@@ -709,36 +818,18 @@ class V1Service {
               const struct = latestDoc.structuredExtractedData;
               const extracted = struct.medications || struct.structuredData?.medications || [];
               if (Array.isArray(extracted) && extracted.length > 0) {
-                const todayStr = new Date().toISOString().slice(0, 10);
-                medsToProcess = extracted.map((m, idx) => {
-                  const { row, onboardingMed } = normalizeMedicine(m, idx, "P-TEMP", {
-                    startDate: todayStr,
-                  });
-                  return {
-                    id: m.id || m.client_med_id || onboardingMed.id,
-                    client_med_id: m.client_med_id || onboardingMed.client_med_id,
-                    name: onboardingMed.name,
-                    medicationName: onboardingMed.name,
-                    medicationType: onboardingMed.type,
-                    type: onboardingMed.type,
-                    dosePerIntake: row.dosePerIntake || 1,
-                    frequency: onboardingMed.frequency,
-                    duration: onboardingMed.duration,
-                    instructions: m.instructions || m.timing || row.notes || null,
-                    notes: row.notes || null,
-                    startDate: row.startDate,
-                    endDate: row.endDate,
-                    foodFrequency: row.foodFrequency,
-                    medicationSchedule: onboardingMed.medicationSchedule,
-                    totalQuantity: row.totalQuantity,
-                    unit: row.unit,
-                    dailyConsumption: row.dailyConsumption,
-                    prescribedBy: row.prescribedBy || null,
-                    refillAlert: row.refillAlert || false,
-                    selected: true,
-                    isSaved: false,
-                  };
-                });
+                medsToProcess = extracted.map((m, idx) => ({
+                  id: m.id || m.client_med_id || `doc_med_${idx}`,
+                  name: m.name || m.medicationName || "Medical Document Medicine",
+                  medicationName: m.name || m.medicationName || "Medical Document Medicine",
+                  medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                  type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
+                  dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
+                  frequency: m.frequency || "ONCE",
+                  duration: m.duration || null,
+                  instructions: m.instructions || m.timing || null,
+                  selected: true,
+                }));
               }
             }
           } catch (docLookupErr) {
@@ -749,299 +840,63 @@ class V1Service {
           }
         }
 
-        // Handle REVIEW_MEDICINES_LIST / SHOW_EXTRACTED_MEDICINES post-onboarding: duplicate check & return review list
-        if (
-          !isActiveOnboardingStep &&
-          (actionType === "REVIEW_MEDICINES_LIST" || actionType === "SHOW_EXTRACTED_MEDICINES") &&
-          Array.isArray(medsToProcess) &&
-          medsToProcess.length > 0
-        ) {
-          const checkedMeds = await medicationService.checkDuplicateMedicationsBatch(
-            userId,
-            medsToProcess,
-          );
-          const replyText = `We found ${checkedMeds.length} medication${checkedMeds.length === 1 ? "" : "s"} for your review.`;
+        const isConfirmAction =
+          actionType === "CONFIRM_MEDICINES" ||
+          String(message || "").toUpperCase() === "CONFIRM" ||
+          String(message || "").toUpperCase() === "CONFIRM_SELECTED";
 
-          let activeSessionId = sessionId;
-          if (!activeSessionId && isOnboardingCompleted) {
-            const newSession = await chatService.createSession({
-              userId,
-              title: "Medication Chat",
-            });
-            activeSessionId = newSession?.id || null;
-          }
-
-          if (activeSessionId) {
-            await chatSessionRepository.appendMessage({
-              sessionId: activeSessionId,
-              userId,
-              role: "assistant",
-              content: replyText,
-              metadata: {
-                mode: "ACTION",
-                actionType: "REVIEW_MEDICINES_LIST",
-                medicines: checkedMeds,
-              },
-            });
-          }
-
-          return buildUnifiedResponse({
-            mode: "ACTION",
-            actionType: "REVIEW_MEDICINES_LIST",
-            reply: replyText,
-            sessionId: activeSessionId,
-            medicines: checkedMeds,
-            options: [
-              { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
-              { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
-              { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
-            ],
-          });
-        }
-
-        if (!isActiveOnboardingStep && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
-          for (const rawMedData of medsToProcess) {
+        if (isConfirmAction && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
+          // Pre-resolve document medications if missing medicationName
+          for (let i = 0; i < medsToProcess.length; i++) {
             let medData =
-              typeof rawMedData === "object" && rawMedData !== null
-                ? { ...rawMedData }
-                : { id: rawMedData, selected: true };
-
-            if (medData.selected === false || medData.resolution === "REMOVE_NEW") {
-              continue;
-            }
-
-            if (medData.resolution === "KEEP_EXISTING") {
-              const matchedId =
-                medData.replaceMedicationId ||
-                medData.targetMedicationId ||
-                medData.duplicateInfo?.matchedMedication?.id ||
-                medData.matchedMedicationId;
-              if (matchedId) {
-                try {
-                  const existingMed = await medicationRepository.findById(matchedId);
-                  if (existingMed) {
-                    createdMeds.push(existingMed);
-                  }
-                } catch (kErr) {
-                  console.warn("[UnifiedChat] KEEP_EXISTING lookup warning:", kErr.message);
-                }
-              }
-              continue;
-            }
-
-            const targetId =
-              medData.replaceMedicationId ||
-              medData.targetMedicationId ||
-              medData.duplicateInfo?.matchedMedication?.id ||
-              medData.matchedMedicationId;
-
-            if (medData.resolution === "REPLACE" && targetId) {
-              try {
-                await medicationService.deleteMedication(targetId, userId);
-              } catch (delErr) {
-                console.warn(
-                  `[UnifiedChat] Soft-delete warning for replaced med ${targetId}:`,
-                  delErr.message,
-                );
-              }
-            }
+              typeof medsToProcess[i] === "object" && medsToProcess[i] !== null
+                ? { ...medsToProcess[i] }
+                : { id: medsToProcess[i], selected: true };
 
             if (!medData.name && !medData.medicationName && userId) {
               try {
-                const matchId =
-                  typeof rawMedData === "string" ? rawMedData : medData.id || medData.client_med_id;
+                const [latestDoc] = await db
+                  .select()
+                  .from(document)
+                  .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
+                  .orderBy(desc(document.createdAt))
+                  .limit(1);
 
-                const parseMedicineMatchId = (matchIdStr) => {
-                  if (!matchIdStr || typeof matchIdStr !== "string") return null;
-                  const compoundRegex =
-                    /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-med-(\d+)-(.*)$/i;
-                  const match = matchIdStr.trim().match(compoundRegex);
-                  if (match) {
-                    const rawName = match[3]
-                      .replace(/([a-z])([A-Z])/g, "$1 $2")
-                      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-                      .trim();
-                    return {
-                      documentId: match[1],
-                      index: parseInt(match[2], 10),
-                      name: rawName,
+                if (latestDoc && latestDoc.structuredExtractedData) {
+                  const struct = latestDoc.structuredExtractedData;
+                  const docMeds = struct.medications || struct.structuredData?.medications || [];
+                  const matchId =
+                    typeof medsToProcess[i] === "string"
+                      ? medsToProcess[i]
+                      : medData.id || medData.client_med_id;
+                  const foundInDoc = docMeds.find(
+                    (m, idx) =>
+                      m.id === matchId ||
+                      m.client_med_id === matchId ||
+                      `extracted_med_${idx + 1}` === matchId ||
+                      `doc_med_${idx}` === matchId,
+                  );
+
+                  if (foundInDoc) {
+                    medData = {
+                      ...foundInDoc,
+                      ...medData,
+                      name:
+                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
+                      medicationName:
+                        foundInDoc.name || foundInDoc.medicationName || "Medical Document Medicine",
+                      medicationType: String(
+                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
+                      ).toUpperCase(),
+                      type: String(
+                        foundInDoc.type || foundInDoc.medicationType || "TABLET",
+                      ).toUpperCase(),
+                      dosePerIntake: foundInDoc.dosage ? parseFloat(foundInDoc.dosage) || 1 : 1,
+                      frequency: foundInDoc.frequency || "ONCE",
+                      duration: foundInDoc.duration || null,
+                      instructions: foundInDoc.instructions || foundInDoc.timing || null,
                     };
                   }
-                  return null;
-                };
-
-                const parsedCompound = parseMedicineMatchId(matchId);
-
-                let foundInDoc = null;
-                const candidateSources = [
-                  effectiveState?.foundMedicines,
-                  effectiveState?.medicinesToAdd,
-                  effectiveState?.medicines,
-                  actionData?.foundMedicines,
-                  actionData?.medicinesList,
-                  body?.state?.foundMedicines,
-                  body?.state?.medicinesToAdd,
-                ].filter((arr) => Array.isArray(arr) && arr.length > 0);
-
-                const findMedicineByMatchId = (medsArray, matchIdVal) => {
-                  if (!Array.isArray(medsArray) || medsArray.length === 0 || !matchIdVal)
-                    return null;
-                  const matchStr = String(matchIdVal).trim();
-                  const compound = parseMedicineMatchId(matchStr);
-
-                  if (compound && compound.index >= 0 && compound.index < medsArray.length) {
-                    return medsArray[compound.index];
-                  }
-
-                  const directMatch = medsArray.find(
-                    (m, idx) =>
-                      m &&
-                      (String(m.id || "") === matchStr ||
-                        String(m.client_med_id || "") === matchStr ||
-                        String(m.clientMedId || "") === matchStr ||
-                        `extracted_med_${idx + 1}` === matchStr ||
-                        `doc_med_${idx + 1}` === matchStr ||
-                        `extracted_med_${idx}` === matchStr ||
-                        `doc_med_${idx}` === matchStr),
-                  );
-                  if (directMatch) return directMatch;
-
-                  if (compound && compound.name) {
-                    const cleanCompName = compound.name.toLowerCase().replace(/\s+/g, "");
-                    const nameMatch = medsArray.find(
-                      (m) =>
-                        m &&
-                        (m.name || m.medicationName) &&
-                        String(m.name || m.medicationName)
-                          .toLowerCase()
-                          .replace(/\s+/g, "") === cleanCompName,
-                    );
-                    if (nameMatch) return nameMatch;
-                  }
-
-                  const numMatch = matchStr.match(/(?:extracted_med_|doc_med_)?(\d+)/i);
-                  if (numMatch) {
-                    const parsedNum = parseInt(numMatch[1], 10);
-                    if (!isNaN(parsedNum)) {
-                      if (parsedNum >= 1 && parsedNum <= medsArray.length) {
-                        return medsArray[parsedNum - 1];
-                      }
-                      if (parsedNum >= 0 && parsedNum < medsArray.length) {
-                        return medsArray[parsedNum];
-                      }
-                    }
-                  }
-                  return null;
-                };
-
-                for (const sourceArr of candidateSources) {
-                  foundInDoc = findMedicineByMatchId(sourceArr, matchId);
-                  if (foundInDoc) break;
-                }
-
-                if (!foundInDoc) {
-                  const targetDocId =
-                    parsedCompound?.documentId ||
-                    (Array.isArray(body?.documentId) ? body.documentId[0] : body?.documentId) ||
-                    (Array.isArray(actionData?.documentId)
-                      ? actionData.documentId[0]
-                      : actionData?.documentId) ||
-                    effectiveState?.documentId;
-
-                  const UUID_REGEX =
-                    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
-                  let docRecord = null;
-                  if (
-                    targetDocId &&
-                    UUID_REGEX.test(String(targetDocId)) &&
-                    userId &&
-                    UUID_REGEX.test(String(userId))
-                  ) {
-                    const [matchedDoc] = await db
-                      .select()
-                      .from(document)
-                      .where(
-                        and(eq(document.id, targetDocId), eq(document.userId, String(userId))),
-                      );
-                    docRecord = matchedDoc;
-                  }
-
-                  if (!docRecord && userId && UUID_REGEX.test(String(userId))) {
-                    const [latestDoc] = await db
-                      .select()
-                      .from(document)
-                      .where(
-                        and(
-                          eq(document.userId, String(userId)),
-                          eq(document.ocrStatus, "completed"),
-                        ),
-                      )
-                      .orderBy(desc(document.createdAt))
-                      .limit(1);
-                    docRecord = latestDoc;
-                  }
-
-                  if (docRecord && docRecord.structuredExtractedData) {
-                    const struct = docRecord.structuredExtractedData;
-                    const docMeds = struct.medications || struct.structuredData?.medications || [];
-                    foundInDoc = findMedicineByMatchId(docMeds, matchId);
-                  }
-                }
-
-                if (foundInDoc) {
-                  const normDocMed = normalizeMedicine(foundInDoc, 0);
-                  medData = {
-                    ...normDocMed.row,
-                    ...foundInDoc,
-                    ...medData,
-                    name:
-                      medData.name ||
-                      medData.medicationName ||
-                      foundInDoc.name ||
-                      foundInDoc.medicationName ||
-                      parsedCompound?.name ||
-                      "Medical Document Medicine",
-                    medicationName:
-                      medData.name ||
-                      medData.medicationName ||
-                      foundInDoc.name ||
-                      foundInDoc.medicationName ||
-                      parsedCompound?.name ||
-                      "Medical Document Medicine",
-                    medicationType: String(
-                      medData.type ||
-                        medData.medicationType ||
-                        foundInDoc.type ||
-                        foundInDoc.medicationType ||
-                        "TABLET",
-                    ).toUpperCase(),
-                    type: String(
-                      medData.type ||
-                        medData.medicationType ||
-                        foundInDoc.type ||
-                        foundInDoc.medicationType ||
-                        "TABLET",
-                    ).toUpperCase(),
-                    dosePerIntake:
-                      medData.dosePerIntake ||
-                      (foundInDoc.dosage ? parseFloat(foundInDoc.dosage) || 1 : 1),
-                    frequency: medData.frequency || foundInDoc.frequency || "ONCE",
-                    duration: medData.duration || foundInDoc.duration || null,
-                    instructions:
-                      medData.instructions ||
-                      medData.notes ||
-                      foundInDoc.instructions ||
-                      foundInDoc.timing ||
-                      null,
-                    startDate:
-                      medData.startDate ||
-                      foundInDoc.startDate ||
-                      new Date().toISOString().split("T")[0],
-                  };
-                } else if (parsedCompound && parsedCompound.name) {
-                  medData.name = parsedCompound.name;
-                  medData.medicationName = parsedCompound.name;
                 }
               } catch (lookupErr) {
                 console.warn("[UnifiedChat] Document lookup for med ID failed:", lookupErr.message);
@@ -1053,40 +908,19 @@ class V1Service {
               if (matchIdStr.startsWith("extracted_med_") || matchIdStr.startsWith("doc_med_")) {
                 medData.name = "Medical Document Medicine";
                 medData.medicationName = "Medical Document Medicine";
-              } else if (matchIdStr.trim().length > 0) {
-                medData.name = matchIdStr.replace(/[{}[\]"]/g, "").trim();
-                medData.medicationName = medData.name;
-              } else {
-                continue;
               }
             }
 
-            try {
-              const { medication: med } = await medicationService.saveMedicationWithReminder(
-                userId,
-                medData,
-                { skipDuplicateCheck: true },
-              );
-              if (med && med.id) {
-                createdMeds.push(med);
-              }
-            } catch (mErr) {
-              console.error("[UnifiedChat] Error creating individual medicine from list:", mErr);
-            }
+            medsToProcess[i] = normalizeCreateMedicationInput(medData);
           }
-        } else if (hasMedicineActionData) {
-          try {
-            const { medication: createdMed } = await medicationService.saveMedicationWithReminder(
-              userId,
-              actionData,
-              { skipDuplicateCheck: true },
-            );
-            if (createdMed && createdMed.id) {
-              createdMeds.push(createdMed);
-            }
-          } catch (e) {
-            console.error("[UnifiedChat] Error creating reminder:", e);
-          }
+
+          const bulkResult = await medicationService.bulkCreate(userId, medsToProcess);
+          createdMeds = bulkResult?.created || bulkResult || [];
+        } else if (isConfirmAction && hasMedicineActionData) {
+          const bulkResult = await medicationService.bulkCreate(userId, [
+            normalizeCreateMedicationInput(actionData),
+          ]);
+          createdMeds = bulkResult?.created || bulkResult || [];
         }
         const createdMed = createdMeds[0] || null;
 
@@ -1095,36 +929,33 @@ class V1Service {
           const stateToUpdate = { ...effectiveState };
           if (!stateToUpdate.medicinesToAdd) stateToUpdate.medicinesToAdd = [];
 
-          if (createdMeds.length > 0) {
-            for (const med of createdMeds) {
-              stateToUpdate.medicinesToAdd.push({
-                name: med.medicationName,
-                id: med.id,
-                client_med_id: med.clientMedId || med.id,
-                selected: true,
-                isSaved: true,
-                dbId: med.id,
-              });
-            }
-            stateToUpdate.medicinesSavedToDb = true;
-          }
-
-          if (actionType === "CONFIRM_MEDICINES") {
+          if (isConfirmAction) {
             stateToUpdate.medicinesConfirmed = true;
+            stateToUpdate.medicinesSavedToDb = true;
             stateToUpdate.medicationFlowDone = true;
-          } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
-            stateToUpdate.currentStep = "ADD_MEDICINE";
-          } else if (
-            effectiveState.currentStep &&
-            effectiveState.currentStep !== "MEDICINE_OPTIONS"
-          ) {
-            stateToUpdate.currentStep = effectiveState.currentStep;
-          } else {
+            stateToUpdate.medicinesToAdd = [];
             stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+          } else {
+            stateToUpdate.medicinesConfirmed = false;
+            stateToUpdate.medicinesSavedToDb = false;
+            stateToUpdate.medicationFlowDone = false;
+
+            if (currentOnboardingStep === "REVIEW_MEDICINES_LIST") {
+              stateToUpdate.currentStep = "REVIEW_MEDICINES_LIST";
+            } else if (effectiveState.currentStep === "ADD_MEDICINE" || isAddMedicineMsg) {
+              stateToUpdate.currentStep = "ADD_MEDICINE";
+            } else if (
+              effectiveState.currentStep &&
+              effectiveState.currentStep !== "MEDICINE_OPTIONS"
+            ) {
+              stateToUpdate.currentStep = effectiveState.currentStep;
+            } else {
+              stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+            }
           }
 
           const onboardingResult = await onboardingService.chat(
-            message || "",
+            message || actionData || "",
             history,
             stateToUpdate,
             userId,
@@ -1139,6 +970,7 @@ class V1Service {
             onboardingState: onboardingResult?.state || stateToUpdate,
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
+            sessionId: effectiveSessionId,
           });
           if (onboardingResult?.completionMessage) {
             responsePayload.completionMessage = onboardingResult.completionMessage;
@@ -1153,20 +985,115 @@ class V1Service {
         }
 
         // Post-Onboarding (Dashboard Chat Stream): return confirmation response
-        const replyText =
-          createdMeds.length > 0
-            ? messageConstants.MEDICATIONS_CONFIRMED_SUCCESS
-            : createdMed?.name
-              ? `Medication '${createdMed.name}' has been added to your active medications.`
-              : "Medication processed successfully.";
+        const userLang = preferredLanguage || patient?.preferredLanguage || "english";
+        const localeMap = {
+          english: "en-IN",
+          gujarati: "gu-IN",
+          hindi: "hi-IN",
+          marathi: "mr-IN",
+          tamil: "ta-IN",
+        };
 
-        let activeSessionId = sessionId;
-        if (!activeSessionId && isOnboardingCompleted) {
-          const newSession = await chatService.createSession({ userId, title: "Medication Chat" });
-          activeSessionId = newSession?.id || null;
+        if (!createdMeds || createdMeds.length === 0) {
+          const replyText = await getLocalizedText(
+            "onboarding.addMedicine.saveFailed",
+            "We were unable to save your medications. Please review the details and try again.",
+            userLang,
+          );
+          return buildUnifiedResponse({
+            mode: "ACTION",
+            actionType: "CONFIRM_MEDICINES_ERROR",
+            reply: replyText,
+            sessionId: effectiveSessionId,
+            medicines: medsToProcess || [],
+          });
+        }
+
+        const toWords = new ToWords({
+          localeCode: localeMap[userLang],
+        });
+        const countWard = toWords.convert(createdMeds.length);
+        const replyText = await getLocalizedText(
+          "onboarding.addMedicine.successWithCount",
+          `${countWard} medications have been successfully added.`,
+          userLang,
+          { count: countWard },
+        );
+
+        const terminalOnboardingState = {
+          ...effectiveState,
+          medicinesConfirmed: true,
+          medicinesSavedToDb: true,
+          medicationFlowDone: true,
+          isOnboardingCompleted: true,
+          currentStep: "POST_ONBOARDING",
+          medicinesToAdd: [],
+          foundMedicines: [],
+        };
+
+        if (userId) {
+          try {
+            await saveOnboardingState(userId, terminalOnboardingState);
+          } catch (persistErr) {
+            console.warn(
+              "[UnifiedChat] Failed to persist post-onboarding terminal state:",
+              persistErr.message,
+            );
+          }
+        }
+
+        let activeSessionId = effectiveSessionId;
+        if (!activeSessionId && userId) {
+          try {
+            if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+              const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+              activeSessionId = canonical?.id || null;
+            }
+          } catch (sErr) {
+            console.warn(
+              "[UnifiedChat] Failed to get canonical session for CONFIRM_MEDICINES:",
+              sErr.message,
+            );
+          }
         }
 
         if (activeSessionId) {
+          const userLang =
+            preferredLanguage ||
+            patient?.preferredLanguage ||
+            effectiveState?.preferredLanguage ||
+            "english";
+
+          let userConfirmContent = displayLabel;
+          if (
+            !userConfirmContent ||
+            (typeof userConfirmContent === "string" &&
+              (userConfirmContent.trim().startsWith("{") ||
+                userConfirmContent.trim().startsWith("[") ||
+                userConfirmContent.includes('"selected"')))
+          ) {
+            userConfirmContent =
+              userLang === "gujarati" || userLang === "gu"
+                ? "આગળ વધો"
+                : await getLocalizedText(
+                    "onboarding.reviewMedicinesList.confirm",
+                    "Confirm Selection",
+                    userLang,
+                  );
+          }
+
+          await chatSessionRepository.appendMessage({
+            sessionId: activeSessionId,
+            userId,
+            role: "user",
+            content: userConfirmContent,
+            metadata: {
+              actionType: "CONFIRM_MEDICINES",
+              action: "CONFIRM_MEDICINES",
+              rawValue: actionData || { selected: (createdMeds || []).map((m) => m.id) },
+            },
+          });
+
           await chatSessionRepository.appendMessage({
             sessionId: activeSessionId,
             userId,
@@ -1175,6 +1102,10 @@ class V1Service {
             metadata: {
               mode: "ACTION",
               actionType: "CONFIRM_MEDICINES",
+              isConfirmed: true,
+              medicationIds: createdMeds.map((m) => m.id),
+              medicines: createdMeds,
+              medication: createdMed,
             },
           });
         }
@@ -1186,6 +1117,7 @@ class V1Service {
           sessionId: activeSessionId,
           medication: createdMed,
           medicines: createdMeds,
+          onboardingState: terminalOnboardingState,
         });
       }
 
@@ -1208,25 +1140,53 @@ class V1Service {
           effectiveState?.hasSkipped === true) &&
         canSkipOnboarding(effectiveState || dbState || inputState);
 
-      const hasUnansweredOptional =
-        isOnboardingCompleted &&
-        ((!bloodGroup && !bloodGroupSkipped) ||
-          ((!allergies || allergies.length === 0) && !allergiesSkipped));
-
       const isMedicationFlowPending =
-        !isOnboardingCompleted &&
+        effectiveState?.medicationFlowDone !== true &&
         dbState?.medicationFlowDone !== true &&
         inputState?.medicationFlowDone !== true &&
-        effectiveState?.medicationFlowDone !== true;
+        effectiveState?.hasSkipped !== true &&
+        dbState?.hasSkipped !== true;
+
+      const hasUnansweredOptional =
+        (!bloodGroup && !bloodGroupSkipped) ||
+        ((!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+          !allergiesSkipped) ||
+        isMedicationFlowPending;
 
       const isForcedOnboardingAction =
         message === "ASK_REPORT" ||
         message === "ASK_ABOUT_REPORT" ||
         actionType === "ASK_REPORT" ||
-        inputState?.currentStep === "ASK_REPORT";
+        actionType === "ADD_MEDICINE" ||
+        actionType === "SAVE_AND_REVIEW" ||
+        actionType === "CONFIRM_MEDICINES" ||
+        message === "ADD_MEDICINE" ||
+        message === "DASHBOARD" ||
+        message === "GO_TO_DASHBOARD" ||
+        actionType === "DASHBOARD" ||
+        inputState?.currentStep === "ASK_REPORT" ||
+        actionType === "ASK_ALLERGIES" ||
+        actionType === "ASK_BLOOD_GROUP" ||
+        actionType === "MEDICINE_OPTIONS";
+
+      const isIncomingOnboardingStep =
+        actionType === "ASK_ALLERGIES" ||
+        actionType === "ASK_BLOOD_GROUP" ||
+        actionType === "MEDICINE_OPTIONS" ||
+        effectiveState?.currentStep === "ASK_ALLERGIES" ||
+        effectiveState?.currentStep === "ASK_BLOOD_GROUP" ||
+        effectiveState?.currentStep === "MEDICINE_OPTIONS" ||
+        inputState?.currentStep === "ASK_ALLERGIES" ||
+        inputState?.currentStep === "ASK_BLOOD_GROUP" ||
+        inputState?.currentStep === "MEDICINE_OPTIONS" ||
+        dbState?.currentStep === "ASK_ALLERGIES" ||
+        dbState?.currentStep === "ASK_BLOOD_GROUP" ||
+        dbState?.currentStep === "MEDICINE_OPTIONS";
 
       const isNormalChat =
+        !isMedicineAction &&
         !isForcedOnboardingAction &&
+        !isIncomingOnboardingStep &&
         actionType !== "SKIP_ONBOARDING" &&
         !hasUnansweredOptional &&
         !isMedicationFlowPending &&
@@ -1248,7 +1208,6 @@ class V1Service {
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
         console.log(`[UnifiedChat] Executing Onboarding State Machine for userId=${userId}`);
-        let effectiveMessage = message;
         let state = inputState;
         let isStaleDuplicateSubmission = false;
         if (!state || Object.keys(state).length === 0) {
@@ -1290,6 +1249,23 @@ class V1Service {
           const isProfileConfirmedInDb =
             dbState?.profileConfirmed === true || !!dbState?.selectedProfileSource;
 
+          const sanitizeAllergies = (list) => {
+            if (!Array.isArray(list)) return undefined;
+            return list.filter(
+              (item) =>
+                typeof item === "string" &&
+                !bloodGroupTypeValues.includes(item.trim().toUpperCase().replace(/\s+/g, "")),
+            );
+          };
+
+          const rawAllergies = Array.isArray(incomingUserDataCleaned.allergies)
+            ? incomingUserDataCleaned.allergies
+            : Array.isArray(dbExistingUserData.allergies)
+              ? dbExistingUserData.allergies
+              : undefined;
+          const mergedAllergies =
+            rawAllergies !== undefined ? sanitizeAllergies(rawAllergies) : undefined;
+
           const mergedUserData =
             isProfileConfirmedInDb && !incomingStateCleaned.edited
               ? {
@@ -1298,10 +1274,7 @@ class V1Service {
                   ...(incomingUserDataCleaned.bloodGroup
                     ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
                     : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
+                  ...(mergedAllergies !== undefined ? { allergies: mergedAllergies } : {}),
                 }
               : {
                   ...dbExistingUserData,
@@ -1309,10 +1282,7 @@ class V1Service {
                   ...(incomingUserDataCleaned.bloodGroup
                     ? { bloodGroup: incomingUserDataCleaned.bloodGroup }
                     : {}),
-                  ...(Array.isArray(incomingUserDataCleaned.allergies) &&
-                  incomingUserDataCleaned.allergies.length > 0
-                    ? { allergies: incomingUserDataCleaned.allergies }
-                    : {}),
+                  ...(mergedAllergies !== undefined ? { allergies: mergedAllergies } : {}),
                 };
 
           const case3AuthoritativeIsOnboardingCompleted =
@@ -1329,6 +1299,8 @@ class V1Service {
           const case3AuthoritativeCompletionMessageSent =
             dbState?.completionMessageSent === true ||
             incomingStateCleaned.completionMessageSent === true;
+          const case3AuthoritativeCompletionMessageId =
+            dbState?.completionMessageId || incomingStateCleaned.completionMessageId || null;
 
           isStaleDuplicateSubmission = false;
           let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
@@ -1346,19 +1318,22 @@ class V1Service {
           state = {
             ...dbState,
             ...incomingStateCleaned,
-            // medicinesToAdd:
-            //   isStaleDuplicateSubmission && Array.isArray(dbState?.medicinesToAdd)
-            //     ? dbState.medicinesToAdd
-            //     : Array.isArray(incomingStateCleaned.medicinesToAdd) &&
-            //         incomingStateCleaned.medicinesToAdd.length > 0
-            //       ? incomingStateCleaned.medicinesToAdd
-            //       : dbState?.medicinesToAdd || [],
+            medicinesToAdd:
+              isStaleDuplicateSubmission && Array.isArray(dbState?.medicinesToAdd)
+                ? dbState.medicinesToAdd
+                : Array.isArray(incomingStateCleaned.medicinesToAdd) &&
+                    incomingStateCleaned.medicinesToAdd.length > 0
+                  ? incomingStateCleaned.medicinesToAdd
+                  : dbState?.medicinesToAdd || [],
             currentStep: case3AuthoritativeStep,
             isOnboardingCompleted: case3AuthoritativeIsOnboardingCompleted,
             hasSkipped: case3AuthoritativeHasSkipped,
             medicationFlowDone: case3AuthoritativeMedicationFlowDone,
             medicinesConfirmed: case3AuthoritativeMedicinesConfirmed,
             completionMessageSent: case3AuthoritativeCompletionMessageSent,
+            ...(case3AuthoritativeCompletionMessageId
+              ? { completionMessageId: case3AuthoritativeCompletionMessageId }
+              : {}),
             bloodGroupSkipped,
             allergiesSkipped,
             ...(documentConfirmed !== undefined && documentConfirmed !== null
@@ -1371,19 +1346,24 @@ class V1Service {
               ? { useDocumentData }
               : {}),
             existingUserData: mergedUserData,
-            medicinesToAdd:
-              Array.isArray(incomingStateCleaned.medicinesToAdd) &&
-              incomingStateCleaned.medicinesToAdd.length > 0
-                ? incomingStateCleaned.medicinesToAdd
-                : Array.isArray(dbState?.medicinesToAdd) && dbState.medicinesToAdd.length > 0
-                  ? dbState.medicinesToAdd
-                  : incomingStateCleaned.medicinesToAdd || dbState?.medicinesToAdd || [],
           };
+
+          const compactMessage =
+            typeof message === "string" ? message.trim().toUpperCase().replace(/\s+/g, "") : "";
+          const isBloodGroupSubmission = bloodGroupTypeValues.includes(compactMessage);
 
           if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
+
+          if (
+            !state.currentStep &&
+            isBloodGroupSubmission &&
+            !dbState.existingUserData?.bloodGroup
+          ) {
+            state.currentStep = "ASK_BLOOD_GROUP";
+          }
 
           // Generic forward transition: If currentStep is already satisfied in the authoritative persistent state (dbState), advance to next step.
           // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
@@ -1405,6 +1385,16 @@ class V1Service {
           }
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
+          if (userId) {
+            try {
+              await patientRepository.updateById(userId, { onboardingCompleted: true });
+            } catch (err) {
+              console.warn(
+                "[OcrService] Failed to update patient onboardingCompleted flag on skip:",
+                err.message,
+              );
+            }
+          }
           if (!state.currentStep && dbState && dbState.currentStep) {
             state.currentStep = dbState.currentStep;
           }
@@ -1423,10 +1413,10 @@ class V1Service {
           return responsePayload;
         }
 
+        let effectiveMessage = message;
         let effectiveDisplayLabel = displayLabel;
         if (isStaleDuplicateSubmission) {
-          // let effectiveMessage = message;
-          // effectiveMessage = null;
+          effectiveMessage = null;
           effectiveDisplayLabel = null;
           if (dbState && Object.keys(dbState).length > 0) {
             state = {
@@ -1445,12 +1435,19 @@ class V1Service {
           }
         }
 
+        if (
+          effectiveSessionId &&
+          (!state.chatSessionId || state.chatSessionId !== effectiveSessionId)
+        ) {
+          state.chatSessionId = effectiveSessionId;
+        }
+
         const onboardingResult = await onboardingService.chat(
           effectiveMessage,
           history,
           state,
           userId,
-          null,
+          effectiveSessionId,
           effectiveDisplayLabel,
         );
 
@@ -1461,7 +1458,7 @@ class V1Service {
         console.log(replyText);
 
         const responsePayload = buildUnifiedResponse({
-          mode: "ONBOARDING",
+          mode: onboardingResult?.mode || "ONBOARDING",
           actionType:
             actionType === "SKIP_ONBOARDING"
               ? "SKIP_ONBOARDING"
@@ -1473,20 +1470,20 @@ class V1Service {
           explainer: onboardingResult?.explainer || null,
           loginSummary: onboardingResult?.loginSummary || null,
           documentSummary: onboardingResult?.documentSummary || null,
+          loginProvider: onboardingResult?.loginProvider || null,
+          sourceComparison: onboardingResult?.sourceComparison || null,
+          sessionId: onboardingResult?.state?.chatSessionId || effectiveSessionId,
           onboardingState: onboardingResult?.state || state,
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
           document: onboardingResult?.document || null,
         });
         responsePayload.state = onboardingResult?.state || state;
-        if (onboardingResult?.isSilent !== undefined) {
-          responsePayload.isSilent = onboardingResult.isSilent;
-        }
-        responsePayload.totalBuffered =
-          onboardingResult?.totalBuffered !== undefined
-            ? onboardingResult.totalBuffered
-            : (responsePayload.onboardingState?.medicinesToAdd || []).length;
-
+        responsePayload.mode = onboardingResult?.mode || responsePayload.mode;
+        responsePayload.loginProvider =
+          onboardingResult?.loginProvider || responsePayload.loginProvider || null;
+        responsePayload.sourceComparison =
+          onboardingResult?.sourceComparison || responsePayload.sourceComparison || null;
         if (onboardingResult?.completionMessage) {
           responsePayload.completionMessage = onboardingResult.completionMessage;
           responsePayload.completionMessageId = onboardingResult.completionMessageId;
@@ -1516,11 +1513,9 @@ class V1Service {
       const chatResult = await chatService.sendMessage({
         userId,
         question: promptText,
-        sessionId,
+        sessionId: effectiveSessionId,
         documentId,
         preferredLanguage: userLang,
-        page,
-        limit,
         onChunk,
         abortSignal,
       });
@@ -1529,7 +1524,7 @@ class V1Service {
         mode: "NORMAL_CHAT",
         actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
-        sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || sessionId,
+        sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || effectiveSessionId,
         citations: chatResult?.citations || [],
         suggestedAction: chatResult?.requireSelection
           ? "REQUIRE_DOCUMENT_SELECTION"
@@ -1589,14 +1584,45 @@ class V1Service {
 
     // If onboarding is considered complete, return completed status
     if (isOnboardingCompleted) {
+      const data = resumableState?.existingUserData || {};
+      const bloodGroup = patient.bloodGroup || data?.bloodGroup;
+      const allergies = patient.allergies || data?.allergies;
+      const bloodGroupSkipped = resumableState?.bloodGroupSkipped === true;
+      const allergiesSkipped = resumableState?.allergiesSkipped === true;
+
+      let effectivePendingStep = "COMPLETE";
+      if (!bloodGroup && !bloodGroupSkipped) {
+        effectivePendingStep = "ASK_BLOOD_GROUP";
+      } else if (
+        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+        !allergiesSkipped
+      ) {
+        effectivePendingStep = "ASK_ALLERGIES";
+      } else if (
+        resumableState?.medicationFlowDone !== true &&
+        resumableState?.hasSkipped !== true &&
+        resumableState?.medicinesConfirmed !== true
+      ) {
+        const hasExtractedMedicines =
+          (Array.isArray(resumableState?.foundMedicines) &&
+            resumableState.foundMedicines.length > 0) ||
+          (Array.isArray(resumableState?.medicinesToAdd) &&
+            resumableState.medicinesToAdd.length > 0);
+        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+          effectivePendingStep = "REVIEW_MEDICINES_LIST";
+        } else {
+          effectivePendingStep = "MEDICINE_OPTIONS";
+        }
+      }
+
       if (currentStep !== "POST_ONBOARDING") {
-        currentStep = "COMPLETE";
+        currentStep = effectivePendingStep;
       }
       return {
         isOnboardingCompleted: true,
         currentStep,
         chatSessionId: resumableState?.chatSessionId || null,
-        resumableState: resumableState ? { ...resumableState, canSkip } : null,
+        resumableState: resumableState ? { ...resumableState, currentStep, canSkip } : null,
         canSkip,
       };
     }
@@ -1616,40 +1642,110 @@ class V1Service {
     }
 
     const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-    const resumableState = onboardingRecord?.data || null;
+    let resumableState = onboardingRecord?.data || null;
+
+    let patient = null;
+    try {
+      patient = await patientRepository.findById(userId);
+    } catch {
+      // ignore
+    }
+
+    if (patient?.onboardingCompleted) {
+      const data = resumableState?.existingUserData || {};
+      const bloodGroup = patient?.bloodGroup || data?.bloodGroup;
+      const allergies = patient?.allergies || data?.allergies;
+      const bloodGroupSkipped = resumableState?.bloodGroupSkipped === true;
+      const allergiesSkipped = resumableState?.allergiesSkipped === true;
+
+      let effectivePendingStep = "COMPLETE";
+      if (!bloodGroup && !bloodGroupSkipped) {
+        effectivePendingStep = "ASK_BLOOD_GROUP";
+      } else if (
+        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+        !allergiesSkipped
+      ) {
+        effectivePendingStep = "ASK_ALLERGIES";
+      } else if (
+        resumableState?.medicationFlowDone !== true &&
+        resumableState?.hasSkipped !== true &&
+        resumableState?.medicinesConfirmed !== true
+      ) {
+        const hasExtractedMedicines =
+          (Array.isArray(resumableState?.foundMedicines) &&
+            resumableState.foundMedicines.length > 0) ||
+          (Array.isArray(resumableState?.medicinesToAdd) &&
+            resumableState.medicinesToAdd.length > 0);
+        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+          effectivePendingStep = "REVIEW_MEDICINES_LIST";
+        } else {
+          effectivePendingStep = "MEDICINE_OPTIONS";
+        }
+      }
+
+      if (!resumableState) {
+        resumableState = { isOnboardingCompleted: true, currentStep: effectivePendingStep };
+      } else {
+        resumableState.isOnboardingCompleted = true;
+        if (resumableState.currentStep !== "POST_ONBOARDING") {
+          resumableState.currentStep = effectivePendingStep;
+        }
+      }
+    }
+
     if (resumableState && resumableState.preferredLanguage) {
       resumableState.preferredLanguage = normalizeLanguage(resumableState.preferredLanguage);
     }
-    const chatSessionId = resumableState?.chatSessionId || null;
+    if (resumableState && !resumableState.loginProvider && userId) {
+      try {
+        const providers = (await authProviderRepository.findByUserId(userId)) || [];
+        const providerNames = Array.isArray(providers) ? providers.map((p) => p.provider) : [];
+        let primaryProvider = "email";
+        if (providerNames.includes("google")) primaryProvider = "google";
+        else if (providerNames.includes("facebook")) primaryProvider = "facebook";
+        else if (providerNames.includes("microsoft")) primaryProvider = "microsoft";
+        else if (providerNames.includes("apple")) primaryProvider = "apple";
+        else if (providerNames.includes("mobile")) primaryProvider = "mobile";
+        resumableState.loginProvider = primaryProvider;
+      } catch {
+        // ignore
+      }
+    }
+    let chatSessionId = resumableState?.chatSessionId || null;
+    if (!chatSessionId && userId) {
+      try {
+        if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+          const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+          chatSessionId = canonical?.id || null;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     let messages = [];
     if (chatSessionId) {
-      let cursor = null;
-      let hasMore = true;
-      const MAX_PAGES = 100;
-      let pageCount = 0;
-
-      while (hasMore && pageCount < MAX_PAGES) {
-        pageCount += 1;
-        const result = await chatSessionRepository.listMessages({
-          sessionId: chatSessionId,
-          userId,
-          limit: 100,
-          direction: "after",
-          cursor,
-        });
-
-        const items = result?.items || [];
-        if (items.length > 0) {
-          messages.push(...items);
+      const result = await chatSessionRepository.listMessages({
+        sessionId: chatSessionId,
+        userId,
+        limit: 100,
+        direction: "after",
+      });
+      messages = (result.items || []).filter((m) => {
+        if (m.role === "assistant") {
+          const action = m.metadata?.action;
+          const text = (m.content || "").toLowerCase();
+          if (
+            action === "COMPLETE" ||
+            action === "POST_ONBOARDING" ||
+            text.includes("thank you! onboarding is complete") ||
+            text.includes("thank you! your onboarding is complete")
+          ) {
+            return false;
+          }
         }
-
-        if (result?.nextCursor && result.nextCursor !== cursor && items.length > 0) {
-          cursor = result.nextCursor;
-        } else {
-          hasMore = false;
-        }
-      }
+        return true;
+      });
     }
 
     let documentsName = [];
@@ -1687,8 +1783,11 @@ class V1Service {
       messages,
       documentsName,
       documentSummary,
-      currentStep: resumableState?.currentStep || "ASK_LANGUAGE",
-      canSkip: resumableState ? canSkipOnboarding(resumableState) : false,
+      currentStep:
+        resumableState?.currentStep || (patient?.onboardingCompleted ? "COMPLETE" : "ASK_LANGUAGE"),
+      canSkip: resumableState
+        ? canSkipOnboarding(resumableState)
+        : Boolean(patient?.onboardingCompleted),
       resumableState,
     };
   }

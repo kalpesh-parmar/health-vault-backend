@@ -169,11 +169,11 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  const _useDoc =
-    state.useDocumentData !== false &&
-    state.flowMode === "UPLOAD" &&
-    state.documentConfirmed !== false &&
-    (!!state.documentData || !!state.documentId);
+  // const _useDoc =
+  //   state.useDocumentData !== false &&
+  //   state.flowMode === "UPLOAD" &&
+  //   state.documentConfirmed !== false &&
+  //   (!!state.documentData || !!state.documentId);
 
   const missingRequired = getMissingRequiredStep(state);
   if (missingRequired) {
@@ -181,14 +181,15 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing login/social profile to compare or confirm
-  const hasLoginProfile =
-    Boolean(state.loginData) ||
-    state.hasSocialData === true ||
-    ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
+  // const hasLoginProfile =
+  //   Boolean(state.loginData) ||
+  //   state.hasSocialData === true ||
+  //   ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
 
-  if (state.flowMode === "SKIP" || state.flowMode === "MANUAL" || !_useDoc || !hasLoginProfile) {
-    state.profileConfirmed = true;
-  } else if (!state.profileConfirmed) {
+  // if (state.flowMode === "SKIP" || state.flowMode === "MANUAL" || !_useDoc || !hasLoginProfile) {
+  //   state.profileConfirmed = true;
+  // } else if (!state.profileConfirmed) {
+  if (!state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
   }
 
@@ -212,7 +213,7 @@ function getNextRequiredOrOptionalStep(state) {
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
 
-    if (!state.hasSkipped) {
+    if (!state.hasSkipped && !state.isOnboardingCompleted) {
       state.isOnboardingCompleted = false;
     }
 
@@ -293,17 +294,15 @@ function getProfileMismatches(state) {
   console.log("[RAW LOGIN DATA] loginData:", JSON.stringify(state.loginData, null, 2));
   console.log("[RAW DOCUMENT DATA] documentData:", JSON.stringify(state.documentData, null, 2));
 
-  const useDoc =
+  const isUpload =
     state.useDocumentData !== false &&
     state.flowMode === "UPLOAD" &&
     state.documentConfirmed !== false &&
     !!state.documentData;
 
-  if (!state.loginData || !useDoc) {
-    return { hasMismatch: false, fields: [] };
-  }
+  const compareTarget = isUpload ? state.documentData || {} : state.existingUserData || {};
+  const sourceComparison = isUpload ? "DOCUMENT_VS_LOGIN" : "MANUAL_VS_LOGIN";
 
-  const docData = state.documentData || {};
   const fields = [];
 
   const compareKeys = [
@@ -316,36 +315,46 @@ function getProfileMismatches(state) {
   ];
 
   for (const item of compareKeys) {
-    const loginField = state.loginData[item.key] || { value: null, verified: false };
-    const rawLogin = loginField.value;
+    let loginField = state.loginData?.[item.key];
+    if (
+      state.socialData &&
+      state.socialData[item.key] !== undefined &&
+      state.socialData[item.key] !== null
+    ) {
+      loginField = { value: state.socialData[item.key], verified: false };
+    } else if (!loginField) {
+      loginField = { value: null, verified: false };
+    }
+    const rawLogin = typeof loginField === "object" ? loginField?.value : loginField;
+    const isVerified = typeof loginField === "object" ? Boolean(loginField?.verified) : false;
 
-    let rawDoc = docData[item.key];
-    if (item.key === "phoneNumber" && rawDoc === undefined) {
-      rawDoc = docData.mobile || docData.phoneNumber;
+    let rawCompare = compareTarget[item.key];
+    if (item.key === "phoneNumber" && rawCompare === undefined) {
+      rawCompare = compareTarget.mobile || compareTarget.phoneNumber;
     }
 
     const normalizedLogin = normalizeFieldVal(rawLogin, item.type);
-    const normalizedDoc = normalizeFieldVal(rawDoc, item.type);
+    const normalizedCompare = normalizeFieldVal(rawCompare, item.type);
 
     let isMismatch = false;
-    if (loginField.verified) {
+    if (isVerified) {
       // Verified fields are never marked as mismatch
       isMismatch = false;
-    } else if (normalizedLogin && normalizedDoc) {
+    } else if (normalizedLogin && normalizedCompare) {
       if (item.type === "phone") {
-        isMismatch = !isSamePhone(normalizedLogin, normalizedDoc);
+        isMismatch = !isSamePhone(normalizedLogin, normalizedCompare);
       } else {
-        isMismatch = normalizedLogin !== normalizedDoc;
+        isMismatch = normalizedLogin !== normalizedCompare;
       }
     }
 
     console.log("[INSTRUMENTATION] getProfileMismatches field evaluation:", {
       key: item.key,
-      verified: loginField.verified,
+      verified: isVerified,
       rawLogin,
-      rawDoc,
+      rawCompare,
       normalizedLogin,
-      normalizedDoc,
+      normalizedCompare,
       isMismatch,
     });
 
@@ -353,19 +362,20 @@ function getProfileMismatches(state) {
       key: item.key,
       label: item.label,
       loginValue: rawLogin || null,
-      documentValue: rawDoc || null,
+      documentValue: rawCompare || null,
       isMismatch,
-      verified: loginField.verified,
+      verified: isVerified,
     });
   }
 
   const hasMismatch = fields.some((f) => f.isMismatch === true);
   console.log("[INSTRUMENTATION] getProfileMismatches final decision:", {
     hasMismatch,
+    sourceComparison,
     computedMode: hasMismatch ? "CONFLICT" : "CONFIRM",
   });
 
-  return { hasMismatch, fields };
+  return { hasMismatch, fields, sourceComparison };
 }
 
 /**
@@ -420,6 +430,19 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       upper.includes("LOGIN")
     ) {
       normSource = "LOGIN";
+    } else if (
+      [
+        "MANUAL",
+        "MANUAL_ENTRY",
+        "ENTERED",
+        "ENTERED_DETAILS",
+        "USE_ENTERED",
+        "USE ENTERED",
+      ].includes(upper) ||
+      upper.includes("MANUAL") ||
+      upper.includes("ENTERED")
+    ) {
+      normSource = "MANUAL";
     }
   }
 
@@ -429,12 +452,19 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       normSource = "DOCUMENT";
     } else if (upperSel === "SOCIAL" || upperSel === "LOGIN" || state.useSocialData === true) {
       normSource = "LOGIN";
+    } else if (upperSel === "MANUAL") {
+      normSource = "MANUAL";
     }
   }
 
   for (const key of compareKeys) {
-    const loginField = state.loginData?.[key] || { value: null, verified: false };
-    const rawLogin = loginField.value;
+    let loginField = state.loginData?.[key];
+    if (state.socialData && state.socialData[key] !== undefined && state.socialData[key] !== null) {
+      loginField = { value: state.socialData[key], verified: false };
+    } else if (!loginField) {
+      loginField = { value: null, verified: false };
+    }
+    const rawLogin = typeof loginField === "object" ? loginField?.value : loginField;
 
     let rawDoc = docData[key];
     if (key === "phoneNumber" && rawDoc === undefined) {
@@ -477,6 +507,9 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
       state.selectedProfileSource = "SOCIAL";
       state.useSocialData = true;
       state.useDocumentData = false;
+    } else if (normSource === "MANUAL") {
+      state.existingUserData[key] = existingVal || null;
+      state.selectedProfileSource = "MANUAL";
     } else if (editedData) {
       state.existingUserData[key] = existingVal || shownValue;
     } else if (loginField.verified) {

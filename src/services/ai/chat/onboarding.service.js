@@ -149,6 +149,14 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
     }
   } else if (fieldType === "allergies") {
     const trimmed = text.trim().toLowerCase();
+    const upperCompact = text.trim().toUpperCase().replace(/\s+/g, "");
+    if (bloodGroupTypeValues.includes(upperCompact)) {
+      return [];
+    }
+    const affirmativeSet = ["yes", "yeah", "yep", "true", "ha", "haa", "હા", "हाँ", "होय", "ஆம்"];
+    if (affirmativeSet.includes(trimmed)) {
+      return null;
+    }
     const negativeSet = [
       "no",
       "none",
@@ -163,22 +171,34 @@ async function extractFieldFromMessage(fieldType, text, _lang) {
       "કોઈ એલર્જી નથી",
       "नहीं",
       "कोई एलर्जी नहीं",
+      "नाही",
+      "இல்லை",
     ];
     if (negativeSet.includes(trimmed)) {
       return [];
     }
     if (trimmed && trimmed.length < 60 && !/[?!=]/.test(trimmed)) {
-      const looksLikeBloodGroup = /^(A|B|AB|O)[+-]$/i.test(trimmed.replace(/\s+/g, ""));
-      if (looksLikeBloodGroup) return null;
-      const items = text
+      const rawItems = text
         .split(",")
         .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
         .filter(Boolean);
+      const items = rawItems.filter((i) => {
+        const iUpper = i.toUpperCase().replace(/\s+/g, "");
+        const iLower = i.toLowerCase();
+        return (
+          !bloodGroupTypeValues.includes(iUpper) &&
+          !affirmativeSet.includes(iLower) &&
+          !negativeSet.includes(iLower)
+        );
+      });
       if (
         items.length > 0 &&
         items.every((i) => i.length < 30 && (!i.includes(" ") || i.split(" ").length <= 3))
       ) {
         return items;
+      }
+      if (rawItems.length > 0 && items.length === 0) {
+        return [];
       }
     }
   }
@@ -397,6 +417,14 @@ async function updateStateFromMessage(state, message, userId = null) {
     state.currentStep = "REVIEW_MEDICINES_LIST";
   }
 
+  const compactMsg = typeof msg === "string" ? msg.trim().toUpperCase().replace(/\s+/g, "") : "";
+  if (
+    bloodGroupTypeValues.includes(compactMsg) &&
+    (!state.existingUserData?.bloodGroup || !state.currentStep)
+  ) {
+    state.currentStep = "ASK_BLOOD_GROUP";
+  }
+
   if (!state.currentStep) return;
 
   switch (state.currentStep) {
@@ -538,7 +566,7 @@ async function updateStateFromMessage(state, message, userId = null) {
             ) {
               payload.source = "LOGIN";
             } else if (
-              [
+              ([
                 "DOCUMENT",
                 "DOC",
                 "MEDICAL_DOCUMENT",
@@ -549,7 +577,9 @@ async function updateStateFromMessage(state, message, userId = null) {
                 "MEDICAL DOCUMENT",
                 "NO",
               ].includes(upper) ||
-              upper.includes("DOCUMENT")
+                upper.includes("DOCUMENT")) &&
+              upper !== "DOCUMENT_UPLOADED" &&
+              !upper.includes("DOCUMENT_UPLOADED")
             ) {
               payload.source = "DOCUMENT";
             } else if (
@@ -607,6 +637,41 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.profileManuallyEdited =
             !!payload.edited || state.selectedProfileSource === "MANUAL";
           state.stepClarificationNeeded = false;
+
+          if (userId && patientRepository?.updateById && state.existingUserData) {
+            const updateFields = {};
+            if (state.existingUserData.firstName)
+              updateFields.firstName = state.existingUserData.firstName;
+            if (state.existingUserData.lastName)
+              updateFields.lastName = state.existingUserData.lastName;
+            if (state.existingUserData.firstName || state.existingUserData.lastName) {
+              updateFields.fullName = [
+                state.existingUserData.firstName,
+                state.existingUserData.lastName,
+              ]
+                .filter(Boolean)
+                .join(" ");
+            }
+            if (state.existingUserData.dateOfBirth) {
+              updateFields.dateOfBirth = toDbDate(state.existingUserData.dateOfBirth);
+            }
+            if (state.existingUserData.gender) updateFields.gender = state.existingUserData.gender;
+            if (state.existingUserData.phoneNumber)
+              updateFields.phoneNumber = state.existingUserData.phoneNumber;
+            if (state.existingUserData.email) updateFields.email = state.existingUserData.email;
+
+            if (Object.keys(updateFields).length > 0) {
+              try {
+                await patientRepository.updateById(userId, updateFields);
+              } catch (err) {
+                console.warn(
+                  "[OnboardingService] Failed to persist confirmed profile to patient:",
+                  err.message,
+                );
+              }
+            }
+          }
+
           state.currentStep = computeCurrentStep(state);
         }
       } else {
@@ -877,12 +942,12 @@ async function updateStateFromMessage(state, message, userId = null) {
         const finalFn = firstName || nameVal;
         state.existingUserData.firstName = finalFn;
         if (!state.loginData) state.loginData = {};
-        state.loginData.firstName = { value: finalFn, verified: true, provenance: "manual" };
+        state.loginData.firstName = { value: finalFn, verified: false, provenance: "manual" };
 
         if (lastName) {
           if (!state.existingUserData.lastName) state.existingUserData.lastName = lastName;
           if (!state.loginData.lastName || !state.loginData.lastName.value) {
-            state.loginData.lastName = { value: lastName, verified: true, provenance: "manual" };
+            state.loginData.lastName = { value: lastName, verified: false, provenance: "manual" };
           }
         }
 
@@ -927,7 +992,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (nameVal) {
         state.existingUserData.lastName = nameVal;
         if (!state.loginData) state.loginData = {};
-        state.loginData.lastName = { value: nameVal, verified: true, provenance: "manual" };
+        state.loginData.lastName = { value: nameVal, verified: false, provenance: "manual" };
 
         if (userId) {
           try {
@@ -967,7 +1032,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (dob) {
         state.existingUserData.dateOfBirth = dob;
         if (!state.loginData) state.loginData = {};
-        state.loginData.dateOfBirth = { value: dob, verified: true, provenance: "manual" };
+        state.loginData.dateOfBirth = { value: dob, verified: false, provenance: "manual" };
 
         if (userId) {
           try {
@@ -1023,7 +1088,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         if (genNorm === "male" || genNorm === "female") {
           state.existingUserData.gender = genNorm;
           if (!state.loginData) state.loginData = {};
-          state.loginData.gender = { value: genNorm, verified: true, provenance: "manual" };
+          state.loginData.gender = { value: genNorm, verified: false, provenance: "manual" };
 
           if (userId) {
             try {
@@ -1064,6 +1129,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         const norm = upperVal.replace(/\s+/g, "");
         if (bloodGroupTypeValues.includes(norm)) {
           state.existingUserData.bloodGroup = norm;
+          state.bloodGroupSkipped = false;
         } else {
           const extractedBg = await extractFieldFromMessage(
             "bloodGroup",
@@ -1074,9 +1140,16 @@ async function updateStateFromMessage(state, message, userId = null) {
             const bgVal = extractedBg.toUpperCase().replace(/\s+/g, "");
             if (bloodGroupTypeValues.includes(bgVal)) {
               state.existingUserData.bloodGroup = bgVal;
+              state.bloodGroupSkipped = false;
             }
           }
         }
+      }
+      // Guarantee allergies field is not contaminated by blood group
+      if (Array.isArray(state.existingUserData.allergies)) {
+        state.existingUserData.allergies = state.existingUserData.allergies.filter(
+          (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+        );
       }
       if (userId) {
         try {
@@ -1095,6 +1168,75 @@ async function updateStateFromMessage(state, message, userId = null) {
     }
 
     case "ASK_ALLERGIES": {
+      let rawVal = msg;
+      let parsedPayload = null;
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === "object") {
+          parsedPayload = parsed;
+          rawVal = String(
+            parsed.value || parsed.key || parsed.label || parsed.option || parsed.message || msg,
+          ).trim();
+        }
+      } catch {
+        // Not a JSON string payload
+      }
+
+      const normUpper = String(rawVal).trim().toUpperCase().replace(/\s+/g, "");
+      // Defensive check: If rawVal is a blood group token, route it to bloodGroup!
+      if (bloodGroupTypeValues.includes(normUpper)) {
+        if (!state.existingUserData.bloodGroup) {
+          state.existingUserData.bloodGroup = normUpper;
+          state.bloodGroupSkipped = false;
+          if (userId) {
+            try {
+              await patientRepository.updateById(userId, { bloodGroup: normUpper });
+            } catch (bgErr) {
+              console.warn(
+                "[OnboardingService] Immediate DB update for rerouted bloodGroup failed:",
+                bgErr.message,
+              );
+            }
+          }
+        }
+        if (Array.isArray(state.existingUserData.allergies)) {
+          state.existingUserData.allergies = state.existingUserData.allergies.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
+        }
+        state.allergiesSkipped = false;
+        state.currentStep = "ASK_ALLERGIES";
+        break;
+      }
+
+      const affirmativePatterns = [
+        "YES",
+        "YEP",
+        "YEAH",
+        "TRUE",
+        "HA",
+        "HAA",
+        "હા",
+        "हाँ",
+        "होय",
+        "ஆம்",
+      ];
+      if (
+        affirmativePatterns.includes(normUpper) ||
+        affirmativePatterns.includes(String(rawVal).trim())
+      ) {
+        // User selected YES indicating intent to enter allergies.
+        // Do NOT save "YES" as an allergy! Keep allergies clean and stay at ASK_ALLERGIES.
+        if (Array.isArray(state.existingUserData.allergies)) {
+          state.existingUserData.allergies = state.existingUserData.allergies.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
+        }
+        state.allergiesSkipped = false;
+        state.currentStep = "ASK_ALLERGIES";
+        break;
+      }
+
       const negativePatterns = [
         "no",
         "none",
@@ -1104,45 +1246,75 @@ async function updateStateFromMessage(state, message, userId = null) {
         "n/a",
         "nothing",
         "na",
+        "not_sure",
+        "not sure",
+        "i'm not sure",
+        "im not sure",
+        "not-sure",
         "ના",
         "નથી",
         "કોઈ એલર્જી નથી",
+        "ખબર નથી",
+        "મને ખબર નથી",
         "नहीं",
         "कोई एलर्जी नहीं",
+        "पता नहीं",
+        "मालूम नहीं",
+        "नाही",
+        "இல்லை",
       ];
       const isNegative =
         isSkip ||
-        msg.toUpperCase() === "SKIP" ||
-        negativePatterns.includes(msg.trim().toLowerCase());
+        normUpper === "SKIP" ||
+        normUpper === "NO" ||
+        normUpper === "NOT_SURE" ||
+        negativePatterns.includes(String(rawVal).trim().toLowerCase());
 
       if (isNegative) {
         state.allergiesSkipped = true;
         state.existingUserData.allergies = [];
+      } else if (parsedPayload && Array.isArray(parsedPayload.allergies)) {
+        const cleanList = parsedPayload.allergies
+          .map((a) => (typeof a === "string" ? a.trim() : ""))
+          .filter(
+            (a) =>
+              Boolean(a) &&
+              !bloodGroupTypeValues.includes(a.toUpperCase().replace(/\s+/g, "")) &&
+              !affirmativePatterns.includes(a.toUpperCase()),
+          );
+        state.existingUserData.allergies = cleanList;
+        state.allergiesSkipped = true;
       } else {
         const allergiesVal = await extractFieldFromMessage(
           "allergies",
-          msg,
+          rawVal,
           state.preferredLanguage,
         );
         if (Array.isArray(allergiesVal)) {
-          state.existingUserData.allergies = allergiesVal;
+          state.existingUserData.allergies = allergiesVal.filter(
+            (a) => !bloodGroupTypeValues.includes(String(a).toUpperCase().replace(/\s+/g, "")),
+          );
           state.allergiesSkipped = true;
         } else if (typeof allergiesVal === "string" && allergiesVal.trim()) {
           const parsed = allergiesVal
             .replace(/^\[|\]$/g, "")
             .split(",")
             .map((s) => s.trim().replace(/^['"]|['"]$/g, ""))
-            .filter(Boolean);
-          state.existingUserData.allergies = parsed.length > 0 ? parsed : [allergiesVal.trim()];
+            .filter(
+              (s) =>
+                Boolean(s) &&
+                !bloodGroupTypeValues.includes(s.toUpperCase().replace(/\s+/g, "")) &&
+                !affirmativePatterns.includes(s.toUpperCase()),
+            );
+          state.existingUserData.allergies = parsed;
           state.allergiesSkipped = true;
-        } else if (msg.trim()) {
-          const looksLikeBloodGroup = /^(A|B|AB|O)[+-]?\s*(positive|negative|pos|neg)?$/i.test(
-            msg.trim(),
-          );
-          if (!looksLikeBloodGroup) {
-            state.existingUserData.allergies = [msg.trim()];
-            state.allergiesSkipped = true;
-          }
+        } else if (
+          String(rawVal).trim() &&
+          !bloodGroupTypeValues.includes(normUpper) &&
+          !affirmativePatterns.includes(normUpper)
+        ) {
+          state.existingUserData.allergies = [String(rawVal).trim()];
+          state.allergiesSkipped = true;
         }
       }
       if (userId) {
@@ -1210,13 +1382,17 @@ async function updateStateFromMessage(state, message, userId = null) {
 
     case "REVIEW_MEDICINES_LIST": {
       let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        const upper = String(msg || "")
-          .trim()
-          .toUpperCase();
-        payload = { value: upper };
+      if (typeof msg === "object" && msg !== null) {
+        payload = msg;
+      } else {
+        try {
+          payload = JSON.parse(msg);
+        } catch {
+          const upper = String(msg || "")
+            .trim()
+            .toUpperCase();
+          payload = { value: upper };
+        }
       }
 
       const val = String(payload.value || payload.action || payload.key || msg || "")
@@ -1398,6 +1574,8 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.activeMedicine = null;
           state.currentMedicineIndex = undefined;
           state.medicinesConfirmed = true;
+          state.medicinesSavedToDb = true;
+          state.medicationFlowDone = true;
           state.currentStep = "MEDICINE_OPTIONS";
         }
       } else if (isAdd) {
@@ -1416,10 +1594,14 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "EDIT_MEDICINE":
     case "ADD_MEDICINE": {
       let payload;
-      try {
-        payload = JSON.parse(msg);
-      } catch {
-        payload = {};
+      if (typeof msg === "object" && msg !== null) {
+        payload = msg;
+      } else {
+        try {
+          payload = JSON.parse(msg);
+        } catch {
+          payload = {};
+        }
       }
 
       if (payload.action === "DRAFT_SYNC" || payload.isSilent === true) {
@@ -1470,15 +1652,13 @@ async function updateStateFromMessage(state, message, userId = null) {
         payload.action === "SAVE_AND_REVIEW" ||
         payload.actionType === "SAVE_AND_REVIEW";
 
-      const isSaveMedicines =
-        payload.saveMedicines === true ||
-        payload.action === "SAVE_MEDICINES" ||
-        payload.actionType === "SAVE_MEDICINES" ||
-        payload.action === "SAVE" ||
-        payload.actionType === "SAVE";
-
-      if (isSaveAndReview && Array.isArray(payload.medicines)) {
-        state.medicinesToAdd = deduplicateMedicines(payload.medicines);
+      if (isSaveAndReview) {
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => !m.isSaved && !m.dbId);
+        if (Array.isArray(payload.medicines)) {
+          state.medicinesToAdd = deduplicateMedicines(
+            payload.medicines.filter((m) => !m.isSaved && !m.dbId),
+          );
+        }
       }
 
       const isAddAndContinue =
@@ -1617,48 +1797,50 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.isFreshAddMedicine = false;
         } else if (isSaveAndReview) {
           state.currentStep = "REVIEW_MEDICINES_LIST";
-        } else if (isSaveMedicines) {
-          const unsavedMeds = (state.medicinesToAdd || []).filter(
-            (m) =>
-              m.selected !== false &&
-              !m.isSaved &&
-              m.resolution !== "KEEP_EXISTING" &&
-              m.resolution !== "REMOVE_NEW",
-          );
-          if (unsavedMeds.length > 0 && userId) {
-            const bulkCreated = (await medicationService.bulkCreate(userId, unsavedMeds)) || [];
+        }
+        //  else if (isSaveMedicines) {
+        //   const unsavedMeds = (state.medicinesToAdd || []).filter(
+        //     (m) =>
+        //       m.selected !== false &&
+        //       !m.isSaved &&
+        //       m.resolution !== "KEEP_EXISTING" &&
+        //       m.resolution !== "REMOVE_NEW",
+        //   );
+        //   if (unsavedMeds.length > 0 && userId) {
+        //     const bulkCreated = (await medicationService.bulkCreate(userId, unsavedMeds)) || [];
 
-            for (let i = 0; i < unsavedMeds.length; i++) {
-              const created = bulkCreated[i];
-              const unsaved = unsavedMeds[i];
-              const matchIdx = state.medicinesToAdd.findIndex(
-                (m) =>
-                  (m.client_med_id && m.client_med_id === unsaved.client_med_id) ||
-                  (m.id && m.id === unsaved.id),
-              );
-              if (matchIdx >= 0 && created) {
-                state.medicinesToAdd[matchIdx].isSaved = true;
-                state.medicinesToAdd[matchIdx].dbId = created.id;
-                try {
-                  await medicationReminderService.createReminder(userId, {
-                    medicationId: created.id,
-                  });
-                } catch (err) {
-                  console.error(
-                    `[OnboardingService] Failed to create reminder for medicine ${created.id}:`,
-                    err.message,
-                  );
-                }
-              }
-            }
-          }
-          state.medicinesToAdd = (state.medicinesToAdd || []).filter(
-            (m) => m.selected !== false || m.isSaved === true,
-          );
-          state.medicinesConfirmed = true;
-          state.medicationFlowDone = true;
-          state.currentStep = "MEDICINE_OPTIONS";
-        } else {
+        //     for (let i = 0; i < unsavedMeds.length; i++) {
+        //       const created = bulkCreated[i];
+        //       const unsaved = unsavedMeds[i];
+        //       const matchIdx = state.medicinesToAdd.findIndex(
+        //         (m) =>
+        //           (m.client_med_id && m.client_med_id === unsaved.client_med_id) ||
+        //           (m.id && m.id === unsaved.id),
+        //       );
+        //       if (matchIdx >= 0 && created) {
+        //         state.medicinesToAdd[matchIdx].isSaved = true;
+        //         state.medicinesToAdd[matchIdx].dbId = created.id;
+        //         try {
+        //           await medicationReminderService.createReminder(userId, {
+        //             medicationId: created.id,
+        //           });
+        //         } catch (err) {
+        //           console.error(
+        //             `[OnboardingService] Failed to create reminder for medicine ${created.id}:`,
+        //             err.message,
+        //           );
+        //         }
+        //       }
+        //     }
+        //   }
+        //   state.medicinesToAdd = (state.medicinesToAdd || []).filter(
+        //     (m) => m.selected !== false || m.isSaved === true,
+        //   );
+        //   state.medicinesConfirmed = true;
+        //   state.medicationFlowDone = true;
+        //   state.currentStep = "MEDICINE_OPTIONS";
+        // }
+        else {
           state.currentStep = "REVIEW_MEDICINES_LIST";
         }
       }
@@ -1955,13 +2137,7 @@ class OnboardingService {
       parsedInputPayload?.action === "DRAFT_SYNC" ||
       parsedInputPayload?.actionType === "DRAFT_SYNC";
 
-    if (!isSilentCall && sessionId && msg) {
-      await chatService.appendChatMessage({
-        sessionId,
-        role: "user",
-        content: msg,
-      });
-    }
+    // Legacy duplicate appendChatMessage removed: canonical message persistence with resolvedLabel and metadata is handled at line 2362
     // Ensure state fields are initialized
     if (!state.existingUserData) {
       state.existingUserData = {
@@ -1989,7 +2165,7 @@ class OnboardingService {
     if (state.documentExtracted === undefined) state.documentExtracted = false;
     if (state.selectedProfileSource === undefined) state.selectedProfileSource = null;
     if (state.useSocialData === undefined) state.useSocialData = false;
-    if (state.useDocumentData === undefined) state.useDocumentData = false;
+    if (state.useDocumentData === undefined) state.useDocumentData = state.flowMode === "UPLOAD";
     if (state.profileManuallyEdited === undefined) state.profileManuallyEdited = false;
 
     // Synchronize medications from DB for UPLOAD flow if they are not loaded yet or if document changed
@@ -2047,6 +2223,33 @@ class OnboardingService {
         dateOfBirth: state.loginData.dateOfBirth?.value || null,
         phoneNumber: state.loginData.phoneNumber?.value || null,
       };
+    } else if (state.socialData && typeof state.socialData === "object") {
+      state.hasSocialData = true;
+      state.hasLoginData = true;
+      state.loginData = {
+        firstName: {
+          value: state.socialData.firstName || null,
+          verified: false,
+          provenance: "profile",
+        },
+        lastName: {
+          value: state.socialData.lastName || null,
+          verified: false,
+          provenance: "profile",
+        },
+        email: { value: state.socialData.email || null, verified: false, provenance: "profile" },
+        gender: { value: state.socialData.gender || null, verified: false, provenance: "profile" },
+        dateOfBirth: {
+          value: state.socialData.dateOfBirth || null,
+          verified: false,
+          provenance: "profile",
+        },
+        phoneNumber: {
+          value: state.socialData.phoneNumber || null,
+          verified: false,
+          provenance: "profile",
+        },
+      };
     } else if (
       state.hasLoginData === undefined ||
       state.hasLoginData === null ||
@@ -2055,8 +2258,8 @@ class OnboardingService {
       if (userId) {
         const patient = await patientRepository.findById(userId);
         if (patient) {
-          const providers = await authProviderRepository.findByUserId(userId);
-          const providerNames = providers.map((p) => p.provider);
+          const providers = (await authProviderRepository.findByUserId(userId)) || [];
+          const providerNames = Array.isArray(providers) ? providers.map((p) => p.provider) : [];
 
           let primaryProvider = "email";
           if (providerNames.includes("google")) {
@@ -2167,6 +2370,30 @@ class OnboardingService {
       }
     }
 
+    if (!state.loginProvider && userId) {
+      try {
+        const providers = (await authProviderRepository.findByUserId(userId)) || [];
+        const providerNames = Array.isArray(providers) ? providers.map((p) => p.provider) : [];
+        let primaryProvider = "email";
+        if (providerNames.includes("google")) {
+          primaryProvider = "google";
+        } else if (providerNames.includes("facebook")) {
+          primaryProvider = "facebook";
+        } else if (providerNames.includes("microsoft")) {
+          primaryProvider = "microsoft";
+        } else if (providerNames.includes("apple")) {
+          primaryProvider = "apple";
+        } else if (providerNames.includes("mobile")) {
+          primaryProvider = "mobile";
+        } else if (providerNames.includes("password")) {
+          primaryProvider = "email";
+        }
+        state.loginProvider = primaryProvider;
+      } catch (err) {
+        console.warn("[Onboarding] Error resolving login provider:", err);
+      }
+    }
+
     // Standardize empty string properties to null in existingUserData
     if (state.existingUserData) {
       const uData = state.existingUserData;
@@ -2224,6 +2451,13 @@ class OnboardingService {
         }
       }
     }
+    // If incoming message is a blood group and bloodGroup is not yet set, prioritize ASK_BLOOD_GROUP step
+    const incomingBgNorm =
+      typeof msg === "string" ? msg.trim().toUpperCase().replace(/\s+/g, "") : "";
+    if (bloodGroupTypeValues.includes(incomingBgNorm) && !state.existingUserData?.bloodGroup) {
+      state.currentStep = "ASK_BLOOD_GROUP";
+    }
+
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
       state.currentStep = computeCurrentStep(state);
@@ -2267,18 +2501,22 @@ class OnboardingService {
     }
     const isInitCall = history.length === 0 && msg.toLowerCase() === "hello";
     if (userId && !state.chatSessionId) {
-      try {
-        const session = await chatService.createOnboardingSession({
-          userId,
-          title: "Health Onboarding",
-          metadata: {
-            type: "ONBOARDING",
-          },
-        });
-        state.chatSessionId = session.id;
-        console.log(`[OnboardingService] Created new onboarding chat session: ${session.id}`);
-      } catch (err) {
-        console.error("[OnboardingService] Failed to create onboarding session:", err);
+      if (sessionId) {
+        state.chatSessionId = sessionId;
+      } else {
+        try {
+          const session = await chatService.createOnboardingSession({
+            userId,
+            title: "Health Assistant",
+            metadata: {
+              type: "ONBOARDING",
+            },
+          });
+          state.chatSessionId = session.id;
+          console.log(`[OnboardingService] Created new onboarding chat session: ${session.id}`);
+        } catch (err) {
+          console.error("[OnboardingService] Failed to create onboarding session:", err);
+        }
       }
     }
 
@@ -2289,7 +2527,8 @@ class OnboardingService {
           const prevResponse = await createResponse(state.currentStep, state);
           if (prevResponse && Array.isArray(prevResponse.options)) {
             const matchedOpt = prevResponse.options.find(
-              (opt) => opt && String(opt.value).toLowerCase() === String(msg).toLowerCase(),
+              (opt) =>
+                opt && String(opt.value || opt.key).toLowerCase() === String(msg).toLowerCase(),
             );
             if (matchedOpt && matchedOpt.label) {
               resolvedLabel = matchedOpt.label;
@@ -2302,8 +2541,26 @@ class OnboardingService {
           );
         }
       }
-      const userContent =
+      let userContent =
         resolvedLabel || displayLabel || (msg !== undefined && msg !== null ? msg : "");
+
+      if (
+        typeof userContent === "object" ||
+        (typeof userContent === "string" &&
+          (userContent.trim().startsWith("{") ||
+            userContent.trim().startsWith("[") ||
+            userContent.includes('"selected"')))
+      ) {
+        const userLang = state?.preferredLanguage || "english";
+        userContent =
+          userLang === "gujarati" || userLang === "gu"
+            ? "આગળ વધો"
+            : await getLocalizedText(
+                "onboarding.reviewMedicinesList.confirm",
+                "Confirm Selection",
+                userLang,
+              );
+      }
 
       await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
@@ -2624,12 +2881,31 @@ class OnboardingService {
     }
 
     state.canSkip = canSkipNow;
+    if (state.isOnboardingCompleted && userId) {
+      try {
+        await patientRepository.updateById(userId, { onboardingCompleted: true });
+      } catch (patientErr) {
+        console.warn(
+          "[OnboardingService] Failed to persist patient onboardingCompleted:",
+          patientErr.message,
+        );
+      }
+    }
 
     const nextStep = getNextStep(state);
-    if (nextStep && nextStep !== "COMPLETE" && nextStep !== "POST_ONBOARDING") {
+    if (
+      nextStep &&
+      nextStep !== "COMPLETE" &&
+      nextStep !== "POST_ONBOARDING" &&
+      nextStep !== "REGISTER_USER"
+    ) {
       state.currentStep = nextStep;
-    } else if (nextStep === "COMPLETE" || nextStep === "POST_ONBOARDING") {
-      state.currentStep = nextStep;
+    } else if (
+      nextStep === "COMPLETE" ||
+      nextStep === "POST_ONBOARDING" ||
+      nextStep === "REGISTER_USER"
+    ) {
+      state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
       state.isOnboardingCompleted = true;
     }
     await saveOnboardingState(userId, state);
@@ -2637,7 +2913,16 @@ class OnboardingService {
     const response = await createResponse(nextStep, state);
 
     let assistantMsgCreatedAt = new Date().toISOString();
-    if (!isSilentCall && state.chatSessionId) {
+    const shouldAppendMessage =
+      !isSilentCall &&
+      state.chatSessionId &&
+      response.message &&
+      response.message.trim().length > 0 &&
+      nextStep !== "COMPLETE" &&
+      nextStep !== "POST_ONBOARDING" &&
+      nextStep !== "REGISTER_USER";
+
+    if (shouldAppendMessage) {
       const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
@@ -2655,6 +2940,7 @@ class OnboardingService {
           loginSummary: response.loginSummary || null,
           documentSummary: response.documentSummary || null,
           loginProvider: response.loginProvider || null,
+          sourceComparison: response.sourceComparison || null,
           medicine: response.medicine || null,
           summary: response.summary || null,
           medicines: response.medicines || null,
@@ -2728,4 +3014,5 @@ module.exports = {
   createResponse,
   getLocalizedResponse,
   REPORT_QUESTIONS_I18N,
+  updateStateFromMessage,
 };

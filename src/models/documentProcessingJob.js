@@ -47,10 +47,10 @@ const documentProcessingJob = pgTable(
     retryable: boolean("retryable"),
     requiresReupload: boolean("requires_reupload").default(false).notNull(),
     message: text("message"),
-    metadata: jsonb("metadata").default({}).notNull(),
+    metadata: jsonb("metadata").default({}).notNull(), //extra field
     checkpointData: jsonb("checkpoint_data").default({}).notNull(),
-    rawOcrData: jsonb("raw_ocr_data"),
-    extractedStructuredData: jsonb("extracted_structured_data"),
+    rawOcrData: jsonb("raw_ocr_data"), //extra field
+    extractedStructuredData: jsonb("extracted_structured_data"), //extra field
     graphs: jsonb("graphs").default([]).notNull(),
     error: text("error"),
     lastHeartbeatAt: timestamp("last_heartbeat_at"),
