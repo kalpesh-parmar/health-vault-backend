@@ -8,6 +8,7 @@ const { errorConstants } = require("../constants/errorConstants");
 const { env } = require("../configs/env");
 const { MAX_FILE_SIZES, ALLOWED_MIME_TYPES } = require("../configs/fileConfig");
 const { retryDocumentSchema } = require("./documentValidation");
+const { validatePreUploadDocument } = require("../services/documentPreValidation.service");
 
 const patientIdParamSchema = z.object({
   patientId: z
@@ -59,13 +60,18 @@ const rawDocumentMulter = multer({
   storage: documentDiskStorage,
   limits: {
     fileSize: MAX_FILE_SIZES.PATIENT_DOCUMENT,
-    files: env.maxFilesPerUpload || 20,
   },
-}).array("files", env.maxFilesPerUpload || 20);
+}).fields([
+  { name: "files" },
+  { name: "file", maxCount: 1 },
+]);
 
 function profileUploadMulter(req, res, next) {
   rawProfileMulter(req, res, (err) => {
     if (err) {
+      if (handleUploadAbort(req, res, err, "ProfileUpload")) {
+        return;
+      }
       if (err.code === "LIMIT_FILE_SIZE") {
         return next(
           new InvalidRequestException(
@@ -82,9 +88,55 @@ function profileUploadMulter(req, res, next) {
   });
 }
 
+function handleUploadAbort(req, res, err, uploadName = "Upload") {
+  const isClientAborted =
+    req.aborted ||
+    req.destroyed ||
+    req.socket?.destroyed ||
+    err?.message === "Request aborted" ||
+    err?.message === "Request closed" ||
+    err?.code === "ECONNABORTED";
+
+  if (!isClientAborted) {
+    return false;
+  }
+
+  console.warn(`[${uploadName}] Client aborted upload connection: ${err?.message || "Request aborted"}`);
+
+  if (req.files && Array.isArray(req.files)) {
+    for (const file of req.files) {
+      if (file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (_) {}
+      }
+    }
+  }
+  if (req.file?.path && fs.existsSync(req.file.path)) {
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (_) {}
+  }
+
+  if (res.headersSent || res.writableEnded || req.destroyed || req.socket?.destroyed) {
+    return true;
+  }
+
+  res.status(499).json({
+    success: false,
+    errorCode: "CLIENT_CLOSED_REQUEST",
+    message: "Upload connection was closed by client.",
+    details: null,
+  });
+  return true;
+}
+
 function documentUploadMulter(req, res, next) {
   rawDocumentMulter(req, res, (err) => {
     if (err) {
+      if (handleUploadAbort(req, res, err, "DocumentUpload")) {
+        return;
+      }
       console.error("Error: document upload multer: ", err);
       if (err.code === "LIMIT_FILE_SIZE") {
         return next(
@@ -102,6 +154,18 @@ function documentUploadMulter(req, res, next) {
       }
       return next(new InvalidRequestException(err.message || "File upload error"));
     }
+
+    if (req.files && !Array.isArray(req.files)) {
+      const filesArray = [
+        ...(req.files.files || []),
+        ...(req.files.file || []),
+      ];
+      req.files = filesArray;
+      req.file = filesArray[0] || null;
+    } else if (req.file && (!req.files || req.files.length === 0)) {
+      req.files = [req.file];
+    }
+
     return next();
   });
 }
@@ -166,6 +230,13 @@ async function validateDocumentUpload(req, _res, next) {
         }
         throw error;
       }
+
+      const preValidation = await validatePreUploadDocument(file);
+      if (!preValidation.isValid) {
+        throw new InvalidRequestException(
+          `${preValidation.title}: ${preValidation.message}`,
+        );
+      }
     }
     return next();
   } catch (error) {
@@ -192,6 +263,9 @@ const rawDocumentRetryMulter = multer({
 function documentRetryUploadMulter(req, res, next) {
   rawDocumentRetryMulter(req, res, (err) => {
     if (err) {
+      if (handleUploadAbort(req, res, err, "DocumentRetryUpload")) {
+        return;
+      }
       if (err.code === "LIMIT_FILE_SIZE") {
         return next(
           new InvalidRequestException(
