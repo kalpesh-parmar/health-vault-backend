@@ -127,6 +127,13 @@ const env = Object.freeze({
   aiModel: stringFromEnv("AI_MODEL"),
   aiServiceUrl: stringFromEnv("AI_SERVICE_URL", "http://localhost:8000"),
   useExternalOcrService: booleanFromEnv("USE_EXTERNAL_AI_SERVICE", false),
+  get usePythonPipeline() {
+    return booleanFromEnv("USE_PYTHON_PIPELINE", false);
+  },
+  set usePythonPipeline(val) {
+    process.env.USE_PYTHON_PIPELINE = String(val);
+  },
+  internalServiceKey: stringFromEnv("INTERNAL_SERVICE_KEY", "change-me-internal-service-key"),
   aiTimeoutMs: numberFromEnv("AI_TIMEOUT_MS", 90 * 1000),
   aiMaxRetries: numberFromEnv("AI_MAX_RETRIES", 2),
   aiPageConcurrency: numberFromEnv("AI_PAGE_CONCURRENCY", 4),
@@ -162,6 +169,7 @@ const env = Object.freeze({
 
   // Embedding & Reminders
   embeddingModel: stringFromEnv("AI_EMBEDDING_MODEL") || "bge-m3:latest",
+  embeddingDim: numberFromEnv("AI_EMBEDDING_DIM", 1024),
   refillRemainingQuantity: numberFromEnv("REFILL_REMAINING_QUANTITY", 3),
   afterReminderNotificationMinutes: numberFromEnv("AFTER_REMINDER_NOTIFICATION_MINUTES", 15),
   ragTopK: numberFromEnv("RAG_TOP_K", 8),
@@ -180,6 +188,8 @@ const env = Object.freeze({
     ? Number(process.env.MEDGEMMA_MIN_CONFIDENCE)
     : 0.6,
   medgemmaMaxPages: numberFromEnv("MEDGEMMA_MAX_PAGES", 2),
+  medgemmaConcurrency: numberFromEnv("MEDGEMMA_CONCURRENCY", 2),
+  validationTimeoutMs: numberFromEnv("VALIDATION_TIMEOUT_MS", 30000),
   draftDocumentTtlHours: numberFromEnv("DRAFT_DOCUMENT_TTL_HOURS", 24),
 
   microsoftClientId: stringFromEnv("MICROSOFT_CLIENT_ID"),
