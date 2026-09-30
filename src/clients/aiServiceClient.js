@@ -73,7 +73,7 @@ class AiServiceClient {
     );
   }
 
-  async validateMedicalDocument({ file, fileName, mimeType }) {
+  async validateMedicalDocument({ file, fileName, mimeType, maxPages = 1, timeout }) {
     const formData = new FormData();
 
     let filePayload = file;
@@ -81,6 +81,8 @@ class AiServiceClient {
       filePayload = fs.createReadStream(file);
     } else if (file && file.path && fs.existsSync(file.path)) {
       filePayload = fs.createReadStream(file.path);
+    } else if (file && file.buffer) {
+      filePayload = file.buffer;
     }
 
     formData.append("file", filePayload, {
@@ -88,8 +90,14 @@ class AiServiceClient {
       contentType: mimeType || (typeof file === "object" ? file.mimetype : "application/pdf"),
     });
 
+    if (maxPages) {
+      formData.append("maxPages", String(maxPages));
+    }
+
+    const effectiveTimeout = timeout || env.validationTimeoutMs || env.medgemmaTimeoutMs;
+
     return this.postWithRetry(this.endpoints.validateMedical, formData, {
-      timeout: env.medgemmaTimeoutMs,
+      timeout: effectiveTimeout,
       retries: 1,
       headers: formData.getHeaders(),
     });
@@ -142,6 +150,20 @@ class AiServiceClient {
       timeout: DEFAULT_TIMEOUT,
     });
     return response.data;
+  }
+
+  async dispatchDocumentProcessing(payload) {
+    return this.postWithRetry(
+      this.endpoints.processDocument,
+      payload,
+      {
+        headers: {
+          "X-Internal-Service-Key": env.internalServiceKey,
+        },
+        timeout: 15000,
+        retries: 2,
+      },
+    );
   }
 }
 

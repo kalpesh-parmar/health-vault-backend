@@ -366,6 +366,17 @@ class MedicalValidationService:
         resolved_model = model_name
         parsed: dict[str, Any] | None = None
 
+        validation_schema = {
+            "type": "object",
+            "properties": {
+                "isMedical": {"type": "boolean"},
+                "documentType": {"type": "string"},
+                "confidence": {"type": "number"},
+                "reason": {"type": "string"},
+            },
+            "required": ["isMedical", "documentType"],
+        }
+
         if model_ok:
             try:
                 async with httpx.AsyncClient(timeout=timeout_sec) as client:
@@ -374,14 +385,21 @@ class MedicalValidationService:
                         "prompt": MEDGEMMA_VISION_CLASSIFICATION_PROMPT,
                         "images": base64_images,
                         "stream": False,
-                        "format": "json",
+                        "format": validation_schema,
                         "keep_alive": "10m",
-                        "options": {"temperature": 0.0, "num_predict": 100},
+                        "options": {"temperature": 0.0, "num_predict": 80},
                     }
                     resp = await client.post(f"{base_url}/api/generate", json=payload)
                     if resp.status_code == 200:
                         raw_out = resp.json().get("response", "")
                         parsed = self._clean_and_parse_json(raw_out)
+                    elif resp.status_code == 400:
+                        # Fallback to standard "json" format if Ollama version doesn't support schema object
+                        payload["format"] = "json"
+                        resp2 = await client.post(f"{base_url}/api/generate", json=payload)
+                        if resp2.status_code == 200:
+                            raw_out = resp2.json().get("response", "")
+                            parsed = self._clean_and_parse_json(raw_out)
                     else:
                         logger.warning("Ollama vision returned HTTP %s: %s", resp.status_code, resp.text[:200])
             except Exception as exc:
@@ -398,14 +416,20 @@ class MedicalValidationService:
                             "model": self.settings.ai_model,
                             "prompt": f"{MEDGEMMA_VISION_CLASSIFICATION_PROMPT}\n\nDocument text:\n{text_content}",
                             "stream": False,
-                            "format": "json",
+                            "format": validation_schema,
                             "keep_alive": "10m",
-                            "options": {"temperature": 0.0, "num_predict": 100},
+                            "options": {"temperature": 0.0, "num_predict": 80},
                         }
                         resp = await client.post(f"{base_url}/api/generate", json=payload)
                         if resp.status_code == 200:
                             raw_out = resp.json().get("response", "")
                             parsed = self._clean_and_parse_json(raw_out)
+                        elif resp.status_code == 400:
+                            payload["format"] = "json"
+                            resp2 = await client.post(f"{base_url}/api/generate", json=payload)
+                            if resp2.status_code == 200:
+                                raw_out = resp2.json().get("response", "")
+                                parsed = self._clean_and_parse_json(raw_out)
                 except Exception as exc:
                     logger.error("Fallback text classifier also failed: %s", exc)
             else:
