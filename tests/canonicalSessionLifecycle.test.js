@@ -7,6 +7,7 @@ const documentRepository = require("../src/repositories/documentRepository");
 const documentProcessingJobRepository = require("../src/repositories/documentProcessingJobRepository");
 const ocrService = require("../src/services/ocr.service");
 const unifiedChatHelper = require("../src/helpers/unifiedChat.helper");
+const medicationService = require("../src/services/medication.service");
 
 describe("Phase 5: Canonical Session Lifecycle & Unified Storage Architecture", () => {
   const testUserId = "user-canonical-uuid-1";
@@ -19,6 +20,10 @@ describe("Phase 5: Canonical Session Lifecycle & Unified Storage Architecture", 
     jest.spyOn(documentProcessingJobRepository, "getUserJobSummary").mockResolvedValue(null);
     jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
     jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+    jest.spyOn(medicationService, "bulkCreate").mockResolvedValue({
+      created: [{ id: "med-1", medicationName: "Metformin" }],
+      createdCount: 1,
+    });
   });
 
   describe("1. chatService.getOrCreateCanonicalSession", () => {

@@ -198,7 +198,7 @@ const createMedicationSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
-    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
     replaceMedicationId: z.string().optional(),
   })
   .strict()
@@ -226,11 +226,14 @@ const createMedicationSchema = z
       }
     }
 
-    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+    if (
+      (data.resolution === "REPLACE" || data.resolution === "EDIT") &&
+      !data.replaceMedicationId
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["replaceMedicationId"],
-        message: "replaceMedicationId is required when resolution is REPLACE",
+        message: `replaceMedicationId is required when resolution is ${data.resolution}`,
       });
     }
 
@@ -257,7 +260,7 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
-    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT"]).optional(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
     replaceMedicationId: z.string().optional(),
   })
   .strict()
@@ -276,11 +279,14 @@ const updateMedicationSchema = z
       });
     }
 
-    if (data.resolution === "REPLACE" && !data.replaceMedicationId) {
+    if (
+      (data.resolution === "REPLACE" || data.resolution === "EDIT") &&
+      !data.replaceMedicationId
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["replaceMedicationId"],
-        message: "replaceMedicationId is required when resolution is REPLACE",
+        message: `replaceMedicationId is required when resolution is ${data.resolution}`,
       });
     }
 

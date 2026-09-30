@@ -79,6 +79,89 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(normalized.totalQuantity).toBe(10);
   });
 
+  describe("normalizeCreateMedicationInput Frequency, Dose & Schedule Slot Normalization", () => {
+    test("normalizes raw space-separated and shorthand frequency variations to canonical title-case enums", () => {
+      const cases = [
+        { raw: "ONCE DAILY", expected: "Once Daily" },
+        { raw: "TWICE DAILY", expected: "Twice Daily" },
+        { raw: "THREE TIMES DAILY", expected: "Three Times Daily" },
+        { raw: "AS NEEDED", expected: "As Needed" },
+        { raw: "3X DAILY", expected: "Three Times Daily" },
+        { raw: "3X_DAILY", expected: "Three Times Daily" },
+        { raw: "1X_DAILY", expected: "Once Daily" },
+        { raw: "2X_DAILY", expected: "Twice Daily" },
+        { raw: "Once Daily", expected: "Once Daily" },
+        { raw: "Twice Daily", expected: "Twice Daily" },
+        { raw: "Three Times Daily", expected: "Three Times Daily" },
+        { raw: "As Needed", expected: "As Needed" },
+      ];
+
+      for (const { raw, expected } of cases) {
+        const result = normalizeCreateMedicationInput({
+          name: "TestMed",
+          type: "TABLET",
+          frequency: raw,
+        });
+        expect(result.frequency).toBe(expected);
+      }
+    });
+
+    test("coerces string dosePerIntake and dose object to double-precision numbers", () => {
+      expect(
+        normalizeCreateMedicationInput({
+          name: "Syrup",
+          type: "SYRUP",
+          dosePerIntake: "7.5 ml",
+        }).dosePerIntake,
+      ).toBe(7.5);
+
+      expect(
+        normalizeCreateMedicationInput({
+          name: "Tablet",
+          type: "TABLET",
+          dosePerIntake: "2.5",
+        }).dosePerIntake,
+      ).toBe(2.5);
+
+      expect(
+        normalizeCreateMedicationInput({
+          name: "Capsule",
+          type: "CAPSULE",
+          dose: { count: 3 },
+        }).dosePerIntake,
+      ).toBe(3);
+    });
+
+    test("generates exact schedule slot counts for each frequency when schedule is omitted", () => {
+      const once = normalizeCreateMedicationInput({
+        name: "OnceMed",
+        type: "TABLET",
+        frequency: "ONCE DAILY",
+      });
+      expect(Object.keys(once.medicationSchedule)).toHaveLength(1);
+      expect(once.medicationSchedule.Morning).toBe("09:00:00");
+
+      const twice = normalizeCreateMedicationInput({
+        name: "TwiceMed",
+        type: "TABLET",
+        frequency: "TWICE DAILY",
+      });
+      expect(Object.keys(twice.medicationSchedule)).toHaveLength(2);
+      expect(twice.medicationSchedule.Morning).toBe("09:00:00");
+      expect(twice.medicationSchedule.Night).toBe("21:00:00");
+
+      const thrice = normalizeCreateMedicationInput({
+        name: "ThriceMed",
+        type: "TABLET",
+        frequency: "THREE TIMES DAILY",
+      });
+      expect(Object.keys(thrice.medicationSchedule)).toHaveLength(3);
+      expect(thrice.medicationSchedule.Morning).toBe("09:00:00");
+      expect(thrice.medicationSchedule.Noon).toBe("14:00:00");
+      expect(thrice.medicationSchedule.Night).toBe("21:00:00");
+    });
+  });
+
   test("executeAddDocumentAction should enqueue background OCR job when rawOcrData is missing", async () => {
     const mockDocumentOcrJobService = {
       enqueue: jest.fn().mockResolvedValue({ id: "job-999", status: "QUEUED" }),
@@ -1131,7 +1214,16 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         },
       };
 
-      const res = await onboardingService.chat("male", [], state, "p-gender-test");
+      const stepRes = await onboardingService.chat("male", [], state, "p-gender-test");
+      expect(stepRes.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(stepRes.mode).toBe("CONFIRM");
+
+      const res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        stepRes.state,
+        "p-gender-test",
+      );
 
       // 1. User remains on onboarding chat screen, next question is ASK_BLOOD_GROUP
       expect(res.action).toBe("ASK_BLOOD_GROUP");
@@ -1202,7 +1294,16 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           },
         };
 
-        const res = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        const resGender = await onboardingService.chat("female", [], testState, `user-${lang}`);
+        expect(resGender.action).toBe("RESOLVE_PROFILE_SOURCE");
+
+        const res = await onboardingService.chat(
+          JSON.stringify({ confirmed: true }),
+          [],
+          resGender.state,
+          `user-${lang}`,
+        );
+        expect(res.action).toBe("ASK_BLOOD_GROUP");
         expect(res.canSkip).toBe(true);
         expect(res.completionMessage).toBe(expectedMsg);
         expect(res.state.completionMessageSent).toBe(true);
@@ -2448,6 +2549,112 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           allergies: ["B+"],
         }),
       );
+
+      jest.restoreAllMocks();
+    });
+  });
+
+  describe("Phase 19: Post-Onboarding Allergy Continuation & Medicine Persistence Parity", () => {
+    test("normalizeCreateMedicationInput strips extraneous OCR draft keys to satisfy strict Zod schema", () => {
+      const draft = {
+        id: "draft-123",
+        client_med_id: "draft-123",
+        medicationName: "Paracetamol 500mg",
+        medicationType: "TABLET",
+        dosePerIntake: 1,
+        frequency: "Once Daily",
+        foodFrequency: "AFTER_MEAL",
+        startDate: "2026-09-28",
+        totalQuantity: 20,
+        // Extraneous keys that would violate createMedicationSchema.strict():
+        isSaved: false,
+        dbId: "db-123",
+        refillAlert: true,
+        dosage: "500mg",
+        notes: "Take after food",
+      };
+
+      const normalized = normalizeCreateMedicationInput(draft);
+      expect(normalized.medicationName).toBe("Paracetamol 500mg");
+      expect(normalized.medicationType).toBe("TABLET");
+      expect(normalized.dosePerIntake).toBe(1);
+      expect(normalized.totalQuantity).toBe(20);
+      expect(normalized.isSaved).toBeUndefined();
+      expect(normalized.dbId).toBeUndefined();
+      expect(normalized.refillAlert).toBeUndefined();
+      expect(normalized.dosage).toBeUndefined();
+    });
+
+    test("Post-onboarding allergy submission advances to MEDICINE_OPTIONS without falling back to NORMAL_CHAT", async () => {
+      const ocrService = require("../src/services/ocr.service");
+      const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
+      const patientRepository = require("../src/repositories/patientRepository");
+      const authProviderRepository = require("../src/repositories/authProviderRepository");
+
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-phase19-test",
+        firstName: "Test",
+        lastName: "User",
+        gender: "male",
+        dateOfBirth: new Date("1990-01-01"),
+        bloodGroup: "O+",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          profileConfirmed: true,
+          currentStep: "ASK_ALLERGIES",
+          isOnboardingCompleted: true,
+          fromScreen: "Dashboard",
+          existingUserData: {
+            firstName: "Test",
+            lastName: "User",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+
+      // Client payload submitting allergies in post-onboarding mode
+      const allergyPayload = {
+        actionType: "ASK_ALLERGIES",
+        message: JSON.stringify({
+          action: "ASK_ALLERGIES",
+          allergies: ["Penicillin"],
+        }),
+        displayLabel: "Penicillin",
+        fromScreen: "Dashboard",
+        state: {
+          preferredLanguage: "english",
+          flowMode: "MANUAL",
+          currentStep: "ASK_ALLERGIES",
+          profileConfirmed: true,
+          isOnboardingCompleted: true,
+          fromScreen: "Dashboard",
+          existingUserData: {
+            firstName: "Test",
+            lastName: "User",
+            dateOfBirth: "1990-01-01",
+            gender: "male",
+            bloodGroup: "O+",
+            allergies: ["Penicillin"],
+          },
+        },
+      };
+
+      const res = await ocrService.onboardingChat("patient-phase19-test", allergyPayload);
+      expect(res.actionType).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.currentStep).toBe("MEDICINE_OPTIONS");
+      expect(res.onboardingState.isOnboardingCompleted).toBe(true);
+      // Because fromScreen === "Dashboard", DASHBOARD option must NOT be present
+      expect(res.options.some((opt) => opt.key === "DASHBOARD")).toBe(false);
+      expect(res.options.some((opt) => opt.key === "ADD")).toBe(true);
 
       jest.restoreAllMocks();
     });

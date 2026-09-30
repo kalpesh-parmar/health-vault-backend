@@ -80,6 +80,8 @@ function buildUnifiedResponse({
   explainer = null,
   loginSummary = null,
   documentSummary = null,
+  loginProvider = null,
+  sourceComparison = null,
 }) {
   return {
     mode,
@@ -91,6 +93,8 @@ function buildUnifiedResponse({
     explainer,
     loginSummary,
     documentSummary,
+    loginProvider,
+    sourceComparison,
     sessionId,
     onboardingState,
     state: onboardingState,

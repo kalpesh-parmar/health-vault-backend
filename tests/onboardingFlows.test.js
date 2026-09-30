@@ -369,8 +369,18 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       };
       dbStates["user-103"] = state;
 
-      state.currentStep = "ASK_BLOOD_GROUP";
-      let res = await onboardingService.chat("A+", [], state, "user-103");
+      state.currentStep = "RESOLVE_PROFILE_SOURCE";
+      let res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        state,
+        "user-103",
+      );
+      state = res.state;
+      expect(state.profileConfirmed).toBe(true);
+      expect(res.action).toBe("ASK_BLOOD_GROUP");
+
+      res = await onboardingService.chat("A+", [], state, "user-103");
       state = res.state;
       expect(res.action).toBe("ASK_ALLERGIES");
 
@@ -458,6 +468,18 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       // Required Q4: Gender
       res = await onboardingService.chat("male", [], state, "user-104");
       state = res.state;
+      expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+      expect(res.mode).toBe("CONFIRM");
+
+      // Profile Confirmation Card
+      res = await onboardingService.chat(
+        JSON.stringify({ confirmed: true }),
+        [],
+        state,
+        "user-104",
+      );
+      state = res.state;
+      expect(state.profileConfirmed).toBe(true);
       expect(res.action).toBe("ASK_BLOOD_GROUP");
 
       // Optional Q1: Blood Group

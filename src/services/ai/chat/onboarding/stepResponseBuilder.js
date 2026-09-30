@@ -95,16 +95,19 @@ async function getLocalizedResponse(step, state) {
         state.documentConfirmed !== false &&
         !!state.documentData;
 
-      const { hasMismatch, fields } = getProfileMismatches(state);
+      const { hasMismatch, fields, sourceComparison } = getProfileMismatches(state);
       const mode = hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
 
-      const loginFirstName = state.socialData?.firstName || "";
-      const loginLastName = state.socialData?.lastName || "";
-      const docFirstName = useDoc ? state.documentData?.firstName || "" : "";
-      const docLastName = useDoc ? state.documentData?.lastName || "" : "";
+      const isManual = sourceComparison === "MANUAL_VS_LOGIN" || !useDoc;
+      const compareData = isManual ? state.existingUserData || {} : state.documentData || {};
+
+      const loginFirstName = state.socialData?.firstName || state.loginData?.firstName?.value || "";
+      const loginLastName = state.socialData?.lastName || state.loginData?.lastName?.value || "";
+      const compareFirstName = compareData.firstName || "";
+      const compareLastName = compareData.lastName || "";
 
       const loginName = [loginFirstName, loginLastName].filter(Boolean).join(" ");
-      const docName = [docFirstName, docLastName].filter(Boolean).join(" ");
+      const compareName = [compareFirstName, compareLastName].filter(Boolean).join(" ");
 
       let message, title, subtitle, explainer;
       if (mode === "CONFLICT") {
@@ -181,21 +184,33 @@ async function getLocalizedResponse(step, state) {
         );
       }
 
-      if (docName) {
-        documentSummary = await getLocalizedText(
-          "onboarding.source.documentSummary",
-          "{name} (Medical Document)",
+      if (isManual) {
+        const manualDetailsText = await getLocalizedText(
+          "onboarding.manual",
+          "Entered Details",
           state.preferredLanguage,
-          { name: docName },
         );
+        if (compareName) {
+          documentSummary = `${compareName} (${manualDetailsText})`;
+        } else {
+          documentSummary = manualDetailsText;
+        }
       } else {
-        documentSummary = await getLocalizedText(
-          "onboarding.source.documentSummaryEmpty",
-          "{provider} Details",
-          state.preferredLanguage,
-          { provider: useDocText },
-        );
-        console.log("[DOCUMENT DETAILS]====", useDocText);
+        if (compareName) {
+          documentSummary = await getLocalizedText(
+            "onboarding.source.documentSummary",
+            "{name} (Medical Document)",
+            state.preferredLanguage,
+            { name: compareName },
+          );
+        } else {
+          documentSummary = await getLocalizedText(
+            "onboarding.source.documentSummaryEmpty",
+            "{provider} Details",
+            state.preferredLanguage,
+            { provider: useDocText },
+          );
+        }
       }
 
       const displayKeys = [
@@ -207,22 +222,21 @@ async function getLocalizedResponse(step, state) {
         { key: "email", label: "Email", type: "email" },
       ];
 
-      const docData = useDoc ? state.documentData || {} : {};
-
       const localizedFields = await Promise.all(
         displayKeys.map(async (item) => {
           const k = item.key;
           const mismatchField = fields.find((f) => f.key === k);
-          const loginField = state.loginData?.[k] || { value: null, verified: false };
+          const loginField = state.loginData?.[k] || {
+            value: state.socialData?.[k] || null,
+            verified: false,
+          };
 
-          let loginVal = mismatchField ? mismatchField.loginValue : loginField.value || null;
-          let docVal = mismatchField
-            ? mismatchField.documentValue
-            : useDoc
-              ? docData[k] || null
-              : null;
-          if (k === "phoneNumber" && docVal === null && useDoc) {
-            docVal = docData.mobile || docData.phoneNumber || null;
+          let loginVal = mismatchField
+            ? mismatchField.loginValue
+            : (typeof loginField === "object" ? loginField.value : loginField) || null;
+          let docVal = mismatchField ? mismatchField.documentValue : compareData[k] || null;
+          if (k === "phoneNumber" && docVal === null) {
+            docVal = compareData.mobile || compareData.phoneNumber || null;
           }
 
           const existingVal = state.existingUserData?.[k] || null;
@@ -262,6 +276,9 @@ async function getLocalizedResponse(step, state) {
           const isMismatch =
             mode === "CONFIRM" ? false : mismatchField ? mismatchField.isMismatch : false;
 
+          const isDemographic = ["firstName", "lastName", "dateOfBirth", "gender"].includes(k);
+          const isVerified = isDemographic ? false : Boolean(loginField.verified);
+
           return {
             key: k,
             label: localizedLabel,
@@ -269,8 +286,8 @@ async function getLocalizedResponse(step, state) {
             documentValue: docVal,
             value: singleVal,
             isMismatch,
-            verified: loginField.verified,
-            editable: !loginField.verified,
+            verified: isVerified,
+            editable: !isVerified,
           };
         }),
       );
@@ -285,6 +302,7 @@ async function getLocalizedResponse(step, state) {
         loginSummary,
         documentSummary,
         loginProvider: state.loginProvider || "email",
+        sourceComparison: sourceComparison || (useDoc ? "DOCUMENT_VS_LOGIN" : "MANUAL_VS_LOGIN"),
       };
 
       if (mode === "CONFLICT") {
@@ -492,7 +510,7 @@ async function getLocalizedResponse(step, state) {
       return {
         action: "REVIEW_MEDICINES_LIST",
         message: await getLocalizedText(
-          "onboarding.reviewMedicinesList.message",
+          "onboarding.reviewMedicinesList.reviewPrompt",
           "Please review the list of medications extracted from your document:",
           state.preferredLanguage,
         ),
@@ -600,6 +618,7 @@ async function getLocalizedResponse(step, state) {
       if (
         state.fromScreen !== "AIChat" &&
         state.fromScreen !== "AIChatScreen" &&
+        state.fromScreen !== "Dashboard" &&
         !state.hasSkipped
       ) {
         options.push({

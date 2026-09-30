@@ -551,7 +551,7 @@ async function updateStateFromMessage(state, message, userId = null) {
             ) {
               payload.source = "LOGIN";
             } else if (
-              [
+              ([
                 "DOCUMENT",
                 "DOC",
                 "MEDICAL_DOCUMENT",
@@ -562,7 +562,9 @@ async function updateStateFromMessage(state, message, userId = null) {
                 "MEDICAL DOCUMENT",
                 "NO",
               ].includes(upper) ||
-              upper.includes("DOCUMENT")
+                upper.includes("DOCUMENT")) &&
+              upper !== "DOCUMENT_UPLOADED" &&
+              !upper.includes("DOCUMENT_UPLOADED")
             ) {
               payload.source = "DOCUMENT";
             } else if (
@@ -620,6 +622,41 @@ async function updateStateFromMessage(state, message, userId = null) {
           state.profileManuallyEdited =
             !!payload.edited || state.selectedProfileSource === "MANUAL";
           state.stepClarificationNeeded = false;
+
+          if (userId && patientRepository?.updateById && state.existingUserData) {
+            const updateFields = {};
+            if (state.existingUserData.firstName)
+              updateFields.firstName = state.existingUserData.firstName;
+            if (state.existingUserData.lastName)
+              updateFields.lastName = state.existingUserData.lastName;
+            if (state.existingUserData.firstName || state.existingUserData.lastName) {
+              updateFields.fullName = [
+                state.existingUserData.firstName,
+                state.existingUserData.lastName,
+              ]
+                .filter(Boolean)
+                .join(" ");
+            }
+            if (state.existingUserData.dateOfBirth) {
+              updateFields.dateOfBirth = toDbDate(state.existingUserData.dateOfBirth);
+            }
+            if (state.existingUserData.gender) updateFields.gender = state.existingUserData.gender;
+            if (state.existingUserData.phoneNumber)
+              updateFields.phoneNumber = state.existingUserData.phoneNumber;
+            if (state.existingUserData.email) updateFields.email = state.existingUserData.email;
+
+            if (Object.keys(updateFields).length > 0) {
+              try {
+                await patientRepository.updateById(userId, updateFields);
+              } catch (err) {
+                console.warn(
+                  "[OnboardingService] Failed to persist confirmed profile to patient:",
+                  err.message,
+                );
+              }
+            }
+          }
+
           state.currentStep = computeCurrentStep(state);
         }
       } else {
@@ -890,12 +927,12 @@ async function updateStateFromMessage(state, message, userId = null) {
         const finalFn = firstName || nameVal;
         state.existingUserData.firstName = finalFn;
         if (!state.loginData) state.loginData = {};
-        state.loginData.firstName = { value: finalFn, verified: true, provenance: "manual" };
+        state.loginData.firstName = { value: finalFn, verified: false, provenance: "manual" };
 
         if (lastName) {
           if (!state.existingUserData.lastName) state.existingUserData.lastName = lastName;
           if (!state.loginData.lastName || !state.loginData.lastName.value) {
-            state.loginData.lastName = { value: lastName, verified: true, provenance: "manual" };
+            state.loginData.lastName = { value: lastName, verified: false, provenance: "manual" };
           }
         }
 
@@ -940,7 +977,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (nameVal) {
         state.existingUserData.lastName = nameVal;
         if (!state.loginData) state.loginData = {};
-        state.loginData.lastName = { value: nameVal, verified: true, provenance: "manual" };
+        state.loginData.lastName = { value: nameVal, verified: false, provenance: "manual" };
 
         if (userId) {
           try {
@@ -980,7 +1017,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (dob) {
         state.existingUserData.dateOfBirth = dob;
         if (!state.loginData) state.loginData = {};
-        state.loginData.dateOfBirth = { value: dob, verified: true, provenance: "manual" };
+        state.loginData.dateOfBirth = { value: dob, verified: false, provenance: "manual" };
 
         if (userId) {
           try {
@@ -1036,7 +1073,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         if (genNorm === "male" || genNorm === "female") {
           state.existingUserData.gender = genNorm;
           if (!state.loginData) state.loginData = {};
-          state.loginData.gender = { value: genNorm, verified: true, provenance: "manual" };
+          state.loginData.gender = { value: genNorm, verified: false, provenance: "manual" };
 
           if (userId) {
             try {
@@ -1578,8 +1615,13 @@ async function updateStateFromMessage(state, message, userId = null) {
         payload.action === "SAVE_AND_REVIEW" ||
         payload.actionType === "SAVE_AND_REVIEW";
 
-      if (isSaveAndReview && Array.isArray(payload.medicines)) {
-        state.medicinesToAdd = deduplicateMedicines(payload.medicines);
+      if (isSaveAndReview) {
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => !m.isSaved && !m.dbId);
+        if (Array.isArray(payload.medicines)) {
+          state.medicinesToAdd = deduplicateMedicines(
+            payload.medicines.filter((m) => !m.isSaved && !m.dbId),
+          );
+        }
       }
 
       const isAddAndContinue =
@@ -2034,7 +2076,7 @@ class OnboardingService {
     if (state.documentExtracted === undefined) state.documentExtracted = false;
     if (state.selectedProfileSource === undefined) state.selectedProfileSource = null;
     if (state.useSocialData === undefined) state.useSocialData = false;
-    if (state.useDocumentData === undefined) state.useDocumentData = false;
+    if (state.useDocumentData === undefined) state.useDocumentData = state.flowMode === "UPLOAD";
     if (state.profileManuallyEdited === undefined) state.profileManuallyEdited = false;
 
     // Synchronize medications from DB for UPLOAD flow if they are not loaded yet or if document changed
@@ -2091,6 +2133,33 @@ class OnboardingService {
         gender: state.loginData.gender?.value || null,
         dateOfBirth: state.loginData.dateOfBirth?.value || null,
         phoneNumber: state.loginData.phoneNumber?.value || null,
+      };
+    } else if (state.socialData && typeof state.socialData === "object") {
+      state.hasSocialData = true;
+      state.hasLoginData = true;
+      state.loginData = {
+        firstName: {
+          value: state.socialData.firstName || null,
+          verified: false,
+          provenance: "profile",
+        },
+        lastName: {
+          value: state.socialData.lastName || null,
+          verified: false,
+          provenance: "profile",
+        },
+        email: { value: state.socialData.email || null, verified: false, provenance: "profile" },
+        gender: { value: state.socialData.gender || null, verified: false, provenance: "profile" },
+        dateOfBirth: {
+          value: state.socialData.dateOfBirth || null,
+          verified: false,
+          provenance: "profile",
+        },
+        phoneNumber: {
+          value: state.socialData.phoneNumber || null,
+          verified: false,
+          provenance: "profile",
+        },
       };
     } else if (
       state.hasLoginData === undefined ||
@@ -2209,6 +2278,30 @@ class OnboardingService {
         state.loginData = null;
         state.hasSocialData = false;
         state.socialData = null;
+      }
+    }
+
+    if (!state.loginProvider && userId) {
+      try {
+        const providers = (await authProviderRepository.findByUserId(userId)) || [];
+        const providerNames = Array.isArray(providers) ? providers.map((p) => p.provider) : [];
+        let primaryProvider = "email";
+        if (providerNames.includes("google")) {
+          primaryProvider = "google";
+        } else if (providerNames.includes("facebook")) {
+          primaryProvider = "facebook";
+        } else if (providerNames.includes("microsoft")) {
+          primaryProvider = "microsoft";
+        } else if (providerNames.includes("apple")) {
+          primaryProvider = "apple";
+        } else if (providerNames.includes("mobile")) {
+          primaryProvider = "mobile";
+        } else if (providerNames.includes("password")) {
+          primaryProvider = "email";
+        }
+        state.loginProvider = primaryProvider;
+      } catch (err) {
+        console.warn("[Onboarding] Error resolving login provider:", err);
       }
     }
 
@@ -2359,8 +2452,26 @@ class OnboardingService {
           );
         }
       }
-      const userContent =
+      let userContent =
         resolvedLabel || displayLabel || (msg !== undefined && msg !== null ? msg : "");
+
+      if (
+        typeof userContent === "object" ||
+        (typeof userContent === "string" &&
+          (userContent.trim().startsWith("{") ||
+            userContent.trim().startsWith("[") ||
+            userContent.includes('"selected"')))
+      ) {
+        const userLang = state?.preferredLanguage || "english";
+        userContent =
+          userLang === "gujarati" || userLang === "gu"
+            ? "આગળ વધો"
+            : await getLocalizedText(
+                "onboarding.reviewMedicinesList.confirm",
+                "Confirm Selection",
+                userLang,
+              );
+      }
 
       await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
@@ -2740,6 +2851,7 @@ class OnboardingService {
           loginSummary: response.loginSummary || null,
           documentSummary: response.documentSummary || null,
           loginProvider: response.loginProvider || null,
+          sourceComparison: response.sourceComparison || null,
           medicine: response.medicine || null,
           summary: response.summary || null,
           medicines: response.medicines || null,
@@ -2813,4 +2925,5 @@ module.exports = {
   createResponse,
   getLocalizedResponse,
   REPORT_QUESTIONS_I18N,
+  updateStateFromMessage,
 };
