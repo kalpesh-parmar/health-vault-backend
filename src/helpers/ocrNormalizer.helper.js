@@ -239,8 +239,10 @@ function sanitizeMedicationInstructions(instructions, quantity, duration) {
 function buildMedications(normalized) {
   const medications = [];
 
-  for (const med of normalized.medications || []) {
-    if (!med) continue;
+  for (const rawMed of normalized.medications || []) {
+    if (!rawMed) continue;
+    const med = typeof rawMed === "string" ? { name: rawMed } : rawMed;
+
     const qty = med?.quantity || med?.qty || null;
     const duration = med?.duration || null;
     const rawDosage = med?.dosage || med?.dose || med?.timeOfDay || null;
@@ -265,7 +267,10 @@ function buildMedications(normalized) {
   }
 
   for (const prescription of normalized.prescriptions || []) {
-    for (const med of prescription?.medications || []) {
+    for (const rawMed of prescription?.medications || []) {
+      if (!rawMed) continue;
+      const med = typeof rawMed === "string" ? { name: rawMed } : rawMed;
+
       const qty = med?.quantity || med?.qty || null;
       const duration = med?.duration || null;
       const rawDosage = med?.dosage || med?.dose || med?.timeOfDay || null;

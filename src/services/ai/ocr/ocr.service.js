@@ -1043,13 +1043,12 @@ Return STRICT JSON only:
 
       const jsonResponseText = await ollamaClient.generate(promptToUse, structuringModel, {
         temperature: 0,
-        maxTokens: 4096,
+        maxTokens: 8192, //4096,
         format: "json",
         keep_alive: -1,
-        rawOptions: { num_ctx: 8192 },
+        rawOptions: { num_ctx: 16384 }, //8192
         think: false,
       });
-
       const parsedCandidate = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
       if (parsedCandidate && parsedCandidate.status !== "FAILED") {
         rawParsedCandidate = parsedCandidate;
@@ -1110,12 +1109,10 @@ Return STRICT JSON only:
     let rawCandidateDocType = rawParsedCandidate.documentType || rawParsedCandidate.reportType;
 
     const rawCandidateText = (rawParsedCandidate.rawText || "").toLowerCase();
-    const candidateMeds = rawParsedCandidate.medications || [];
-    const candidateLab =
-      rawParsedCandidate.testResults ||
-      rawParsedCandidate.labTests ||
-      rawParsedCandidate.tests ||
-      [];
+    const candidateMeds = asArray(rawParsedCandidate.medications);
+    const candidateLab = asArray(
+      rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
+    );
 
     if (
       !rawCandidateDocType ||
@@ -1135,7 +1132,9 @@ Return STRICT JSON only:
 
     const analyzedDocType = normalizeDocumentType(rawCandidateDocType);
 
-    const formattedMeds = (rawParsedCandidate.medications || []).map((m) => {
+    const rawMeds = asArray(rawParsedCandidate.medications);
+    const formattedMeds = rawMeds.map((rawMed) => {
+      const m = typeof rawMed === "string" ? { name: rawMed.trim() } : rawMed || {};
       const qty = m.quantity || m.qty || null;
       const duration = m.duration || null;
       const instructions =
@@ -1279,12 +1278,12 @@ Return STRICT JSON only:
           bloodGroup: normalizeBloodGroup(
             rawParsedCandidate.bloodGroup || rawParsedCandidate.patient?.bloodGroup,
           ),
-          allergies: Array.isArray(rawParsedCandidate.allergies)
-            ? rawParsedCandidate.allergies
-            : [],
-          medicalConditions: Array.isArray(rawParsedCandidate.medicalConditions)
-            ? rawParsedCandidate.medicalConditions
-            : [],
+          allergies: asArray(rawParsedCandidate.allergies)
+            .map((a) => (typeof a === "string" ? a : String(a?.name || a?.value || "")))
+            .filter(Boolean),
+          medicalConditions: asArray(rawParsedCandidate.medicalConditions)
+            .map((c) => (typeof c === "string" ? c : String(c?.name || c?.value || "")))
+            .filter(Boolean),
           address: rawParsedCandidate.address || rawParsedCandidate.patient?.address || null,
         },
         hospitalInfo: {
@@ -1301,18 +1300,18 @@ Return STRICT JSON only:
             ? [rawParsedCandidate.diagnosis]
             : [],
         medications: formattedMeds,
-        labResults: (
-          rawParsedCandidate.testResults ||
-          rawParsedCandidate.labTests ||
-          rawParsedCandidate.tests ||
-          []
-        ).map((t) => ({
-          name: t.testName || t.name || null,
-          value: t.value || null,
-          unit: t.unit || null,
-          normalRange: t.referenceRange || t.normalRange || null,
-          isAbnormal: t.status === "ABNORMAL",
-        })),
+        labResults: asArray(
+          rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
+        ).map((rawTest) => {
+          const t = typeof rawTest === "string" ? { testName: rawTest.trim() } : rawTest || {};
+          return {
+            name: t.testName || t.name || null,
+            value: t.value || null,
+            unit: t.unit || null,
+            normalRange: t.referenceRange || t.normalRange || null,
+            isAbnormal: t.status === "ABNORMAL",
+          };
+        }),
         summary: finalSummaryValue,
       },
     };
