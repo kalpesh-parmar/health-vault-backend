@@ -5,8 +5,8 @@ const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
-const { normalizeMedicine } = require("./medicineNormalize.helper");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const { normalizeMedicine } = require("./medicineNormalize.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.

@@ -169,26 +169,11 @@ function getMissingRequiredStep(state) {
 function getNextRequiredOrOptionalStep(state) {
   const data = state.existingUserData || {};
 
-  // const _useDoc =
-  //   state.useDocumentData !== false &&
-  //   state.flowMode === "UPLOAD" &&
-  //   state.documentConfirmed !== false &&
-  //   (!!state.documentData || !!state.documentId);
-
   const missingRequired = getMissingRequiredStep(state);
   if (missingRequired) {
     return missingRequired;
   }
 
-  // MATRIX RULE: RESOLVE_PROFILE_SOURCE is triggered when there is an existing login/social profile to compare or confirm
-  // const hasLoginProfile =
-  //   Boolean(state.loginData) ||
-  //   state.hasSocialData === true ||
-  //   ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-
-  // if (state.flowMode === "SKIP" || state.flowMode === "MANUAL" || !_useDoc || !hasLoginProfile) {
-  //   state.profileConfirmed = true;
-  // } else if (!state.profileConfirmed) {
   if (!state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
   }

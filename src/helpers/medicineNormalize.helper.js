@@ -788,7 +788,6 @@ function normalizeCreateMedicationInput(payload = {}) {
     "notes",
     "resolution",
     "replaceMedicationId",
-    "refillAlert",
   ];
 
   const cleaned = {};
