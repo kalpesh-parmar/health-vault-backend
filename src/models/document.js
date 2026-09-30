@@ -38,13 +38,13 @@ const document = pgTable(
     ocrExtractedText: text("ocr_extracted_text"),
     structuredExtractedData: jsonb("structured_extracted_data"),
     // Strategy 3 Follow-up: Long-term migration to Postgres column type 'date' with { mode: 'string' }
-    reportDate: date("report_date", { mode: "date" }),
-    hospitalName: varchar("hospital_name", { length: 255 }),
-    doctorName: varchar("doctor_name", { length: 255 }),
+    reportDate: date("report_date", { mode: "date" }), //extra field
+    hospitalName: varchar("hospital_name", { length: 255 }), //extra field
+    doctorName: varchar("doctor_name", { length: 255 }), //extra field
     remarks: text("remarks"),
-    summaryEnglish: text("summary_english"),
+    summaryEnglish: text("summary_english"), //extra field
     softDelete: boolean("soft_delete").default(false).notNull(),
-    // deletedAt: timestamp("deleted_at"),
+    // deletedAt: timestamp("deleted_at"), // uncommit this
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

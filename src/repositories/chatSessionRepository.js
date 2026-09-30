@@ -68,6 +68,77 @@ class ChatSessionRepository {
   }
 
   /**
+   * Find the user's primary/canonical session.
+   */
+  async findCanonicalSession(userId) {
+    if (!userId) return null;
+
+    // 1. Explicitly marked canonical session
+    const [canonical] = await this.client
+      .select()
+      .from(chatSession)
+      .where(
+        and(
+          eq(chatSession.userId, userId),
+          eq(chatSession.softDelete, false),
+          sql`${chatSession.metadata}->>'isCanonical' = 'true'`,
+        ),
+      )
+      .limit(1);
+    if (canonical) return canonical;
+
+    // 2. Existing ONBOARDING typed session
+    const [onboardingSession] = await this.client
+      .select()
+      .from(chatSession)
+      .where(
+        and(
+          eq(chatSession.userId, userId),
+          eq(chatSession.softDelete, false),
+          sql`${chatSession.metadata}->>'type' = 'ONBOARDING'`,
+        ),
+      )
+      .orderBy(asc(chatSession.createdAt))
+      .limit(1);
+    if (onboardingSession) return onboardingSession;
+
+    // 3. Fall back to oldest active session for the patient
+    const [oldest] = await this.client
+      .select()
+      .from(chatSession)
+      .where(and(eq(chatSession.userId, userId), eq(chatSession.softDelete, false)))
+      .orderBy(asc(chatSession.createdAt))
+      .limit(1);
+
+    return oldest || null;
+  }
+
+  /**
+   * Mark an existing session as canonical.
+   */
+  async markAsCanonical(sessionId, userId) {
+    if (!sessionId || !userId) return null;
+    const session = await this.findSessionById(sessionId, userId);
+    if (!session) return null;
+
+    const currentMetadata = session.metadata || {};
+    const [updated] = await this.client
+      .update(chatSession)
+      .set({
+        metadata: {
+          ...currentMetadata,
+          isCanonical: true,
+          type: "CANONICAL",
+        },
+        updatedAt: new Date(),
+      })
+      .where(and(eq(chatSession.id, sessionId), eq(chatSession.userId, userId)))
+      .returning();
+
+    return updated || null;
+  }
+
+  /**
    * List sessions ordered by recent activity. Used by the FE sidebar.
    */
   async listSessions({ userId, limit = DEFAULT_PAGE_SIZE, cursor }) {

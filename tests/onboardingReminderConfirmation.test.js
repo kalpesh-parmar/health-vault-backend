@@ -133,12 +133,15 @@ describe("Onboarding & Post-Onboarding Reminder Creation and KEEP_EXISTING Verif
       },
     ]);
 
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
     const result = await medicationService.createMedication(userId, {
       medicationName: "Atorvastatin 10mg",
       medicationType: "TABLET",
       dosePerIntake: 1,
       frequency: "Once Daily",
-      startDate: new Date().toISOString().split("T")[0],
+      startDate: todayStr,
       totalQuantity: 30,
       medicationSchedule: { MORNING: "08:00:00" },
       resolution: "KEEP_EXISTING",

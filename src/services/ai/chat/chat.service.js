@@ -11,6 +11,7 @@ const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const medicationRepository = require("../../../repositories/medicationRepository");
+const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
@@ -539,10 +540,8 @@ ${chunksContent}`;
         if (documentId && documentId.length > 0) {
           let lookupSessionId = reqSessionId;
           if (!lookupSessionId) {
-            const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
-            if (existingSessions?.items?.length > 0) {
-              lookupSessionId = existingSessions.items[0].id;
-            }
+            const canonicalSession = await this.getOrCreateCanonicalSession({ userId });
+            lookupSessionId = canonicalSession?.id;
           }
           if (lookupSessionId) {
             const recentMsgs = await chatSessionRepository.listMessages({
@@ -575,7 +574,6 @@ ${chunksContent}`;
         }
         if (!preferredLanguage || preferredLanguage === "english") {
           try {
-            const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
             const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
             if (onboardingRecord?.data?.preferredLanguage) {
               preferredLanguage = onboardingRecord.data.preferredLanguage;
@@ -638,20 +636,22 @@ ${chunksContent}`;
       let session;
       if (reqSessionId) {
         session = await chatSessionRepository.findSessionById(reqSessionId, userId);
-        if (!session) throw new NotFoundException("Chat session not found");
-      } else {
-        const existingSessions = await chatSessionRepository.listSessions({ userId, limit: 1 });
-        if (existingSessions && existingSessions.items && existingSessions.items.length > 0) {
-          session = existingSessions.items[0];
-        } else {
-          session = await chatSessionRepository.createSession({
-            userId,
-            title: "Health Chat",
-            metadata: { active_document_ids: documentId || [] },
-          });
+        if (!session) {
+          session = await this.getOrCreateCanonicalSession({ userId });
         }
+      } else {
+        session = await this.getOrCreateCanonicalSession({ userId });
       }
       const sessionId = session.id;
+
+      if (documentId) {
+        const docIdsToAttach = Array.isArray(documentId) ? documentId : [documentId];
+        for (const docId of docIdsToAttach) {
+          if (docId) {
+            await chatSessionRepository.attachDocument(sessionId, userId, docId);
+          }
+        }
+      }
 
       if (interceptedReply !== null) {
         const userMsg = await chatSessionRepository.appendMessage({
@@ -1322,14 +1322,95 @@ ${chunksContent}`;
     return updated;
   }
 
-  //creat onboring session
-  async createOnboardingSession({ userId, title = "Health Onboarding", metadata = {} }) {
-    return chatSessionRepository.createSession({
+  /**
+   * Get or create the single canonical chat session for a patient.
+   */
+  async getOrCreateCanonicalSession({ userId, title = "Health Assistant", metadata = {} }) {
+    if (!userId) {
+      throw new InvalidRequestException("User ID is required to get or create a session");
+    }
+
+    // 1. Check user_onboarding table for an anchored chatSessionId
+    try {
+      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+      const existingSessionId = onboardingRecord?.data?.chatSessionId;
+      if (existingSessionId) {
+        const found = await chatSessionRepository.findSessionById(existingSessionId, userId);
+        if (found) {
+          if (!found.metadata?.isCanonical) {
+            await chatSessionRepository.markAsCanonical(found.id, userId);
+            found.metadata = { ...(found.metadata || {}), isCanonical: true, type: "CANONICAL" };
+          }
+          return found;
+        }
+      }
+    } catch (err) {
+      debugLogger.error("getOrCreateCanonicalSession: Failed checking onboarding record", {
+        error: err.message,
+      });
+    }
+
+    // 2. Check repository for an existing canonical or active session
+    const canonical = await chatSessionRepository.findCanonicalSession(userId);
+    if (canonical) {
+      // Anchor it into user_onboarding if record exists
+      try {
+        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+        if (onboardingRecord && onboardingRecord.data?.chatSessionId !== canonical.id) {
+          await userOnboardingRepository.updateByUserId(userId, {
+            data: { ...(onboardingRecord.data || {}), chatSessionId: canonical.id },
+          });
+        }
+      } catch (err) {
+        debugLogger.error(
+          "getOrCreateCanonicalSession: Failed anchoring canonical ID to onboarding",
+          {
+            error: err.message,
+          },
+        );
+      }
+      return canonical;
+    }
+
+    // 3. Create fresh canonical session for the patient
+    const newSession = await chatSessionRepository.createSession({
       userId,
       documentId: null,
       title,
       lastMessageAt: new Date(),
-      metadata,
+      metadata: {
+        ...metadata,
+        isCanonical: true,
+        type: "CANONICAL",
+      },
+    });
+
+    // Anchor to user_onboarding
+    try {
+      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+      if (onboardingRecord) {
+        await userOnboardingRepository.updateByUserId(userId, {
+          data: { ...(onboardingRecord.data || {}), chatSessionId: newSession.id },
+        });
+      }
+    } catch (err) {
+      debugLogger.error(
+        "getOrCreateCanonicalSession: Failed saving chatSessionId to onboarding record",
+        {
+          error: err.message,
+        },
+      );
+    }
+
+    return newSession;
+  }
+
+  // Create or retrieve onboarding session (delegates to canonical session)
+  async createOnboardingSession({ userId, title = "Health Assistant", metadata = {} }) {
+    return this.getOrCreateCanonicalSession({
+      userId,
+      title,
+      metadata: { ...metadata, type: "ONBOARDING" },
     });
   }
 

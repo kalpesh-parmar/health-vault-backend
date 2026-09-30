@@ -5,6 +5,7 @@ const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
+const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -79,6 +80,8 @@ function buildUnifiedResponse({
   explainer = null,
   loginSummary = null,
   documentSummary = null,
+  loginProvider = null,
+  sourceComparison = null,
 }) {
   return {
     mode,
@@ -90,6 +93,8 @@ function buildUnifiedResponse({
     explainer,
     loginSummary,
     documentSummary,
+    loginProvider,
+    sourceComparison,
     sessionId,
     onboardingState,
     state: onboardingState,
@@ -566,28 +571,7 @@ async function executeAddDocumentAction({
     failed: failedCount,
     rejected: rejectedCount,
   };
-  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
-    const prefLang = preferredLanguage.toLowerCase();
-    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
-    for (const docItem of docs) {
-      if (!docItem) continue;
-      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
-      if (struct && typeof struct === "object") {
-        if (struct.summaryInPreferredLanguage) {
-          struct.summary = struct.summaryInPreferredLanguage;
-        } else if (struct.summary) {
-          try {
-            const translated = await aiClient.translate(struct.summary, "english", prefLang);
-            if (translated) {
-              struct.summary = translated;
-            }
-          } catch (err) {
-            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
-          }
-        }
-      }
-    }
-  }
+
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,
@@ -596,12 +580,21 @@ async function executeAddDocumentAction({
   });
 
   let activeSessionId = sessionId;
-  if (!activeSessionId && isOnboardingCompleted) {
-    const newSession = await chatService.createSession({
-      userId,
-      title: docResult?.document?.fileName || "Document Chat",
-    });
-    activeSessionId = newSession?.id || null;
+  if (!activeSessionId && userId) {
+    try {
+      if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+        const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+        activeSessionId = canonical?.id || null;
+      } else if (chatService && typeof chatService.createSession === "function") {
+        const newSession = await chatService.createSession({
+          userId,
+          title: "Health Assistant",
+        });
+        activeSessionId = newSession?.id || null;
+      }
+    } catch (sErr) {
+      console.warn("[executeAddDocumentAction] Failed to initialize session:", sErr.message);
+    }
   }
 
   if (activeSessionId) {
@@ -625,7 +618,6 @@ async function executeAddDocumentAction({
       (Array.isArray(docResult?.document) ? docResult.document[0]?.id : null);
     if (createdDocId) {
       try {
-        const userOnboardingRepository = require("../repositories/userOnboardingRepository");
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
         if (onboardingRecord) {
           const updatedData = {

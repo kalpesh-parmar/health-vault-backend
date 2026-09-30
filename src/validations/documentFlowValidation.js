@@ -155,7 +155,10 @@ const sessionListQuerySchema = z
 const unifiedChatSchema = z.object({
   actionType: z.string().trim().optional().nullable(),
   actionData: z.record(z.any()).optional().nullable(),
-  message: z.string().trim().max(4000).optional().nullable(),
+  message: z
+    .union([z.string().trim().max(4000), z.record(z.any())])
+    .optional()
+    .nullable(),
   question: z.string().trim().max(4000).optional().nullable(),
   sessionId: z.string().uuid().optional().nullable(),
   documentId: z
@@ -165,6 +168,8 @@ const unifiedChatSchema = z.object({
   state: z.record(z.any()).optional().nullable(),
   history: z.array(z.record(z.any())).optional().default([]),
   displayLabel: z.string().optional().nullable(),
+  fromScreen: z.string().optional().nullable(),
+  medicines: z.array(z.any()).optional().nullable(),
   preferredLanguage: z.string().optional().nullable(),
   stream: z
     .union([z.boolean(), z.enum(["true", "false"])])
