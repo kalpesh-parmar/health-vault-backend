@@ -36,7 +36,7 @@ function buildDocumentFilters(filters = {}, userId) {
   }
 
   if (filters.documentType) {
-    conditions.push(document.documentType.eq(filters.documentType.trim()));
+    conditions.push(eq(document.documentType, filters.documentType.trim()));
   }
 
   if (filters.fileType) {
@@ -235,10 +235,10 @@ class DocumentRepository {
   async findAllByFilterSortAndPagination({ filter = {}, page, sort = {}, userId }) {
     const conditions = buildFilterSortConditions(filter, userId);
     const orderClause = buildOrderClause(sort);
-    const pageNumber = page?.pageNumber ?? 1;
-    const pageLimit = page?.pageLimit ?? 10;
-
-    const offset = (pageNumber - 1) * pageLimit;
+    const rawPageNumber = page?.pageNumber ?? 1;
+    const pageLimit = Math.max(1, page?.pageLimit ?? 10);
+    const effectivePageNumber = Math.max(1, rawPageNumber);
+    const offset = Math.max(0, (effectivePageNumber - 1) * pageLimit);
     const limit = pageLimit;
 
     const data = await db

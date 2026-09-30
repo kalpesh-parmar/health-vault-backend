@@ -579,7 +579,7 @@ async function executeAddDocumentAction({
   }
 
   if (completedCount === 0 && (docResult?.document || docResult?.job)) {
-    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 1);
+    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
   }
   if (totalUploads === 0) {
     totalUploads = Math.max(batchDocumentsName.length, 1);
