@@ -12,6 +12,7 @@ const {
   refillMedicationSchema,
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
+  batchDeleteMedicationSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
@@ -318,6 +319,36 @@ class MedicationService {
     }
 
     return true;
+  }
+
+  // BATCH DELETE MEDICATIONS
+  async batchDeleteMedications(userId, payload) {
+    const { ids } = await validateSchema(batchDeleteMedicationSchema, payload);
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const deletedIds = [];
+    const notFoundIds = [];
+
+    for (const id of ids) {
+      try {
+        await this.deleteMedication(id, userId);
+        deletedIds.push(id);
+      } catch (err) {
+        console.log(err);
+
+        notFoundIds.push(id);
+      }
+    }
+
+    return {
+      deletedCount: deletedIds.length,
+      deletedIds,
+      notFoundIds,
+      totalRequested: ids.length,
+    };
   }
 
   // REFILL MEDICATION

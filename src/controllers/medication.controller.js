@@ -77,10 +77,18 @@ async function checkDuplicateMedication(req, res) {
   return successResponse(res, result, messageConstants.MEDICATION_DUPLICATE_CHECKED);
 }
 
+// batch delete medications
+async function batchDeleteMedications(req, res) {
+  const result = await medicationService.batchDeleteMedications(req.auth.userId, req.body);
+
+  return successResponse(res, result, messageConstants.MEDICATIONS_BATCH_DELETED);
+}
+
 module.exports = {
   createMedication,
   updateMedication,
   deleteMedication,
+  batchDeleteMedications,
   getMedicationById,
   getMedicationList,
   listMedications,

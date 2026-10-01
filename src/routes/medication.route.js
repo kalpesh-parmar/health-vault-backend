@@ -27,6 +27,9 @@ router.get("/:id", verifyToken, medicationController.getMedicationById);
 // update
 router.put("/:id", verifyToken, medicationController.updateMedication);
 
+// batch delete
+router.delete("/batch", verifyToken, medicationController.batchDeleteMedications);
+
 // delete
 router.delete("/:id", verifyToken, medicationController.deleteMedication);
 

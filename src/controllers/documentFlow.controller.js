@@ -18,7 +18,6 @@ const documentProcessingJobRepository = require("../repositories/documentProcess
 const documentOcrJobService = require("../services/documentOcrJob.service");
 const documentPersistenceService = require("../services/documentPersistence.service");
 const ocrProgressBus = require("../services/sse/ocrProgressBus");
-const { formatDuration } = require("../utils/commonUtils");
 const { validateSchema } = require("../validations");
 const {
   addDocumentSchema,
@@ -176,9 +175,8 @@ function formatJobStatusPayload(job) {
     job.metadata?.processingTimingsMs?.totalDurationMs ||
     (job.completedAt && job.startedAt ? new Date(job.completedAt) - new Date(job.startedAt) : null);
   const processingTimeFormatted =
-    job.metadata?.processingTimeFormatted ||
-    job.metadata?.totalTimeTaken ||
-    (processingTimeMs ? formatDuration(processingTimeMs) : null);
+    job.metadata?.processingTimeFormatted || job.metadata?.totalTimeTaken;
+  // || (processingTimeMs ? formatDuration(processingTimeMs) : null);
   const processingTimeSeconds =
     job.metadata?.processingSeconds ||
     (processingTimeMs ? Number((processingTimeMs / 1000).toFixed(1)) : null);

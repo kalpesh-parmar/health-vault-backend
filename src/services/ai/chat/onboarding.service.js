@@ -2908,7 +2908,24 @@ class OnboardingService {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
       state.isOnboardingCompleted = true;
     }
-    await saveOnboardingState(userId, state);
+    if (
+      userId &&
+      (nextStep === "REVIEW_MEDICINES_LIST" || state.currentStep === "REVIEW_MEDICINES_LIST") &&
+      Array.isArray(state.medicinesToAdd) &&
+      state.medicinesToAdd.length > 0
+    ) {
+      try {
+        state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+          userId,
+          state.medicinesToAdd,
+        );
+      } catch (dupErr) {
+        console.warn(
+          "[OnboardingService] Duplicate check warning in onboarding step response:",
+          dupErr.message,
+        );
+      }
+    }
 
     const response = await createResponse(nextStep, state);
 
