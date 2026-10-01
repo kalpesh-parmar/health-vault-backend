@@ -262,6 +262,7 @@ class V1Service {
         displayLabel,
         preferredLanguage,
       } = normalizedInput;
+      console.log("[MEDICINES]===", normalizedInput.message);
 
       // Fetch user profile and existing onboarding state
       const patient = await patientRepository.findById(userId);

@@ -66,8 +66,9 @@ class MedicationService {
         }
       }
     }
-    const { resolution, replaceMedicationId, ...medicationPayload } = validData;
+    const { resolution, replaceMedicationId, refillAlert, ...medicationPayload } = validData;
     console.log("resolution", resolution);
+    console.log("refillAlert", refillAlert);
     console.log("replaceMedicationId", replaceMedicationId);
 
     const { endDate, dailyConsumption, unit, startDate } =

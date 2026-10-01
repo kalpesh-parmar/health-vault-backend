@@ -200,6 +200,7 @@ const createMedicationSchema = z
     notes: z.string().trim().max(1000).optional().nullable(),
     resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
     replaceMedicationId: z.string().optional(),
+    refillAlert: z.boolean().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
