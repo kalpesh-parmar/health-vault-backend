@@ -262,6 +262,7 @@ class V1Service {
         displayLabel,
         preferredLanguage,
       } = normalizedInput;
+      console.log("[MEDICINES]===", normalizedInput.message);
 
       // Fetch user profile and existing onboarding state
       const patient = await patientRepository.findById(userId);
@@ -626,12 +627,26 @@ class V1Service {
             }
           }
 
-          const reviewMeds =
+          let reviewMeds =
             Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
               ? actionData.medicines
               : actionData?.medicine
                 ? [actionData.medicine]
                 : effectiveState?.medicinesToAdd || [];
+
+          if (userId && Array.isArray(reviewMeds) && reviewMeds.length > 0) {
+            try {
+              reviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                reviewMeds,
+              );
+            } catch (dupErr) {
+              console.warn(
+                "[UnifiedChat] Duplicate check warning in SAVE_AND_REVIEW:",
+                dupErr.message,
+              );
+            }
+          }
 
           if (!isActiveOnboardingStep) {
             const userLang =
@@ -714,7 +729,21 @@ class V1Service {
           stateToUpdate.medicinesConfirmed = false;
           stateToUpdate.medicinesSavedToDb = false;
           stateToUpdate.medicationFlowDone = false;
-          stateToUpdate.medicinesToAdd = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+          let cleanedReviewMeds = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+          if (userId && Array.isArray(cleanedReviewMeds) && cleanedReviewMeds.length > 0) {
+            try {
+              cleanedReviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                cleanedReviewMeds,
+              );
+            } catch (dupErr) {
+              console.warn(
+                "[UnifiedChat] Duplicate check warning in pre-onboarding SAVE_AND_REVIEW:",
+                dupErr.message,
+              );
+            }
+          }
+          stateToUpdate.medicinesToAdd = cleanedReviewMeds;
 
           const onboardingResult = await onboardingService.chat(
             message || actionData || "",

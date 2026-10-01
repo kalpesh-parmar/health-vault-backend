@@ -200,6 +200,7 @@ const createMedicationSchema = z
     notes: z.string().trim().max(1000).optional().nullable(),
     resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
     replaceMedicationId: z.string().optional(),
+    refillAlert: z.boolean().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -446,6 +447,22 @@ const checkDuplicateMedicationSchema = z.object({
     .optional()
     .nullable(),
 });
+const batchDeleteMedicationSchema = z.object({
+  ids: z
+    .array(
+      z
+        .string({
+          required_error: errorConstants.INVALID_UUID,
+          invalid_type_error: errorConstants.INVALID_UUID,
+        })
+        .uuid(errorConstants.INVALID_UUID),
+      {
+        required_error: "ids array is required",
+        invalid_type_error: "ids must be an array of UUIDs",
+      },
+    )
+    .min(1, "At least one medication ID is required"),
+});
 
 module.exports = {
   createMedicationSchema,
@@ -454,4 +471,5 @@ module.exports = {
   refillMedicationSchema,
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
+  batchDeleteMedicationSchema,
 };
