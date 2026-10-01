@@ -46,6 +46,13 @@ class OcrEmptyResultError(AiServiceError):
     code = "ocr_empty_result"
 
 
+class NonMedicalDocumentException(AiServiceError):
+    """Raised when a non-medical document (e.g. utility bill, invoice, receipt) is uploaded."""
+
+    status_code = 400
+    code = "non_medical_document"
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AiServiceError)
     async def handle_ai_error(request: Request, exc: AiServiceError) -> JSONResponse:
