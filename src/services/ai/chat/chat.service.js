@@ -10,7 +10,6 @@ const { ollamaClient } = require("../../../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
-const medicationRepository = require("../../../repositories/medicationRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 
 const aiClient = require("../clients/aiClient.service");
@@ -24,7 +23,23 @@ const {
   buildMedicationsContext,
   getMedicalEntityKeywords,
   getReportAgeString,
+  buildDependencyAwareContext,
 } = require("./ragContext.service");
+const { chatClassifier } = require("./chatClassifier.service");
+const {
+  NO_CONTEXT_REPLY_I18N,
+  REQUIRE_SELECTION_I18N,
+  AGE_REPLY_I18N,
+  AGE_KEYWORDS,
+  SUMMARY_KEYWORDS,
+  SUMMARY_LABELS_I18N,
+  REPORT_PROCESSING_I18N,
+  NO_REPORT_FOUND_I18N,
+  NO_SUMMARY_AVAILABLE_I18N,
+  PREDEFINED_QUESTIONS_I18N,
+} = require("../../../constants/chatReplies");
+
+const { chatFastPath } = require("./chatFastPath.service");
 
 // Debug logger
 const debugLogger = {
@@ -46,193 +61,6 @@ async function streamTextLikeChat(text, onChunk, abortSignal, delayMs = 15) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
-
-const NO_CONTEXT_REPLY_I18N = {
-  english: "Information not found in uploaded reports.",
-  gujarati: "અપલોડ કરેલા અહેવાલોમાં આ માહિતી મળી નથી.",
-  hindi: "अपलोड की गई रिपोर्ट में यह जानकारी नहीं मिली।",
-  marathi: "अपलोड केलेल्या अहवालात ही माहिती आढळली नाही.",
-  tamil: "பதிவேற்றப்பட்ட அறிக்கைகளில் இந்தத் தகவல் காணப்படவில்லை.",
-};
-
-const REQUIRE_SELECTION_I18N = {
-  english: "Sure, please select your document that you have to compare.",
-  gujarati: "ચોક્કસ, કૃપા કરીને તમારો દસ્તાવેજ પસંદ કરો જેની તમારે સરખામણી કરવી છે.",
-  hindi: "ज़रूर, कृपया अपने उस दस्तावेज़ का चयन करें जिसकी आपको तुलना करनी है।",
-  marathi: "नक्की, कृपया तुमचा दस्तऐवज निवडा ज्याची तुम्हाला तुलना करायची आहे.",
-  tamil: "நிச்சயமாக, தயவுசெய்து நீங்கள் ஒப்பிட வேண்டிய உங்கள் ஆவணத்தைத் தேர்ந்தெடுக்கவும்.",
-};
-
-const AGE_REPLY_I18N = {
-  english: {
-    success: (dobStr, age) => `Based on your date of birth (${dobStr}), you are ${age} years old.`,
-    missing: "Your date of birth is not specified in your profile, so I cannot calculate your age.",
-  },
-  gujarati: {
-    success: (dobStr, age) => `તમારી જન્મ તારીખ (${dobStr}) ના આધારે, તમારી ઉંમર ${age} વર્ષ છે.`,
-    missing:
-      "તમારી જન્મ તારીખ તમારી પ્રોફાઇલમાં નિર્દિષ્ટ નથી, તેથી હું તમારી ઉંમરની ગણતરી કરી શકતો નથી.",
-  },
-  hindi: {
-    success: (dobStr, age) => `आपकी जन्म तिथि (${dobStr}) के आधार पर, आपकी आयु ${age} वर्ष है।`,
-    missing:
-      "आपकी जन्म तिथि आपकी प्रोफ़ाइल में निर्दिष्ट नहीं है, इसलिए मैं आपकी आयु की गणना नहीं कर सकता।",
-  },
-  marathi: {
-    success: (dobStr, age) => `तुमच्या जन्मतारखेनुसार (${dobStr}), तुमचे वय ${age} वर्षे आहे.`,
-    missing:
-      "तुमची जन्मतारीख तुमच्या प्रोफाइलमध्ये नमूद केलेली नाही, त्यामुळे मी तुमच्या वयाची गणना करू शकत नाही.",
-  },
-  tamil: {
-    success: (dobStr, age) =>
-      `உங்கள் பிறந்த தேதியின் (${dobStr}) அடிப்படையில், உங்கள் வயது ${age} ஆண்டுகள் ஆகும்.`,
-    missing:
-      "உங்கள் பிறந்த தேதி உங்கள் சுயவிவரத்தில் குறிப்பிடப்படவில்லை, எனவே என்னால் உங்கள் வயதைக் கணக்கிடுமாறு செய்ய முடியாது.",
-  },
-};
-
-const AGE_KEYWORDS = [
-  // English
-  "what is my age",
-  "how old am i",
-  "calculate my age",
-  // Gujarati
-  "મારી ઉંમર શું છે",
-  "મારી ઉંમર કેટલી છે",
-  "હું કેટલા વર્ષનો છું",
-  // Hindi
-  "मेरी उम्र क्या है",
-  "मेरी आयु क्या है",
-  "मैं कितने साल का हूँ",
-  // Marathi
-  "माझे वय काय आहे",
-  "माझे वय किती आहे",
-  "मी किती वर्षांचा आहे",
-  // Tamil
-  "என் வயது என்ன",
-  "எனக்கு என்ன வயது",
-  "என் வயது எவ்வளவு",
-];
-
-const SUMMARY_KEYWORDS = [
-  // English
-  "ask_report",
-  "ask report",
-  "tell me about my report",
-  "summary of my report",
-  "report summary",
-  "summarize my report",
-  "explain my report",
-  "tell me about report",
-  "give me report summary",
-  // Gujarati
-  "રિપોર્ટ નો સારાંશ",
-  "મને મારા રિપોર્ટ વિશે કહો",
-  "મારો રિપોર્ટ સમજાવો",
-  "રિપોર્ટ સમજાવો",
-  "રિપોર્ટ નો સારાંશ આપો",
-  "મારા રિપોર્ટ વિશે જણાવો",
-  // Hindi
-  "मेरी रिपोर्ट का सारांश",
-  "मुझे मेरी रिपोर्ट के बारे में बताएं",
-  "रिपोर्ट का सारांश",
-  "मेरी रिपोर्ट समझाएं",
-  "मेरी रिपोर्ट का सारांश दें",
-  "मुझे रिपोर्ट के बारे में बताएं",
-  // Marathi
-  "माझ्या अहवालाचा सारांश",
-  "मला माझ्या अहवालाबद्दल सांगा",
-  "अहवालाचा सारांश",
-  "माझा अहवाल स्पष्ट करा",
-  "माझ्या अहवालाचा सारांश द्या",
-  // Tamil
-  "என் அறிக்கையின் சுருக்கம்",
-  "என் அறிக்கை பற்றி சொல்லுங்கள்",
-  "அறிக்கையின் சுருக்கம்",
-  "என் அறிக்கையை விளக்குங்கள்",
-  "என் அறிக்கையின் சுருக்கத்தை கொடுங்கள்",
-];
-
-const SUMMARY_LABELS_I18N = {
-  english: {
-    patientName: "Patient Name",
-    reportAge: "Report Age",
-    summaryTitle: "Report Summary",
-  },
-  gujarati: {
-    patientName: "દર્દીનું નામ",
-    reportAge: "રિપોર્ટનો સમય",
-    summaryTitle: "રિપોર્ટનો સારાંશ",
-  },
-  hindi: {
-    patientName: "मरीज का नाम",
-    reportAge: "रिपोर्ट की अवधि",
-    summaryTitle: "रिपोर्ट का सारांश",
-  },
-  marathi: {
-    patientName: "रुग्णाचे नाव",
-    reportAge: "अहवालाचा कालावधी",
-    summaryTitle: "अहवालाचा सारांश",
-  },
-  tamil: {
-    patientName: "நோயாளி பெயர்",
-    reportAge: "அறிக்கையின் வயது",
-    summaryTitle: "அறிக்கையின் சுருக்கம்",
-  },
-};
-
-const REPORT_PROCESSING_I18N = {
-  english: "Your report is currently being processed. Please wait a moment.",
-  gujarati: "તમારો રિપોર્ટ હાલમાં પ્રક્રિયા હેઠળ છે. કૃપા કરીને થોડી રાહ જુઓ.",
-  hindi: "आपकी रिपोर्ट पर अभी प्रक्रिया चल रही है। कृपया कुछ समय प्रतीक्षा करें।",
-  marathi: "तुमच्या अहवालावर सध्या प्रक्रिया सुरू आहे. कृपया काही वेळ थांबा.",
-  tamil:
-    "உங்கள் அறிக்கை தற்போது செயலாக்கப்பட்டு வருகிறது. தயவுசெய்து சிறிது நேரம் காத்திருக்கவும்.",
-};
-
-const NO_REPORT_FOUND_I18N = {
-  english: "No active medical reports found in your profile.",
-  gujarati: "તમારી પ્રોફાઇલમાં કોઈ સક્રિય તબીબી રિપોર્ટ મળ્યા નથી.",
-  hindi: "आपकी प्रोफ़ाइल में कोई सक्रिय मेडिकल रिपोर्ट नहीं मिली।",
-  marathi: "तुमच्या प्रोफाइलमध्ये कोणताही सक्रिय वैद्यकीय अहवाल आढळला नाही.",
-  tamil: "உங்கள் சுயவிவரத்தில் செயலில் உள்ள மருத்துவ அறிக்கைகள் எதுவும் காணப்படவில்லை.",
-};
-
-const NO_SUMMARY_AVAILABLE_I18N = {
-  english: "No summary details were found in this report.",
-  gujarati: "આ રિપોર્ટમાં કોઈ સારાંશ વિગતો મળી નથી.",
-  hindi: "इस रिपोर्ट में कोई सारांश विवरण नहीं मिला।",
-  marathi: "या अहवालात कोणताही सारांश तपशील आढळला नाही.",
-  tamil: "இந்த அறிக்கையில் சுருக்க விவரங்கள் எதுவும் காணப்படவில்லை.",
-};
-
-const PREDEFINED_QUESTIONS_I18N = {
-  english: [
-    "What are the key findings?",
-    "Are there any abnormal values?",
-    "What are the next steps or recommendations?",
-  ],
-  gujarati: [
-    "મુખ્ય તારણો શું છે?",
-    "શું કોઈ અસામાન્ય મૂલ્યો છે?",
-    "આગળના પગલાં અથવા ભલામણો શું છે?",
-  ],
-  hindi: [
-    "मुख्य निष्कर्ष क्या हैं?",
-    "क्या कोई असामान्य मूल्य हैं?",
-    "आगे के कदम या सिफारिशें क्या हैं?",
-  ],
-  marathi: [
-    "मुख्य निष्कर्ष काय आहेत?",
-    "काही असामान्य मूल्ये आहेत का?",
-    "पुढील पावले किंवा शिफारसी काय आहेत?",
-  ],
-  tamil: [
-    "முக்கிய கண்டுபிடிப்புகள் யாவை?",
-    "ஏதேனும் அசாதாரண மதிப்புகள் உள்ளதா?",
-    "அடுத்த படிகள் அல்லது பரிந்துரைகள் யாவை?",
-  ],
-};
 
 const processingSessions = new Set();
 
@@ -510,6 +338,8 @@ ${chunksContent}`;
     preferredLanguage: passedLang,
     onChunk,
     abortSignal,
+    page,
+    limit,
   }) {
     if (reqSessionId) {
       if (processingSessions.has(reqSessionId)) {
@@ -614,6 +444,14 @@ ${chunksContent}`;
       // Force everything to use detectedLanguage
       preferredLanguage = detectedLanguage;
       const retrievalQuery = question;
+      let englishQuestion = question;
+      if (detectedLanguage !== "english") {
+        try {
+          englishQuestion = await aiClient.translate(question, detectedLanguage, "english");
+        } catch {
+          englishQuestion = question;
+        }
+      }
 
       // Intercept specific questions
       const cleanQuestion = question.toLowerCase().replace(/[?.]/g, "").trim();
@@ -872,6 +710,41 @@ ${chunksContent}`;
           emergency: false,
           options,
         };
+      }
+
+      // FAST-PATH INTERCEPTOR (Direct deterministic domain answers)
+      try {
+        const classification = chatClassifier.classify({
+          rawQuestion: question,
+          englishQuestion,
+          question,
+          detectedLanguage,
+          documentId,
+        });
+
+        if (classification && classification.fastPathType) {
+          const fastPathRes = await chatFastPath.execute(
+            {
+              userId,
+              sessionId,
+              question,
+              detectedLanguage,
+              onChunk,
+              abortSignal,
+              documentId,
+              page,
+              limit,
+            },
+            classification,
+          );
+          if (fastPathRes) {
+            return fastPathRes;
+          }
+        }
+      } catch (fastPathErr) {
+        debugLogger.error("sendMessage: Fast path execution failed", {
+          error: fastPathErr.message,
+        });
       }
 
       // REQUEST ANALYZER
@@ -1154,20 +1027,23 @@ ${chunksContent}`;
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
 
-      // Fetch user's active medications for smart context injection
+      // Fetch user's dependency-aware smart context
       let medicationsContextStr = "";
       try {
-        const activeMeds = await medicationRepository.findAll(userId);
-        medicationsContextStr = buildMedicationsContext(activeMeds, question);
+        medicationsContextStr = await buildDependencyAwareContext(userId, question, {
+          patient: p,
+          detectedLanguage,
+          englishQuestion,
+        });
       } catch (err) {
         debugLogger.error("sendMessage: Failed to fetch active medications for context", {
           error: err.message,
         });
       }
 
-      // Build patient context
-      let patientContextStr = "";
-      if (p) {
+      let patientContextStr = medicationsContextStr;
+
+      if (!patientContextStr && p) {
         let dobStr = p.dateOfBirth
           ? p.dateOfBirth instanceof Date
             ? p.dateOfBirth.toISOString().split("T")[0]
@@ -1178,12 +1054,6 @@ ${chunksContent}`;
             ? p.allergies.join(", ")
             : "None";
         patientContextStr = `Patient Profile Context:\nName: ${p.firstName || ""} ${p.lastName || ""}\nGender: ${p.gender || "Unknown"}\nDate of Birth: ${dobStr}\nBlood Group: ${p.bloodGroup || "Unknown"}\nAllergies: ${allergiesStr}`;
-      }
-
-      if (medicationsContextStr) {
-        patientContextStr = patientContextStr
-          ? `${patientContextStr}\n\n${medicationsContextStr}`
-          : medicationsContextStr;
       }
 
       if (patientContextStr) {

@@ -181,4 +181,38 @@ describe("Onboarding Chat History Pagination Tests", () => {
     expect(result.messages[200].seq).toBe(201);
     expect(result.messages[249].seq).toBe(250);
   });
+
+  it("should fetch exactly 100 messages in a single page when nextCursor is null", async () => {
+    jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+      data: { chatSessionId: mockSessionId, currentStep: "ASK_FIRST_NAME" },
+    });
+
+    const mockMessages = Array.from({ length: 100 }, (_, i) => ({
+      id: `msg-${i + 1}`,
+      seq: i + 1,
+      role: "user",
+      content: `Message ${i + 1}`,
+    }));
+
+    const listMessagesSpy = jest
+      .spyOn(chatSessionRepository, "listMessages")
+      .mockResolvedValueOnce({
+        items: mockMessages,
+        nextCursor: null,
+      });
+
+    const result = await ocrService.getOnboardingHistory(mockUserId);
+
+    expect(listMessagesSpy).toHaveBeenCalledTimes(1);
+    expect(listMessagesSpy).toHaveBeenCalledWith({
+      sessionId: mockSessionId,
+      userId: mockUserId,
+      limit: 100,
+      direction: "after",
+      cursor: null,
+    });
+    expect(result.messages).toHaveLength(100);
+    expect(result.messages[0].seq).toBe(1);
+    expect(result.messages[99].seq).toBe(100);
+  });
 });

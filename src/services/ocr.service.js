@@ -1725,13 +1725,32 @@ class V1Service {
 
     let messages = [];
     if (chatSessionId) {
-      const result = await chatSessionRepository.listMessages({
-        sessionId: chatSessionId,
-        userId,
-        limit: 100,
-        direction: "after",
-      });
-      messages = (result.items || []).filter((m) => {
+      let cursor = null;
+      let hasMore = true;
+      const seenCursors = new Set();
+      const allRawMessages = [];
+
+      while (hasMore) {
+        const result = await chatSessionRepository.listMessages({
+          sessionId: chatSessionId,
+          userId,
+          limit: 100,
+          direction: "after",
+          cursor,
+        });
+
+        const items = result?.items || [];
+        allRawMessages.push(...items);
+
+        if (result?.nextCursor && !seenCursors.has(result.nextCursor)) {
+          seenCursors.add(result.nextCursor);
+          cursor = result.nextCursor;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      messages = allRawMessages.filter((m) => {
         if (m.role === "assistant") {
           const action = m.metadata?.action;
           const text = (m.content || "").toLowerCase();

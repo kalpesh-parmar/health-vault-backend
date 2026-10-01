@@ -96,10 +96,9 @@ async function getLocalizedResponse(step, state) {
         !!state.documentData;
 
       const { hasMismatch, fields, sourceComparison } = getProfileMismatches(state);
-      const mode = hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
+      const mode = useDoc && hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
 
-      const isManual = sourceComparison === "MANUAL_VS_LOGIN" || !useDoc;
-      const compareData = isManual ? state.existingUserData || {} : state.documentData || {};
+      const compareData = useDoc ? state.documentData || {} : state.existingUserData || {};
 
       const loginFirstName = state.socialData?.firstName || state.loginData?.firstName?.value || "";
       const loginLastName = state.socialData?.lastName || state.loginData?.lastName?.value || "";
@@ -184,18 +183,7 @@ async function getLocalizedResponse(step, state) {
         );
       }
 
-      if (isManual) {
-        const manualDetailsText = await getLocalizedText(
-          "onboarding.manual",
-          "Entered Details",
-          state.preferredLanguage,
-        );
-        if (compareName) {
-          documentSummary = `${compareName} (${manualDetailsText})`;
-        } else {
-          documentSummary = manualDetailsText;
-        }
-      } else {
+      if (useDoc) {
         if (compareName) {
           documentSummary = await getLocalizedText(
             "onboarding.source.documentSummary",
@@ -211,6 +199,8 @@ async function getLocalizedResponse(step, state) {
             { provider: useDocText },
           );
         }
+      } else {
+        documentSummary = null;
       }
 
       const displayKeys = [
@@ -234,8 +224,13 @@ async function getLocalizedResponse(step, state) {
           let loginVal = mismatchField
             ? mismatchField.loginValue
             : (typeof loginField === "object" ? loginField.value : loginField) || null;
-          let docVal = mismatchField ? mismatchField.documentValue : compareData[k] || null;
-          if (k === "phoneNumber" && docVal === null) {
+          let docVal = useDoc
+            ? mismatchField
+              ? mismatchField.documentValue
+              : compareData[k] || null
+            : null;
+
+          if (useDoc && k === "phoneNumber" && docVal === null) {
             docVal = compareData.mobile || compareData.phoneNumber || null;
           }
 
@@ -302,7 +297,12 @@ async function getLocalizedResponse(step, state) {
         loginSummary,
         documentSummary,
         loginProvider: state.loginProvider || "email",
-        sourceComparison: sourceComparison || (useDoc ? "DOCUMENT_VS_LOGIN" : "MANUAL_VS_LOGIN"),
+        sourceComparison:
+          sourceComparison ||
+          (useDoc
+            ? "DOCUMENT_VS_LOGIN"
+            : state.selectedProfileSource ||
+              (state.hasSocialData || state.socialData ? "SOCIAL" : "LOGIN")),
       };
 
       if (mode === "CONFLICT") {

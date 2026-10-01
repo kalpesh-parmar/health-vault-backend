@@ -95,6 +95,70 @@ const NO_SUMMARY_AVAILABLE_I18N = {
   tamil: "இந்த அறிக்கையில் சுருக்க விவரங்கள் எதுவும் காணப்படவில்லை.",
 };
 
+const AGE_KEYWORDS = [
+  // English
+  "what is my age",
+  "how old am i",
+  "calculate my age",
+  // Gujarati
+  "મારી ઉંમર શું છે",
+  "મારી ઉંમર કેટલી છે",
+  "હું કેટલા વર્ષનો છું",
+  // Hindi
+  "मेरी उम्र क्या है",
+  "मेरी आयु क्या है",
+  "मैं कितने साल का हूँ",
+  // Marathi
+  "माझे वय काय आहे",
+  "माझे वय किती आहे",
+  "मी किती वर्षांचा आहे",
+  // Tamil
+  "என் வயது என்ன",
+  "எனக்கு என்ன வயது",
+  "என் வயது எவ்வளவு",
+];
+
+const SUMMARY_KEYWORDS = [
+  // English
+  "ask_report",
+  "ask report",
+  "tell me about my report",
+  "summary of my report",
+  "report summary",
+  "summarize my report",
+  "explain my report",
+  "tell me about report",
+  "give me report summary",
+  // Gujarati
+  "રિપોર્ટ નો સારાંશ",
+  "મને મારા રિપોર્ટ વિશે કહો",
+  "મારો રિપોર્ટ સમજાવો",
+  "રિપોર્ટ સમજાવો",
+  "રિપોર્ટ નો સારાંશ આપો",
+  "મારા રિપોર્ટ વિશે જણાવો",
+  // Hindi
+  "मेरी रिपोर्ट का सारांश",
+  "मुझे मेरी रिपोर्ट के बारे में बताएं",
+  "रिपोर्ट का सारांश",
+  "मेरी रिपोर्ट समझाएं",
+  "मेरी रिपोर्ट का सारांश दें",
+  "मुझे रिपोर्ट के बारे में बताएं",
+  // Marathi
+  "માझ्या અહવાલાચા સારાંશ",
+  "मला माझ्या अहवालाबद्दल सांगा",
+  "અહવાલાચા સારાંશ",
+  "માઝા અહવાલ સ્પષ્ટ કરા",
+  "માझ्या અહવાલાચા સારાંશ દ્યા",
+  "माझा अहवाल स्पष्ट करा",
+  "माझ्या अहवालाचा सारांश द्या",
+  // Tamil
+  "என் அறிக்கையின் சுருக்கம்",
+  "என் அறிக்கை பற்றி சொல்லுங்கள்",
+  "அறிக்கையின் சுருக்கம்",
+  "என் அறிக்கையை விளக்குங்கள்",
+  "என் அறிக்கையின் சுருக்கத்தை கொடுங்கள்",
+];
+
 const PREDEFINED_QUESTIONS_I18N = {
   english: [
     "What are the key findings?",
@@ -629,6 +693,8 @@ const MEDICATION_REPLY_I18N = {
     scheduleLabel: "Timing",
     instructionLabel: "Food",
     endDateLabel: "End Date",
+    stockCompletedNote:
+      "Note: This medication is completed/inactive because its stock is 0 and not restocked. Adding a refill will reactivate it.",
   },
   gujarati: {
     titleAll: "તમારી દવાઓની યાદી:",
@@ -655,6 +721,8 @@ const MEDICATION_REPLY_I18N = {
     scheduleLabel: "સમય",
     instructionLabel: "ખોરાક",
     endDateLabel: "અંતિમ તારીખ",
+    stockCompletedNote:
+      "નોંધ: આ દવાનો સ્ટોક પૂરો થઈ ગયો છે (0 બાકી) તેથી તે નિષ્ક્રિય/પૂર્ણ છે. રિફિલ ઉમેરવાથી તે ફરીથી સક્રિય થશે.",
   },
   hindi: {
     titleAll: "आपकी दवाइयों की सूची:",
@@ -681,6 +749,8 @@ const MEDICATION_REPLY_I18N = {
     scheduleLabel: "समय",
     instructionLabel: "भोजन",
     endDateLabel: "अंतिम तिथि",
+    stockCompletedNote:
+      "नोट: इस दवा का स्टॉक समाप्त हो गया है (0 शेष) इसलिए यह निष्क्रिय/पूर्ण है। रिफिल जोड़ने पर यह फिर से सक्रिय हो जाएगी।",
   },
   marathi: {
     titleAll: "तुमची औषधांची यादी:",
@@ -707,6 +777,8 @@ const MEDICATION_REPLY_I18N = {
     scheduleLabel: "वेळ",
     instructionLabel: "अन्न",
     endDateLabel: "शेवटची तारीख",
+    stockCompletedNote:
+      "टीप: या औषधाचा साठा संपला आहे (0 शिल्लक) त्यामुळे ते निष्क्रिय/पूर्ण आहे. रिफिल जोडल्यास ते पुन्हा सक्रिय होईल.",
   },
   tamil: {
     titleAll: "உங்கள் மருந்துகளின் பட்டியல்:",
@@ -733,6 +805,8 @@ const MEDICATION_REPLY_I18N = {
     scheduleLabel: "நேரம்",
     instructionLabel: "உணவு",
     endDateLabel: "முடிவு தேதி",
+    stockCompletedNote:
+      "குறிப்பு: இந்த மருந்தின் கையிருப்பு முடிந்ததால் (0 மீதம்) செயலற்றதாக உள்ளது. ரீஃபில் சேர்த்தால் இது மீண்டும் செயலில் வரும்.",
   },
 };
 
@@ -803,6 +877,8 @@ module.exports = {
   NO_CONTEXT_REPLY_I18N,
   REQUIRE_SELECTION_I18N,
   AGE_REPLY_I18N,
+  AGE_KEYWORDS,
+  SUMMARY_KEYWORDS,
   SUMMARY_LABELS_I18N,
   REPORT_PROCESSING_I18N,
   NO_REPORT_FOUND_I18N,

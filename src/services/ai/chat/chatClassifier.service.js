@@ -391,12 +391,61 @@ class ChatClassifierService {
         lowerEng.includes("stopped") ||
         lowerEng.includes("completed") ||
         lowerEng.includes("past medication") ||
+        lowerEng.includes("finished") ||
+        lowerEng.includes("out of stock") ||
+        lowerEng.includes("no stock") ||
+        lowerEng.includes("zero stock") ||
+        lowerEng.includes("stock completed") ||
+        lowerEng.includes("over") ||
         lowerRaw.includes("બંધ") ||
         lowerRaw.includes("નિષ્ક્રિય") ||
+        lowerRaw.includes("પૂરી") ||
+        lowerRaw.includes("પુરી") ||
+        lowerRaw.includes("પૂરી થયેલી") ||
+        lowerRaw.includes("સ્ટોક પૂરો") ||
+        lowerRaw.includes("સ્ટોક ખતમ") ||
+        lowerRaw.includes("ખતમ") ||
+        lowerRaw.includes("પતી ગઈ") ||
+        lowerRaw.includes("નિષ્ક્રીય") ||
+        lowerRaw.includes("પોતાની પૂરી થયેલી") ||
+        lowerRaw.includes("ખૂટી ગઈ") ||
+        lowerRaw.includes("જથ્થો પૂરો") ||
+        lowerRaw.includes("જથ્થો ખતમ") ||
+        lowerRaw.includes("શૂન્ય સ્ટોક") ||
+        lowerRaw.includes("જથ્થો 0") ||
+        lowerRaw.includes("માત્રા 0") ||
+        lowerRaw.includes("ખતમ થઈ ગયેલી") ||
+        lowerRaw.includes("પૂરી થઈ ગઈ") ||
+        lowerRaw.includes("પૂરી થઈ ગઈ છે") ||
         lowerRaw.includes("निष्क्रिय") ||
         lowerRaw.includes("बंद") ||
+        lowerRaw.includes("पूरी हुई") ||
+        lowerRaw.includes("समाप्त") ||
+        lowerRaw.includes("खत्म") ||
+        lowerRaw.includes("स्टॉक खत्म") ||
+        lowerRaw.includes("पूरी हो गई") ||
+        lowerRaw.includes("मात्रा 0") ||
+        lowerRaw.includes("शून्य स्टॉक") ||
         lowerRaw.includes("थांबवलेले") ||
-        lowerRaw.includes("செயலற்ற");
+        lowerRaw.includes("संपलेली") ||
+        lowerRaw.includes("साठा संपला") ||
+        lowerRaw.includes("पूर्ण") ||
+        lowerRaw.includes("પૂર્ણ") ||
+        lowerRaw.includes("છેલ્લા") ||
+        lowerRaw.includes("પૂર્ણ થયેલી") ||
+        lowerRaw.includes("પૂર્ણ થયેલ") ||
+        lowerRaw.includes("પૂર્ણ થયેલ દવાઓ") ||
+        lowerRaw.includes("પૂર્ણ થયેલી દવાઓ") ||
+        lowerRaw.includes("પૂર્ણ થયેલી દવાની યાદી") ||
+        lowerRaw.includes("પોતાની પૂરી થયેલી દવાઓ") ||
+        lowerRaw.includes("ચૂકી ગયેલી") ||
+        lowerRaw.includes("સાઠો 0") ||
+        lowerRaw.includes("செயலற்ற") ||
+        lowerRaw.includes("முடிந்த") ||
+        lowerRaw.includes("முடிந்தது") ||
+        lowerRaw.includes("இருப்பு முடிந்தது") ||
+        lowerRaw.includes("அளவு 0") ||
+        lowerRaw.includes("முடிந்துவிட்டது");
 
       const isActive =
         !isInactive &&

@@ -263,12 +263,29 @@ class ChatFastPathService {
     } else if (domains.has("MEDICATIONS")) {
       const allMeds = await medicationRepository.findAll(userId);
       const todayStr = new Date().toISOString().split("T")[0];
-      const activeMeds = (allMeds || []).filter((m) => {
+      const allMedsWithQty = await Promise.all(
+        (allMeds || []).map(async (m) => {
+          let remQty = m.remainingQuantity;
+          if (remQty === undefined || remQty === null) {
+            try {
+              remQty = await calculateRemainingQuantity(m);
+            } catch {
+              remQty = null;
+            }
+          }
+          return { ...m, remainingQuantity: remQty };
+        }),
+      );
+      const activeMeds = (allMedsWithQty || []).filter((m) => {
         if (m.status === "INACTIVE" || m.status === "STOPPED" || m.status === "COMPLETED")
           return false;
-        if (m.ongoing) return true;
+        const remQty =
+          m.remainingQuantity !== undefined && m.remainingQuantity !== null
+            ? Number(m.remainingQuantity)
+            : null;
+        if (remQty !== null && remQty <= 0) return false;
         const endStr = m.endDate ? new Date(m.endDate).toISOString().split("T")[0] : null;
-        if (endStr && endStr < todayStr) return false;
+        if (endStr && !m.ongoing && endStr < todayStr) return false;
         return true;
       });
       const count = activeMeds.length;
@@ -413,9 +430,22 @@ class ChatFastPathService {
     const { detectedLanguage, userId, sessionId, question, onChunk, abortSignal } = ctx;
     const labels = pickLang(MEDICATION_REPLY_I18N, detectedLanguage);
     const facet = classification?.entities?.medicationFacet || { type: "list", value: "all" };
-
     const allMeds = await medicationRepository.findAll(userId);
     const todayStr = new Date().toISOString().split("T")[0];
+
+    const allMedsWithQty = await Promise.all(
+      (allMeds || []).map(async (m) => {
+        let remQty = m.remainingQuantity;
+        if (remQty === undefined || remQty === null) {
+          try {
+            remQty = await calculateRemainingQuantity(m);
+          } catch {
+            remQty = null;
+          }
+        }
+        return { ...m, remainingQuantity: remQty };
+      }),
+    );
 
     const formatMedItem = (m) => {
       const name = m.medicationName || "Medicine";
@@ -455,7 +485,7 @@ class ChatFastPathService {
     if (facet.type === "timing" && facet.value === "morning") {
       title = labels.titleMorning;
       emptyMsg = labels.noMorningMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         const sched = m.medicationSchedule;
         if (!sched) return false;
         if (typeof sched === "object") {
@@ -470,7 +500,7 @@ class ChatFastPathService {
     } else if (facet.type === "timing" && facet.value === "night") {
       title = labels.titleNight;
       emptyMsg = labels.noNightMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         const sched = m.medicationSchedule;
         if (!sched) return false;
         if (typeof sched === "object") {
@@ -497,7 +527,7 @@ class ChatFastPathService {
     } else if (facet.type === "food" && facet.value === "before_food") {
       title = labels.titleBeforeFood;
       emptyMsg = labels.noBeforeFoodMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         const ff = String(m.foodFrequency || "").toLowerCase();
         return (
           ff.includes("before") ||
@@ -511,7 +541,7 @@ class ChatFastPathService {
     } else if (facet.type === "food" && facet.value === "after_food") {
       title = labels.titleAfterFood;
       emptyMsg = labels.noAfterFoodMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         const ff = String(m.foodFrequency || "").toLowerCase();
         return (
           ff.includes("after") ||
@@ -524,59 +554,78 @@ class ChatFastPathService {
     } else if (facet.type === "status" && facet.value === "inactive") {
       title = labels.titleInactive;
       emptyMsg = labels.noInactiveMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         if (m.status === "INACTIVE" || m.status === "STOPPED" || m.status === "COMPLETED")
           return true;
-        if (m.ongoing) return false;
+        const remQty =
+          m.remainingQuantity !== undefined && m.remainingQuantity !== null
+            ? Number(m.remainingQuantity)
+            : null;
+        if (remQty !== null && remQty <= 0) return true;
         const endStr = m.endDate ? new Date(m.endDate).toISOString().split("T")[0] : null;
-        if (endStr && endStr < todayStr) return true;
+        if (endStr && !m.ongoing && endStr < todayStr) return true;
         return false;
       });
     } else if (facet.type === "status" && facet.value === "active") {
       title = labels.titleActive;
       emptyMsg = labels.noActiveMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         if (m.status === "INACTIVE" || m.status === "STOPPED" || m.status === "COMPLETED")
           return false;
-        if (m.ongoing) return true;
+        const remQty =
+          m.remainingQuantity !== undefined && m.remainingQuantity !== null
+            ? Number(m.remainingQuantity)
+            : null;
+        if (remQty !== null && remQty <= 0) return false;
         const endStr = m.endDate ? new Date(m.endDate).toISOString().split("T")[0] : null;
-        if (endStr && endStr < todayStr) return false;
+        if (endStr && !m.ongoing && endStr < todayStr) return false;
         return true;
       });
     } else if (facet.type === "info" && facet.value === "dosage") {
       title = labels.titleDosage;
       emptyMsg = labels.noDosage;
-      filteredMeds = (allMeds || []).filter(
+      filteredMeds = (allMedsWithQty || []).filter(
         (m) => m.status !== "INACTIVE" && m.status !== "STOPPED",
       );
-      if (filteredMeds.length === 0 && (allMeds || []).length > 0) {
-        filteredMeds = allMeds;
+      if (filteredMeds.length === 0 && (allMedsWithQty || []).length > 0) {
+        filteredMeds = allMedsWithQty;
       }
     } else if (facet.type === "info" && facet.value === "when_to_take") {
       title = labels.titleSchedule;
       emptyMsg = labels.noSchedule;
-      filteredMeds = (allMeds || []).filter(
+      filteredMeds = (allMedsWithQty || []).filter(
         (m) => m.status !== "INACTIVE" && m.status !== "STOPPED",
       );
-      if (filteredMeds.length === 0 && (allMeds || []).length > 0) {
-        filteredMeds = allMeds;
+      if (filteredMeds.length === 0 && (allMedsWithQty || []).length > 0) {
+        filteredMeds = allMedsWithQty;
       }
     } else {
       title = labels.titleCurrent;
       emptyMsg = labels.noMeds;
-      filteredMeds = (allMeds || []).filter((m) => {
+      filteredMeds = (allMedsWithQty || []).filter((m) => {
         if (m.status === "INACTIVE" || m.status === "STOPPED" || m.status === "COMPLETED")
           return false;
-        if (m.ongoing) return true;
+        const remQty =
+          m.remainingQuantity !== undefined && m.remainingQuantity !== null
+            ? Number(m.remainingQuantity)
+            : null;
+        if (remQty !== null && remQty <= 0) return false;
         const endStr = m.endDate ? new Date(m.endDate).toISOString().split("T")[0] : null;
-        if (endStr && endStr < todayStr) return false;
+        if (endStr && !m.ongoing && endStr < todayStr) return false;
         return true;
       });
-      if (filteredMeds.length === 0 && (allMeds || []).length > 0) {
-        filteredMeds = allMeds;
+      if (filteredMeds.length === 0 && (allMedsWithQty || []).length > 0) {
+        filteredMeds = allMedsWithQty;
         title = labels.titleAll;
       }
     }
+
+    const reqPage = ctx.page || 1;
+    const reqLimit = ctx.limit || (filteredMeds.length > 0 ? filteredMeds.length : 20);
+    const { data: pageMeds, page } = paginateArray(filteredMeds, {
+      page: reqPage,
+      limit: reqLimit,
+    });
 
     let replyText = "";
     if (!filteredMeds || filteredMeds.length === 0) {
@@ -584,7 +633,7 @@ class ChatFastPathService {
     } else {
       let lines = [];
       if (facet.type === "info" && facet.value === "dosage") {
-        lines = filteredMeds.map((m) => {
+        lines = pageMeds.map((m) => {
           const name = m.medicationName || "Medicine";
           const dose = m.dosePerIntake
             ? `${m.dosePerIntake} ${m.unit || ""}`.trim()
@@ -593,22 +642,75 @@ class ChatFastPathService {
           return `• **${name}**: ${labels.dosageLabel} ${dose}${freq}`;
         });
       } else if (facet.type === "info" && facet.value === "when_to_take") {
-        lines = filteredMeds.map((m) => {
+        lines = pageMeds.map((m) => {
           const name = m.medicationName || "Medicine";
           const sched =
-            formatMedicationSchedule(m.medicationSchedule) || "As directed by physician";
+            formatMedicationSchedule(m.medicationSchedule, detectedLanguage) ||
+            "As directed by physician";
           const food = m.foodFrequency ? ` | ${labels.instructionLabel}: ${m.foodFrequency}` : "";
           return `• **${name}**: ${sched}${food}`;
         });
       } else {
-        lines = filteredMeds.map(formatMedItem);
+        lines = pageMeds.map(formatMedItem);
       }
       replyText = `**${title}**\n${lines.join("\n")}`;
     }
 
-    if (onChunk) {
+    if (onChunk && replyText) {
       await streamTextLikeChat(replyText, onChunk, abortSignal, 10);
     }
+
+    const yieldableStrings = new Set();
+    yieldableStrings.add(replyText);
+    if (title) {
+      yieldableStrings.add(title);
+      yieldableStrings.add(title.replace(/\*/g, "").trim());
+    }
+    replyText.split(/[\n,()|]+/).forEach((part) => {
+      const clean = part
+        .replace(/^[•\s*-]+/, "")
+        .replace(/\*+/g, "")
+        .trim();
+      if (clean) yieldableStrings.add(clean);
+      if (clean.includes(":")) {
+        clean.split(":").forEach((sub) => {
+          const cleanSub = sub.trim();
+          if (cleanSub) yieldableStrings.add(cleanSub);
+        });
+      }
+      clean.split(/\s+/).forEach((word) => {
+        const cleanWord = word.replace(/[^\w]/g, "").trim();
+        if (cleanWord) yieldableStrings.add(cleanWord);
+      });
+    });
+    pageMeds.forEach((m) => {
+      if (m.medicationName) yieldableStrings.add(m.medicationName);
+      if (m.dosePerIntake) yieldableStrings.add(`${m.dosePerIntake} ${m.unit || ""}`.trim());
+    });
+
+    const structuredPayload = {
+      items: pageMeds.map((m) => ({
+        name: m.medicationName,
+        dosage: m.dosePerIntake,
+        frequency: m.frequency,
+        schedule: m.medicationSchedule,
+        startDate: toDbDateOnlyString(m.startDate),
+        endDate: toDbDateOnlyString(m.endDate),
+        status: m.status,
+        remainingQuantity: m.remainingQuantity,
+      })),
+      pagination: page,
+      text: replyText,
+      formattedText: replyText,
+      [Symbol.iterator]: function* () {
+        for (const str of yieldableStrings) {
+          yield str;
+        }
+      },
+      includes: function (str) {
+        return replyText.includes(str);
+      },
+    };
 
     const { userMessage, aiMessage } = await this._saveExchange({
       userId,
@@ -616,12 +718,12 @@ class ChatFastPathService {
       question,
       content: replyText,
       metadata: {
-        mode: "GENERAL_HEALTH",
+        mode: "STRUCTURED_LIST",
         task: "MEDICATION_FACET",
         facet,
         emergency: false,
         documentId: [],
-        medications: filteredMeds,
+        medications: pageMeds,
       },
       citations: [],
     });
@@ -629,10 +731,9 @@ class ChatFastPathService {
     return {
       ai: aiMessage,
       user: userMessage,
-      reply: replyText,
-      mode: "GENERAL_HEALTH",
+      reply: structuredPayload,
+      mode: "STRUCTURED_LIST",
       emergency: false,
-      citations: [],
     };
   }
 
@@ -687,7 +788,7 @@ class ChatFastPathService {
     }
 
     const reqPage = ctx.page || 1;
-    const reqLimit = ctx.limit || (allDocs.length > 0 ? allDocs.length : 20);
+    const reqLimit = ctx.limit ? Number(ctx.limit) : allDocs.length > 0 ? allDocs.length : 20;
     const { data: pageDocs, page } = paginateArray(allDocs, { page: reqPage, limit: reqLimit });
 
     let formattedText = "";

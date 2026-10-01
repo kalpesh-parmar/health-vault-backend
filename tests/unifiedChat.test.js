@@ -891,7 +891,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       preferredLanguage: "english",
     });
 
-    jest.spyOn(medicationRepository, "findAll").mockResolvedValue([
+    const medsList = [
       {
         id: "med-1",
         medicationName: "Metformin",
@@ -910,11 +910,30 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
         frequency: "once daily",
         prescribedBy: "Dr. Jones",
       },
-    ]);
+    ];
+
+    jest.spyOn(medicationRepository, "findAll").mockResolvedValue(medsList);
+    jest
+      .spyOn(medicationRepository, "findAllWithPagination")
+      .mockImplementation(async ({ page }) => {
+        const limit = page.pageLimit || 1;
+        const num = page.pageNumber || 1;
+        const start = (num - 1) * limit;
+        return {
+          data: medsList.slice(start, start + limit),
+          page: {
+            pageLimit: limit,
+            pageNumber: num,
+            totalPages: Math.ceil(medsList.length / limit),
+            totalRecords: medsList.length,
+          },
+        };
+      });
 
     jest
       .spyOn(chatSessionRepository, "listSessions")
       .mockResolvedValue({ items: [{ id: "session-med-123" }] });
+    ``;
     jest
       .spyOn(chatSessionRepository, "findSessionById")
       .mockResolvedValue({ id: "session-med-123" });

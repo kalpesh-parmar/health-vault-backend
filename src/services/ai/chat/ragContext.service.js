@@ -999,6 +999,89 @@ class RagContextService {
   }
 }
 
+/**
+ * Formats a user's active medications into a clean context string for LLM prompts.
+ * @param {Array} medications - Array of medication DB records
+ * @param {string} [_question=""] - Optional user question for relevance filtering
+ * @returns {string} Formatted active medications context string
+ */
+function buildMedicationsContext(medications = [], _question = "") {
+  if (!Array.isArray(medications) || medications.length === 0) {
+    return "Active Profile Medications:\nNone";
+  }
+
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const formattedMeds = medications
+    .filter((m) => m && !m.softDelete)
+    .map((m, idx) => {
+      const name = m.medicationName || "Unknown Medicine";
+      const type = m.medicationType ? ` (${m.medicationType})` : "";
+      const dose = m.dosePerIntake ? `${m.dosePerIntake}` : "";
+      const unit = m.unit ? ` ${m.unit}` : "";
+      const doseStr = dose || unit ? `: ${dose}${unit}` : "";
+      const freq = m.frequency ? `, Frequency: ${m.frequency}` : "";
+      const food = m.foodFrequency ? ` (${m.foodFrequency})` : "";
+      const rawEndDate = m.endDate ? String(m.endDate).split("T")[0] : null;
+      let endDateStr = "Not specified";
+      if (rawEndDate && m.ongoing) {
+        endDateStr = `${rawEndDate} (Ongoing treatment)`;
+      } else if (rawEndDate) {
+        endDateStr = rawEndDate;
+      } else if (m.ongoing) {
+        endDateStr = "Ongoing (No fixed end date)";
+      }
+
+      let scheduleStr = "";
+      if (m.medicationSchedule && typeof m.medicationSchedule === "object") {
+        const times = Object.entries(m.medicationSchedule)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ");
+        if (times) scheduleStr = `, Schedule: [${times}]`;
+      }
+
+      const doctor = m.prescribedBy ? `, Prescribed By: ${m.prescribedBy}` : "";
+
+      const remQty =
+        m.remainingQuantity !== undefined && m.remainingQuantity !== null
+          ? Number(m.remainingQuantity)
+          : m.totalQuantity !== undefined && m.totalQuantity !== null
+            ? Number(m.totalQuantity)
+            : null;
+
+      const isStopped =
+        m.status === "INACTIVE" ||
+        m.status === "STOPPED" ||
+        m.status === "COMPLETED" ||
+        (remQty !== null && remQty <= 0) ||
+        (rawEndDate && !m.ongoing && rawEndDate < todayStr);
+
+      let statusStr = "Active";
+      let stockNote = "";
+      if (isStopped) {
+        statusStr = "Inactive / Completed (Stock Finished / Out of Stock)";
+        stockNote =
+          " [STOCK STATUS: Completed/Finished - 0 remaining quantity. Medication is inactive because stock is completed and not restocked. Adding a refill will reactivate it as an active medication.]";
+      } else if (remQty !== null && remQty > 0) {
+        stockNote = ` [Remaining Stock: ${remQty} ${m.unit || "unit(s)"}]`;
+      }
+
+      return `${idx + 1}. ${name}${type}${doseStr}${freq}${food} | Status: ${statusStr}${stockNote} | Start Date: ${m.startDate ? String(m.startDate).split("T")[0] : "N/A"} | Authoritative Stored End Date: ${endDateStr}${scheduleStr}${doctor}`;
+    });
+
+  if (formattedMeds.length === 0) {
+    return "Active Profile Medications:\nNone";
+  }
+
+  return (
+    `Active & Completed Profile Medications:\n${formattedMeds.join("\n")}\n\n` +
+    `STRICT MEDICATION STATUS & STOCK RULES:\n` +
+    `1. If remaining quantity is 0 or status is Completed/Inactive, the medication is inactive because stock is completed and not restocked.\n` +
+    `2. If the user asks about a completed or 0-stock medication, explain that it is inactive due to 0 remaining stock, and refilling it will reactivate it as an active medication.`
+  );
+}
+
 const ragContextService = new RagContextService();
 
 module.exports = {
@@ -1007,6 +1090,7 @@ module.exports = {
   getMedicalEntityKeywords,
   detectContextGraph,
   buildDependencyAwareContext,
+  buildMedicationsContext,
   RagContextService,
   ragContextService,
 };
