@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-"""Direct PDF text extraction via PyMuPDF."""
+"""Direct PDF text extraction via PyMuPDF with per-page text sanitization and garble gating."""
 
 import asyncio
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 import fitz
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,70 @@ MIN_ALNUM_CHARS = 80
 
 _WHITESPACE_RUN = re.compile(r"[ \t\f\v]+")
 _TRAILING_BLANK_LINES = re.compile(r"\n\s*\n+")
+
+# Detection patterns for font corruption and garble
+_CID_PATTERN = re.compile(r"\(cid:\d+\)")
+_UNICODE_REPLACEMENT_CHAR = "\ufffd"
+_CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxyz]{4,}", re.IGNORECASE)
+
+# Legacy 8-bit Indic font families mapping Devanagari/Indic glyphs to Latin ASCII code points
+LEGACY_INDIC_FONT_PATTERNS = [
+    re.compile(r"kruti", re.IGNORECASE),
+    re.compile(r"shree", re.IGNORECASE),
+    re.compile(r"walkman", re.IGNORECASE),
+    re.compile(r"chanakya", re.IGNORECASE),
+    re.compile(r"devlys", re.IGNORECASE),
+    re.compile(r"akruti", re.IGNORECASE),
+    re.compile(r"aps[-_]?dv", re.IGNORECASE),
+    re.compile(r"aps[-_]?c", re.IGNORECASE),
+    re.compile(r"dv[-_]?tt", re.IGNORECASE),
+    re.compile(r"kiran", re.IGNORECASE),
+    re.compile(r"shivaji", re.IGNORECASE),
+    re.compile(r"bilingual", re.IGNORECASE),
+]
+
+# Medical terms, tests, acronyms, and units strictly whitelisted to prevent false rejections
+MEDICAL_WHITELIST = frozenset({
+    # Hematology & Biochemistry
+    "wbc", "rbc", "hgb", "hb", "hct", "mcv", "mch", "mchc", "rdw", "plt",
+    "sgot", "sgpt", "ast", "alt", "alp", "ggt", "ldh", "cpk", "bun", "crp",
+    "esr", "tsh", "ft3", "ft4", "t3", "t4", "hba1c", "psa", "vldl", "hdl", "ldl",
+    # Vitals & Clinical Tests
+    "bp", "spo2", "pr", "rr", "bmi", "bsa", "ecg", "ekg", "eeg", "emg", "ct", "mri",
+    "usg", "cxr", "pft", "abg", "inr", "pt", "aptt", "fbs", "ppbs", "rbs",
+    # Units of Measure
+    "mg/dl", "g/dl", "ug/dl", "mcg/dl", "ng/ml", "pg/ml", "pmol/l", "mmol/l",
+    "meq/l", "iu/l", "u/l", "mu/l", "mmhg", "bpm", "fl", "pg", "cells/cumm",
+    "cumm", "thou/cumm", "mill/cumm", "gm%", "mg%", "vol%",
+    # Common Prescriptions & Forms
+    "tab", "cap", "syp", "inj", "oint", "dr", "pt", "opd", "ipd", "rx", "sos",
+    "od", "bd", "tid", "qid", "hs", "bbf", "pc", "ac", "po", "iv", "im", "sc",
+    # Additional common clinical acronyms
+    "cbc", "lft", "kft", "rft", "tft", "hiv", "hbsag", "hcv", "vdrl",
+})
+
+# Words with valid 4+ consonant clusters in standard English
+_ENGLISH_CONSONANT_EXEMPTIONS = frozenset({
+    "lengths", "strengths", "angst", "catchphrase", "watchstrap", "birthplace", "archdruid",
+})
+
+# High-frequency English medical and report vocabulary for lexical validity check
+_COMMON_LEXICON = frozenset({
+    "patient", "name", "age", "gender", "male", "female", "date", "doctor", "hospital",
+    "clinic", "report", "test", "result", "reference", "interval", "normal", "high",
+    "low", "unit", "blood", "serum", "urine", "specimen", "investigation", "department",
+    "pathology", "verified", "authorized", "sign", "signature", "notes", "clinical",
+    "remarks", "history", "sample", "collected", "reported", "status", "address",
+    "phone", "reg", "id", "no", "page", "total", "count", "value", "method", "serology",
+    "biochemistry", "hematology", "microbiology", "impression", "interpretation", "finding",
+    "findings", "advice", "treatment", "diagnosis", "prescription", "consultation", "medical",
+    "health", "care", "center", "centre", "laboratory", "labs", "diagnostic", "diagnostics",
+    "the", "of", "and", "in", "to", "for", "with", "on", "at", "by", "from", "is", "was",
+    "are", "were", "been", "has", "have", "had", "this", "that", "these", "those", "not",
+    "or", "as", "an", "be", "all", "any", "each", "every", "both", "few", "more", "most",
+    "other", "some", "such", "than", "too", "very", "can", "will", "just", "should", "now",
+    "years", "year", "months", "days", "hours", "yrs", "yr", "mo", "dob",
+}) | MEDICAL_WHITELIST
 
 
 def decode_symbol_pua_text(text: str) -> str:
@@ -62,10 +127,206 @@ def decode_symbol_pua_text(text: str) -> str:
 
 
 @dataclass(frozen=True)
+class PageTextValidationResult:
+    page_number: int
+    text: str
+    is_valid_direct_text: bool
+    rejection_reason: str | None  # "CID_CORRUPTION", "UNICODE_REPLACEMENT", "LEGACY_INDIC_FONT", "PHONOTACTIC_GARBLE", "INSUFFICIENT_TEXT", or None
+    metrics: dict[str, Any] = field(default_factory=dict)
+
+
+def detect_cid_artifacts(text: str) -> tuple[bool, float, int]:
+    """Detect (cid:...) font artifacts from missing ToUnicode CMap tables."""
+    if not text:
+        return False, 0.0, 0
+    cid_matches = _CID_PATTERN.findall(text)
+    cid_count = len(cid_matches)
+    tokens = text.split()
+    total_tokens = max(len(tokens), 1)
+    cid_token_ratio = cid_count / total_tokens
+    # Flag if > 5% of tokens are CID patterns, or any CID in sparse text (< 20 tokens)
+    is_flagged = (cid_token_ratio > 0.05) or (cid_count > 0 and len(tokens) < 20)
+    return is_flagged, round(cid_token_ratio, 4), cid_count
+
+
+def detect_replacement_chars(text: str) -> tuple[bool, float, int]:
+    """Detect Unicode replacement character \ufffd artifacts."""
+    if not text:
+        return False, 0.0, 0
+    repl_count = text.count(_UNICODE_REPLACEMENT_CHAR)
+    total_chars = max(len(text), 1)
+    ratio = repl_count / total_chars
+    # Flag if > 2% of chars are replacement characters, or at least 3 occurrences in short text
+    is_flagged = (ratio > 0.02) or (repl_count >= 3 and len(text) < 100)
+    return is_flagged, round(ratio, 4), repl_count
+
+
+def detect_legacy_indic_fonts(doc: Any, page_number: int) -> tuple[bool, list[str]]:
+    """Inspect page font table for known 8-bit legacy Indic font families."""
+    if doc is None:
+        return False, []
+    page_idx = page_number - 1
+    try:
+        if hasattr(doc, "page_count") and 0 <= page_idx < doc.page_count:
+            page = doc.load_page(page_idx)
+        elif hasattr(doc, "__len__") and 0 <= page_idx < len(doc):
+            page = doc[page_idx]
+        else:
+            return False, []
+
+        if not hasattr(page, "get_fonts"):
+            return False, []
+
+        font_list = page.get_fonts(full=True)
+        matched_fonts: list[str] = []
+        for font in font_list:
+            # font tuple format: (xref, ext, type, basefont, name, encoding, ...)
+            basefont = str(font[3]) if len(font) > 3 else ""
+            name = str(font[4]) if len(font) > 4 else ""
+            for pat in LEGACY_INDIC_FONT_PATTERNS:
+                if pat.search(basefont) or pat.search(name):
+                    matched_fonts.append(basefont or name)
+                    break
+        return bool(matched_fonts), matched_fonts
+    except Exception as exc:
+        logger.warning("Failed to inspect fonts for page %d: %s", page_number, exc)
+        return False, []
+
+
+def detect_phonotactic_garble(text: str) -> tuple[bool, float, list[str]]:
+    """Detect unnatural Latin consonant sequences and low lexical valid ratios."""
+    if not text:
+        return False, 0.0, []
+
+    words = re.findall(r"[A-Za-z0-9%/+\.\-]+", text)
+    if not words:
+        return False, 0.0, []
+
+    anomalous_tokens: list[str] = []
+    alpha_words: list[str] = []
+
+    for raw_w in words:
+        w_clean = raw_w.strip(".,;:()[]{}%/-")
+        if not w_clean:
+            continue
+        w_lower = w_clean.lower()
+        if w_clean.isdigit():
+            continue
+        if any(ch.isalpha() for ch in w_clean):
+            alpha_words.append(w_lower)
+
+        # Check exemptions
+        if w_lower in MEDICAL_WHITELIST or w_lower in _ENGLISH_CONSONANT_EXEMPTIONS:
+            continue
+
+        # Check 4+ consonant cluster or mid-word casing anomaly (e.g. LFkku, vLirky)
+        has_consonant_cluster = bool(_CONSONANT_CLUSTER_RE.search(w_clean))
+        has_mid_uppercase = bool(re.search(r"[a-z][A-Z]", w_clean))
+
+        if has_consonant_cluster or has_mid_uppercase:
+            anomalous_tokens.append(w_clean)
+
+    total_alpha = max(len(alpha_words), 1)
+    anomaly_ratio = len(anomalous_tokens) / total_alpha
+
+    # Lexical validity check on text with substantial content
+    lexical_ratio = 1.0
+    if len(alpha_words) >= 8 and len(text) >= 80:
+        valid_lexical_count = sum(1 for w in alpha_words if w in _COMMON_LEXICON)
+        lexical_ratio = valid_lexical_count / total_alpha
+
+    # Flag conditions:
+    # 1. More than 2 anomalous tokens and anomaly ratio >= 3%
+    # 2. Or single anomalous token in very short text (< 15 alpha words)
+    # 3. Or text >= 80 chars and lexical ratio < 20% and at least 1 anomalous token
+    is_flagged = (
+        (len(anomalous_tokens) >= 2 and anomaly_ratio >= 0.03)
+        or (len(anomalous_tokens) >= 1 and len(alpha_words) < 15 and anomaly_ratio > 0.10)
+        or (len(text) >= 80 and len(alpha_words) >= 8 and lexical_ratio < 0.20 and len(anomalous_tokens) >= 1)
+    )
+
+    metric = round(anomaly_ratio if is_flagged else (1.0 - lexical_ratio), 4)
+    return is_flagged, metric, anomalous_tokens
+
+
+def validate_page_direct_text(
+    doc: Any,
+    page_number: int,
+    text: str,
+) -> PageTextValidationResult:
+    """Run all text sanitization gates on a single page in strict priority order."""
+    cleaned = _clean_page_text(text)
+
+    # 1. Minimum informative length check
+    if len(cleaned.strip()) < MIN_INFORMATIVE_CHARS_PER_PAGE:
+        return PageTextValidationResult(
+            page_number=page_number,
+            text=cleaned,
+            is_valid_direct_text=False,
+            rejection_reason="INSUFFICIENT_TEXT",
+            metrics={"char_count": len(cleaned.strip()), "min_required": MIN_INFORMATIVE_CHARS_PER_PAGE},
+        )
+
+    # 2. Legacy Indic font check in font table
+    has_legacy_font, legacy_fonts = detect_legacy_indic_fonts(doc, page_number)
+    if has_legacy_font:
+        return PageTextValidationResult(
+            page_number=page_number,
+            text=cleaned,
+            is_valid_direct_text=False,
+            rejection_reason="LEGACY_INDIC_FONT",
+            metrics={"detected_fonts": legacy_fonts},
+        )
+
+    # 3. CID corruption check
+    is_cid, cid_ratio, cid_count = detect_cid_artifacts(cleaned)
+    if is_cid:
+        return PageTextValidationResult(
+            page_number=page_number,
+            text=cleaned,
+            is_valid_direct_text=False,
+            rejection_reason="CID_CORRUPTION",
+            metrics={"cid_ratio": cid_ratio, "cid_count": cid_count},
+        )
+
+    # 4. Unicode replacement character check
+    is_repl, repl_ratio, repl_count = detect_replacement_chars(cleaned)
+    if is_repl:
+        return PageTextValidationResult(
+            page_number=page_number,
+            text=cleaned,
+            is_valid_direct_text=False,
+            rejection_reason="UNICODE_REPLACEMENT",
+            metrics={"replacement_ratio": repl_ratio, "replacement_count": repl_count},
+        )
+
+    # 5. Phonotactic / lexical garble check
+    is_garble, garble_metric, anomalous_tokens = detect_phonotactic_garble(cleaned)
+    if is_garble:
+        return PageTextValidationResult(
+            page_number=page_number,
+            text=cleaned,
+            is_valid_direct_text=False,
+            rejection_reason="PHONOTACTIC_GARBLE",
+            metrics={"metric": garble_metric, "anomalous_tokens": anomalous_tokens},
+        )
+
+    # All gates passed: valid direct text
+    return PageTextValidationResult(
+        page_number=page_number,
+        text=cleaned,
+        is_valid_direct_text=True,
+        rejection_reason=None,
+        metrics={"char_count": len(cleaned), "alpha_ratio": round(_alpha_ratio(cleaned), 3)},
+    )
+
+
+@dataclass(frozen=True)
 class DirectPdfPage:
     page_number: int
     text: str
     char_count: int
+    validation: PageTextValidationResult | None = None
 
 
 @dataclass(frozen=True)
@@ -156,22 +417,38 @@ def _extract_from_doc(
         except Exception:
             logger.exception("pdf_text_page_failed", extra={"page": page_number})
             raw = ""
-        cleaned = _clean_page_text(raw)
+        val_res = validate_page_direct_text(doc, page_number, raw)
         pages.append(
             DirectPdfPage(
                 page_number=page_number,
-                text=cleaned,
-                char_count=len(cleaned),
+                text=val_res.text,
+                char_count=len(val_res.text),
+                validation=val_res,
             )
         )
-        if cleaned:
-            full_text_parts.append(cleaned)
+        if val_res.is_valid_direct_text and val_res.text:
+            full_text_parts.append(val_res.text)
 
     full_text = "\n\n".join(full_text_parts).strip()
     elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     if not pages:
         logger.info("pdf_text_extraction_completed", extra={"page_count": 0, "char_count": 0, "elapsed_ms": elapsed_ms})
+        return None
+
+    # Check for any invalid/corrupted pages across the document
+    invalid_pages = [p for p in pages if not (p.validation and p.validation.is_valid_direct_text)]
+    if require_quality and invalid_pages:
+        reasons = [p.validation.rejection_reason for p in invalid_pages if p.validation]
+        logger.info(
+            "pdf_text_page_validation_rejected",
+            extra={
+                "page_count": len(pages),
+                "invalid_page_count": len(invalid_pages),
+                "rejection_reasons": reasons,
+                "elapsed_ms": elapsed_ms,
+            },
+        )
         return None
 
     informative_pages = sum(
@@ -223,7 +500,7 @@ def _extract_from_doc(
         )
         return None
 
-    if not full_text:
+    if not full_text and require_quality:
         logger.info(
             "pdf_text_insufficient_for_direct",
             extra={
@@ -240,10 +517,12 @@ def _extract_from_doc(
         "pdf_text_detected",
         extra={"page_count": len(pages), "char_count": len(full_text), "alnum_chars": alnum_chars},
     )
+    # Assemble full text for raw return if not requiring quality (all pages)
+    return_full_text = full_text if full_text else "\n\n".join(p.text for p in pages if p.text).strip()
     return DirectPdfExtraction(
         pages=pages,
-        full_text=full_text,
-        char_count=len(full_text),
+        full_text=return_full_text,
+        char_count=len(return_full_text),
         elapsed_ms=elapsed_ms,
     )
 
@@ -254,7 +533,6 @@ def _extract_bytes_sync(
     max_pages: int | None,
     require_quality: bool = True,
 ) -> DirectPdfExtraction | None:
-
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             return _extract_from_doc(doc, max_pages=max_pages, require_quality=require_quality)
@@ -264,7 +542,6 @@ def _extract_bytes_sync(
 
 
 def _extract_path_sync(pdf_path: Path, *, max_pages: int | None) -> DirectPdfExtraction | None:
-
     try:
         with fitz.open(str(pdf_path)) as doc:
             return _extract_from_doc(doc, max_pages=max_pages)
