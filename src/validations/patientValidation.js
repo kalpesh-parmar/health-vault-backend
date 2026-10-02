@@ -103,6 +103,7 @@ const updatePatientSchema = z
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
     mobile: mobileField.optional(),
+    countryCode: z.string().max(10).trim().optional().nullable(),
     profileImageKey: profileImageKey,
     status: z.enum(userStatusValues).optional(),
     allergies: allergiesField,

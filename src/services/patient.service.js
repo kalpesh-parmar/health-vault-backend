@@ -20,6 +20,7 @@ const {
   hashToken,
   parseDurationToDate,
   sanitizePatient,
+  normalizePhoneNumber,
 } = require("../utils/commonUtils");
 const JwtUtils = require("../utils/jwtUtils");
 const {
@@ -298,6 +299,18 @@ class PatientService {
       data.fullName = `${mergedFirstName || ""} ${mergedLastName || ""}`.trim();
     }
 
+    if (data.mobile !== undefined || data.countryCode !== undefined) {
+      const phoneNorm = normalizePhoneNumber({
+        mobile: data.mobile !== undefined ? data.mobile : existingPatient.mobile,
+        countryCode:
+          data.countryCode !== undefined ? data.countryCode : existingPatient.countryCode,
+      });
+      if (data.mobile !== undefined || phoneNorm.mobile) data.mobile = phoneNorm.mobile;
+      if (data.countryCode !== undefined || phoneNorm.countryCode) {
+        data.countryCode = phoneNorm.countryCode;
+      }
+    }
+
     const updatedPatient = await patientRepository.updateById(params.id, data);
 
     if (!updatedPatient) {
@@ -438,12 +451,9 @@ class PatientService {
     let mobile = null;
     let countryCode = null;
     if (decodedToken.phone_number) {
-      const cleaned = decodedToken.phone_number.replace(/[^+\d]/g, "");
-      mobile = cleaned;
-      if (cleaned.startsWith("+") && cleaned.length > 10) {
-        mobile = cleaned.slice(-10);
-        countryCode = cleaned.slice(0, cleaned.length - 10);
-      }
+      const phoneNorm = normalizePhoneNumber({ mobile: decodedToken.phone_number });
+      mobile = phoneNorm.mobile;
+      countryCode = phoneNorm.countryCode;
     }
 
     let email = decodedToken.email || data.email || null;

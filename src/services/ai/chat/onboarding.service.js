@@ -5,7 +5,7 @@ const { env } = require("../../../configs/env");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
-const { normalizeLanguage } = require("../../../utils/commonUtils");
+const { normalizeLanguage, normalizePhoneNumber } = require("../../../utils/commonUtils");
 const medicationService = require("../../medication.service");
 const medicationReminderService = require("../../medicationReminder.service");
 const { languageTypeValues } = require("../../../enums/languageType");
@@ -887,12 +887,14 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.documentText = "";
         state.documentExtracted = false;
 
+        const phoneNorm = normalizePhoneNumber({ mobile: state.loginData?.phoneNumber?.value });
         const rollbackData = {
           firstName: state.loginData?.firstName?.value || null,
           lastName: state.loginData?.lastName?.value || null,
           dateOfBirth: toDbDate(state.loginData?.dateOfBirth?.value),
           gender: state.loginData?.gender?.value || null,
-          mobile: state.loginData?.phoneNumber?.value || null,
+          mobile: phoneNorm.mobile || null,
+          countryCode: phoneNorm.countryCode || null,
         };
         if (state.loginData?.email?.value) {
           rollbackData.email = state.loginData.email.value;
@@ -1954,8 +1956,11 @@ async function saveOnboardingState(userId, state) {
       if (
         state.existingUserData.phoneNumber !== undefined &&
         state.existingUserData.phoneNumber !== null
-      )
-        updateData.mobile = state.existingUserData.phoneNumber;
+      ) {
+        const phoneNorm = normalizePhoneNumber({ mobile: state.existingUserData.phoneNumber });
+        if (phoneNorm.mobile) updateData.mobile = phoneNorm.mobile;
+        if (phoneNorm.countryCode) updateData.countryCode = phoneNorm.countryCode;
+      }
 
       if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
         const existingPatient = await patientRepository.findById(userId);

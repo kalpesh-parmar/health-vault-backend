@@ -101,6 +101,52 @@ function isValidClinicalSummary(text, _patientName) {
   return true;
 }
 
+function normalizePhoneNumber(payload = {}) {
+  const inputMobile = payload.mobile ? String(payload.mobile).trim() : null;
+  const inputCountryCode = payload.countryCode ? String(payload.countryCode).trim() : null;
+
+  if (!inputMobile) {
+    let formattedCountryCode = inputCountryCode;
+    if (formattedCountryCode && !formattedCountryCode.startsWith("+")) {
+      formattedCountryCode = `+${formattedCountryCode.replace(/[^\d]/g, "")}`;
+    }
+    return {
+      mobile: null,
+      countryCode: formattedCountryCode || null,
+    };
+  }
+
+  const cleaned = inputMobile.replace(/[^\d+]/g, "");
+
+  let mobile = cleaned;
+  let countryCode = inputCountryCode;
+
+  if (cleaned.startsWith("+")) {
+    const digitsOnly = cleaned.slice(1);
+    if (digitsOnly.length > 10) {
+      mobile = digitsOnly.slice(-10);
+      countryCode = `+${digitsOnly.slice(0, digitsOnly.length - 10)}`;
+    } else {
+      mobile = digitsOnly;
+    }
+  } else if (cleaned.length > 10) {
+    mobile = cleaned.slice(-10);
+    countryCode = `+${cleaned.slice(0, cleaned.length - 10)}`;
+  } else {
+    mobile = cleaned;
+  }
+
+  if (countryCode && !countryCode.startsWith("+")) {
+    const digitsCode = countryCode.replace(/[^\d]/g, "");
+    countryCode = digitsCode ? `+${digitsCode}` : countryCode;
+  }
+
+  return {
+    mobile: mobile || null,
+    countryCode: countryCode || null,
+  };
+}
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -111,4 +157,5 @@ module.exports = {
   normalizeLanguage,
   stripReasoningTags,
   isValidClinicalSummary,
+  normalizePhoneNumber,
 };
