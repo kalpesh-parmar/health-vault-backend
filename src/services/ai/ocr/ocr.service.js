@@ -869,7 +869,7 @@ Return STRICT JSON only:
                   maxTokens: 8192,
                   format: "json",
                   keep_alive: -1,
-                  rawOptions: { num_ctx: 8192 },
+                  rawOptions: { num_ctx: 16384, num_predict: 8192 },
                   think: false,
                   fallbackToThinking: true,
                 },

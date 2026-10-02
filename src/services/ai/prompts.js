@@ -366,6 +366,10 @@ Perform two tasks on the provided document page image:
      * Output a concise semantic descriptor tag instead:
        [DIAGRAM: <type> - <brief clinical description>]
        For example: [DIAGRAM: ECG 12-lead strip showing regular sinus rhythm] or [FIGURE: Chest X-ray PA view with clear lung fields].
+   - FULL TOP-TO-BOTTOM TRANSCRIPTION (MANDATORY):
+     * You MUST transcribe the entire page from top to bottom completely.
+     * NEVER stop after patient demographics or address headers.
+     * You MUST include every prescribed medication, tablet, syrup, dosage, frequency, diagnosis, investigation, and doctor instruction listed anywhere on the page.
    - MULTILINGUAL & MIXED-SCRIPT PRESERVATION:
      * Transcribe mixed-script documents verbatim across English, Gujarati, Hindi, Marathi, and Tamil.
      * Always preserve medication brand names, generic formulations, medical acronyms, and dosages in English / Latin characters (e.g. "Tab. Caldison D3 1-0-0", "Cap. Amoxicillin 500mg", "BP: 120/80 mmHg") even when surrounded by Indic doctor notes.

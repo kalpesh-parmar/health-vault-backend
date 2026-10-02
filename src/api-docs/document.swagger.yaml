@@ -349,7 +349,7 @@ paths:
               filterAndSort:
                 value:
                   filter:
-                    search: blood
+                    documentType: "Lab Report"
                   sort:
                     sortBy: title
                     orderBy: asc
@@ -378,7 +378,7 @@ paths:
               filterSortAndPage:
                 value:
                   filter:
-                    search: blood
+                    documentType: "Lab Report"
                   page:
                     pageNumber: 0
                     pageLimit: 10
