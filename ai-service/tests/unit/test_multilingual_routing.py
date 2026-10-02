@@ -457,3 +457,86 @@ async def test_concurrent_race_cancels_vlm_when_paddle_returns_clean_english():
     assert page_res["fallback_reason"] is None
     assert "METROPOLIS HEALTHCARE" in page_res["text"]
 
+
+@pytest.mark.asyncio
+async def test_paddle_timeout_sequential_fallback_to_vlm():
+    """Verify that in sequential mode, PaddleOCR exceeding paddle_timeout_seconds falls back to VLM."""
+    mock_paddle = MagicMock()
+    mock_paddle.is_available.return_value = True
+
+    async def hanging_paddle(img_bytes):
+        await asyncio.sleep(10.0)
+        return {"full_text": "Never returned"}
+
+    mock_paddle.async_extract_text_from_bytes = hanging_paddle
+
+    mock_vision = MagicMock()
+    mock_vision.extract_image = AsyncMock(return_value={
+        "text": "VLM rescued after Paddle timed out",
+        "confidence": 0.92,
+        "lines": [{"text": "VLM rescued after Paddle timed out", "confidence": 0.92}],
+    })
+
+    handler = OcrStageHandler(
+        s3_client=None,
+        vision_service=mock_vision,
+        paddle_engine=mock_paddle,
+    )
+    # Configure 0.1s timeout and disable race to test sequential fallback branch
+    handler.settings.paddle_timeout_seconds = 0.1
+    handler.settings.ocr_concurrent_race_enabled = False
+
+    t0 = asyncio.get_running_loop().time()
+    page_res = await handler._extract_page_with_tiered_ocr(
+        b"dummy-image-bytes",
+        page_num=2,
+    )
+    elapsed = asyncio.get_running_loop().time() - t0
+
+    assert elapsed < 1.0
+    assert page_res["engine"] == "qwen_vl"
+    assert "PADDLE_TIMEOUT" in str(page_res["fallback_reason"])
+    assert "VLM rescued" in page_res["text"]
+
+
+@pytest.mark.asyncio
+async def test_paddle_timeout_concurrent_race_fallback_to_vlm():
+    """Verify that in concurrent race, PaddleOCR timing out falls back cleanly to VLM."""
+    mock_paddle = MagicMock()
+    mock_paddle.is_available.return_value = True
+
+    async def hanging_paddle(img_bytes):
+        await asyncio.sleep(10.0)
+        return {"full_text": "Never returned"}
+
+    mock_paddle.async_extract_text_from_bytes = hanging_paddle
+
+    mock_vision = MagicMock()
+    mock_vision.extract_image = AsyncMock(return_value={
+        "text": "VLM rescued during concurrent race",
+        "confidence": 0.91,
+        "lines": [{"text": "VLM rescued during concurrent race", "confidence": 0.91}],
+    })
+
+    handler = OcrStageHandler(
+        s3_client=None,
+        vision_service=mock_vision,
+        paddle_engine=mock_paddle,
+    )
+    # Set timeout to 0.1s in race
+    handler.settings.paddle_timeout_seconds = 0.1
+    handler.settings.ocr_concurrent_race_enabled = True
+
+    t0 = asyncio.get_running_loop().time()
+    page_res = await handler._extract_page_with_tiered_ocr(
+        b"dummy-image-bytes",
+        page_num=3,
+    )
+    elapsed = asyncio.get_running_loop().time() - t0
+
+    assert elapsed < 1.0
+    assert page_res["engine"] == "qwen_vl"
+    assert "PADDLE_TIMEOUT" in str(page_res["fallback_reason"])
+    assert "VLM rescued" in page_res["text"]
+
+

@@ -33,6 +33,7 @@ from app.modules.ocr.cache import OcrResultCache
 from app.modules.ocr.quality_gate import QualityGate
 from app.services.pipeline.lifecycle_service import PipelineLifecycleService
 from app.services.pipeline.preprocessing import preprocess_document_image
+from app.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ class OcrStageHandler:
         quality_gate: Any = None,
         min_direct_text_chars: int = 8,
         cache: OcrResultCache | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self.s3_client = s3_client
         self.lifecycle = lifecycle
@@ -144,6 +146,7 @@ class OcrStageHandler:
         self.quality_gate = quality_gate or QualityGate()
         self.min_direct_text_chars = min_direct_text_chars
         self.cache = cache
+        self.settings = settings or Settings()
 
     # ─────────────────────────────────────────────────────────────────────────
     # STAGE 1: VALIDATING
@@ -377,9 +380,16 @@ class OcrStageHandler:
 
                 async def _paddle_runner() -> tuple[dict[str, Any] | None, float, Exception | None]:
                     t_inf = time.perf_counter()
+                    timeout_sec = float(getattr(getattr(self, "settings", None), "paddle_timeout_seconds", 20.0))
                     try:
-                        p_res = await self.paddle.async_extract_text_from_bytes(img_bytes)
+                        p_res = await asyncio.wait_for(
+                            self.paddle.async_extract_text_from_bytes(img_bytes),
+                            timeout=timeout_sec,
+                        )
                         return p_res, round((time.perf_counter() - t_inf) * 1000, 2), None
+                    except asyncio.TimeoutError as te:
+                        logger.warning("Page %d PaddleOCR timed out after %.1fs", page_num, timeout_sec)
+                        return None, round((time.perf_counter() - t_inf) * 1000, 2), te
                     except Exception as pe:
                         return None, round((time.perf_counter() - t_inf) * 1000, 2), pe
 
@@ -450,13 +460,16 @@ class OcrStageHandler:
                                     v_res, paddle_res, fallback_reason
                                 )
                     else:
-                        # Paddle errored; await VLM
+                        # Paddle errored or timed out; await VLM
+                        timeout_sec = float(getattr(self.settings, "paddle_timeout_seconds", 20.0))
+                        fb_reason = f"PADDLE_TIMEOUT_{timeout_sec}S" if isinstance(p_err, asyncio.TimeoutError) else "PADDLE_FAILED"
+                        logger.info("Page %d PaddleOCR failed/timed out (%s), awaiting concurrent VLM", page_num, fb_reason)
                         v_res, v_ms, v_err = await v_task
                         stage_timings["vlm_call_ms"] = v_ms
                         if v_res and not v_err:
                             page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
                             page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                v_res, None, "PADDLE_FAILED"
+                                v_res, None, fb_reason
                             )
                 elif v_task in done:
                     v_res, v_ms, v_err = v_task.result()
@@ -480,75 +493,53 @@ class OcrStageHandler:
                         )
                         fallback_reason = fb_reason
                     else:
-                        # VLM completed first but produced low confidence; await Paddle
+                        # VLM completed first but produced low confidence / empty text; await Paddle
+                        p_err = None
                         try:
                             p_res, p_ms, p_err = await p_task
                             stage_timings["ocr_infer_ms"] = p_ms
                             paddle_res = p_res
                         except asyncio.CancelledError:
                             paddle_res = None
+                        except Exception as pe:
+                            p_err = pe
+                            paddle_res = None
 
-                    if paddle_res and not p_err:
-                        timings = paddle_res.get("timings") or {}
-                        stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
-                        stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
-                        if timings.get("engine_init_ms"):
-                            stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
-                        if timings.get("queue_wait_ms"):
-                            stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
-
-                        t_qg = time.perf_counter()
-                        with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
+                        if paddle_res and not p_err:
                             gate_result = self.quality_gate.evaluate(paddle_res)
-                        stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
-
-                        min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
-                        mean_c = float(paddle_res.get("mean_confidence") or 0.0)
-                        low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
-                        can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
-
-                        if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
-                            v_task.cancel()
-                            logger.info(
-                                "Page %d PaddleOCR won concurrent race (conf=%.2f, elapsed=%dms), cancelled VLM",
-                                page_num,
-                                mean_c,
-                                p_ms,
-                            )
-                            page_text = paddle_res.get("full_text") or ""
-                            confidence = mean_c or 0.95
-                            lines = paddle_res.get("lines") or []
-                            engine_used = "paddleocr"
-                            status = "SUCCESS"
-                            fallback_reason = None
-                        else:
-                            fallback_reason = gate_result.reason
-                            logger.info("Page %d PaddleOCR quality gate failed (%s), awaiting concurrent VLM", page_num, fallback_reason)
-                            v_res, v_ms, v_err = await v_task
-                            stage_timings["vlm_call_ms"] = v_ms
-                            if v_res and not v_err:
-                                page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
-                                page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                    v_res, paddle_res, fallback_reason
-                                )
-                    else:
-                        # Paddle errored; await VLM
-                        v_res, v_ms, v_err = await v_task
-                        stage_timings["vlm_call_ms"] = v_ms
-                        if v_res and not v_err:
-                            page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                            min_conf = getattr(self.settings, "ocr_router_min_confidence", 0.82)
+                            mean_c = float(paddle_res.get("mean_confidence") or 0.0)
+                            low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
+                            can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
+                            if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
+                                page_text = paddle_res.get("full_text") or ""
+                                confidence = mean_c or 0.95
+                                lines = paddle_res.get("lines") or []
+                                engine_used = "paddleocr"
+                                status = "SUCCESS"
+                                fallback_reason = None
+                            else:
+                                if v_res:
+                                    page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                                        v_res, paddle_res, gate_result.reason
+                                    )
+                        elif v_res:
                             page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                v_res, None, "PADDLE_FAILED"
+                                v_res, None, "VLM_FALLBACK"
                             )
             except Exception as race_err:
                 fallback_reason = f"concurrent_race_error: {race_err}"
                 logger.warning("Page %d concurrent race exception: %s", page_num, race_err)
         elif paddle_available:
             # ── Standard Sequential PaddleOCR ──
+            timeout_sec = float(getattr(getattr(self, "settings", None), "paddle_timeout_seconds", 20.0))
             try:
                 t_infer = time.perf_counter()
                 with ocr_timer("ocr_infer_ms", engine="paddleocr", lang=target_lang, pass_num=1, page=page_num):
-                    paddle_res = await self.paddle.async_extract_text_from_bytes(img_bytes)
+                    paddle_res = await asyncio.wait_for(
+                        self.paddle.async_extract_text_from_bytes(img_bytes),
+                        timeout=timeout_sec,
+                    )
                 stage_timings["ocr_infer_ms"] = round((time.perf_counter() - t_infer) * 1000, 2)
 
                 timings = paddle_res.get("timings") or {}
@@ -611,6 +602,10 @@ class OcrStageHandler:
                         fallback_reason = gate_result.reason
                         logger.info("Page %d PaddleOCR quality gate failed: %s", page_num, fallback_reason)
                 stage_timings["postprocess_ms"] = round((time.perf_counter() - t_post) * 1000, 2)
+            except asyncio.TimeoutError:
+                fallback_reason = f"PADDLE_TIMEOUT_{timeout_sec}S"
+                stage_timings["ocr_infer_ms"] = round((time.perf_counter() - t_infer) * 1000, 2)
+                logger.warning("Page %d PaddleOCR timed out after %.1fs, falling back to VLM", page_num, timeout_sec)
             except Exception as p_err:
                 fallback_reason = f"PaddleOCR exception: {p_err}"
                 logger.warning("Page %d PaddleOCR exception: %s", page_num, p_err)

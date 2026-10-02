@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import hashlib
 import json
 import logging
@@ -9,14 +10,13 @@ import threading
 import time
 from collections import OrderedDict
 from typing import Any
+from PIL import Image
 
 # Safely pre-load PyTorch native DLLs before Paddle/PaddleOCR load OpenMP on Windows
 try:
     import torch  # noqa: F401
 except Exception:
     pass
-
-import paddle
 
 from app.core.errors import ModelUnavailableError, OcrEmptyResultError
 from app.core.json_utils import parse_json_object
@@ -28,43 +28,93 @@ logger = logging.getLogger(__name__)
 # --- GLOBAL PADDLEOCR INITIALIZATION ---
 import sys
 import os
-
-# Dynamically add PaddleOCR packages from D: drive to sys.path
-paddle_path = r"D:\paddle_packages"
-if paddle_path not in sys.path:
-    sys.path.append(paddle_path)
-
 import cv2
 import numpy as np
 
-try:
-    from paddleocr import PaddleOCR
-    import logging as p_logging
-    # Silence paddle logging
-    p_logging.getLogger("ppocr").setLevel(p_logging.ERROR)
-    # Initialize globally (only once)
-    global_ocr = PaddleOCR(
-        use_textline_orientation=True,
-        use_doc_orientation_classify=True,
-        enable_mkldnn=False,
-        lang='en')
-    print("=======>",paddle.get_device())
-except Exception as e:
-    logger.error(f"Failed to initialize global PaddleOCR: {e}")
-    global_ocr = None
+# Redundant global_ocr eliminated in Phase P2 (ProcessPoolExecutor managed by PaddleOcrEngine)
 # ---------------------------------------
 
 _JSON_FENCE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 
 _OCR_PROMPT = (
-    "You are a precise OCR and document-understanding engine for medical documents. "
-    "Transcribe ALL visible text exactly as it appears and return ONLY JSON in this shape: "
-    '{"pages":[{"page":1,"text":"","confidence":0.0}],'
-    '"medicalExtraction":{"patientInfo":{},"hospitalInfo":{},"doctorInfo":{},'
-    '"diagnosis":[],"medications":[],"labResults":[],"vitals":[],"recommendations":[],"summary":""},'
-    '"summary":{"type":"","summary":[],"medications":[],"tests":[],"warnings":[],"follow_up":[]}}. '
-    "Never invent values. Preserve line breaks, numbers, units, dates, names, and tables."
+    "You are an accurate OCR engine for medical documents. "
+    "Transcribe ALL visible text exactly as it appears in this document image into clean markdown/plain text. "
+    "Preserve line breaks, exact numbers, test names, values, units, reference intervals, dates, and tabular column alignments. "
+    "Do not summarize, interpret, translate, or omit any text. "
+    "Output ONLY the transcribed document text."
 )
+
+
+def downscale_image_if_needed(
+    image_bytes: bytes,
+    max_side: int = 1500,
+) -> tuple[bytes, dict[str, Any]]:
+    """
+    Proportionally downscale images exceeding max_side on their longest dimension.
+    If image longest dimension <= max_side, return untouched bytes.
+    Returns: (output_bytes, downscale_info_dict)
+    """
+    if not image_bytes or max_side <= 0:
+        return image_bytes, {
+            "downscaled": False,
+            "original_dims": None,
+            "scaled_dims": None,
+            "bytes_saved_pct": 0.0,
+        }
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            orig_w, orig_h = img.size
+            longest_side = max(orig_w, orig_h)
+            if longest_side <= max_side:
+                return image_bytes, {
+                    "downscaled": False,
+                    "original_dims": (orig_w, orig_h),
+                    "scaled_dims": (orig_w, orig_h),
+                    "bytes_saved_pct": 0.0,
+                }
+
+            scale = max_side / float(longest_side)
+            new_w = max(1, int(round(orig_w * scale)))
+            new_h = max(1, int(round(orig_h * scale)))
+
+            if img.mode in ("RGBA", "LA", "P"):
+                rgb_img = Image.new("RGB", (orig_w, orig_h), (255, 255, 255))
+                if img.mode == "P":
+                    rgb_img.paste(img.convert("RGBA"))
+                else:
+                    rgb_img.paste(img, mask=img.split()[-1])
+                img_to_resize = rgb_img
+            elif img.mode != "RGB":
+                img_to_resize = img.convert("RGB")
+            else:
+                img_to_resize = img
+
+            resized = img_to_resize.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            resized.save(out_buf, format="JPEG", quality=88, optimize=True)
+            new_bytes = out_buf.getvalue()
+
+            orig_len = len(image_bytes)
+            new_len = len(new_bytes)
+            saved_pct = round(((orig_len - new_len) / orig_len) * 100, 2) if orig_len > 0 else 0.0
+
+            return new_bytes, {
+                "downscaled": True,
+                "original_dims": (orig_w, orig_h),
+                "scaled_dims": (new_w, new_h),
+                "bytes_saved_pct": saved_pct,
+            }
+    except Exception as exc:
+        logger.warning("Failed to inspect/downscale image, using original bytes: %s", exc)
+        return image_bytes, {
+            "downscaled": False,
+            "original_dims": None,
+            "scaled_dims": None,
+            "bytes_saved_pct": 0.0,
+            "error": str(exc),
+        }
+
 
 
 class VisionModelRequestError(ModelUnavailableError):
@@ -142,6 +192,9 @@ class VisionModelService:
         cache_size: int,
         max_inline_bytes: int,
         page_concurrency: int = 4,
+        max_image_side: int = 1500,
+        num_ctx: int = 4096,
+        num_predict: int = 1536,
     ) -> None:
         self.api_key = (api_key or "").strip()
         self.base_url = (base_url or "").rstrip("/")
@@ -152,6 +205,9 @@ class VisionModelService:
         self.min_text_chars = max(1, int(min_text_chars))
         self.max_inline_bytes = int(max_inline_bytes)
         self.page_concurrency = max(1, int(page_concurrency))
+        self.max_image_side = int(max_image_side)
+        self.num_ctx = int(num_ctx)
+        self.num_predict = int(num_predict)
         self._cache = _ResultCache(cache_size)
         self._client: AiClient | None = None
         self._available: bool | None = None
@@ -171,6 +227,8 @@ class VisionModelService:
                     timeout_seconds=self.timeout_seconds,
                     max_retries=self.max_retries,
                     max_output_tokens=self.max_output_tokens,
+                    num_ctx=self.num_ctx,
+                    num_predict=self.num_predict,
                 )
             )
         return self._client
@@ -191,7 +249,14 @@ class VisionModelService:
             "available": self._available,
         }
 
-    async def extract_pdf(self, pdf_bytes: bytes, *, max_pages: int) -> dict[str, Any]:
+    async def extract_pdf(
+        self,
+        pdf_bytes: bytes,
+        *,
+        max_pages: int = 25,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        del kwargs
         if not pdf_bytes:
             raise VisionModelRequestError("Empty PDF payload received")
 
@@ -212,11 +277,12 @@ class VisionModelService:
         self,
         image_bytes: bytes,
         *,
-        filename: str,
-        mime_type: str | None,
-        max_pages: int,
+        filename: str = "",
+        mime_type: str | None = None,
+        max_pages: int = 1,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        del filename, max_pages
+        del filename, max_pages, kwargs
         if not image_bytes:
             raise VisionModelRequestError("Empty image payload received")
         resolved = (mime_type or "image/png").split(";")[0].strip().lower()
@@ -232,7 +298,15 @@ class VisionModelService:
                 classification="too_large",
             )
 
-        cache_key = f"{self.model}:{mime_type}:{hashlib.sha256(data).hexdigest()}"
+        downscale_info = {"downscaled": False, "original_dims": None, "scaled_dims": None, "bytes_saved_pct": 0.0}
+        processed_data = data
+        processed_mime = mime_type
+        if mime_type.startswith("image/"):
+            processed_data, downscale_info = downscale_image_if_needed(data, max_side=self.max_image_side)
+            if downscale_info["downscaled"]:
+                processed_mime = "image/jpeg"
+
+        cache_key = f"{self.model}:{processed_mime}:{hashlib.sha256(processed_data).hexdigest()}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             payload = json.loads(json.dumps(cached))
@@ -240,60 +314,70 @@ class VisionModelService:
             payload["metrics"]["processing_seconds"] = round(time.monotonic() - started, 3)
             logger.info(
                 "ai_response_cache_hit",
-                extra={"model": self.model, "mime_type": mime_type, "elapsed_ms": int((time.monotonic() - started) * 1000)},
+                extra={"model": self.model, "mime_type": processed_mime, "elapsed_ms": int((time.monotonic() - started) * 1000)},
             )
             return payload
 
         request_started = time.monotonic()
-        raw, finish_reason = await self._generate(data, mime_type=mime_type)
+        raw, finish_reason = await self._generate(processed_data, mime_type=processed_mime)
         request_ms = int((time.monotonic() - request_started) * 1000)
         parse_started = time.monotonic()
-        _log_raw_ai_response(raw, model=self.model, mime_type=mime_type)
+        _log_raw_ai_response(raw, model=self.model, mime_type=processed_mime)
         parsed = _parse_json(raw)
-        if not isinstance(parsed, dict) or not isinstance(parsed.get("pages"), list):
+        pages = None
+        if isinstance(parsed, dict):
+            if isinstance(parsed.get("pages"), list):
+                pages = _normalize_pages(parsed["pages"])
+            elif "text" in parsed and isinstance(parsed["text"], str):
+                pages = _normalize_pages([{"page": 1, "text": parsed["text"], "confidence": parsed.get("confidence", 0.95)}])
+
+        if not pages and raw and len(raw.strip()) > 0:
+            cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            cleaned = _JSON_FENCE.sub("", cleaned).strip()
+            if cleaned:
+                pages = _normalize_pages([{"page": 1, "text": cleaned, "confidence": 0.95}])
+
+        if not pages:
             logger.error(
                 "ai_response_parse_failed",
                 extra={
                     "model": self.model,
-                    "mime_type": mime_type,
+                    "mime_type": processed_mime,
                     "response_chars": len(raw or ""),
                     "elapsed_ms": int((time.monotonic() - parse_started) * 1000),
                 },
             )
             raise VisionModelOutputError(
-                "Configured AI model returned HTTP 200 but the OCR response was not valid JSON with a pages array",
+                "Configured AI model returned HTTP 200 but the OCR response was not valid text or JSON",
                 details={
                     "model": self.model,
-                    "mimeType": mime_type,
+                    "mimeType": processed_mime,
                     "responsePreview": _preview(raw),
                     "responseSha256": _sha256(raw),
                     "responseChars": len(raw or ""),
                 },
             )
 
-        pages = _normalize_pages(parsed["pages"])
-        if not pages:
-            raise VisionModelOutputError(
-                "Configured AI model returned HTTP 200 but no OCR pages",
-                details={"model": self.model, "mimeType": mime_type, "responsePreview": _preview(raw)},
-            )
-
         medical = empty_medical_extraction()
-        if isinstance(parsed.get("medicalExtraction"), dict):
+        if isinstance(parsed, dict) and isinstance(parsed.get("medicalExtraction"), dict):
             for key in medical:
                 if parsed["medicalExtraction"].get(key) is not None:
                     medical[key] = parsed["medicalExtraction"][key]
 
-        vision_summary = _normalize_summary(parsed.get("summary"), medical=medical)
+        vision_summary = _normalize_summary(parsed.get("summary") if isinstance(parsed, dict) else None, medical=medical)
+        client_inst = self._ensure_client()
+        telemetry = getattr(raw, "telemetry", None) or getattr(client_inst, "last_telemetry", {})
         payload = _build_payload(
             pages,
-            engine=f"{self._ensure_client().engine}:{self.model}",
+            engine=f"{client_inst.engine}:{self.model}",
             medical_extraction=medical,
             vision_summary=vision_summary,
             started=started,
             request_ms=request_ms,
             truncated=finish_reason == "MAX_TOKENS",
             model=self.model,
+            telemetry=telemetry,
+            downscale_info=downscale_info,
         )
 
         if payload["metrics"]["non_empty_pages"] > 0 and not payload["metrics"]["truncated"]:
@@ -314,18 +398,33 @@ class VisionModelService:
         async def process_page(page_number: int, image_bytes: bytes) -> dict[str, Any]:
             request_started = time.monotonic()
             page_prompt = _page_prompt(page_number)
+            scaled_bytes, page_downscale_info = downscale_image_if_needed(image_bytes, max_side=self.max_image_side)
             async with semaphore:
                 try:
                     raw, finish_reason = await self._generate(
-                        image_bytes,
-                        mime_type="image/png",
+                        scaled_bytes,
+                        mime_type="image/jpeg",
                         prompt=page_prompt,
                     )
                     request_ms = int((time.monotonic() - request_started) * 1000)
                     parse_started = time.monotonic()
-                    _log_raw_ai_response(raw, model=self.model, mime_type="image/png", page=page_number)
+                    _log_raw_ai_response(raw, model=self.model, mime_type="image/jpeg", page=page_number)
                     parsed = _parse_json(raw)
-                    if not isinstance(parsed, dict) or not isinstance(parsed.get("pages"), list):
+                    pages = None
+                    if isinstance(parsed, dict):
+                        if isinstance(parsed.get("pages"), list):
+                            pages = _normalize_pages(parsed["pages"])
+                        elif "text" in parsed and isinstance(parsed["text"], str):
+                            pages = _normalize_pages([{"page": page_number, "text": parsed["text"], "confidence": parsed.get("confidence", 0.95)}])
+
+                    if not pages and raw and len(raw.strip()) > 0:
+                        fallback_text = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL)
+                        fallback_text = _JSON_FENCE.sub("", fallback_text).strip()
+                        if fallback_text:
+                            logger.info("ai_page_recovered_as_plain_text", extra={"model": self.model, "page": page_number, "chars": len(fallback_text)})
+                            pages = _normalize_pages([{"page": page_number, "text": fallback_text, "confidence": 0.85}])
+
+                    if not pages:
                         logger.error(
                             "ai_response_parse_failed",
                             extra={
@@ -344,31 +443,34 @@ class VisionModelService:
                             "truncated": finish_reason == "MAX_TOKENS",
                             "error": "invalid_response",
                             "response_preview": _preview(raw),
+                            "downscale_info": page_downscale_info,
                         }
 
-                    pages = _normalize_pages(parsed["pages"])
-                    if not pages:
-                        pages = [{"page": page_number, "text": "", "confidence": None}]
                     for page in pages:
                         page["page"] = page_number
                     logger.info(
                         "vision_page_completed",
                         extra={
                             "page": page_number,
-                            "image_size_bytes": len(image_bytes),
+                            "image_size_bytes": len(scaled_bytes),
                             "request_ms": request_ms,
                             "response_chars": len(raw or ""),
                             "non_empty": any((page.get("text") or "").strip() for page in pages),
                         },
                     )
+                    med_data = parsed.get("medicalExtraction") if (isinstance(parsed, dict) and isinstance(parsed.get("medicalExtraction"), dict)) else None
+                    sum_data = _normalize_summary(parsed.get("summary"), medical=medical) if (isinstance(parsed, dict) and isinstance(parsed.get("summary"), dict)) else None
+                    page_telemetry = getattr(raw, "telemetry", None) or getattr(self._ensure_client(), "last_telemetry", {})
                     return {
                         "page": page_number,
                         "pages": pages,
-                        "medical": parsed.get("medicalExtraction") if isinstance(parsed.get("medicalExtraction"), dict) else None,
-                        "summary": _normalize_summary(parsed.get("summary"), medical=medical) if isinstance(parsed.get("summary"), dict) else None,
+                        "medical": med_data,
+                        "summary": sum_data,
                         "request_ms": request_ms,
                         "truncated": finish_reason == "MAX_TOKENS",
                         "error": None,
+                        "telemetry": page_telemetry,
+                        "downscale_info": page_downscale_info,
                     }
                 except Exception as exc:
                     request_ms = int((time.monotonic() - request_started) * 1000)
@@ -377,7 +479,7 @@ class VisionModelService:
                         "vision_page_failed",
                         extra={
                             "page": page_number,
-                            "image_size_bytes": len(image_bytes),
+                            "image_size_bytes": len(scaled_bytes),
                             "request_ms": request_ms,
                             "kind": kind,
                             "error": str(exc)[:300],
@@ -392,6 +494,7 @@ class VisionModelService:
                         "request_ms": request_ms,
                         "truncated": False,
                         "error": kind,
+                        "downscale_info": page_downscale_info,
                     }
 
         results = await asyncio.gather(*(process_page(page_number, image_bytes) for page_number, image_bytes in page_images))
@@ -414,6 +517,8 @@ class VisionModelService:
             )
 
         vision_summary = _combine_summaries(summaries, medical=medical)
+        pdf_telemetry = {"pages": [r.get("telemetry") for r in results if r.get("telemetry")]}
+        any_downscaled = any(bool(r.get("downscale_info", {}).get("downscaled")) for r in results)
         payload = _build_payload(
             all_pages,
             engine=f"{self._ensure_client().engine}:{self.model}",
@@ -423,6 +528,8 @@ class VisionModelService:
             request_ms=total_request_ms,
             truncated=truncated,
             model=self.model,
+            telemetry=pdf_telemetry,
+            downscale_info={"downscaled": any_downscaled, "original_dims": None, "scaled_dims": None, "bytes_saved_pct": 0.0},
         )
         payload["metrics"]["pdf_rendered_to_images"] = True
         payload["metrics"]["rendered_page_count"] = len(page_images)
@@ -431,75 +538,56 @@ class VisionModelService:
         return payload
 
     async def _generate(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> tuple[str, str | None]:
-        t0 = time.monotonic()
+        actual_prompt = prompt or _OCR_PROMPT
         try:
-            if global_ocr is None:
-                raise VisionModelRequestError("Global PaddleOCR is not initialized.", classification="model_unavailable")
+            client = self._ensure_client()
+            try:
+                return await client.generate_json_from_bytes(
+                    data=data,
+                    mime_type=mime_type,
+                    prompt=actual_prompt,
+                    json_only=False,
+                )
+            except TypeError:
+                return await client.generate_json_from_bytes(
+                    data=data,
+                    mime_type=mime_type,
+                    prompt=actual_prompt,
+                )
+        except Exception as exc:
+            if globals().get("global_ocr") is not None:
+                logger.warning("Primary AI client failed (%s); attempting PaddleOCR fallback", exc)
+                return self._generate_paddleocr(data, mime_type=mime_type)
+            kind = _classify_error(exc)
+            logger.error("ai_request_error", extra={"engine": getattr(getattr(self, "_client", None), "engine", "ai-client"), "model": self.model, "kind": kind, "error": str(exc)[:300]})
+            raise VisionModelRequestError(f"AI vision request failed: {exc}", classification=kind) from exc
 
-            
-            # Decode image from bytes
+    def _generate_paddleocr(self, data: bytes, *, mime_type: str) -> tuple[str, str | None]:
+        try:
+            t0 = time.monotonic()
             img_array = np.frombuffer(data, np.uint8)
             img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            
             if img is None:
-                raise ValueError("Failed to decode image bytes using cv2.imdecode. (If this is a PDF, it must be rendered to images first).")
-
-            #  # 1. Convert to grayscale
-            # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # # 2. Apply CLAHE (Contrast Enhancement) to make faint text readable
-            # clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            # enhanced = clahe.apply(gray)
-            # # 3. Convert back to BGR (PaddleOCR expects 3 color channels)
-            # img = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-            # Extract text
-            try:
-                result = global_ocr.ocr(img)
-            except Exception as e:
-                print(type(e))
-                print(e)
-                raise
-            
+                raise ValueError("Failed to decode image bytes for PaddleOCR")
+            result = global_ocr.ocr(img)
             extracted_text = ""
             if result and result[0]:
                 if isinstance(result[0], dict) and "rec_texts" in result[0]:
-                    # PaddleOCR 3.x (PaddleX Pipeline) format
                     extracted_text = "\n".join(result[0]["rec_texts"])
                 elif isinstance(result[0], list) and isinstance(result[0][0], (list, tuple)) and len(result[0][0]) > 1:
-                    # PaddleOCR 2.x format
                     try:
                         extracted_text = "\n".join([line[1][0] for line in result[0]])
                     except Exception:
                         pass
-            # 6. Format as Vision LLM JSON
             structured_json = {
-                "pages": [{"page": 1, "text": extracted_text, "confidence": 1.0}],
+                "pages": [{"page": 1, "text": extracted_text, "confidence": 0.95}],
                 "medicalExtraction": empty_medical_extraction(),
                 "summary": empty_summary()
             }
-            text = json.dumps(structured_json)
-            finish_reason = "STOP"
-            
+            logger.info("paddleocr_fallback_completed", extra={"chars": len(extracted_text), "elapsed_ms": int((time.monotonic() - t0) * 1000)})
+            return json.dumps(structured_json), "STOP"
         except Exception as exc:
-            kind = _classify_error(exc)
-            logger.error("ai_request_error", extra={"engine": "paddleocr", "model": "paddleocr", "kind": kind, "error": str(exc)[:300]})
-            raise VisionModelRequestError(f"PaddleOCR request failed: {exc}", classification=kind) from exc
-
-        logger.info(
-            "ai_response_received",
-            extra={
-                "engine": "paddleocr",
-                "model": "paddleocr",
-                "response_chars": len(text),
-                "finish_reason": finish_reason,
-                "elapsed_ms": int((time.monotonic() - t0) * 1000),
-            },
-        )
-        if not text.strip():
-            raise VisionModelOutputError(
-                "Configured AI model returned HTTP 200 but an empty response body",
-                details={"model": "paddleocr", "mimeType": mime_type, "finishReason": finish_reason},
-            )
-        return text, finish_reason
+            raise VisionModelRequestError(f"PaddleOCR fallback failed: {exc}") from exc
 
 
 def _render_pdf_pages_to_png(pdf_bytes: bytes, *, max_pages: int) -> list[tuple[int, bytes]]:
@@ -515,11 +603,11 @@ def _render_pdf_pages_to_png(pdf_bytes: bytes, *, max_pages: int) -> list[tuple[
             page_limit = min(max(1, int(max_pages)), int(doc.page_count))
             for index in range(page_limit):
                 page = doc.load_page(index)
-                # 1.0x render keeps Ollama vision payloads small. The prior
-                # 1.5x render inflated each page by roughly 2.25x pixels and
-                # made six-page PDFs fan out into multi-minute requests.
                 pix = page.get_pixmap(matrix=fitz.Matrix(1.0, 1.0), alpha=False)
-                image_bytes = pix.tobytes("png")
+                try:
+                    image_bytes = pix.tobytes("jpeg", jpg_quality=88)
+                except Exception:
+                    image_bytes = pix.tobytes("png")
                 images.append((index + 1, image_bytes))
                 logger.info(
                     "pdf_page_rendered",
@@ -545,13 +633,11 @@ def _render_pdf_pages_to_png(pdf_bytes: bytes, *, max_pages: int) -> list[tuple[
 
 def _page_prompt(page_number: int) -> str:
     return (
-        f"You are OCRing page {page_number} of a PDF document. "
-        "Transcribe ALL visible text exactly as it appears on this page and return ONLY JSON in this shape: "
-        f'{{"pages":[{{"page":{page_number},"text":"","confidence":0.0}}],'
-        '"medicalExtraction":{"patientInfo":{},"hospitalInfo":{},"doctorInfo":{},'
-        '"diagnosis":[],"medications":[],"labResults":[],"vitals":[],"recommendations":[],"summary":""},'
-        '"summary":{"type":"","summary":[],"medications":[],"tests":[],"warnings":[],"follow_up":[]}}. '
-        "Never invent values. Preserve line breaks, numbers, units, dates, names, and tables."
+        f"You are an accurate OCR engine for medical documents. "
+        f"Transcribe ALL visible text on page {page_number} exactly as it appears in clean markdown/plain text. "
+        f"Preserve line breaks, exact numbers, test names, values, units, reference intervals, dates, and tabular column alignments. "
+        f"Do not summarize, interpret, translate, or omit any text. "
+        f"Output ONLY the transcribed text for page {page_number}."
     )
 
 
@@ -701,7 +787,10 @@ def _build_payload(
     request_ms: int,
     truncated: bool,
     model: str,
+    telemetry: dict[str, Any] | None = None,
+    downscale_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    downscale_info = downscale_info or {}
     page_payloads = []
     for page in pages:
         text = page["text"]
@@ -754,5 +843,10 @@ def _build_payload(
             "request_ms": request_ms,
             "vision_ms": int((time.monotonic() - started) * 1000),
             "processing_seconds": round(time.monotonic() - started, 3),
+            "telemetry": telemetry or {},
+            "vlm_downscaled": bool(downscale_info.get("downscaled", False)),
+            "vlm_original_dims": downscale_info.get("original_dims"),
+            "vlm_scaled_dims": downscale_info.get("scaled_dims"),
+            "vlm_bytes_saved_pct": float(downscale_info.get("bytes_saved_pct", 0.0)),
         },
     }
