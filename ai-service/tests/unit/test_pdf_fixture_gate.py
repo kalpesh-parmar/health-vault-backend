@@ -20,10 +20,18 @@ class TestPdfFixtureGate(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        # Guarantee fixtures exist prior to running test assertions
-        from scripts.generate_pdf_text_fixtures import generate_fixtures
+        # Guarantee fixtures exist prior to running test assertions without mutating committed binaries
+        required_fixtures = [
+            "clean_born_digital.pdf",
+            "cid_corrupted.pdf",
+            "replacement_char_corrupted.pdf",
+            "legacy_krutidev.pdf",
+            "hybrid_mixed_pages.pdf",
+        ]
+        if not all((FIXTURES_DIR / name).exists() for name in required_fixtures):
+            from scripts.generate_pdf_text_fixtures import generate_fixtures
 
-        generate_fixtures(FIXTURES_DIR)
+            generate_fixtures(FIXTURES_DIR)
 
     def test_clean_born_digital_fixture(self) -> None:
         pdf_path = FIXTURES_DIR / "clean_born_digital.pdf"
