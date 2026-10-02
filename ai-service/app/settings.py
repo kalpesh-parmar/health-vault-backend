@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str | None = Field(default=None, alias="AWS_SECRET_ACCESS_KEY")
 
     ai_model: str = Field(alias="AI_MODEL")
+    chat_model: str | None = Field(default=None, alias="CHAT_MODEL")
     ai_base_url: str = Field(alias="AI_BASE_URL")
     ai_api_key: str | None = Field(
         default=None,
@@ -98,8 +99,93 @@ class Settings(BaseSettings):
     summary_from_vision: bool = Field(default=True, alias="SUMMARY_FROM_VISION")
     ocr_slim_response: bool = Field(default=False, alias="OCR_SLIM_RESPONSE")
     ocr_fail_on_empty: bool = Field(default=True, alias="OCR_FAIL_ON_EMPTY")
+    ocr_router_min_confidence: float = Field(
+        default=0.82,
+        alias="OCR_ROUTER_MIN_CONFIDENCE",
+        description="Minimum mean confidence threshold for primary PaddleOCR engine to accept without VLM fallback.",
+    )
+    ocr_script_detection_enabled: bool = Field(
+        default=True,
+        alias="OCR_SCRIPT_DETECTION_ENABLED",
+        description="Enable pre-OCR script detection on page text hints to skip non-Latin pages from Paddle.",
+    )
+    ocr_concurrent_race_enabled: bool = Field(
+        default=True,
+        alias="OCR_CONCURRENT_RACE_ENABLED",
+        description="Run PaddleOCR and VLM concurrently on raster pages and cancel the loser.",
+    )
+    paddle_timeout_seconds: float = Field(
+        default=20.0,
+        alias="PADDLE_TIMEOUT_SECONDS",
+        description="Hard timeout in seconds for PaddleOCR page inference before falling back to VLM.",
+    )
+    paddle_max_workers: int = Field(
+        default=4,
+        alias="PADDLE_MAX_WORKERS",
+        description="Number of worker processes in PaddleOCR process pool to allow true page parallelism.",
+    )
+    paddle_det_limit_side_len: int = Field(
+        default=960,
+        alias="PADDLE_DET_LIMIT_SIDE_LEN",
+        description="Cap on PaddleOCR detection max side length to avoid abnormal memory and inference latency.",
+    )
+    vlm_suppress_thinking: bool = Field(
+        default=True,
+        alias="VLM_SUPPRESS_THINKING",
+        description="Suppress chain-of-thought thinking loops in Qwen-VL via assistant prefill </think>.",
+    )
+    vlm_temperature: float = Field(
+        default=0.0,
+        alias="VLM_TEMPERATURE",
+        description="Sampling temperature for VLM OCR fallback.",
+    )
+    vlm_validate_output: bool = Field(
+        default=True,
+        alias="VLM_VALIDATE_OUTPUT",
+        description="Validate VLM output against reasoning markers, truncation, and loops.",
+    )
+    ocr_mark_ancillary_pages: bool = Field(
+        default=False,
+        alias="OCR_MARK_ANCILLARY_PAGES",
+        description="Parse Page X of N from direct-text pages and mark pages beyond N as ancillary.",
+    )
+    paddle_enable_mkldnn: bool = Field(
+        default=False,
+        alias="PADDLE_ENABLE_MKLDNN",
+        description="Enable OneDNN/MKL-DNN acceleration in PaddleOCR. Defaults to False on Windows.",
+    )
+    paddle_bypass_orientation: bool = Field(
+        default=True,
+        alias="PADDLE_BYPASS_ORIENTATION",
+        description="Bypass orientation classification and unwarping models in PaddleOCR on upright scans to save CPU cycles.",
+    )
+    paddle_cpu_threads: int = Field(
+        default=4,
+        alias="PADDLE_CPU_THREADS",
+        description="Number of CPU/OpenMP threads dedicated to PaddleOCR inference to prevent core contention.",
+    )
+    vlm_max_image_side: int = Field(
+        default=1500,
+        alias="VLM_MAX_IMAGE_SIDE",
+        description="Maximum image dimension (width or height) before proportional downscaling for vision model fallback.",
+    )
+    vlm_num_ctx: int = Field(
+        default=4096,
+        alias="VLM_NUM_CTX",
+        description="Explicit context window size in tokens allocated for Ollama vision model evaluation.",
+    )
+    vlm_num_predict: int = Field(
+        default=1536,
+        alias="VLM_NUM_PREDICT",
+        description="Maximum tokens to generate during vision model OCR fallback to prevent runaway generation.",
+    )
+    clinical_heuristic_bypass_min_confidence: float = Field(
+        default=0.85,
+        alias="CLINICAL_HEURISTIC_BYPASS_MIN_CONFIDENCE",
+        description="Minimum confidence threshold required to bypass medgemma:4b LLM normalization in favor of fast-path heuristic extraction.",
+    )
     embedding_model: str = Field(
-        default="all-MiniLM-L6-v2",
+        default="bge-m3:latest",
         alias="AI_EMBEDDING_MODEL",
         validation_alias=AliasChoices("AI_EMBEDDING_MODEL", "EMBEDDING_MODEL"),
     )
@@ -123,10 +209,19 @@ class Settings(BaseSettings):
 
     worker_poll_interval_seconds: float = 1.0
     job_lock_seconds: int = 900
+    internal_service_key: str = Field(default="change-me-internal-service-key", alias="INTERNAL_SERVICE_KEY")
+    pg_notify_channel: str = Field(default="health_vault_sse_events", alias="PG_NOTIFY_CHANNEL")
+    worker_concurrency: int = Field(default=2, alias="WORKER_CONCURRENCY")
+    worker_mode: str = Field(default="standalone", alias="WORKER_MODE")
+    worker_heartbeat_interval_seconds: float = Field(default=15.0, alias="WORKER_HEARTBEAT_INTERVAL_SECONDS")
+    worker_heartbeat_stale_seconds: float = Field(default=180.0, alias="WORKER_HEARTBEAT_STALE_SECONDS")
+    worker_reconciler_interval_seconds: float = Field(default=180.0, alias="WORKER_RECONCILER_INTERVAL_SECONDS")
     max_pdf_pages: int = Field(default=25, alias="MAX_PDF_PAGES")
     summary_chunk_chars: int = Field(default=1800, alias="SUMMARY_CHUNK_CHARS")
     summary_max_chunks: int = Field(default=8, alias="SUMMARY_MAX_CHUNKS")
     summary_num_predict: int = Field(default=220, alias="SUMMARY_NUM_PREDICT")
+    extraction_num_predict: int = Field(default=1024, alias="EXTRACTION_NUM_PREDICT")
+    ollama_keep_alive: str = Field(default="10m", alias="OLLAMA_KEEP_ALIVE")
 
     medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")
     medgemma_max_pages: int = Field(default=2, alias="MEDGEMMA_MAX_PAGES")
@@ -174,10 +269,20 @@ class Settings(BaseSettings):
             raise ValueError("AI_MAX_INLINE_BYTES must be greater than zero")
         if self.ai_min_text_chars < 0:
             raise ValueError("AI_MIN_TEXT_CHARS must be zero or greater")
-        if not 0 <= self.ai_min_confidence <= 1:
-            raise ValueError("AI_MIN_CONFIDENCE must be between 0 and 1")
+        # Normalize embedding model identifier to Ollama model tag (bge-m3:latest)
+        raw_emb = (self.embedding_model or "").strip()
+        if raw_emb.lower() in ("bge-m3", "baai/bge-m3", "bge-m3:latest"):
+            self.embedding_model = "bge-m3:latest"
+        elif raw_emb:
+            self.embedding_model = raw_emb
+        else:
+            self.embedding_model = "bge-m3:latest"
 
         return self
+
+    @property
+    def effective_chat_model(self) -> str:
+        return (self.chat_model or "").strip() or self.ai_model
 
     @property
     def effective_gcp_bucket(self) -> str | None:

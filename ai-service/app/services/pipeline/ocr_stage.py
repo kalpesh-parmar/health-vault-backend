@@ -40,14 +40,50 @@ logger = logging.getLogger(__name__)
 @contextlib.contextmanager
 def ocr_timer(step_name: str, **extra: Any):
     """Context-manager timer for attributing OCR stage execution sub-steps."""
-    t_start = time.monotonic()
-    result = {"elapsed_ms": 0}
+    t_start = time.perf_counter()
+    result = {"elapsed_ms": 0.0}
     try:
         yield result
     finally:
-        result["elapsed_ms"] = int((time.monotonic() - t_start) * 1000)
+        result["elapsed_ms"] = round((time.perf_counter() - t_start) * 1000, 2)
         extra_str = f" ({', '.join(f'{k}={v}' for k, v in extra.items())})" if extra else ""
-        logger.info("%s: %d ms%s", step_name, result["elapsed_ms"], extra_str)
+        logger.info("%s: %.2f ms%s", step_name, result["elapsed_ms"], extra_str)
+
+def _compute_stage_summary(pages_data: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """Aggregate per-stage timings across all pages into p50, p95, min, max, mean, sum."""
+    timing_keys = [
+        "queue_wait_ms",
+        "render_ms",
+        "preprocess_ms",
+        "lang_detect_ms",
+        "engine_init_ms",
+        "det_ms",
+        "rec_ms",
+        "ocr_infer_ms",
+        "quality_gate_ms",
+        "vlm_call_ms",
+        "postprocess_ms",
+        "total_page_ms",
+    ]
+    summary: dict[str, dict[str, float]] = {}
+    for k in timing_keys:
+        vals = [float(p.get("stage_timings", {}).get(k, 0.0)) for p in pages_data if p.get("stage_timings")]
+        if vals:
+            sorted_vals = sorted(vals)
+            n = len(sorted_vals)
+            p50_idx = int(0.50 * (n - 1))
+            p95_idx = int(0.95 * (n - 1))
+            summary[k] = {
+                "min": round(min(vals), 2),
+                "max": round(max(vals), 2),
+                "mean": round(sum(vals) / n, 2),
+                "p50": round(sorted_vals[p50_idx], 2),
+                "p95": round(sorted_vals[p95_idx], 2),
+                "sum": round(sum(vals), 2),
+            }
+        else:
+            summary[k] = {"min": 0.0, "max": 0.0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "sum": 0.0}
+    return summary
 
 SUPPORTED_MIME_TYPES = {
     "application/pdf",
@@ -194,19 +230,63 @@ class OcrStageHandler:
             raise CorruptFileException(f"Downloaded file is empty or missing: {temp_path}")
         return temp_path
 
+    def _apply_vision_result(
+        self,
+        res: dict[str, Any],
+        paddle_res: dict[str, Any] | None,
+        fallback_reason: str | None,
+    ) -> tuple[str, float, list[dict[str, Any]], str, str]:
+        """Process Vision model output and optionally splice non-Latin lines with English Paddle lines."""
+        from app.modules.ocr.script_detector import detect_scripts_in_text
+
+        raw_vision_text = (res.get("text") or "").strip()
+        vision_conf = float(res.get("confidence") or 0.95) if raw_vision_text else 0.0
+
+        if fallback_reason and "UNREAD_NON_LATIN_SCRIPT" in fallback_reason and paddle_res and paddle_res.get("lines"):
+            # Preserve accurate English lines from PaddleOCR
+            retained_lines = [
+                l for l in paddle_res["lines"]
+                if float(l.get("confidence") or 0.0) >= 0.70 and not any(k in str(l.get("text", "")) for k in ["Eqy", "qyu"])
+            ]
+            # Extract non-Latin lines from Vision Model transcription
+            non_latin_lines = [
+                l.strip() for l in raw_vision_text.splitlines()
+                if detect_scripts_in_text(l).get("has_non_latin")
+            ]
+            if non_latin_lines:
+                for nl in non_latin_lines:
+                    retained_lines.append({"text": nl, "confidence": 0.95})
+                page_text = "\n".join(l["text"] for l in retained_lines)
+                conf = round(sum(float(l.get("confidence") or 0.95) for l in retained_lines) / len(retained_lines), 4)
+                return page_text, conf, retained_lines, "hybrid_paddle_vlm", "FALLBACK"
+            else:
+                lines = [{"text": l.strip(), "confidence": vision_conf} for l in raw_vision_text.splitlines() if l.strip()]
+                return raw_vision_text, vision_conf, lines, "qwen_vl", "FALLBACK"
+        else:
+            lines = [
+                {"text": l.strip(), "confidence": vision_conf}
+                for l in raw_vision_text.splitlines()
+                if l.strip()
+            ]
+            status = "FALLBACK" if fallback_reason else "SUCCESS"
+            return raw_vision_text, vision_conf, lines, "qwen_vl", status
+
     async def _extract_page_with_tiered_ocr(
         self,
         img_bytes: bytes,
         page_num: int,
         mime: str = "image/jpeg",
+        render_ms: float = 0.0,
+        queue_wait_ms: float = 0.0,
+        text_hint: str = "",
     ) -> dict[str, Any]:
         """Tiered extraction for a single rendered page or image:
-        1. Try PaddleOCR primary.
-        2. Evaluate via QualityGate.
-        3. If QualityGate fails or Paddle error, fallback to VisionModelService (Qwen3-VL).
+        1. Pre-OCR Script Detection: inspect text hint; if non-Latin, skip Paddle directly to VLM.
+        2. If script unknown: launch Paddle and VLM concurrently, cancelling loser.
+        3. Evaluate via QualityGate.
         4. If Vision fails too, mark FAILED without aborting whole document.
         """
-        page_start = time.monotonic()
+        page_start = time.perf_counter()
         page_text = ""
         confidence = 0.0
         lines: list[dict[str, Any]] = []
@@ -216,22 +296,58 @@ class OcrStageHandler:
         error_msg = None
         page_telemetry: dict[str, Any] = {}
 
+        stage_timings: dict[str, float] = {
+            "queue_wait_ms": float(queue_wait_ms),
+            "render_ms": float(render_ms),
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 0.0,
+        }
+
         # ── Step 0: Check SHA-256 Result Cache ──
         if self.cache is not None:
             config_hash = getattr(self.paddle, "config_hash", "") if self.paddle else ""
             cached_res = self.cache.get(img_bytes, engine_config_hash=config_hash)
             if cached_res is not None:
                 cached_res["page"] = page_num
+                if "stage_timings" not in cached_res:
+                    cached_res["stage_timings"] = stage_timings
                 logger.info("Page %d OCR cache hit (SHA-256 key, elapsed_ms=%d)", page_num, cached_res.get("elapsed_ms", 0))
                 return cached_res
 
+        t_pre = time.perf_counter()
         with ocr_timer("preprocess_ms", page=page_num, bytes_len=len(img_bytes)):
             pass
+        stage_timings["preprocess_ms"] = round((time.perf_counter() - t_pre) * 1000, 2)
 
+        # ── Step 1: Script Detection Before OCR ──
+        t_lang = time.perf_counter()
         target_lang = "en"
-        with ocr_timer("lang_detect_ms", page=page_num, lang=target_lang):
-            target_lang = getattr(self.paddle, "lang", "en") if self.paddle else "en"
+        is_non_latin_page = False
+        detected_script = "latin"
+        from app.modules.ocr.script_detector import detect_scripts_in_text
 
+        script_detection_enabled = getattr(getattr(self, "settings", None), "ocr_script_detection_enabled", True)
+        with ocr_timer("lang_detect_ms", page=page_num):
+            if script_detection_enabled and text_hint and text_hint.strip():
+                script_info = detect_scripts_in_text(text_hint)
+                if script_info.get("has_non_latin"):
+                    is_non_latin_page = True
+                    detected_script = script_info.get("dominant_script") or "indic"
+                    target_lang = detected_script
+                    logger.info("Page %d pre-OCR script detection identified non-Latin script: %s", page_num, detected_script)
+            else:
+                target_lang = getattr(self.paddle, "lang", "en") if self.paddle else "en"
+        stage_timings["lang_detect_ms"] = round((time.perf_counter() - t_lang) * 1000, 2)
+
+        t_init = time.perf_counter()
         paddle_available = False
         with ocr_timer("model_load_ms", engine="paddleocr", page=page_num):
             paddle_available = bool(self.paddle and getattr(self.paddle, "is_available", lambda: True)())
@@ -240,19 +356,220 @@ class OcrStageHandler:
                     fallback_reason = f"primary_init_failed: {self.paddle._init_error}"
                 elif not self.paddle:
                     fallback_reason = "primary_not_configured"
+        stage_timings["engine_init_ms"] = round((time.perf_counter() - t_init) * 1000, 2)
 
-        # ── Step 1: Try PaddleOCR if configured ──
-        if paddle_available:
+        paddle_res = None
+        concurrent_race_enabled = bool(
+            getattr(getattr(self, "settings", None), "ocr_concurrent_race_enabled", True)
+            and paddle_available
+            and self.vision
+            and not is_non_latin_page
+        )
+
+        if is_non_latin_page:
+            # Skip PaddleOCR completely - preserve CPU cycles and route directly to VLM
+            fallback_reason = f"UNREAD_NON_LATIN_SCRIPT_PRE_DETECTED_{detected_script.upper()}"
+            logger.info("Page %d non-Latin script pre-detected (%s), skipping PaddleOCR directly to VLM", page_num, detected_script)
+        elif concurrent_race_enabled:
+            # ── Concurrent Race: Run PaddleOCR and VLM concurrently, cancel loser ──
             try:
+                logger.info("Page %d launching concurrent race: PaddleOCR vs VLM", page_num)
+
+                async def _paddle_runner() -> tuple[dict[str, Any] | None, float, Exception | None]:
+                    t_inf = time.perf_counter()
+                    try:
+                        p_res = await self.paddle.async_extract_text_from_bytes(img_bytes)
+                        return p_res, round((time.perf_counter() - t_inf) * 1000, 2), None
+                    except Exception as pe:
+                        return None, round((time.perf_counter() - t_inf) * 1000, 2), pe
+
+                async def _vlm_runner() -> tuple[dict[str, Any] | None, float, Exception | None]:
+                    t_vl = time.perf_counter()
+                    try:
+                        v_res = await self.vision.extract_image(
+                            img_bytes,
+                            filename=f"page_{page_num}.jpg",
+                            mime_type=mime,
+                            max_pages=1,
+                        )
+                        return v_res, round((time.perf_counter() - t_vl) * 1000, 2), None
+                    except Exception as ve:
+                        return None, round((time.perf_counter() - t_vl) * 1000, 2), ve
+
+                p_task = asyncio.create_task(_paddle_runner())
+                v_task = asyncio.create_task(_vlm_runner())
+
+                done, pending = await asyncio.wait([p_task, v_task], return_when=asyncio.FIRST_COMPLETED)
+
+                if p_task in done:
+                    p_res, p_ms, p_err = p_task.result()
+                    stage_timings["ocr_infer_ms"] = p_ms
+                    paddle_res = p_res
+
+                    if paddle_res and not p_err:
+                        timings = paddle_res.get("timings") or {}
+                        stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
+                        stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
+                        if timings.get("engine_init_ms"):
+                            stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
+                        if timings.get("queue_wait_ms"):
+                            stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
+
+                        t_qg = time.perf_counter()
+                        with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
+                            gate_result = self.quality_gate.evaluate(paddle_res)
+                        stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
+
+                        min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
+                        mean_c = float(paddle_res.get("mean_confidence") or 0.0)
+                        low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
+                        can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
+
+                        if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
+                            v_task.cancel()
+                            logger.info(
+                                "Page %d PaddleOCR won concurrent race (conf=%.2f, elapsed=%dms), cancelled VLM",
+                                page_num,
+                                mean_c,
+                                p_ms,
+                            )
+                            page_text = paddle_res.get("full_text") or ""
+                            confidence = mean_c or 0.95
+                            lines = paddle_res.get("lines") or []
+                            engine_used = "paddleocr"
+                            status = "SUCCESS"
+                            fallback_reason = None
+                        else:
+                            fallback_reason = gate_result.reason
+                            logger.info("Page %d PaddleOCR quality gate failed (%s), awaiting concurrent VLM", page_num, fallback_reason)
+                            v_res, v_ms, v_err = await v_task
+                            stage_timings["vlm_call_ms"] = v_ms
+                            if v_res and not v_err:
+                                page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                                page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                                    v_res, paddle_res, fallback_reason
+                                )
+                    else:
+                        # Paddle errored; await VLM
+                        v_res, v_ms, v_err = await v_task
+                        stage_timings["vlm_call_ms"] = v_ms
+                        if v_res and not v_err:
+                            page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                            page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                                v_res, None, "PADDLE_FAILED"
+                            )
+                elif v_task in done:
+                    v_res, v_ms, v_err = v_task.result()
+                    stage_timings["vlm_call_ms"] = v_ms
+                    v_text = (v_res.get("text") or "").strip() if v_res else ""
+                    v_script = detect_scripts_in_text(v_text)
+                    v_conf = float(v_res.get("confidence") or 0.95) if (v_res and v_text) else 0.0
+
+                    if v_res and (v_script.get("has_non_latin") or v_conf >= 0.85):
+                        p_task.cancel()
+                        fb_reason = "UNREAD_NON_LATIN_SCRIPT" if v_script.get("has_non_latin") else None
+                        logger.info(
+                            "Page %d VLM won concurrent race (non_latin=%s, elapsed=%dms), cancelled PaddleOCR",
+                            page_num,
+                            v_script.get("has_non_latin"),
+                            v_ms,
+                        )
+                        page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                        page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                            v_res, None, fb_reason
+                        )
+                        fallback_reason = fb_reason
+                    else:
+                        # VLM completed first but produced low confidence; await Paddle
+                        try:
+                            p_res, p_ms, p_err = await p_task
+                            stage_timings["ocr_infer_ms"] = p_ms
+                            paddle_res = p_res
+                        except asyncio.CancelledError:
+                            paddle_res = None
+
+                    if paddle_res and not p_err:
+                        timings = paddle_res.get("timings") or {}
+                        stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
+                        stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
+                        if timings.get("engine_init_ms"):
+                            stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
+                        if timings.get("queue_wait_ms"):
+                            stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
+
+                        t_qg = time.perf_counter()
+                        with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
+                            gate_result = self.quality_gate.evaluate(paddle_res)
+                        stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
+
+                        min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
+                        mean_c = float(paddle_res.get("mean_confidence") or 0.0)
+                        low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
+                        can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
+
+                        if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
+                            v_task.cancel()
+                            logger.info(
+                                "Page %d PaddleOCR won concurrent race (conf=%.2f, elapsed=%dms), cancelled VLM",
+                                page_num,
+                                mean_c,
+                                p_ms,
+                            )
+                            page_text = paddle_res.get("full_text") or ""
+                            confidence = mean_c or 0.95
+                            lines = paddle_res.get("lines") or []
+                            engine_used = "paddleocr"
+                            status = "SUCCESS"
+                            fallback_reason = None
+                        else:
+                            fallback_reason = gate_result.reason
+                            logger.info("Page %d PaddleOCR quality gate failed (%s), awaiting concurrent VLM", page_num, fallback_reason)
+                            v_res, v_ms, v_err = await v_task
+                            stage_timings["vlm_call_ms"] = v_ms
+                            if v_res and not v_err:
+                                page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                                page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                                    v_res, paddle_res, fallback_reason
+                                )
+                    else:
+                        # Paddle errored; await VLM
+                        v_res, v_ms, v_err = await v_task
+                        stage_timings["vlm_call_ms"] = v_ms
+                        if v_res and not v_err:
+                            page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
+                            page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                                v_res, None, "PADDLE_FAILED"
+                            )
+            except Exception as race_err:
+                fallback_reason = f"concurrent_race_error: {race_err}"
+                logger.warning("Page %d concurrent race exception: %s", page_num, race_err)
+        elif paddle_available:
+            # ── Standard Sequential PaddleOCR ──
+            try:
+                t_infer = time.perf_counter()
                 with ocr_timer("ocr_infer_ms", engine="paddleocr", lang=target_lang, pass_num=1, page=page_num):
                     paddle_res = await self.paddle.async_extract_text_from_bytes(img_bytes)
-                with ocr_timer("postprocess_ms", engine="paddleocr", page=page_num):
+                stage_timings["ocr_infer_ms"] = round((time.perf_counter() - t_infer) * 1000, 2)
+
+                timings = paddle_res.get("timings") or {}
+                stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
+                stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
+                if timings.get("engine_init_ms"):
+                    stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
+                if timings.get("queue_wait_ms"):
+                    stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
+
+                t_qg = time.perf_counter()
+                with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
                     gate_result = self.quality_gate.evaluate(paddle_res)
+                stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
+
+                t_post = time.perf_counter()
+                with ocr_timer("postprocess_ms", engine="paddleocr", page=page_num):
                     min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
                     mean_c = float(paddle_res.get("mean_confidence") or 0.0)
                     low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
 
-                    timings = paddle_res.get("timings") or {}
                     page_telemetry.update({
                         "get_instance_ms": timings.get("get_instance_ms", 0),
                         "engine_init_ms": timings.get("engine_init_ms", 0),
@@ -261,10 +578,11 @@ class OcrStageHandler:
                         "recognizer_ms": timings.get("recognizer_ms", 0),
                         "result_conversion_ms": timings.get("result_conversion_ms", 0),
                         "total_ocr_ms": timings.get("total_ocr_ms", 0),
+                        "queue_wait_ms": timings.get("queue_wait_ms", 0),
                         "worker_pid": paddle_res.get("worker_pid"),
                     })
                     logger.info(
-                        "Page %d PaddleOCR timings: total=%d ms, det=%d ms, rec=%d ms, decode=%d ms, conv=%d ms, engine_init=%d ms, pid=%s (lines=%d, conf=%.4f)",
+                        "Page %d PaddleOCR timings: total=%d ms, det=%d ms, rec=%d ms, decode=%d ms, conv=%d ms, engine_init=%d ms, queue_wait=%d ms, pid=%s (lines=%d, conf=%.4f)",
                         page_num,
                         timings.get("total_ocr_ms", 0),
                         timings.get("detector_ms", 0),
@@ -272,13 +590,12 @@ class OcrStageHandler:
                         timings.get("image_decode_ms", 0),
                         timings.get("result_conversion_ms", 0),
                         timings.get("engine_init_ms", 0),
+                        timings.get("queue_wait_ms", 0),
                         paddle_res.get("worker_pid"),
                         paddle_res.get("line_count", 0),
                         mean_c,
                     )
 
-                    # Accept primary engine if quality gate passed OR if mean confidence >= router threshold and low confidence line ratio is small,
-                    # provided no unread regional/non-Latin scripts were detected (zero-silent-drop invariant MULTI-02)
                     can_bypass_low_conf = (
                         mean_c >= min_conf
                         and low_conf_ratio <= 0.15
@@ -293,6 +610,7 @@ class OcrStageHandler:
                     else:
                         fallback_reason = gate_result.reason
                         logger.info("Page %d PaddleOCR quality gate failed: %s", page_num, fallback_reason)
+                stage_timings["postprocess_ms"] = round((time.perf_counter() - t_post) * 1000, 2)
             except Exception as p_err:
                 fallback_reason = f"PaddleOCR exception: {p_err}"
                 logger.warning("Page %d PaddleOCR exception: %s", page_num, p_err)
@@ -305,54 +623,22 @@ class OcrStageHandler:
                     page_num,
                     fallback_reason or "Primary engine not configured",
                 )
-                with ocr_timer("ocr_infer_ms", engine="qwen_vl", lang="en", pass_num=2, page=page_num):
+                t_vlm = time.perf_counter()
+                with ocr_timer("ocr_infer_ms", engine="qwen_vl", lang=target_lang, pass_num=2, page=page_num):
                     res = await self.vision.extract_image(
                         img_bytes,
                         filename=f"page_{page_num}.jpg",
                         mime_type=mime,
                         max_pages=1,
                     )
+                stage_timings["vlm_call_ms"] = round((time.perf_counter() - t_vlm) * 1000, 2)
                 page_telemetry = (res.get("metrics") or {}).get("telemetry") or {}
+                t_post_vlm = time.perf_counter()
                 with ocr_timer("postprocess_ms", engine="qwen_vl", page=page_num):
-                    raw_vision_text = (res.get("text") or "").strip()
-                    vision_conf = float(res.get("confidence") or 0.95) if raw_vision_text else 0.0
-
-                    from app.modules.ocr.script_detector import detect_scripts_in_text
-
-                    if fallback_reason == "UNREAD_NON_LATIN_SCRIPT" and paddle_res and paddle_res.get("lines"):
-                        # Preserve accurate English lines from PaddleOCR
-                        retained_lines = [
-                            l for l in paddle_res["lines"]
-                            if float(l.get("confidence") or 0.0) >= 0.70 and not any(k in str(l.get("text", "")) for k in ["Eqy", "qyu"])
-                        ]
-                        # Extract non-Latin lines from Vision Model transcription
-                        non_latin_lines = [
-                            l.strip() for l in raw_vision_text.splitlines()
-                            if detect_scripts_in_text(l).get("has_non_latin")
-                        ]
-                        if non_latin_lines:
-                            for nl in non_latin_lines:
-                                retained_lines.append({"text": nl, "confidence": 0.95})
-                            lines = retained_lines
-                            page_text = "\n".join(l["text"] for l in lines)
-                            confidence = round(sum(float(l.get("confidence") or 0.95) for l in lines) / len(lines), 4)
-                            engine_used = "hybrid_paddle_vlm"
-                        else:
-                            page_text = raw_vision_text
-                            lines = [{"text": l.strip(), "confidence": vision_conf} for l in raw_vision_text.splitlines() if l.strip()]
-                            confidence = vision_conf
-                            engine_used = "qwen_vl"
-                    else:
-                        page_text = raw_vision_text
-                        lines = [
-                            {"text": l.strip(), "confidence": vision_conf}
-                            for l in raw_vision_text.splitlines()
-                            if l.strip()
-                        ]
-                        confidence = vision_conf
-                        engine_used = "qwen_vl"
-
-                    status = "FALLBACK" if fallback_reason else "SUCCESS"
+                    page_text, confidence, lines, engine_used, status = self._apply_vision_result(
+                        res, paddle_res, fallback_reason
+                    )
+                stage_timings["postprocess_ms"] += round((time.perf_counter() - t_post_vlm) * 1000, 2)
             except Exception as v_err:
                 error_msg = str(v_err)
                 logger.warning("Vision OCR failed on page %d: %s", page_num, v_err)
@@ -362,7 +648,8 @@ class OcrStageHandler:
                 engine_used = "none"
                 status = "FAILED"
 
-        elapsed_page_ms = int((time.monotonic() - page_start) * 1000)
+        elapsed_page_ms = int(round((time.perf_counter() - page_start) * 1000))
+        stage_timings["total_page_ms"] = float(elapsed_page_ms)
         res = {
             "page": page_num,
             "text": page_text,
@@ -375,6 +662,7 @@ class OcrStageHandler:
             "error": error_msg,
             "cached": False,
             "telemetry": page_telemetry,
+            "stage_timings": stage_timings,
         }
 
         # Cache successful page OCR extractions (zero cache poisoning)
@@ -430,6 +718,20 @@ class OcrStageHandler:
                         "elapsed_ms": elapsed_ms,
                         "engine": "office_direct",
                         "status": "SUCCESS",
+                        "stage_timings": {
+                            "queue_wait_ms": 0.0,
+                            "render_ms": 0.0,
+                            "preprocess_ms": 0.0,
+                            "lang_detect_ms": 0.0,
+                            "engine_init_ms": 0.0,
+                            "det_ms": 0.0,
+                            "rec_ms": 0.0,
+                            "ocr_infer_ms": 0.0,
+                            "quality_gate_ms": 0.0,
+                            "vlm_call_ms": 0.0,
+                            "postprocess_ms": float(elapsed_ms),
+                            "total_page_ms": float(elapsed_ms),
+                        },
                     }
                 ]
                 if self.lifecycle:
@@ -445,6 +747,7 @@ class OcrStageHandler:
                         page=1,
                         total_pages=1,
                     )
+                stage_summary = _compute_stage_summary(pages_data)
                 return {
                     "pages": pages_data,
                     "fullText": office_res.full_text,
@@ -464,6 +767,8 @@ class OcrStageHandler:
                         "page_count": 1,
                         "processing_seconds": round(elapsed_ms / 1000.0, 3),
                         "elapsed_ms": elapsed_ms,
+                        "stage_timings": {1: pages_data[0]["stage_timings"]},
+                        "stage_summary": stage_summary,
                     },
                 }
 
@@ -475,17 +780,21 @@ class OcrStageHandler:
                 with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                     total_p = doc.page_count
                     pages_data_dict: dict[int, dict[str, Any]] = {}
+                    raw_text_dict: dict[int, str] = {}
 
                     # Evaluate every page individually with validate_page_direct_text
                     for index in range(total_p):
                         page_num = index + 1
+                        t_direct = time.perf_counter()
                         try:
                             raw_text = doc.load_page(index).get_text("text") or ""
                         except Exception as page_read_err:
                             logger.warning("Failed to read direct text on page %d: %s", page_num, page_read_err)
                             raw_text = ""
+                        raw_text_dict[page_num] = raw_text
 
                         val_res = validate_page_direct_text(doc, page_number=page_num, text=raw_text)
+                        direct_ms = round((time.perf_counter() - t_direct) * 1000, 2)
                         if val_res.is_valid_direct_text and len(val_res.text.strip()) >= self.min_direct_text_chars:
                             lines = [
                                 {"text": line.strip(), "confidence": 1.0}
@@ -497,9 +806,23 @@ class OcrStageHandler:
                                 "text": val_res.text,
                                 "confidence": 1.0,
                                 "lines": lines,
-                                "elapsed_ms": 0,
+                                "elapsed_ms": int(direct_ms),
                                 "engine": "pymupdf_direct",
                                 "status": "SUCCESS",
+                                "stage_timings": {
+                                    "queue_wait_ms": 0.0,
+                                    "render_ms": 0.0,
+                                    "preprocess_ms": 0.0,
+                                    "lang_detect_ms": 0.0,
+                                    "engine_init_ms": 0.0,
+                                    "det_ms": 0.0,
+                                    "rec_ms": 0.0,
+                                    "ocr_infer_ms": 0.0,
+                                    "quality_gate_ms": 0.0,
+                                    "vlm_call_ms": 0.0,
+                                    "postprocess_ms": direct_ms,
+                                    "total_page_ms": direct_ms,
+                                },
                             }
                             routing_decisions.append({
                                 "page": page_num,
@@ -541,6 +864,7 @@ class OcrStageHandler:
                                     total_pages=total_p,
                                 )
 
+                        stage_summary = _compute_stage_summary(pages_data)
                         return {
                             "pages": pages_data,
                             "fullText": full_text,
@@ -564,6 +888,8 @@ class OcrStageHandler:
                                 "hybrid_extraction": False,
                                 "processing_seconds": round(elapsed_ms / 1000.0, 3),
                                 "elapsed_ms": elapsed_ms,
+                                "stage_timings": {p["page"]: p.get("stage_timings", {}) for p in pages_data},
+                                "stage_summary": stage_summary,
                             },
                         }
 
@@ -580,8 +906,11 @@ class OcrStageHandler:
                         )
 
                         async def process_scanned_page(page_num: int) -> dict[str, Any]:
+                            t_wait = time.perf_counter()
                             async with semaphore:
+                                queue_wait_ms = round((time.perf_counter() - t_wait) * 1000, 2)
                                 try:
+                                    t_render = time.perf_counter()
                                     with ocr_timer("render_ms", page=page_num, format="pdf"):
                                         page = doc.load_page(page_num - 1)
                                         pix = page.get_pixmap(dpi=150, alpha=False)
@@ -591,8 +920,15 @@ class OcrStageHandler:
                                         except Exception:
                                             img_bytes = pix.tobytes("png")
                                             mime = "image/png"
+                                    render_ms = round((time.perf_counter() - t_render) * 1000, 2)
+                                    text_hint = raw_text_dict.get(page_num, "")
                                     return await self._extract_page_with_tiered_ocr(
-                                        img_bytes, page_num, mime=mime
+                                        img_bytes,
+                                        page_num,
+                                        mime=mime,
+                                        render_ms=render_ms,
+                                        queue_wait_ms=queue_wait_ms,
+                                        text_hint=text_hint,
                                     )
                                 except Exception as err:
                                     logger.warning("Render failed on page %d: %s", page_num, err)
@@ -605,6 +941,11 @@ class OcrStageHandler:
                                         "engine": "none",
                                         "status": "FAILED",
                                         "error": str(err),
+                                        "stage_timings": {
+                                            "queue_wait_ms": queue_wait_ms,
+                                            "render_ms": round((time.perf_counter() - t_wait) * 1000, 2),
+                                            "total_page_ms": round((time.perf_counter() - t_wait) * 1000, 2),
+                                        },
                                     }
 
                         scanned_results = await asyncio.gather(
@@ -630,12 +971,16 @@ class OcrStageHandler:
                     semaphore = asyncio.Semaphore(concurrency)
 
                     async def process_tiff_frame(frame_idx: int, frame_img: Image.Image) -> dict[str, Any]:
+                        t_wait = time.perf_counter()
                         async with semaphore:
+                            queue_wait_ms = round((time.perf_counter() - t_wait) * 1000, 2)
+                            t_render = time.perf_counter()
                             with ocr_timer("render_ms", page=frame_idx, format="tiff"):
                                 buf = io.BytesIO()
                                 frame_img.convert("RGB").save(buf, format="JPEG", quality=88)
+                            render_ms = round((time.perf_counter() - t_render) * 1000, 2)
                             return await self._extract_page_with_tiered_ocr(
-                                buf.getvalue(), frame_idx, mime="image/jpeg"
+                                buf.getvalue(), frame_idx, mime="image/jpeg", render_ms=render_ms, queue_wait_ms=queue_wait_ms
                             )
 
                     pages_data = list(
@@ -653,7 +998,7 @@ class OcrStageHandler:
             with ocr_timer("render_ms", page=1, format="raster_direct"):
                 pass
             res = await self._extract_page_with_tiered_ocr(
-                file_bytes, 1, mime=mime_type or "image/png"
+                file_bytes, 1, mime=mime_type or "image/png", render_ms=0.0, queue_wait_ms=0.0
             )
             pages_data = [res]
 
@@ -714,6 +1059,7 @@ class OcrStageHandler:
             raster_ocr_count = sum(1 for p in pages_data if p.get("engine") not in {"pymupdf_direct", "office_direct"})
             hybrid_extraction = bool(direct_text_count > 0 and raster_ocr_count > 0)
 
+        stage_summary = _compute_stage_summary(pages_data)
         return {
             "pages": pages_data,
             "fullText": full_text,
@@ -749,5 +1095,7 @@ class OcrStageHandler:
                 "processing_seconds": round(elapsed_ms / 1000.0, 3),
                 "elapsed_ms": elapsed_ms,
                 "telemetry": [p.get("telemetry") for p in pages_data if p.get("telemetry")],
+                "stage_timings": {p["page"]: p.get("stage_timings", {}) for p in pages_data},
+                "stage_summary": stage_summary,
             },
         }

@@ -10,4 +10,7 @@ tmp/
 docs/*.html
 poppler/
 uploads/
-tests/scratch/
+tests/scratch/
+debug_page_*.jpg
+ai-service/debug_page_*.jpg
+*60300505154*
