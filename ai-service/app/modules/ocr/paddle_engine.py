@@ -107,6 +107,17 @@ def _init_paddle_worker(config: dict[str, Any]) -> None:
             "enable_mkldnn": enable_mkldnn,
             "cpu_threads": cpu_threads,
         }
+        if config.get("det_limit_side_len") is not None:
+            ocr_kwargs["det_limit_side_len"] = int(config["det_limit_side_len"])
+        if config.get("use_gpu") is not None:
+            ocr_kwargs["use_gpu"] = bool(config["use_gpu"])
+        else:
+            try:
+                has_cuda = bool(getattr(paddle.device, "is_compiled_with_cuda", lambda: False)())
+                dev_str = str(paddle.get_device()).lower()
+                ocr_kwargs["use_gpu"] = bool(has_cuda and "gpu" in dev_str)
+            except Exception:
+                ocr_kwargs["use_gpu"] = False
 
         bypass_orientation = bool(config.get("bypass_orientation", True))
         if is_v3:
@@ -262,6 +273,8 @@ class PaddleOcrEngine:
         bypass_orientation: bool | None = None,
         max_workers: int | None = None,
         cpu_threads: int | None = None,
+        det_limit_side_len: int | None = None,
+        use_gpu: bool | None = None,
     ) -> None:
         self.lang = lang
         if bypass_orientation is None:
@@ -286,19 +299,20 @@ class PaddleOcrEngine:
             self.enable_mkldnn = bool(enable_mkldnn)
 
         # Worker and core allocation:
-        # Default to 1 worker to ensure 100% of CPU cores (e.g. 8 threads) are dedicated
-        # to single-page inference, avoiding Windows IPC thrashing and un-warmed worker cold starts.
         env_workers = os.environ.get("PADDLE_NUM_WORKERS")
         if env_workers is not None:
             try:
                 default_workers = max(1, int(env_workers))
             except ValueError:
-                default_workers = 1
+                default_workers = 4
         else:
-            default_workers = 1
+            default_workers = 4
 
         cpu_cnt = os.cpu_count() or 4
         self.max_workers = max_workers if max_workers is not None else default_workers
+        self.det_limit_side_len = int(det_limit_side_len) if det_limit_side_len is not None else int(os.environ.get("PADDLE_DET_LIMIT_SIDE_LEN", "960"))
+        self.use_gpu = use_gpu
+
         if cpu_threads is not None:
             self.cpu_threads = int(cpu_threads)
         else:
@@ -343,6 +357,8 @@ class PaddleOcrEngine:
                 "use_angle_cls": self.use_angle_cls,
                 "enable_mkldnn": self.enable_mkldnn,
                 "cpu_threads": self.cpu_threads,
+                "det_limit_side_len": self.det_limit_side_len,
+                "use_gpu": self.use_gpu,
             },
         }
         return self._get_executor(cfg)
@@ -412,6 +428,9 @@ class PaddleOcrEngine:
         enable_mkldnn: bool | None = None,
         bypass_orientation: bool | None = None,
         cpu_threads: int | None = None,
+        max_workers: int | None = None,
+        det_limit_side_len: int | None = None,
+        use_gpu: bool | None = None,
         **kwargs: Any,
     ) -> PaddleOcrEngine:
         """Singleton accessor for PaddleOCR engine with get_instance timing."""
@@ -424,6 +443,9 @@ class PaddleOcrEngine:
                         enable_mkldnn=enable_mkldnn,
                         bypass_orientation=bypass_orientation,
                         cpu_threads=cpu_threads,
+                        max_workers=max_workers,
+                        det_limit_side_len=det_limit_side_len,
+                        use_gpu=use_gpu,
                         **kwargs,
                     )
         inst = cls._instance

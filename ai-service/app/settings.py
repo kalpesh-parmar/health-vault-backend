@@ -129,6 +129,11 @@ class Settings(BaseSettings):
         alias="PADDLE_DET_LIMIT_SIDE_LEN",
         description="Cap on PaddleOCR detection max side length to avoid abnormal memory and inference latency.",
     )
+    paddle_use_gpu: bool | None = Field(
+        default=None,
+        alias="PADDLE_USE_GPU",
+        description="Enable GPU for PaddleOCR if CUDA is available; None for auto-detection.",
+    )
     vlm_suppress_thinking: bool = Field(
         default=True,
         alias="VLM_SUPPRESS_THINKING",

@@ -86,6 +86,18 @@ def _compute_stage_summary(pages_data: list[dict[str, Any]]) -> dict[str, dict[s
             summary[k] = {"min": 0.0, "max": 0.0, "mean": 0.0, "p50": 0.0, "p95": 0.0, "sum": 0.0}
     return summary
 
+
+def _render_single_pdf_page(doc_bytes: bytes, page_idx: int) -> tuple[bytes, str]:
+    """Thread-safe rendering of a single PDF page to image bytes."""
+    with fitz.open(stream=doc_bytes, filetype="pdf") as pdoc:
+        page = pdoc.load_page(page_idx)
+        pix = page.get_pixmap(dpi=150, alpha=False)
+        try:
+            return pix.tobytes("jpeg", jpg_quality=88), "image/jpeg"
+        except Exception:
+            return pix.tobytes("png"), "image/png"
+
+
 SUPPORTED_MIME_TYPES = {
     "application/pdf",
     "image/png",
@@ -891,8 +903,8 @@ class OcrStageHandler:
                     # Mixed / Scanned PDF: Rasterize remaining pages needing OCR
                     scanned_page_nums = [p for p in range(1, total_p + 1) if p not in pages_data_dict]
                     if scanned_page_nums:
-                        concurrency = getattr(self.vision, "page_concurrency", 2) or 2
-                        concurrency = max(1, min(int(concurrency), 4))
+                        concurrency = int(getattr(self.settings, "paddle_max_workers", 4))
+                        concurrency = max(1, min(concurrency, 8))
                         semaphore = asyncio.Semaphore(concurrency)
                         logger.info(
                             "Routing %d scanned / corrupted pages to raster OCR with concurrency=%d",
@@ -901,47 +913,39 @@ class OcrStageHandler:
                         )
 
                         async def process_scanned_page(page_num: int) -> dict[str, Any]:
+                            t_render = time.perf_counter()
+                            try:
+                                with ocr_timer("render_ms", page=page_num, format="pdf"):
+                                    img_bytes, mime = await asyncio.to_thread(
+                                        _render_single_pdf_page, file_bytes, page_num - 1
+                                    )
+                                render_ms = round((time.perf_counter() - t_render) * 1000, 2)
+                            except Exception as render_err:
+                                logger.warning("Render failed on page %d: %s", page_num, render_err)
+                                return {
+                                    "page": page_num,
+                                    "text": "",
+                                    "confidence": 0.0,
+                                    "lines": [],
+                                    "elapsed_ms": 0,
+                                    "engine": "unknown",
+                                    "status": "FAILED",
+                                    "fallback_reason": f"render_error: {render_err}",
+                                    "stage_timings": {},
+                                }
+
                             t_wait = time.perf_counter()
                             async with semaphore:
                                 queue_wait_ms = round((time.perf_counter() - t_wait) * 1000, 2)
-                                try:
-                                    t_render = time.perf_counter()
-                                    with ocr_timer("render_ms", page=page_num, format="pdf"):
-                                        page = doc.load_page(page_num - 1)
-                                        pix = page.get_pixmap(dpi=150, alpha=False)
-                                        try:
-                                            img_bytes = pix.tobytes("jpeg", jpg_quality=88)
-                                            mime = "image/jpeg"
-                                        except Exception:
-                                            img_bytes = pix.tobytes("png")
-                                            mime = "image/png"
-                                    render_ms = round((time.perf_counter() - t_render) * 1000, 2)
-                                    text_hint = raw_text_dict.get(page_num, "")
-                                    return await self._extract_page_with_tiered_ocr(
-                                        img_bytes,
-                                        page_num,
-                                        mime=mime,
-                                        render_ms=render_ms,
-                                        queue_wait_ms=queue_wait_ms,
-                                        text_hint=text_hint,
-                                    )
-                                except Exception as err:
-                                    logger.warning("Render failed on page %d: %s", page_num, err)
-                                    return {
-                                        "page": page_num,
-                                        "text": "",
-                                        "confidence": 0.0,
-                                        "lines": [],
-                                        "elapsed_ms": 0,
-                                        "engine": "none",
-                                        "status": "FAILED",
-                                        "error": str(err),
-                                        "stage_timings": {
-                                            "queue_wait_ms": queue_wait_ms,
-                                            "render_ms": round((time.perf_counter() - t_wait) * 1000, 2),
-                                            "total_page_ms": round((time.perf_counter() - t_wait) * 1000, 2),
-                                        },
-                                    }
+                                text_hint = raw_text_dict.get(page_num, "")
+                                return await self._extract_page_with_tiered_ocr(
+                                    img_bytes,
+                                    page_num,
+                                    mime=mime,
+                                    render_ms=render_ms,
+                                    queue_wait_ms=queue_wait_ms,
+                                    text_hint=text_hint,
+                                )
 
                         scanned_results = await asyncio.gather(
                             *(process_scanned_page(p) for p in scanned_page_nums)
