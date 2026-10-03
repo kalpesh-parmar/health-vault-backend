@@ -54,11 +54,7 @@ function isStepAlreadySatisfied(stepName, state) {
     );
   }
   if (stepName === "ASK_ALLERGIES") {
-    return (
-      state.allergiesSkipped === true ||
-      (Array.isArray(state.existingUserData?.allergies) &&
-        state.existingUserData.allergies.length > 0)
-    );
+    return state.allergiesSkipped === true;
   }
   if (
     [
@@ -268,6 +264,19 @@ class V1Service {
       const patient = await patientRepository.findById(userId);
       const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
       const dbState = onboardingRecord?.data || {};
+      if (patient) {
+        if (!dbState.existingUserData) dbState.existingUserData = {};
+        if (patient.bloodGroup && !dbState.existingUserData.bloodGroup) {
+          dbState.existingUserData.bloodGroup = patient.bloodGroup;
+        }
+        if (
+          Array.isArray(patient.allergies) &&
+          patient.allergies.length > 0 &&
+          (!dbState.existingUserData.allergies || dbState.existingUserData.allergies.length === 0)
+        ) {
+          dbState.existingUserData.allergies = patient.allergies;
+        }
+      }
       const isOnboardingCompleted =
         patient?.onboardingCompleted ||
         patient?.isOnboardingCompleted ||
@@ -1150,6 +1159,15 @@ class V1Service {
         });
       }
 
+      let parsedMsg = null;
+      if (typeof message === "string" && message.trim().startsWith("{")) {
+        try {
+          parsedMsg = JSON.parse(message);
+        } catch {
+          // Ignore JSON parse error
+        }
+      }
+
       // Determine if request should route to Normal Post-Onboarding Chat vs Onboarding State Machine
       const isCompletedStep =
         effectiveState?.currentStep === "COMPLETE" ||
@@ -1333,6 +1351,14 @@ class V1Service {
 
           isStaleDuplicateSubmission = false;
           let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
+          const isExplicitIncomingStep =
+            actionType === "ASK_ALLERGIES" ||
+            actionType === "ASK_BLOOD_GROUP" ||
+            actionType === "MEDICINE_OPTIONS" ||
+            actionType === "REVIEW_MEDICINES_LIST" ||
+            actionType === "CONFIRM_MEDICINES" ||
+            (incomingStateCleaned.currentStep && actionType === incomingStateCleaned.currentStep);
+
           if (incomingStateCleaned.currentStep && dbState?.currentStep) {
             if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
               case3AuthoritativeStep = dbState.currentStep;
@@ -1377,28 +1403,32 @@ class V1Service {
             existingUserData: mergedUserData,
           };
 
-          const compactMessage =
-            typeof message === "string" ? message.trim().toUpperCase().replace(/\s+/g, "") : "";
-          const isBloodGroupSubmission = bloodGroupTypeValues.includes(compactMessage);
-
           if (!state.currentStep && dbState.currentStep) state.currentStep = dbState.currentStep;
           if (!state.flowMode && dbState.flowMode) state.flowMode = dbState.flowMode;
           if (!state.preferredLanguage && dbState.preferredLanguage)
             state.preferredLanguage = dbState.preferredLanguage;
 
-          if (
-            !state.currentStep &&
-            isBloodGroupSubmission &&
-            !dbState.existingUserData?.bloodGroup
-          ) {
-            state.currentStep = "ASK_BLOOD_GROUP";
+          const explicitActionStep =
+            actionType === "ASK_ALLERGIES" || actionType === "ASK_BLOOD_GROUP"
+              ? actionType
+              : parsedMsg &&
+                  (parsedMsg.action === "ASK_ALLERGIES" || parsedMsg.action === "ASK_BLOOD_GROUP")
+                ? parsedMsg.action
+                : null;
+
+          if (explicitActionStep && !isStepAlreadySatisfied(explicitActionStep, dbState)) {
+            state.currentStep = explicitActionStep;
           }
 
           // Generic forward transition: If currentStep is already satisfied in the authoritative persistent state (dbState), advance to next step.
           // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
           // Checking merged state caused premature step advancement before onboardingService.chat executed, causing the Blood Group answer
           // to be executed against ASK_ALLERGIES.
-          if (isStepAlreadySatisfied(state.currentStep, dbState)) {
+          if (
+            !isExplicitIncomingStep &&
+            !explicitActionStep &&
+            isStepAlreadySatisfied(state.currentStep, dbState)
+          ) {
             isStaleDuplicateSubmission = true;
             state.currentStep = getNextRequiredOrOptionalStep(state);
           }

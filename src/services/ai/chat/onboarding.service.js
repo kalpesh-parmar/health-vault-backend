@@ -5,7 +5,11 @@ const { env } = require("../../../configs/env");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
 const authProviderRepository = require("../../../repositories/authProviderRepository");
-const { normalizeLanguage, normalizePhoneNumber } = require("../../../utils/commonUtils");
+const {
+  normalizeLanguage,
+  normalizePhoneNumber,
+  mergeUniqueAllergies,
+} = require("../../../utils/commonUtils");
 const medicationService = require("../../medication.service");
 const medicationReminderService = require("../../medicationReminder.service");
 const { languageTypeValues } = require("../../../enums/languageType");
@@ -425,7 +429,7 @@ async function updateStateFromMessage(state, message, userId = null) {
     state.currentStep = "ASK_BLOOD_GROUP";
   }
 
-  if (!state.currentStep) return;
+  if (!state.currentStep) return null;
 
   switch (state.currentStep) {
     case "ASK_LANGUAGE": {
@@ -1172,19 +1176,27 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "ASK_ALLERGIES": {
       let rawVal = msg;
       let parsedPayload = null;
-      try {
-        const parsed = JSON.parse(msg);
-        if (parsed && typeof parsed === "object") {
-          parsedPayload = parsed;
-          rawVal = String(
-            parsed.value || parsed.key || parsed.label || parsed.option || parsed.message || msg,
-          ).trim();
+      if (typeof message === "object" && message !== null) {
+        if (Array.isArray(message.allergies) || Array.isArray(message.value)) {
+          parsedPayload = message;
         }
-      } catch {
-        // Not a JSON string payload
+      }
+      if (!parsedPayload) {
+        try {
+          const parsed = JSON.parse(msg);
+          if (parsed && typeof parsed === "object") {
+            parsedPayload = parsed;
+            rawVal = String(
+              parsed.value || parsed.key || parsed.label || parsed.option || parsed.message || msg,
+            ).trim();
+          }
+        } catch {
+          // Not a JSON string payload
+        }
       }
 
       const normUpper = String(rawVal).trim().toUpperCase().replace(/\s+/g, "");
+
       // Defensive check: If rawVal is a blood group token, route it to bloodGroup!
       if (bloodGroupTypeValues.includes(normUpper)) {
         if (!state.existingUserData.bloodGroup) {
@@ -1272,11 +1284,18 @@ async function updateStateFromMessage(state, message, userId = null) {
         normUpper === "NOT_SURE" ||
         negativePatterns.includes(String(rawVal).trim().toLowerCase());
 
+      const payloadAllergiesList =
+        parsedPayload && Array.isArray(parsedPayload.allergies)
+          ? parsedPayload.allergies
+          : parsedPayload && Array.isArray(parsedPayload.value)
+            ? parsedPayload.value
+            : null;
+
       if (isNegative) {
         state.allergiesSkipped = true;
         state.existingUserData.allergies = [];
-      } else if (parsedPayload && Array.isArray(parsedPayload.allergies)) {
-        const cleanList = parsedPayload.allergies
+      } else if (payloadAllergiesList) {
+        const cleanList = payloadAllergiesList
           .map((a) => (typeof a === "string" ? a.trim() : ""))
           .filter(
             (a) =>
@@ -1321,8 +1340,24 @@ async function updateStateFromMessage(state, message, userId = null) {
       }
       if (userId) {
         try {
+          const existingPatient = await patientRepository.findById(userId);
+          const dbAllergies = Array.isArray(existingPatient?.allergies)
+            ? existingPatient.allergies
+            : [];
+
+          let finalAllergies = [];
+          if (isNegative) {
+            finalAllergies = dbAllergies;
+          } else {
+            finalAllergies = mergeUniqueAllergies(
+              dbAllergies,
+              state.existingUserData.allergies || [],
+            );
+          }
+
+          state.existingUserData.allergies = finalAllergies;
           await patientRepository.updateById(userId, {
-            allergies: state.existingUserData.allergies || [],
+            allergies: finalAllergies,
           });
         } catch (err) {
           console.warn(
@@ -1897,6 +1932,25 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.isOnboardingCompleted = false;
         state.medicinesConfirmed = true;
         state.currentStep = "ASK_REPORT";
+      } else if (typeof msg === "string" && msg.trim().length > 0) {
+        const isJsonPayload = msg.trim().startsWith("{");
+        if (!isJsonPayload) {
+          const chatRes = await chatService.sendMessage({
+            userId,
+            question: msg.trim(),
+            sessionId: state.chatSessionId || null,
+            preferredLanguage: state.preferredLanguage || "english",
+          });
+          return {
+            action: "NORMAL_CHAT",
+            mode: "NORMAL_CHAT",
+            reply: chatRes.answer || chatRes.reply || chatRes.message || "",
+            message: chatRes.answer || chatRes.reply || chatRes.message || "",
+            suggestedQuestions: chatRes.suggestedQuestions || [],
+            options: [],
+            state,
+          };
+        }
       }
       break;
     }
@@ -1905,7 +1959,10 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {
-      if (msg === "ADD_MORE_MEDICINES" || msg.toLowerCase().includes("add more medicines")) {
+      if (
+        msg === "ADD_MORE_MEDICINES" ||
+        (typeof msg === "string" && msg.toLowerCase().includes("add more medicines"))
+      ) {
         state.isOnboardingCompleted = false;
         state.activeMedicine = null;
         state.currentMedicineIndex = undefined;
@@ -1917,10 +1974,17 @@ async function updateStateFromMessage(state, message, userId = null) {
         break;
       }
 
-      state.currentStep = "ASK_REPORT";
+      if (
+        msg === "ASK_REPORT" ||
+        msg === "ASK_ABOUT_REPORT" ||
+        state.currentStep === "ASK_REPORT"
+      ) {
+        state.currentStep = "ASK_REPORT";
+      }
       break;
     }
   }
+  return null;
 }
 
 // Note: getNextStep is imported from ./onboarding/onboardingStateMachine
@@ -1975,8 +2039,18 @@ async function saveOnboardingState(userId, state) {
     }
     if (state.existingUserData.bloodGroup)
       updateData.bloodGroup = state.existingUserData.bloodGroup;
-    if (Array.isArray(state.existingUserData.allergies) && state.allergiesSkipped === true)
-      updateData.allergies = state.existingUserData.allergies;
+    if (Array.isArray(state.existingUserData.allergies)) {
+      let dbAllergies = [];
+      if (userId) {
+        try {
+          const currentPatient = await patientRepository.findById(userId);
+          dbAllergies = Array.isArray(currentPatient?.allergies) ? currentPatient.allergies : [];
+        } catch (dbErr) {
+          console.warn("[saveOnboardingData] Failed to fetch existing allergies:", dbErr.message);
+        }
+      }
+      updateData.allergies = mergeUniqueAllergies(dbAllergies, state.existingUserData.allergies);
+    }
   }
 
   if (state.isOnboardingCompleted || state.hasSkipped) {
@@ -2814,7 +2888,10 @@ class OnboardingService {
 
     // 3. Process incoming user message based on current expected step AFTER document data pre-loading
     if (!isInitCall && msg && msg.trim().length > 0) {
-      await updateStateFromMessage(state, msg, userId);
+      const overrideResponse = await updateStateFromMessage(state, msg, userId);
+      if (overrideResponse) {
+        return overrideResponse;
+      }
     }
 
     // Extra safeguard: if a document has already been uploaded/extracted in UPLOAD flow,

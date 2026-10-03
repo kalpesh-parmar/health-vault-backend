@@ -147,6 +147,31 @@ function normalizePhoneNumber(payload = {}) {
   };
 }
 
+function mergeUniqueAllergies(existingDbAllergies = [], newAllergies = []) {
+  const allergyMap = new Map();
+
+  const listA = Array.isArray(existingDbAllergies) ? existingDbAllergies : [];
+  const listB = Array.isArray(newAllergies) ? newAllergies : [];
+
+  listA.forEach((allergy) => {
+    if (typeof allergy === "string" && allergy.trim()) {
+      const clean = allergy.trim();
+      const key = clean.toLowerCase();
+      if (!allergyMap.has(key)) allergyMap.set(key, clean);
+    }
+  });
+
+  listB.forEach((allergy) => {
+    if (typeof allergy === "string" && allergy.trim()) {
+      const clean = allergy.trim();
+      const key = clean.toLowerCase();
+      if (!allergyMap.has(key)) allergyMap.set(key, clean);
+    }
+  });
+
+  return Array.from(allergyMap.values());
+}
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -158,4 +183,5 @@ module.exports = {
   stripReasoningTags,
   isValidClinicalSummary,
   normalizePhoneNumber,
+  mergeUniqueAllergies,
 };

@@ -193,26 +193,25 @@ function getNextRequiredOrOptionalStep(state) {
   }
 
   // Medication Flow
-  if (!state.medicationFlowDone) {
-    const hasExtractedMedicines =
-      (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
-      (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
+  const hasExtractedMedicines =
+    (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
+    (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
 
+  if (!state.medicinesConfirmed && hasExtractedMedicines) {
+    state.medicationFlowStarted = true;
+    if (!Array.isArray(state.medicinesToAdd) || state.medicinesToAdd.length === 0) {
+      state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
+    }
+    return "REVIEW_MEDICINES_LIST";
+  }
+
+  if (
+    !state.medicationFlowDone ||
+    state.currentStep === "ASK_ALLERGIES" ||
+    state.currentStep === "ASK_BLOOD_GROUP"
+  ) {
     if (!state.hasSkipped && !state.isOnboardingCompleted) {
       state.isOnboardingCompleted = false;
-    }
-
-    if (!state.medicinesConfirmed && hasExtractedMedicines) {
-      state.medicationFlowStarted = true;
-      if (!Array.isArray(state.medicinesToAdd) || state.medicinesToAdd.length === 0) {
-        state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
-      }
-      return "REVIEW_MEDICINES_LIST";
-    }
-
-    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
-      state.medicationFlowStarted = true;
-      return "MEDICINE_OPTIONS";
     }
 
     state.medicationFlowStarted = true;
