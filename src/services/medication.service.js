@@ -34,6 +34,17 @@ const {
 class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload, options = {}) {
+    const isArrayPayload = Array.isArray(payload);
+    const hasArrayKey =
+      typeof payload === "object" &&
+      payload !== null &&
+      (Array.isArray(payload.medications) || Array.isArray(payload.items));
+
+    if (isArrayPayload || hasArrayKey) {
+      const itemList = isArrayPayload ? payload : payload.medications || payload.items;
+      return await this.bulkCreate(userId, itemList, options);
+    }
+
     const normalizedInput = normalizeCreateMedicationInput(payload);
     const validData = await validateSchema(createMedicationSchema, normalizedInput);
     const patient = await patientRepository.findById(userId);
@@ -83,11 +94,28 @@ class MedicationService {
       unit,
       startDate,
     });
+
+    if (!options.skipReminder && medication && medication.id) {
+      try {
+        await medicationReminderService.createReminder(userId, {
+          medicationId: medication.id,
+        });
+      } catch (rErr) {
+        console.warn(
+          `[MedicationService] Error creating reminder for med ${medication.id}:`,
+          rErr.message,
+        );
+      }
+    }
+
     return medication;
   }
   // SAVE MEDICATION WITH REMINDER (SHARED ORCHESTRATOR HELPER)
   async saveMedicationWithReminder(userId, payload, options = {}) {
-    const medication = await this.createMedication(userId, payload, options);
+    const medication = await this.createMedication(userId, payload, {
+      ...options,
+      skipReminder: true,
+    });
     let reminder = null;
     if (medication && medication.id) {
       try {
@@ -565,7 +593,10 @@ class MedicationService {
         }
 
         try {
-          const med = await this.createMedication(userId, normalized, { skipDuplicateCheck: true });
+          const med = await this.createMedication(userId, normalized, {
+            skipDuplicateCheck: true,
+            skipReminder: true,
+          });
           if (med && med.id) {
             created.push(med);
             try {
@@ -608,6 +639,7 @@ class MedicationService {
             try {
               const med = await this.createMedication(userId, normalized, {
                 skipDuplicateCheck: true,
+                skipReminder: true,
               });
               if (med && med.id) {
                 created.push(med);
@@ -628,6 +660,7 @@ class MedicationService {
           try {
             const med = await this.createMedication(userId, normalized, {
               skipDuplicateCheck: true,
+              skipReminder: true,
             });
             if (med && med.id) {
               created.push(med);
@@ -649,7 +682,10 @@ class MedicationService {
 
       // Default: KEEP_NEW
       try {
-        const med = await this.createMedication(userId, normalized, { skipDuplicateCheck: true });
+        const med = await this.createMedication(userId, normalized, {
+          skipDuplicateCheck: true,
+          skipReminder: true,
+        });
         if (med && med.id) {
           created.push(med);
           try {

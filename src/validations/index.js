@@ -32,9 +32,12 @@ const {
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  flexibleMedicationItemSchema,
+  createMedicationOrBatchSchema,
 } = require("./medicationValidation");
 const {
   createReminderSchema,
+  createReminderOrBatchSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 } = require("./reminderValidation");
@@ -98,12 +101,15 @@ module.exports = {
   updateMedicationSchema,
   listMedicationQuerySchema,
   createReminderSchema,
+  createReminderOrBatchSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
   refillMedicationSchema,
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  flexibleMedicationItemSchema,
+  createMedicationOrBatchSchema,
   patientIdParamSchema,
   profileUploadSchema,
   documentUploadSchema,

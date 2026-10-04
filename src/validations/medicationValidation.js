@@ -464,6 +464,35 @@ const batchDeleteMedicationSchema = z.object({
     .min(1, "At least one medication ID is required"),
 });
 
+const flexibleMedicationItemSchema = z.union([
+  medicationOnboardingSchema,
+  createMedicationSchema,
+  z
+    .object({
+      medicationName: z.string().trim().min(1).optional(),
+      name: z.string().trim().min(1).optional(),
+      medicineName: z.string().trim().min(1).optional(),
+    })
+    .passthrough(),
+]);
+
+const createMedicationOrBatchSchema = z.union([
+  z.array(flexibleMedicationItemSchema).min(1, "At least one medication is required"),
+  z
+    .object({
+      medications: z
+        .array(flexibleMedicationItemSchema)
+        .min(1, "At least one medication is required"),
+    })
+    .passthrough(),
+  z
+    .object({
+      items: z.array(flexibleMedicationItemSchema).min(1, "At least one medication is required"),
+    })
+    .passthrough(),
+  flexibleMedicationItemSchema,
+]);
+
 module.exports = {
   createMedicationSchema,
   updateMedicationSchema,
@@ -472,4 +501,6 @@ module.exports = {
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  flexibleMedicationItemSchema,
+  createMedicationOrBatchSchema,
 };

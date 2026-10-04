@@ -2,9 +2,24 @@ const express = require("express");
 const router = express.Router();
 const medicationReminderController = require("../controllers/medicationReminder.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const { validateRequest } = require("../middlewares/validateRequest");
+const { createReminderOrBatchSchema } = require("../validations");
 
 // CREATE
-router.post("/create", verifyToken, medicationReminderController.createReminder);
+router.post(
+  "/create",
+  verifyToken,
+  validateRequest({ body: createReminderOrBatchSchema }),
+  medicationReminderController.createReminder,
+);
+
+// BATCH CREATE
+router.post(
+  "/batch-create",
+  verifyToken,
+  validateRequest({ body: createReminderOrBatchSchema }),
+  medicationReminderController.createBatchReminders,
+);
 
 // GET ALL MAIN REMINDERS
 router.get("/", verifyToken, medicationReminderController.getAllReminders);

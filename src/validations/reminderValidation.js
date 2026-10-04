@@ -10,6 +10,36 @@ const createReminderSchema = z
   })
   .strict();
 
+const reminderItemSchema = z
+  .object({
+    medicationId: z.string().uuid(),
+  })
+  .strict();
+
+const singleStringSchema = z.string().uuid();
+
+const createReminderOrBatchSchema = z.union([
+  reminderItemSchema,
+  singleStringSchema,
+  z.array(singleStringSchema).min(1),
+  z.array(reminderItemSchema).min(1),
+  z
+    .object({
+      medicationIds: z.array(singleStringSchema).min(1),
+    })
+    .passthrough(),
+  z
+    .object({
+      medications: z.array(z.union([reminderItemSchema, singleStringSchema])).min(1),
+    })
+    .passthrough(),
+  z
+    .object({
+      items: z.array(z.union([reminderItemSchema, singleStringSchema])).min(1),
+    })
+    .passthrough(),
+]);
+
 const updateOccurrenceSchema = z
   .object({
     status: z.literal(reminderOccurrenceStatus.COMPLETED).optional(),
@@ -51,6 +81,7 @@ const listOccurrencesQuerySchema = z
 
 module.exports = {
   createReminderSchema,
+  createReminderOrBatchSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 };
