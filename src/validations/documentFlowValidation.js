@@ -195,6 +195,8 @@ const unifiedChatSchema = z.object({
     .union([z.boolean(), z.enum(["true", "false"])])
     .optional()
     .nullable(),
+  actions: z.array(z.record(z.any())).optional().nullable(),
+  reportSummary: z.record(z.any()).optional().nullable(),
 });
 
 /* Backup of original module.exports:

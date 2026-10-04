@@ -90,6 +90,8 @@ function buildUnifiedResponse({
   documentSummary = null,
   loginProvider = null,
   sourceComparison = null,
+  actions = null,
+  reportSummary = null,
 }) {
   return {
     mode,
@@ -116,6 +118,8 @@ function buildUnifiedResponse({
     reports,
     allowMultiSelect,
     selectionType,
+    actions,
+    reportSummary,
   };
 }
 

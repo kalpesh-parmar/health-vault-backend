@@ -1955,7 +1955,63 @@ async function updateStateFromMessage(state, message, userId = null) {
       break;
     }
 
-    case "ASK_REPORT":
+    case "ASK_REPORT": {
+      if (
+        msg === "ADD_MORE_MEDICINES" ||
+        (typeof msg === "string" && msg.toLowerCase().includes("add more medicines"))
+      ) {
+        state.isOnboardingCompleted = false;
+        state.activeMedicine = null;
+        state.currentMedicineIndex = undefined;
+        state.currentStep = "ADD_MEDICINE";
+        break;
+      } else if (msg === "GO_TO_DASHBOARD" || msg === "DASHBOARD") {
+        state.isOnboardingCompleted = true;
+        state.currentStep = "COMPLETE";
+        break;
+      }
+
+      if (typeof msg === "string" && msg.trim().length > 0) {
+        const rawUpperMsg = msg.trim().toUpperCase();
+        const isActionKeyword =
+          rawUpperMsg === "ASK_REPORT" ||
+          rawUpperMsg === "ASK_ABOUT_REPORT" ||
+          rawUpperMsg === "GO_TO_DASHBOARD" ||
+          rawUpperMsg === "DASHBOARD" ||
+          rawUpperMsg === "ADD_MORE_MEDICINES" ||
+          rawUpperMsg.includes("ADD MORE MEDICINES");
+        const isJsonPayload = msg.trim().startsWith("{");
+
+        if (!isJsonPayload && !isActionKeyword) {
+          const targetDocId = Array.isArray(state.documentId)
+            ? state.documentId
+            : state.documentId
+              ? [state.documentId]
+              : null;
+          const chatRes = await chatService.sendMessage({
+            userId,
+            question: msg.trim(),
+            sessionId: state.chatSessionId || null,
+            documentId: targetDocId,
+            preferredLanguage: state.preferredLanguage || "english",
+          });
+          return {
+            action: "NORMAL_CHAT",
+            mode: "NORMAL_CHAT",
+            reply: chatRes.answer || chatRes.reply || chatRes.message || "",
+            message: chatRes.answer || chatRes.reply || chatRes.message || "",
+            suggestedQuestions: chatRes.suggestedQuestions || [],
+            citations: chatRes.citations || [],
+            options: [],
+            state,
+          };
+        }
+      }
+
+      state.currentStep = "ASK_REPORT";
+      break;
+    }
+
     case "REGISTER_USER":
     case "COMPLETE":
     case "POST_ONBOARDING": {

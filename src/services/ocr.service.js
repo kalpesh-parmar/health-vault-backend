@@ -38,6 +38,7 @@ const {
   executeAddDocumentAction,
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
+const { buildStructuredReportPayload } = require("../helpers/reportPayload.helper");
 const { and, eq, desc } = require("drizzle-orm");
 const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
 const { ToWords } = require("to-words");
@@ -1148,6 +1149,50 @@ class V1Service {
           });
         }
 
+        let reportSummaryPayload = null;
+        let actionsPayload = null;
+        if (userId) {
+          try {
+            const reportData = await buildStructuredReportPayload({
+              docRecord: null,
+              targetDocId: documentId || null,
+              userId,
+              preferredLanguage: userLang,
+            });
+            if (reportData && reportData.document) {
+              const doc = reportData.document;
+              reportSummaryPayload = {
+                report_id: doc.id,
+                report_name: doc.fileName,
+                documentType: doc.documentType,
+                report_date: doc.reportDate,
+                hospitalName: doc.hospitalName,
+                doctorName: doc.doctorName,
+                summary: doc.summary,
+                key_findings: doc.keyFindings || doc.summary,
+                patientDetails: doc.patientDetails,
+                isLabReport: doc.isLabReport,
+                isPrescription: doc.isPrescription,
+                isOtherMedicalDoc: doc.isOtherMedicalDoc,
+                abnormal_values: doc.abnormalResults || [],
+                normal_values: doc.normalResults || [],
+                extracted_medicines: doc.medicationFindings || [],
+              };
+              actionsPayload = [
+                {
+                  actionType: "REPORT_SUMMARY",
+                  reportSummary: reportSummaryPayload,
+                },
+              ];
+            }
+          } catch (reportErr) {
+            console.warn(
+              "[UnifiedChat] Failed to build report summary payload after confirmation:",
+              reportErr.message,
+            );
+          }
+        }
+
         return buildUnifiedResponse({
           mode: "ACTION",
           actionType: "CONFIRM_MEDICINES",
@@ -1156,6 +1201,8 @@ class V1Service {
           medication: createdMed,
           medicines: createdMeds,
           onboardingState: terminalOnboardingState,
+          actions: actionsPayload,
+          reportSummary: reportSummaryPayload,
         });
       }
 
@@ -1200,10 +1247,14 @@ class V1Service {
           !allergiesSkipped) ||
         isMedicationFlowPending;
 
-      const isForcedOnboardingAction =
+      const isExplicitReportActionMsg =
         message === "ASK_REPORT" ||
         message === "ASK_ABOUT_REPORT" ||
         actionType === "ASK_REPORT" ||
+        actionType === "ASK_ABOUT_REPORT";
+
+      const isForcedOnboardingAction =
+        isExplicitReportActionMsg ||
         actionType === "ADD_MEDICINE" ||
         actionType === "SAVE_AND_REVIEW" ||
         actionType === "CONFIRM_MEDICINES" ||
@@ -1211,7 +1262,6 @@ class V1Service {
         message === "DASHBOARD" ||
         message === "GO_TO_DASHBOARD" ||
         actionType === "DASHBOARD" ||
-        inputState?.currentStep === "ASK_REPORT" ||
         actionType === "ASK_ALLERGIES" ||
         actionType === "ASK_BLOOD_GROUP" ||
         actionType === "MEDICINE_OPTIONS";
@@ -1244,7 +1294,7 @@ class V1Service {
             dbState?.currentStep === "ASK_REPORT" ||
             inputState?.currentStep === "ASK_REPORT") &&
             !isActiveOnboardingStep &&
-            message !== "ASK_REPORT" &&
+            !isExplicitReportActionMsg &&
             (actionType !== "ONBOARDING" ||
               isCompletedStep ||
               isSkippedValid ||
@@ -1569,11 +1619,13 @@ class V1Service {
 
       const intentResult = detectActionIntent(promptText, userLang);
 
+      const targetDocId = documentId || inputState?.documentId || dbState?.documentId || null;
+
       const chatResult = await chatService.sendMessage({
         userId,
         question: promptText,
         sessionId: effectiveSessionId,
-        documentId,
+        documentId: targetDocId,
         preferredLanguage: userLang,
         onChunk,
         abortSignal,

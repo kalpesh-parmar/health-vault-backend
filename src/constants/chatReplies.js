@@ -120,6 +120,9 @@ const AGE_KEYWORDS = [
 
 const SUMMARY_KEYWORDS = [
   // English
+  "ask_about_report",
+  "ask about report",
+  "ask about my report",
   "ask_report",
   "ask report",
   "tell me about my report",

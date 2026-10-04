@@ -241,6 +241,36 @@ paths:
                     example: SUCCESS
                   data:
                     type: object
+                    properties:
+                      mode:
+                        type: string
+                        example: ACTION
+                      actionType:
+                        type: string
+                        example: CONFIRM_MEDICINES
+                      reply:
+                        type: string
+                        example: 1 medications have been successfully added.
+                      sessionId:
+                        type: string
+                        format: uuid
+                      actions:
+                        type: array
+                        nullable: true
+                        description: List of secondary chatbot actions (e.g. REPORT_SUMMARY)
+                        items:
+                          type: object
+                          properties:
+                            actionType:
+                              type: string
+                              example: REPORT_SUMMARY
+                            reportSummary:
+                              type: object
+                              description: Structured report summary card payload
+                      reportSummary:
+                        type: object
+                        nullable: true
+                        description: Structured payload carrying report details, summary, abnormal values, and extracted medicines
 
   /v1/onboarding/status:
     get:
