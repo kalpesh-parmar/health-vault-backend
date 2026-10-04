@@ -83,8 +83,27 @@ const messageConstants = Object.freeze({
   DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (params, legacyCount) => {
     if (typeof params === "object" && params !== null) {
       const { successfulCount = 0, totalCount = 0, medicationCount = 0, failedCount = 0 } = params;
-      let msg = `${successfulCount} of ${totalCount} documents processed successfully.\nWe found ${medicationCount} medication${medicationCount === 1 ? "" : "s"} for your review.`;
-      if (failedCount > 0) {
+      let msg = "";
+
+      if (totalCount === 1) {
+        if (successfulCount === 1) {
+          msg = "1 document processed successfully.";
+        } else if (failedCount === 1) {
+          msg = "1 document could not be processed.";
+        } else {
+          msg = `${successfulCount} of ${totalCount} documents processed.`;
+        }
+      } else {
+        msg = `${successfulCount} of ${totalCount} documents processed successfully.`;
+      }
+
+      if (medicationCount > 0) {
+        msg += `\nWe found ${medicationCount} medication${medicationCount === 1 ? "" : "s"} for your review.`;
+      } else if (successfulCount > 0) {
+        msg += `\nNo medications found for review.`;
+      }
+
+      if (failedCount > 0 && totalCount > 1) {
         msg += `\n${failedCount} document${failedCount === 1 ? "" : "s"} could not be processed. Please retry them below.`;
       }
       return msg;

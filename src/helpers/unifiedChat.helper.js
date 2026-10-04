@@ -587,8 +587,36 @@ async function executeAddDocumentAction({
     });
   }
 
-  if (completedCount === 0 && (docResult?.document || docResult?.job)) {
-    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
+  if (
+    completedCount === 0 &&
+    failedCount === 0 &&
+    rejectedCount === 0 &&
+    (docResult?.document || docResult?.job)
+  ) {
+    const docs = docResult?.document
+      ? Array.isArray(docResult.document)
+        ? docResult.document
+        : [docResult.document]
+      : [];
+    const jobs = docResult?.job
+      ? Array.isArray(docResult.job)
+        ? docResult.job
+        : [docResult.job]
+      : [];
+
+    const hasErrors =
+      docs.some(
+        (d) => d?.error || String(d?.ocrStatus || d?.status || "").toUpperCase() === "FAILED",
+      ) ||
+      jobs.some(
+        (j) => j?.error || String(j?.status || j?.ocrStatus || "").toUpperCase() === "FAILED",
+      );
+
+    if (hasErrors) {
+      failedCount = Math.max(totalUploads - completedCount - rejectedCount, 1);
+    } else {
+      completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
+    }
   }
   if (totalUploads === 0) {
     totalUploads = Math.max(batchDocumentsName.length, 1);
