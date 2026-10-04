@@ -11,7 +11,6 @@ google-cloud-storage==2.19.0
 google-genai==2.7.0
 Pillow==11.0.0
 PyMuPDF==1.27.2.3
-sentence-transformers==3.3.1
 faster-whisper==1.1.0
 TTS==0.22.0
 transformers>=4.38.0
@@ -19,11 +18,14 @@ sacremoses==0.1.1
 sentencepiece==0.2.2
 indictranstoolkit==1.1.1
 
-# OCR dependencies with compatible versions for Windows
-paddlepaddle==3.3.1
-paddleocr==3.7.0
+# OCR dependencies with compatible versions for Windows (Pinned to tested Windows CPU wheels)
+# NOTE: Requires ai-service/venv (Python 3.11). Do NOT upgrade to Paddle 3.x on Windows
+# due to unresolved OneDNN PIR ConvertPirAttribute2RuntimeAttribute crashes.
+paddlepaddle==2.6.2
+paddleocr==2.7.3
 paddlex==3.7.2
 numpy<2.0.0
+protobuf==3.20.2
 opencv-python-headless
 
 # Language Detection

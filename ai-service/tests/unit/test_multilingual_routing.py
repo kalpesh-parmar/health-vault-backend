@@ -211,6 +211,7 @@ async def test_ocr_stage_routes_to_vlm_on_non_latin_fallback():
         vision_service=mock_vision,
         paddle_engine=mock_paddle,
     )
+    handler.settings.ocr_concurrent_race_enabled = False
 
     page_res = await handler._extract_page_with_tiered_ocr(b"dummy-image-bytes", page_num=1)
 
@@ -308,6 +309,7 @@ async def test_out04_gujarati_footer_retention(lab1_image_bytes: bytes):
         vision_service=vm,
         paddle_engine=paddle,
     )
+    handler.settings.ocr_concurrent_race_enabled = False
 
     page_res = await handler._extract_page_with_tiered_ocr(lab1_image_bytes, page_num=1)
 
@@ -511,12 +513,16 @@ async def test_paddle_timeout_concurrent_race_fallback_to_vlm():
 
     mock_paddle.async_extract_text_from_bytes = hanging_paddle
 
+    async def slow_vision(*args, **kwargs):
+        await asyncio.sleep(0.15)
+        return {
+            "text": "VLM rescued during concurrent race",
+            "confidence": 0.91,
+            "lines": [{"text": "VLM rescued during concurrent race", "confidence": 0.91}],
+        }
+
     mock_vision = MagicMock()
-    mock_vision.extract_image = AsyncMock(return_value={
-        "text": "VLM rescued during concurrent race",
-        "confidence": 0.91,
-        "lines": [{"text": "VLM rescued during concurrent race", "confidence": 0.91}],
-    })
+    mock_vision.extract_image = slow_vision
 
     handler = OcrStageHandler(
         s3_client=None,

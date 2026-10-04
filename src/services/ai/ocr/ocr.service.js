@@ -26,6 +26,7 @@ const {
 } = require("../classifier/medicalDocumentClassifier.service");
 const aiClient = require("../clients/aiClient.service");
 const { MedicalExtractionSchema } = require("../../../validations/ocr.validation");
+const { parsePdf } = require("../../../utils/pdfParser");
 
 const {
   preprocessImage,
@@ -756,8 +757,7 @@ Return STRICT JSON only:
     // STEP 1: Digital PDF Text Extraction vs. Rasterization Fallback
     if (isPdf) {
       try {
-        const pdfParse = require("pdf-parse");
-        const pdfData = await pdfParse(fileBuffer);
+        const pdfData = await parsePdf(fileBuffer);
         // Strip control characters while preserving printable Unicode (µ, °, ±, non-English)
         // eslint-disable-next-line no-control-regex -- intentionally stripping control characters from OCR output
         const extracted = (pdfData.text || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim();
@@ -1741,8 +1741,7 @@ Return STRICT JSON only:
       let pdfData = { text: "" };
       try {
         console.log(`[OcrService] Delegating OCR extraction to pdf-parse...`);
-        const pdfParse = require("pdf-parse");
-        pdfData = await pdfParse(file.buffer);
+        pdfData = await parsePdf(file.buffer);
       } catch (err) {
         console.warn(
           `[OcrService] pdf-parse failed, likely a scanned or large PDF. Falling back to OCR...`,

@@ -198,25 +198,107 @@ class MedicalValidationService:
         base_name = model_name.split(":")[0]
         return any(m == model_name or m.startswith(f"{base_name}:") for m in installed)
 
-    def _downscale_image(self, image_bytes: bytes, max_dim: int = 1536) -> bytes:
+    def _downscale_image(self, image_bytes: bytes, max_dim: int | None = None) -> bytes:
+        target_dim = max_dim if max_dim is not None else getattr(self.settings, "validation_max_image_side", 1200)
         try:
             with Image.open(io.BytesIO(image_bytes)) as img:
                 img = img.convert("RGB")
                 w, h = img.size
-                if max(w, h) > max_dim:
+                if max(w, h) > target_dim:
                     if w > h:
-                        new_w = max_dim
-                        new_h = int(h * (max_dim / w))
+                        new_w = target_dim
+                        new_h = max(1, int(h * (target_dim / w)))
                     else:
-                        new_h = max_dim
-                        new_w = int(w * (max_dim / h))
+                        new_h = target_dim
+                        new_w = max(1, int(w * (target_dim / h)))
                     img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 
                 out_io = io.BytesIO()
-                img.save(out_io, format="JPEG", quality=85)
+                img.save(out_io, format="JPEG", quality=80, optimize=True)
                 return out_io.getvalue()
         except Exception as exc:
             raise InvalidDocumentFileError(f"Failed to process image: {exc}") from exc
+
+    def _validate_document_bytes(self, document_bytes: bytes, file_name: str | None = None) -> str:
+        """Validate raw bytes in < 5ms before model invocation.
+        Returns document format ('pdf' or 'image').
+        Raises InvalidDocumentFileError for empty, corrupt, or unsupported data.
+        """
+        if not document_bytes or len(document_bytes) == 0:
+            raise InvalidDocumentFileError("Uploaded file is empty")
+
+        # Fast magic byte sniffing
+        if document_bytes.startswith(b"%PDF"):
+            return "pdf"
+        if document_bytes.startswith(b"\xff\xd8\xff"):  # JPEG
+            return "image"
+        if document_bytes.startswith(b"\x89PNG\r\n\x1a\n"):  # PNG
+            return "image"
+        if document_bytes.startswith(b"RIFF") and len(document_bytes) >= 12 and document_bytes[8:12] == b"WEBP":
+            return "image"
+        if document_bytes.startswith(b"II*\x00") or document_bytes.startswith(b"MM\x00*"):
+            return "image"
+
+        # Check minimal size
+        if len(document_bytes) < 16 and not (file_name and file_name.lower().endswith(".pdf")):
+            raise InvalidDocumentFileError("Uploaded file is corrupted or too small (< 16 bytes)")
+
+        # Fallback quick header probe via PIL or PyMuPDF
+        try:
+            with Image.open(io.BytesIO(document_bytes)) as img:
+                img.verify()
+                return "image"
+        except Exception:
+            pass
+
+        try:
+            import fitz
+            with fitz.open(stream=document_bytes, filetype="pdf") as doc:
+                if doc.page_count > 0:
+                    return "pdf"
+        except Exception:
+            pass
+
+        if file_name and file_name.lower().endswith(".pdf"):
+            return "pdf"
+
+        raise InvalidDocumentFileError("Unsupported or unreadable document format")
+
+    async def _call_vision_model(
+        self,
+        base64_images: list[str],
+        base_url: str,
+        model_name: str,
+        timeout_sec: float,
+        validation_schema: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        keep_alive = getattr(self.settings, "ollama_keep_alive", "15m")
+        try:
+            async with httpx.AsyncClient(timeout=timeout_sec) as client:
+                payload = {
+                    "model": model_name,
+                    "prompt": MEDGEMMA_VISION_CLASSIFICATION_PROMPT,
+                    "images": base64_images,
+                    "stream": False,
+                    "format": validation_schema,
+                    "keep_alive": keep_alive,
+                    "options": {"temperature": 0.0, "num_predict": 64},
+                }
+                resp = await client.post(f"{base_url}/api/generate", json=payload)
+                if resp.status_code == 200:
+                    raw_out = resp.json().get("response", "")
+                    return self._clean_and_parse_json(raw_out)
+                elif resp.status_code == 400:
+                    payload["format"] = "json"
+                    resp2 = await client.post(f"{base_url}/api/generate", json=payload)
+                    if resp2.status_code == 200:
+                        raw_out = resp2.json().get("response", "")
+                        return self._clean_and_parse_json(raw_out)
+                else:
+                    logger.warning("Ollama vision returned HTTP %s: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("Ollama vision call failed: %s", exc)
+        return None
 
     def _clean_and_parse_json(self, raw_text: str) -> dict[str, Any] | None:
         if not raw_text or not raw_text.strip():
@@ -327,6 +409,8 @@ class MedicalValidationService:
         if not document_bytes or len(document_bytes) == 0:
             raise InvalidDocumentFileError("Uploaded file is empty" if file_bytes is not None else "File in storage is empty")
 
+        format_type = self._validate_document_bytes(document_bytes, effective_filename)
+
         model_ok = await self.is_model_available(model_name)
         if not model_ok:
             if self.settings.medgemma_fallback != "text_classifier":
@@ -337,34 +421,11 @@ class MedicalValidationService:
             )
 
         is_pdf = (
-            (mime_type and "pdf" in mime_type.lower())
+            format_type == "pdf"
+            or (mime_type and "pdf" in mime_type.lower())
             or effective_filename.lower().endswith(".pdf")
             or document_bytes.startswith(b"%PDF")
         )
-
-        base64_images: list[str] = []
-        pages_used = 1
-
-        if is_pdf:
-            try:
-                rendered = _render_pdf_pages_to_png(document_bytes, max_pages=pages_limit)
-                pages_used = len(rendered)
-                for _, png_data in rendered:
-                    downscaled = self._downscale_image(png_data)
-                    base64_images.append(base64.b64encode(downscaled).decode("utf-8"))
-            except Exception as exc:
-                logger.error("medical_validation_pdf_render_failed", extra={"trace_id": trace, "error": str(exc)})
-                raise InvalidDocumentFileError(f"Failed to render PDF: {exc}") from exc
-        else:
-            downscaled = self._downscale_image(document_bytes)
-            base64_images.append(base64.b64encode(downscaled).decode("utf-8"))
-
-        if not base64_images:
-            raise InvalidDocumentFileError("No usable images extracted from document")
-
-        method = "vision"
-        resolved_model = model_name
-        parsed: dict[str, Any] | None = None
 
         validation_schema = {
             "type": "object",
@@ -377,33 +438,80 @@ class MedicalValidationService:
             "required": ["isMedical", "documentType"],
         }
 
-        if model_ok:
+        pages_used = 1
+        method = "vision"
+        resolved_model = model_name
+        parsed: dict[str, Any] | None = None
+
+        if is_pdf:
             try:
-                async with httpx.AsyncClient(timeout=timeout_sec) as client:
-                    payload = {
-                        "model": model_name,
-                        "prompt": MEDGEMMA_VISION_CLASSIFICATION_PROMPT,
-                        "images": base64_images,
-                        "stream": False,
-                        "format": validation_schema,
-                        "keep_alive": "10m",
-                        "options": {"temperature": 0.0, "num_predict": 80},
-                    }
-                    resp = await client.post(f"{base_url}/api/generate", json=payload)
-                    if resp.status_code == 200:
-                        raw_out = resp.json().get("response", "")
-                        parsed = self._clean_and_parse_json(raw_out)
-                    elif resp.status_code == 400:
-                        # Fallback to standard "json" format if Ollama version doesn't support schema object
-                        payload["format"] = "json"
-                        resp2 = await client.post(f"{base_url}/api/generate", json=payload)
-                        if resp2.status_code == 200:
-                            raw_out = resp2.json().get("response", "")
-                            parsed = self._clean_and_parse_json(raw_out)
-                    else:
-                        logger.warning("Ollama vision returned HTTP %s: %s", resp.status_code, resp.text[:200])
+                # Step 1: Render Page 1 first for adaptive early exit
+                rendered = _render_pdf_pages_to_png(document_bytes, max_pages=1)
+                if not rendered:
+                    raise InvalidDocumentFileError("No usable pages extracted from PDF")
+
+                downscaled_p1 = self._downscale_image(rendered[0][1])
+                b64_p1 = base64.b64encode(downscaled_p1).decode("utf-8")
+                pages_used = 1
+
+                if model_ok:
+                    parsed = await self._call_vision_model(
+                        base64_images=[b64_p1],
+                        base_url=base_url,
+                        model_name=model_name,
+                        timeout_sec=timeout_sec,
+                        validation_schema=validation_schema,
+                    )
+
+                # Check Adaptive Early Exit condition:
+                # If Page 1 is conclusive (medical with confidence >= 0.85), conclude immediately
+                is_p1_medical = bool(parsed.get("isMedical") or parsed.get("isMedicalDocument")) if parsed else False
+                p1_conf = float(parsed.get("confidence", 0.0)) if (parsed and parsed.get("confidence") is not None) else 0.0
+
+                if parsed is not None and is_p1_medical and p1_conf >= 0.85:
+                    logger.info(
+                        "medical_validation_adaptive_p1_early_exit",
+                        extra={"trace_id": trace, "confidence": p1_conf, "pages_used": 1},
+                    )
+                elif pages_limit > 1 and model_ok:
+                    # Ambiguous Page 1 (< 0.85) or failed: check if PDF has additional pages to evaluate
+                    rendered_multi = _render_pdf_pages_to_png(document_bytes, max_pages=pages_limit)
+                    if len(rendered_multi) > 1:
+                        logger.info(
+                            "medical_validation_evaluating_additional_pages",
+                            extra={"trace_id": trace, "rendered_pages": len(rendered_multi)},
+                        )
+                        multi_b64 = [
+                            base64.b64encode(self._downscale_image(png_data)).decode("utf-8")
+                            for _, png_data in rendered_multi
+                        ]
+                        pages_used = len(multi_b64)
+                        multi_parsed = await self._call_vision_model(
+                            base64_images=multi_b64,
+                            base_url=base_url,
+                            model_name=model_name,
+                            timeout_sec=timeout_sec,
+                            validation_schema=validation_schema,
+                        )
+                        if multi_parsed:
+                            parsed = multi_parsed
+            except InvalidDocumentFileError:
+                raise
             except Exception as exc:
-                logger.warning("Ollama vision call failed: %s", exc)
+                logger.error("medical_validation_pdf_render_failed", extra={"trace_id": trace, "error": str(exc)})
+                raise InvalidDocumentFileError(f"Failed to render PDF: {exc}") from exc
+        else:
+            downscaled = self._downscale_image(document_bytes)
+            b64_img = base64.b64encode(downscaled).decode("utf-8")
+            pages_used = 1
+            if model_ok:
+                parsed = await self._call_vision_model(
+                    base64_images=[b64_img],
+                    base_url=base_url,
+                    model_name=model_name,
+                    timeout_sec=timeout_sec,
+                    validation_schema=validation_schema,
+                )
 
         if parsed is None:
             if self.settings.medgemma_fallback == "text_classifier":
@@ -411,14 +519,15 @@ class MedicalValidationService:
                 resolved_model = self.settings.ai_model
                 try:
                     text_content = text or f"Document filename: {effective_filename}"
+                    keep_alive = getattr(self.settings, "ollama_keep_alive", "15m")
                     async with httpx.AsyncClient(timeout=timeout_sec) as client:
                         payload = {
                             "model": self.settings.ai_model,
                             "prompt": f"{MEDGEMMA_VISION_CLASSIFICATION_PROMPT}\n\nDocument text:\n{text_content}",
                             "stream": False,
                             "format": validation_schema,
-                            "keep_alive": "10m",
-                            "options": {"temperature": 0.0, "num_predict": 80},
+                            "keep_alive": keep_alive,
+                            "options": {"temperature": 0.0, "num_predict": 64},
                         }
                         resp = await client.post(f"{base_url}/api/generate", json=payload)
                         if resp.status_code == 200:

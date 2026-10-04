@@ -72,17 +72,19 @@ async def test_warmup_with_token_version_check(mock_transformers, tf_version, ex
         
         await service.warm_up()
         
-        # Verify tokenizer loading used the correct argument name
-        mock_tok.assert_called_once()
-        _, kwargs_tok = mock_tok.call_args
-        assert kwargs_tok.get(expected_key) == "test_huggingface_token"
-        assert kwargs_tok.get("trust_remote_code") is True
+        # Verify tokenizer loading used the correct argument name (bidirectional: en-indic and indic-en)
+        assert mock_tok.call_count == 2
+        for call_args_item in mock_tok.call_args_list:
+            _, kwargs_tok = call_args_item
+            assert kwargs_tok.get(expected_key) == "test_huggingface_token"
+            assert kwargs_tok.get("trust_remote_code") is True
         
         # Verify model loading used the correct argument name
-        mock_model.assert_called_once()
-        _, kwargs_model = mock_model.call_args
-        assert kwargs_model.get(expected_key) == "test_huggingface_token"
-        assert kwargs_model.get("trust_remote_code") is True
+        assert mock_model.call_count == 2
+        for call_args_item in mock_model.call_args_list:
+            _, kwargs_model = call_args_item
+            assert kwargs_model.get(expected_key) == "test_huggingface_token"
+            assert kwargs_model.get("trust_remote_code") is True
         
         # Verify IndicProcessor is initialized
         mock_proc.assert_called_once_with(inference=True)

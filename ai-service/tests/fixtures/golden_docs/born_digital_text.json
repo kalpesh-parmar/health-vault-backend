@@ -1,0 +1,36 @@
+{
+  "documentType": "LAB_REPORT",
+  "language": "english",
+  "patientInfo": {
+    "name": "John Doe",
+    "age": 45,
+    "gender": "MALE"
+  },
+  "doctorInfo": {
+    "name": "Dr. Sarah Jenkins"
+  },
+  "hospitalInfo": {
+    "name": "Metro Healthcare Clinical Laboratory"
+  },
+  "labResults": [
+    {
+      "testName": "Fasting Blood Glucose",
+      "value": "95",
+      "unit": "mg/dL",
+      "status": "NORMAL"
+    },
+    {
+      "testName": "HbA1c",
+      "value": "5.4",
+      "unit": "%",
+      "status": "NORMAL"
+    },
+    {
+      "testName": "Serum Creatinine",
+      "value": "0.9",
+      "unit": "mg/dL",
+      "status": "NORMAL"
+    }
+  ],
+  "groundTruthText": "METRO HEALTHCARE CLINICAL LABORATORY\nPatient Name: John Doe    Age: 45    Sex: Male    Date: 2026-03-15\nDoctor: Dr. Sarah Jenkins    Ref ID: MH-2026-9921\n\nCOMPREHENSIVE METABOLIC PANEL\nTest Name                 Result      Unit       Reference Range    Status\nFasting Blood Glucose     95          mg/dL      70 - 99            NORMAL\nHbA1c                     5.4         %          4.0 - 5.6          NORMAL\nBlood Urea Nitrogen       14          mg/dL      7 - 20             NORMAL\nSerum Creatinine          0.9         mg/dL      0.6 - 1.2          NORMAL\nTotal Bilirubin           0.8         mg/dL      0.2 - 1.2          NORMAL\nSerum Potassium           4.2         mmol/L     3.5 - 5.0          NORMAL\n\nImpression: Metabolic profile is within normal clinical limits.\nDr. Sarah Jenkins, MD (Pathologist)"
+}

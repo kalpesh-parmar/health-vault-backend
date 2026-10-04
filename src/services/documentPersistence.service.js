@@ -13,7 +13,7 @@ const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
 const { medication } = require("../models/medication");
 const { embeddingService } = require("./ai/chat/embedding.service");
-const { inferFileType, buildPatientSuggestions, asText } = require("../helpers/document.helper");
+const { inferFileType, buildPatientSuggestions } = require("../helpers/document.helper");
 const { toDbDate } = require("../utils/dateUtils");
 
 function sanitizeGraphRow(graph, documentId, userId) {
@@ -155,30 +155,53 @@ class DocumentPersistenceService {
       payload.s3bucket ||
       (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName);
 
-    // Resolve date ONCE above queries to prevent insert/upsert drift
-    const reportDateOrNull = toDbDate(extractedStructuredData?.reportDate, { documentId: s3Key });
-    const reportDateOrNow = reportDateOrNull ?? new Date();
+    // Strict requirement: report_date projection comes ONLY from explicit documentInfo.documentDate
+    // NEVER use current date/time as fallback; if absent in document, remain null!
+    const explicitDateStr =
+      extractedStructuredData?.documentInfo?.documentDate ||
+      extractedStructuredData?.reportDate ||
+      payload.reportDate ||
+      null;
+    const projectedReportDate = explicitDateStr
+      ? toDbDate(explicitDateStr, { documentId: s3Key })
+      : null;
+
+    // Strict requirement: hospital_name projection comes from facilityInfo.name
+    const projectedHospitalName =
+      extractedStructuredData?.facilityInfo?.name || extractedStructuredData?.hospitalName || null;
+
+    // Strict requirement: doctor_name projection comes strictly from explicitly identified primary provider
+    // If multiple providers exist without an explicit primary, remain null (never concatenate or guess)
+    const primaryProvider =
+      extractedStructuredData?.providerInfo?.primary?.name ||
+      (Array.isArray(extractedStructuredData?.providerInfo?.providers) &&
+      extractedStructuredData.providerInfo.providers.length === 1
+        ? extractedStructuredData.providerInfo.providers[0].name
+        : null);
+    const projectedDoctorName = primaryProvider || extractedStructuredData?.doctorName || null;
 
     const [documentRow] = await tx
       .insert(document)
       .values({
         documentType: normalizeDocumentType(
           payload.documentType ||
+            extractedStructuredData?.documentInfo?.documentType ||
             extractedStructuredData?.documentType ||
             extractedStructuredData?.reportType,
         ),
-        doctorName: extractedStructuredData?.doctorName || null,
+        doctorName: projectedDoctorName,
         fileName,
         fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
         fileType: inferFileType(mimeType),
-        hospitalName: extractedStructuredData?.hospitalName || null,
+        hospitalName: projectedHospitalName,
         ocrExtractedText: rawOcrData?.fullText || null,
         ocrStatus: ocrStatus.COMPLETED,
         remarks:
           extractedStructuredData?.summaryInPreferredLanguage ||
           extractedStructuredData?.summary ||
+          extractedStructuredData?.additionalInformation?.remarks ||
           null,
-        reportDate: reportDateOrNow,
+        reportDate: projectedReportDate,
         s3Bucket: bucketName,
         s3Key: s3Key,
         structuredExtractedData: extractedStructuredData,
@@ -190,21 +213,23 @@ class DocumentPersistenceService {
         set: {
           documentType: normalizeDocumentType(
             payload.documentType ||
+              extractedStructuredData?.documentInfo?.documentType ||
               extractedStructuredData?.documentType ||
               extractedStructuredData?.reportType,
           ),
-          doctorName: extractedStructuredData?.doctorName || null,
+          doctorName: projectedDoctorName,
           fileName,
           fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
           fileType: inferFileType(mimeType),
-          hospitalName: extractedStructuredData?.hospitalName || null,
+          hospitalName: projectedHospitalName,
           ocrExtractedText: rawOcrData?.fullText || null,
           ocrStatus: ocrStatus.COMPLETED,
           remarks:
             extractedStructuredData?.summaryInPreferredLanguage ||
             extractedStructuredData?.summary ||
+            extractedStructuredData?.additionalInformation?.remarks ||
             null,
-          reportDate: reportDateOrNow,
+          reportDate: projectedReportDate,
           s3Bucket: bucketName,
           structuredExtractedData: extractedStructuredData,
           summaryEnglish: extractedStructuredData?.summaryEnglish || null,
@@ -245,29 +270,13 @@ class DocumentPersistenceService {
       })),
     );
 
+    // Stop duplicate medical writes: retain strictly AI audit/execution metadata
     await artifacts.upsertAiSummary({
       aiModel: extractedStructuredData?.aiModel || null,
       aiProvider: extractedStructuredData?.aiProvider || null,
-      allergies: extractedStructuredData?.allergies || [],
-      bloodGroup: extractedStructuredData?.bloodGroup || null,
-      diagnosis:
-        extractedStructuredData?.diagnosisText || asText(extractedStructuredData?.diagnosis),
-      doctorName: extractedStructuredData?.doctorName || null,
       documentId,
-      hospitalName: extractedStructuredData?.hospitalName || null,
-      medications: extractedStructuredData?.medications || [],
-      observations: extractedStructuredData?.observations || [],
-      patientName: extractedStructuredData?.patientName || null,
-      rawAiResponse: extractedStructuredData?.rawSummary || null,
-      recommendations: extractedStructuredData?.recommendations || [],
-      reportDate: reportDateOrNull,
-      reportType: extractedStructuredData?.reportType || null,
-      summary:
-        extractedStructuredData?.summaryInPreferredLanguage ||
-        extractedStructuredData?.summary ||
-        null,
-      testResults:
-        extractedStructuredData?.testResults || extractedStructuredData?.labResults || [],
+      rawAiResponse:
+        extractedStructuredData?.rawSummary || extractedStructuredData?.rawAiResponse || null,
       userId,
     });
 
@@ -279,8 +288,8 @@ class DocumentPersistenceService {
 
     const { rows: medicationRows, skipped: medicationSkipped } = medicationMapper.buildRows({
       defaults: {
-        prescribedBy: extractedStructuredData?.doctorName || null,
-        startDate: reportDateOrNow,
+        prescribedBy: projectedDoctorName || extractedStructuredData?.doctorName || null,
+        startDate: projectedReportDate || new Date(),
       },
       medications: extractedStructuredData?.medications || [],
       patientCode: patientObj.patientCode,

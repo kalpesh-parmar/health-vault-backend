@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -21,6 +22,9 @@ class AiClientConfig:
     timeout_seconds: float
     max_retries: int
     max_output_tokens: int
+    keep_alive: str = "10m"
+    num_ctx: int | None = None
+    num_predict: int | None = None
 
 
 class AiClient:
@@ -29,6 +33,7 @@ class AiClient:
     async def generate_text(
         self,
         *,
+        model: str | None = None,
         messages: list[dict],
         temperature: float = 0.2,
         format_json: bool = False,
@@ -43,6 +48,7 @@ class AiClient:
         mime_type: str,
         prompt: str,
         temperature: float = 0,
+        json_only: bool = True,
     ) -> tuple[str, str | None]:
         raise NotImplementedError
 
@@ -73,6 +79,16 @@ class AiClientHttpError(RuntimeError):
         self.url = url
 
 
+class GenerationResult(tuple):
+    """2-tuple (content, finish_reason) backward-compatible result with attached telemetry dict."""
+
+    def __new__(cls, content: str, finish_reason: str | None, telemetry: dict[str, Any] | None = None):
+        return super().__new__(cls, (content, finish_reason))
+
+    def __init__(self, content: str, finish_reason: str | None, telemetry: dict[str, Any] | None = None):
+        self.telemetry = telemetry or {}
+
+
 class GoogleGenAiClient(AiClient):
     engine = "google-genai"
 
@@ -94,6 +110,7 @@ class GoogleGenAiClient(AiClient):
     async def generate_text(
         self,
         *,
+        model: str | None = None,
         messages: list[dict],
         temperature: float = 0.2,
         format_json: bool = False,
@@ -101,6 +118,7 @@ class GoogleGenAiClient(AiClient):
     ) -> tuple[str, str | None]:
         from google.genai import types
 
+        effective_model = model or self.config.model
         config_kwargs = {
             "temperature": temperature,
             "max_output_tokens": max_tokens or self.config.max_output_tokens,
@@ -110,7 +128,7 @@ class GoogleGenAiClient(AiClient):
 
         response = await _with_retry(
             lambda: self._ensure_client().aio.models.generate_content(
-                model=self.config.model,
+                model=effective_model,
                 contents=_messages_to_prompt(messages),
                 config=types.GenerateContentConfig(**config_kwargs),
             ),
@@ -125,19 +143,23 @@ class GoogleGenAiClient(AiClient):
         mime_type: str,
         prompt: str,
         temperature: float = 0,
+        json_only: bool = True,
     ) -> tuple[str, str | None]:
         from google.genai import types
 
-        config = types.GenerateContentConfig(
-            temperature=temperature,
-            response_mime_type="application/json",
-            max_output_tokens=self.config.max_output_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-        )
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "max_output_tokens": self.config.num_predict or self.config.max_output_tokens,
+            "thinking_config": types.ThinkingConfig(thinking_budget=0),
+        }
+        if json_only:
+            config_kwargs["response_mime_type"] = "application/json"
+        config = types.GenerateContentConfig(**config_kwargs)
+        actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         response = await _with_retry(
             lambda: self._ensure_client().aio.models.generate_content(
                 model=self.config.model,
-                contents=[types.Part.from_bytes(data=data, mime_type=mime_type), prompt],
+                contents=[types.Part.from_bytes(data=data, mime_type=mime_type), actual_prompt],
                 config=config,
             ),
             self.config.max_retries,
@@ -154,6 +176,7 @@ class ChatCompletionsClient(AiClient):
         self._client: httpx.AsyncClient | None = None
         self._failure_count = 0
         self._circuit_open_until = 0.0
+        self.last_telemetry: dict[str, Any] = {}
 
     def _ensure_http_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -179,18 +202,23 @@ class ChatCompletionsClient(AiClient):
     async def generate_text(
         self,
         *,
+        model: str | None = None,
         messages: list[dict],
         temperature: float = 0.2,
         format_json: bool = False,
         max_tokens: int | None = None,
     ) -> tuple[str, str | None]:
+        effective_model = model or self.config.model
         prepared_messages = messages
         payload: dict[str, Any] = {
-            "model": self.config.model,
+            "model": effective_model,
             "messages": prepared_messages,
             "temperature": temperature,
             "max_tokens": max_tokens or self.config.max_output_tokens,
         }
+        if _looks_like_ollama_native_base_url(self.base_url):
+            payload["keep_alive"] = getattr(self.config, "keep_alive", "10m") or "10m"
+            payload["think"] = False
         if format_json:
             payload["response_format"] = {"type": "json_object"}
 
@@ -201,15 +229,19 @@ class ChatCompletionsClient(AiClient):
                 raise
             fallback_messages = _append_json_instruction(prepared_messages)
             fallback_payload = {
-                "model": self.config.model,
+                "model": effective_model,
                 "messages": fallback_messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens or self.config.max_output_tokens,
             }
+            if _looks_like_ollama_native_base_url(self.base_url):
+                fallback_payload["keep_alive"] = getattr(self.config, "keep_alive", "10m") or "10m"
+                fallback_payload["think"] = False
             logger.warning(
                 "ai_http_retry_without_response_format",
                 extra={
                     "engine": self.engine,
+                    "model": effective_model,
                     "status_code": exc.status_code,
                     "reason": _classify_http_error(exc.status_code or 0, exc.response_body or ""),
                 },
@@ -230,7 +262,7 @@ class ChatCompletionsClient(AiClient):
                     "ai_http_empty_load_retry",
                     extra={
                         "engine": self.engine,
-                        "model": self.config.model,
+                        "model": effective_model,
                         "attempt": attempt + 1,
                         "finish_reason": finish_reason,
                     },
@@ -249,6 +281,7 @@ class ChatCompletionsClient(AiClient):
         mime_type: str,
         prompt: str,
         temperature: float = 0,
+        json_only: bool = True,
     ) -> tuple[str, str | None]:
         """Extract structured JSON/text from image bytes.
 
@@ -264,16 +297,25 @@ class ChatCompletionsClient(AiClient):
                 status_code=400,
             )
 
+        t_enc_start = time.monotonic()
+        actual_prompt = _json_only_prompt(prompt) if json_only else prompt
+        image_chat_msg = _image_chat_content(data=data, mime_type=mime_type, prompt=actual_prompt)
+        encode_ms = int((time.monotonic() - t_enc_start) * 1000)
+
+        options: dict[str, Any] = {
+            "temperature": temperature,
+            "num_predict": self.config.num_predict or self.config.max_output_tokens,
+        }
+        if self.config.num_ctx:
+            options["num_ctx"] = self.config.num_ctx
+
         payload = {
             "model": self.config.model,
-            "messages": [
-                _image_chat_content(data=data, mime_type=mime_type, prompt=_json_only_prompt(prompt))
-            ],
+            "messages": [image_chat_msg],
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": self.config.max_output_tokens,
-            },
+            "think": False,
+            "keep_alive": getattr(self.config, "keep_alive", "10m") or "10m",
+            "options": options,
         }
 
         response = await self._post_ollama_vision_chat(
@@ -306,6 +348,10 @@ class ChatCompletionsClient(AiClient):
                 if content.strip() or not _is_ollama_load_response(response, finish_reason):
                     break
 
+        telemetry = dict(response.get("_telemetry") or {})
+        telemetry["encode_ms"] = encode_ms
+        self.last_telemetry = telemetry
+
         logger.info(
             "ollama_vision_finish",
             extra={
@@ -313,9 +359,10 @@ class ChatCompletionsClient(AiClient):
                 "model": self.config.model,
                 "finish_reason": finish_reason,
                 "content_chars": len(content or ""),
+                "encode_ms": encode_ms,
             },
         )
-        return content or "", finish_reason
+        return GenerationResult(content or "", finish_reason, telemetry)
 
     async def _post_ollama_vision_chat(
         self,
@@ -402,7 +449,52 @@ class ChatCompletionsClient(AiClient):
                 )
 
             self._record_success()
+            t_dec_start = time.monotonic()
             parsed = response.json()
+            decode_ms = int((time.monotonic() - t_dec_start) * 1000)
+
+            total_dur = parsed.get("total_duration")
+            load_dur = parsed.get("load_duration")
+            prompt_eval_count = parsed.get("prompt_eval_count")
+            prompt_eval_dur = parsed.get("prompt_eval_duration")
+            eval_count = parsed.get("eval_count")
+            eval_dur = parsed.get("eval_duration")
+
+            ollama_total_ms = int(total_dur / 1e6) if isinstance(total_dur, (int, float)) else None
+            ollama_load_ms = int(load_dur / 1e6) if isinstance(load_dur, (int, float)) else None
+            ollama_prompt_eval_ms = int(prompt_eval_dur / 1e6) if isinstance(prompt_eval_dur, (int, float)) else None
+            ollama_eval_ms = int(eval_dur / 1e6) if isinstance(eval_dur, (int, float)) else None
+
+            http_network_ms = max(0, elapsed_ms - (ollama_total_ms or 0)) if ollama_total_ms is not None else elapsed_ms
+            tokens_per_sec = (
+                round(eval_count / (eval_dur / 1e9), 2)
+                if (isinstance(eval_count, (int, float)) and isinstance(eval_dur, (int, float)) and eval_dur > 0)
+                else 0.0
+            )
+
+            telemetry = {
+                "http_network_ms": http_network_ms,
+                "decode_ms": decode_ms,
+                "elapsed_ms": elapsed_ms,
+                "ollama_total_ms": ollama_total_ms,
+                "ollama_load_ms": ollama_load_ms,
+                "ollama_prompt_eval_count": prompt_eval_count,
+                "ollama_prompt_eval_ms": ollama_prompt_eval_ms,
+                "ollama_eval_count": eval_count,
+                "ollama_eval_ms": ollama_eval_ms,
+                "tokens_per_sec": tokens_per_sec,
+            }
+            parsed["_telemetry"] = telemetry
+
+            logger.info(
+                "ollama_vision_telemetry",
+                extra={
+                    "engine": self.engine,
+                    "model": self.config.model,
+                    **telemetry,
+                },
+            )
+
             logger.info(
                 "ollama_vision_response",
                 extra={
@@ -577,16 +669,18 @@ class AnthropicMessagesClient(AiClient):
     async def generate_text(
         self,
         *,
+        model: str | None = None,
         messages: list[dict],
         temperature: float = 0.2,
         format_json: bool = False,
         max_tokens: int | None = None,
     ) -> tuple[str, str | None]:
+        effective_model = model or self.config.model
         prompt_messages = _to_anthropic_messages(messages)
         if format_json:
             prompt_messages.append({"role": "user", "content": "Return only valid JSON."})
         payload = {
-            "model": self.config.model,
+            "model": effective_model,
             "messages": prompt_messages,
             "temperature": temperature,
             "max_tokens": max_tokens or self.config.max_output_tokens,
@@ -601,7 +695,9 @@ class AnthropicMessagesClient(AiClient):
         mime_type: str,
         prompt: str,
         temperature: float = 0,
+        json_only: bool = True,
     ) -> tuple[str, str | None]:
+        actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         payload = {
             "model": self.config.model,
             "messages": [
@@ -616,12 +712,12 @@ class AnthropicMessagesClient(AiClient):
                                 "data": base64.b64encode(data).decode(),
                             },
                         },
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": actual_prompt},
                     ],
                 }
             ],
             "temperature": temperature,
-            "max_tokens": self.config.max_output_tokens,
+            "max_tokens": self.config.num_predict or self.config.max_output_tokens,
         }
         response = await self._post_messages(payload)
         return _anthropic_text(response), response.get("stop_reason")
@@ -772,6 +868,19 @@ def _chat_completion_text_and_finish(response: dict[str, Any]) -> tuple[str, str
     content = message.get("content") if isinstance(message, dict) else None
     if content is None:
         content = choice.get("text") if isinstance(choice, dict) else ""
+
+    # Recover reasoning/thinking tokens if content is empty (e.g. Ollama deepseek/qwen reasoning models)
+    if not (content or "").strip():
+        reasoning = (
+            (message.get("reasoning_content") if isinstance(message, dict) else None)
+            or (message.get("reasoning") if isinstance(message, dict) else None)
+            or (choice.get("reasoning_content") if isinstance(choice, dict) else None)
+            or (choice.get("thinking") if isinstance(choice, dict) else None)
+            or (response.get("reasoning") if isinstance(response, dict) else None)
+        )
+        if isinstance(reasoning, str) and reasoning.strip():
+            content = reasoning
+
     finish_reason = (
         choice.get("finish_reason")
         or response.get("done_reason")
@@ -797,6 +906,10 @@ def _ollama_response_text(response: dict[str, Any]) -> str:
     fallback = response.get("response") if isinstance(response, dict) else None
     if isinstance(fallback, str) and fallback.strip():
         return fallback
+    if isinstance(message, dict):
+        reasoning = message.get("reasoning_content") or message.get("thinking") or message.get("reasoning")
+        if isinstance(reasoning, str) and reasoning.strip():
+            return reasoning
     return content or fallback or ""
 
 

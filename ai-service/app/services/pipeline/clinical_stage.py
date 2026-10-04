@@ -68,7 +68,8 @@ class ClinicalStageHandler:
             )
         else:
             # 1. Base heuristic extraction from text and tables (14 sections)
-            structured = self._heuristic_extraction(full_text, tables)
+            ocr_lines = raw_ocr_data.get("lines") or []
+            structured = self._heuristic_extraction(full_text, tables, raw_ocr_lines=ocr_lines)
 
             # CLIN-01: Heuristic completeness evaluation
             completeness_eval = evaluate_heuristic_completeness(
@@ -200,6 +201,20 @@ class ClinicalStageHandler:
         else:
             structured["labResults"] = []
 
+        # 7. Ensure fallback provenance and verification fields on all clinical entities
+        for med in structured.get("medications", []):
+            if isinstance(med, dict):
+                med.setdefault("provenance", "primary_ocr")
+                med.setdefault("verification_required", (med.get("provenance") == "vlm_fallback"))
+        for diag in structured.get("diagnosis", []):
+            if isinstance(diag, dict):
+                diag.setdefault("provenance", "primary_ocr")
+                diag.setdefault("verification_required", (diag.get("provenance") == "vlm_fallback"))
+        for lab in structured.get("labResults", []):
+            if isinstance(lab, dict):
+                lab.setdefault("provenance", "primary_ocr")
+                lab.setdefault("verification_required", (lab.get("provenance") == "vlm_fallback"))
+
         logger.info(
             "Clinical extraction completed: type=%s, diagnoses=%d, medications=%d, labResults=%d, treatments=%d, lineItems=%d",
             doc_type,
@@ -212,10 +227,24 @@ class ClinicalStageHandler:
 
         return structured
 
-    def _heuristic_extraction(self, text: str, tables: list[dict[str, Any]]) -> dict[str, Any]:
+    def _heuristic_extraction(
+        self,
+        text: str,
+        tables: list[dict[str, Any]],
+        raw_ocr_lines: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Robust rule-based parser for Indian and international medical documents."""
         lines = [l.strip() for l in text.splitlines() if l.strip()]
         text_upper = text.upper()
+
+        line_provenance_map: dict[str, str] = {}
+        line_conf_map: dict[str, float] = {}
+        if raw_ocr_lines:
+            for item in raw_ocr_lines:
+                t = (item.get("text") or "").strip().lower()
+                if t:
+                    line_provenance_map[t] = item.get("provenance", "primary_ocr")
+                    line_conf_map[t] = float(item.get("confidence") or 0.95)
 
         # Check if document is a Dental Quotation (e.g. Manjuben Ranoliya)
         is_dental_quotation = (
@@ -365,6 +394,19 @@ class ClinicalStageHandler:
                 med_name = m_med.group(2).strip()
                 med_dose = m_med.group(3).strip()
                 med_freq = (m_med.group(4) or "").strip()
+
+                line_lower = line.strip().lower()
+                prov = line_provenance_map.get(line_lower)
+                conf = line_conf_map.get(line_lower)
+                if not prov:
+                    for lt, lp in line_provenance_map.items():
+                        if lt in line_lower or line_lower in lt:
+                            prov = lp
+                            conf = line_conf_map.get(lt)
+                            break
+                prov = prov or "primary_ocr"
+                is_fallback = (prov == "vlm_fallback")
+
                 medications.append(
                     {
                         "name": f"{med_name} {med_dose}".strip(),
@@ -373,6 +415,9 @@ class ClinicalStageHandler:
                         "frequency": med_freq or "As directed",
                         "duration": None,
                         "instructions": "After meals" if "after" in line.lower() else "As prescribed",
+                        "provenance": prov,
+                        "verification_required": is_fallback,
+                        "confidence": conf if conf is not None else 0.95,
                     }
                 )
 
@@ -721,9 +766,11 @@ class ClinicalStageHandler:
         patient_age = vlm_extraction.get("patientAge")
         patient_gender = vlm_extraction.get("patientGender")
         base_patient = base.get("patientInfo", {})
-        eff_name = patient_name or base_patient.get("fullName") or base_patient.get("name", {}).get("full")
-        eff_age = patient_age if patient_age is not None else (base_patient.get("age") or base_patient.get("demographics", {}).get("age"))
-        eff_gender = patient_gender or base_patient.get("gender") or base_patient.get("demographics", {}).get("gender")
+        base_name = base_patient.get("name") if isinstance(base_patient.get("name"), dict) else {}
+        base_demo = base_patient.get("demographics") if isinstance(base_patient.get("demographics"), dict) else {}
+        eff_name = patient_name or base_patient.get("fullName") or base_name.get("full")
+        eff_age = patient_age if patient_age is not None else (base_patient.get("age") or base_demo.get("age"))
+        eff_gender = patient_gender or base_patient.get("gender") or base_demo.get("gender")
         patient_info = {
             "fullName": eff_name,
             "name": {
@@ -765,17 +812,53 @@ class ClinicalStageHandler:
         diagnoses = []
         for d in raw_diagnoses:
             if isinstance(d, str):
-                diagnoses.append({"condition": d})
+                diagnoses.append({
+                    "condition": d,
+                    "provenance": "vlm_fallback",
+                    "verification_required": True,
+                })
             elif isinstance(d, dict):
-                diagnoses.append(d)
+                d_copy = dict(d)
+                d_copy.setdefault("provenance", "vlm_fallback")
+                d_copy.setdefault("verification_required", True)
+                diagnoses.append(d_copy)
         if not diagnoses and base.get("diagnosis"):
-            diagnoses = base["diagnosis"]
+            for d in base["diagnosis"]:
+                if isinstance(d, dict):
+                    d_copy = dict(d)
+                    d_copy.setdefault("provenance", "vlm_fallback")
+                    d_copy.setdefault("verification_required", True)
+                    diagnoses.append(d_copy)
+                else:
+                    diagnoses.append(d)
 
         # Medications
-        medications = vlm_extraction.get("medications") or base.get("medications", [])
+        raw_medications = vlm_extraction.get("medications") or base.get("medications", [])
+        medications = []
+        for m in raw_medications:
+            if isinstance(m, dict):
+                m_copy = dict(m)
+                m_copy.setdefault("provenance", "vlm_fallback")
+                m_copy.setdefault("verification_required", True)
+                medications.append(m_copy)
+            elif isinstance(m, str):
+                medications.append({
+                    "name": m,
+                    "provenance": "vlm_fallback",
+                    "verification_required": True,
+                })
 
         # Lab Results
-        lab_results = vlm_extraction.get("labResults") or base.get("labResults", [])
+        raw_labs = vlm_extraction.get("labResults") or base.get("labResults", [])
+        lab_results = []
+        for lab in raw_labs:
+            if isinstance(lab, dict):
+                l_copy = dict(lab)
+                l_copy.setdefault("provenance", "vlm_fallback")
+                l_copy.setdefault("verification_required", True)
+                lab_results.append(l_copy)
+            else:
+                lab_results.append(lab)
 
         # Vitals
         vitals_raw = vlm_extraction.get("vitalSigns") or vlm_extraction.get("vitals")

@@ -52,6 +52,8 @@ router.put("/update/:id", verifyToken, documentController.updateDocument);
 router.post("/list", verifyToken, documentController.listDocuments);
 router.post("/list-paginated", verifyToken, documentController.listDocumentsPaginated);
 
+router.post("/validate", verifyToken, documentUploadMulter, documentController.validateDocuments);
+
 router.post(
   "/upload",
   verifyToken,

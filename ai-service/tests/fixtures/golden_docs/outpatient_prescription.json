@@ -1,0 +1,37 @@
+{
+  "documentType": "PRESCRIPTION",
+  "patientInfo": {
+    "name": "Ananya Roy",
+    "age": 29,
+    "gender": "FEMALE"
+  },
+  "vitals": [
+    {
+      "parameter": "Blood Pressure",
+      "systolic": 118,
+      "diastolic": 75
+    }
+  ],
+  "medications": [
+    {
+      "name": "Augmentin 625mg",
+      "dosage": "625mg",
+      "frequency": "twice daily"
+    },
+    {
+      "name": "Levocetirizine 5mg",
+      "dosage": "5mg",
+      "frequency": "at bedtime"
+    },
+    {
+      "name": "Paracetamol 650mg",
+      "dosage": "650mg",
+      "frequency": "tid"
+    },
+    {
+      "name": "Fluticasone 50mcg",
+      "dosage": "50mcg",
+      "frequency": "once daily"
+    }
+  ]
+}

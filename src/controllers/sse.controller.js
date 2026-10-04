@@ -34,7 +34,6 @@ class SseController {
         channel.ownerId = job.userId;
         channel.fileName = job.metadata?.originalName || null;
         channel.batchId = job.metadata?.batchId || null;
-
         if (job.status) {
           channel.buffer.push({
             type: "document.progress",

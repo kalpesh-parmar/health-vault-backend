@@ -7,14 +7,14 @@
  *   1. Build chunks from full OCR text, summary, observations,
  *      recommendations, and medications. Each chunk carries the
  *      source-type tag so RAG search can filter / boost.
- *   2. Embed each chunk via the FastAPI service (sentence-transformers).
+ *   2. Embed each chunk via Ollama bge-m3:latest (1024-dim).
  *   3. Persist chunk + embedding rows in a single transaction.
  */
 
 const { env } = require("../../configs/env");
 const DocumentIntelligenceRepository = require("../../repositories/documentIntelligenceRepository");
 const intelligenceRepository = new DocumentIntelligenceRepository();
-const { embeddingService } = require("../ai/embeddingService.ts");
+const { embeddingService } = require("../ai/chat/embedding.service");
 const { splitText, buildChunks } = require("../../helpers/embedding.helper");
 
 async function embedAndPersist({

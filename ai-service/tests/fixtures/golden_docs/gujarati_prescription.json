@@ -1,0 +1,22 @@
+{
+  "language": "gujarati",
+  "patientInfo": {
+    "name": "\u0aae\u0a82\u0a9c\u0ac1\u0ab2\u0abe\u0aac\u0ac7\u0aa8 \u0ab6\u0abe\u0ab9",
+    "age": 62,
+    "gender": "FEMALE"
+  },
+  "medications": [
+    {
+      "name": "Metformin 500mg",
+      "dosage": "500mg"
+    },
+    {
+      "name": "Telmisartan 40mg",
+      "dosage": "40mg"
+    },
+    {
+      "name": "Atorvastatin 10mg",
+      "dosage": "10mg"
+    }
+  ]
+}

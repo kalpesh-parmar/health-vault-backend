@@ -1,0 +1,45 @@
+{
+  "docId": "gu_02_prescription",
+  "language": "gu",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "સ્ટર્લિંગ મલ્ટીસ્પેશિયાલિટી હોસ્પિટલ\nમેમનગર, ડ્રાઇવ-ઇન રોડ, અમદાવાદ | ફોન: ૦૭૯-૪૦૦૧૧૧૧\nડૉ. હર્ષદ મહેતા\nએમ.ડી. (મેડિસિન), કન્સલ્ટન્ટ ફિઝિશિયન\nદર્દીનું નામ / Patient Name: શ્રી રમણભાઈ પટેલ    |    ઉંમર / Age: ૫૬ વર્ષ    |    જાતિ / Gender: પુરુષ\nતારીખ: ૨૫/૦૩/૨૦૨૬\nપ્રાથમિક હાઇપરટેન્શન અને ડાયાબિટીસ (Hypertension & Type 2 Diabetes)\n૧. Tab. Glimisave M1 (ગ્લિમીસેવ) - સવારે ભૂખ્યા પેટે ૧ ગોળી (૧-૦-૦) (૩૦ દિવસ)\n૨. Tab. Telma 40 (ટેલ્મા ૪૦) - સવારે નાસ્તા પછી ૧ ગોળી (૧-૦-૦) (૩૦ દિવસ)\n૩. Tab. Rosuvas 10 (રોસુવાસ ૧૦) - રાત્રે જમ્યા પછી ૧ ગોળી (૦-૦-૧) (૩૦ દિવસ)\n૪. Tab. Becosules Z - બપોરે જમ્યા પછી ૧ કેપ્સ્યુલ (૦-૧-૦) (૩૦ દિવસ)\nમીઠું, ખાંડ અને તેલવાળી વસ્તુઓનો ઉપયોગ ઓછો કરવો. દરરોજ સવારે ૩૦ મિનિટ ઝડપથી ચાલવું.\nબ્લડ પ્રેશર અને સુગરની નિયમિત નોંધ રાખવી. ફરી મુલાકાત: ૧ મહિના પછી.",
+  "patientInfo": {
+    "name": "શ્રી રમણભાઈ પટેલ",
+    "age": 56,
+    "gender": "M",
+    "doctorName": "ડૉ. હર્ષદ મહેતા",
+    "date": "2026-03-25"
+  },
+  "medications": [
+    {
+      "name": "Glimisave M1",
+      "dosage": "1 tab",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Telma 40",
+      "dosage": "40 mg",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Rosuvas 10",
+      "dosage": "10 mg",
+      "frequency": "0-0-1",
+      "duration": "30 days"
+    },
+    {
+      "name": "Becosules Z",
+      "dosage": "1 cap",
+      "frequency": "0-1-0",
+      "duration": "30 days"
+    }
+  ],
+  "labResults": []
+}

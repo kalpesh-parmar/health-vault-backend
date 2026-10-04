@@ -1,0 +1,39 @@
+{
+  "docId": "mr_03_lab_report",
+  "language": "mr",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "पुणे पॅथॉलॉजी व मायक्रोबायोलॉजी लॅब\nप्रमाणित पॅथॉलॉजी तपासणी अहवाल | एफसी रोड, पुणे\nडॉ. सुहास चितळे\nएम.डी. (पॅथॉलॉजी)\nरुग्णाचे नाव: श्री. विलास बापट    |    वय: ४६ वर्षे    |    लिंग: पुरुष\nदिनांक: २१/०३/२०२६\nसंपूर्ण रक्त तपासणी अहवाल (Complete Blood Count)\nतपासणी घटक (Test) | आढळलेले मूल्य (Result) | एकक (Unit) | सामान्य श्रेणी (Reference)\nहिमोग्लोबिन (Hemoglobin) | 13.2 | gm% | 13.0 - 17.0\nपांढऱ्या पेशींची संख्या (WBC Count) | 6,800 | /cumm | 4,000 - 10,000\nतांबड्या पेशींची संख्या (RBC) | 4.6 | million/cumm | 4.5 - 5.5\nप्लेटलेट पेशी (Platelet Count) | 2,20,000 | /cumm | 1,50,000 - 4,50,000\nन्यूट्रोफिल्स (Neutrophils) | 62 | % | 40 - 75\nलिम्फोसाइट्स (Lymphocytes) | 30 | % | 20 - 45",
+  "patientInfo": {
+    "name": "श्री. विलास बापट",
+    "age": 46,
+    "gender": "M",
+    "doctorName": "डॉ. सुहास चितळे",
+    "date": "2026-03-21"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Hemoglobin",
+      "value": 13.2,
+      "unit": "gm%",
+      "referenceRange": "13.0 - 17.0"
+    },
+    {
+      "testName": "WBC Count",
+      "value": 6800,
+      "unit": "/cumm",
+      "referenceRange": "4000 - 10000"
+    },
+    {
+      "testName": "Platelets",
+      "value": 220000,
+      "unit": "/cumm",
+      "referenceRange": "150000 - 450000"
+    }
+  ]
+}

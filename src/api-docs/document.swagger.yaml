@@ -252,7 +252,149 @@ components:
         errorCode:
           type: string
 
+    DocumentValidationResultItem:
+      type: object
+      required:
+        - fileName
+        - isValid
+      properties:
+        fileName:
+          type: string
+          example: blood-report.pdf
+        isValid:
+          type: boolean
+          example: true
+        documentType:
+          type: string
+          description: Detected medical document classification when valid
+          example: LAB_REPORT
+        code:
+          type: string
+          enum:
+            - NON_MEDICAL
+            - CORRUPTED_FILE
+            - UNSUPPORTED_TYPE
+            - FILE_TOO_LARGE
+            - FILE_MISSING
+          description: Validation failure code when isValid is false
+          example: CORRUPTED_FILE
+        title:
+          type: string
+          description: Human-readable error title
+          example: "File couldn't be read"
+        message:
+          type: string
+          description: Human-readable error explanation or reason
+          example: "This file appears to be corrupted."
+
+    DocumentValidationResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: "#/components/schemas/DocumentValidationResultItem"
+        status:
+          type: object
+          properties:
+            description:
+              type: string
+              example: Documents validated successfully
+            status:
+              type: string
+              example: SUCCESS
+            statusCode:
+              type: integer
+              example: 200
+
 paths:
+  /documents/validate:
+    post:
+      tags: [Document]
+      security:
+        - bearerAuth: []
+      summary: Validate document files prior to upload
+      description: |
+        Pre-validates one or more uploaded document files without persisting them.
+        Performs magic byte inspection, structural format verification (PDF/image), file size checks (max 25 MB per document), supported file type verification (PDF, JPG, JPEG, PNG, WEBP, TIFF, TIF, DOC, DOCX), and canonical medical document validation via the AI service (POST /v1/validation/medical).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: |
+                    Array of document files to validate (max 20 files, up to 25 MB each). Supported file types: PDF (application/pdf), JPG/JPEG (image/jpeg), PNG (image/png), WEBP (image/webp), TIFF/TIF (image/tiff), DOC (application/msword), and DOCX (application/vnd.openxmlformats-officedocument.wordprocessingml.document). Plain text (.txt) files are not allowed.
+      responses:
+        "200":
+          description: Documents validated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentValidationResponse"
+              examples:
+                validationResults:
+                  summary: Document validation results
+                  value:
+                    data:
+                      results:
+                        - fileName: blood-report.pdf
+                          isValid: true
+                          documentType: LAB_REPORT
+                        - fileName: utility-bill.pdf
+                          isValid: false
+                          code: NON_MEDICAL
+                          title: Not a medical document
+                          message: This file doesn't appear to be a medical document. Please remove it before continuing.
+                        - fileName: corrupted-file.pdf
+                          isValid: false
+                          code: CORRUPTED_FILE
+                          title: File couldn't be read
+                          message: This file appears to be corrupted.
+                        - fileName: notes.txt
+                          isValid: false
+                          code: UNSUPPORTED_TYPE
+                          title: Unsupported file type
+                          message: This file type isn't supported. Please select PDF, JPG, JPEG or another supported medical file type.
+                        - fileName: huge-file.pdf
+                          isValid: false
+                          code: FILE_TOO_LARGE
+                          title: File is too large
+                          message: Maximum allowed size is 25 MB.
+                    status:
+                      description: Documents validated successfully
+                      status: SUCCESS
+                      statusCode: 200
+        "400":
+          description: Bad request (Invalid multipart payload, file count exceeds limit, or file upload error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Unauthorized (Missing, invalid, or expired Bearer authentication token)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
   /documents/add:
     post:
       tags: [Document]

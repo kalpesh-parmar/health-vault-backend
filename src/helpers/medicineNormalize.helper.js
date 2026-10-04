@@ -493,12 +493,28 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   const refillAlert = !!med.refill_alert || !!med.refillAlert || false;
   const prescribedBy = med.prescribedBy || med.prescribed_by || defaults.prescribedBy || null;
 
+  // Extract provenance and fallback verification requirements
+  const provenance =
+    med.provenance || (med.source === "VLM_FALLBACK" ? "vlm_fallback" : "primary_ocr");
+  const verificationRequired = Boolean(
+    med.verificationRequired || med.verification_required || provenance === "vlm_fallback",
+  );
+  const confidence =
+    med.confidence !== undefined && med.confidence !== null ? Number(med.confidence) : null;
+
+  if (verificationRequired) {
+    needsReview.fallbackVerification = true;
+  }
+
   // 6. Build the approved medicationSchedule JSON contract
   const medicationSchedule = {
     times,
     reminderTimes: times,
     dose: hasTabletType ? { count } : { value, unit },
-    source: med.source || "OCR",
+    source: med.source || (provenance === "vlm_fallback" ? "VLM_FALLBACK" : "OCR"),
+    provenance,
+    verificationRequired,
+    confidence,
     refillAlert,
     foodContext: foodFrequency,
   };
@@ -552,7 +568,10 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
     refill_alert: refillAlert,
     total_quantity: totalQuantity || null,
     selected: true,
-    source: "OCR",
+    source: provenance === "vlm_fallback" ? "VLM_FALLBACK" : med.source || "OCR",
+    provenance,
+    verificationRequired,
+    confidence,
     needsReview,
     medicationSchedule,
     duration: rawDuration || (durationDays ? `${durationDays} Days` : ""),

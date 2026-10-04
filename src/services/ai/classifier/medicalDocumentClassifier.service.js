@@ -2,6 +2,7 @@ const prompts = require("../prompts");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const aiClient = require("../clients/aiClient.service");
 const { env } = require("../../../configs/env");
+const { parsePdf } = require("../../../utils/pdfParser");
 
 class MedicalDocumentClassifierService {
   async classifyFromStorage({ bucket, fileKey, mimeType, traceId }) {
@@ -158,8 +159,7 @@ class MedicalDocumentClassifierService {
       if (isPdf) {
         try {
           console.log("[MedicalDocumentClassifierService] Extracting text using pdf-parse...");
-          const pdfParse = require("pdf-parse");
-          const pdfData = await pdfParse(file.buffer);
+          const pdfData = await parsePdf(file.buffer);
           console.log("[SC]------> ", pdfData);
 
           extractedText = pdfData.text || "";

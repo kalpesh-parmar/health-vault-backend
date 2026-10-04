@@ -31,6 +31,7 @@ module.exports = {
       embeddings: "/v1/embeddings",
       graphs: "/v1/extraction/graphs",
       detectLanguage: "/api/v1/language/detect",
+      processDocument: "/internal/documents/process",
     },
     timeout: env.aiTimeoutMs || 300000,
   },

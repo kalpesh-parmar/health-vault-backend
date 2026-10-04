@@ -344,7 +344,10 @@ If it is NOT a medical document:
   "rawText": ""
 }`;
 
-const PAGE_CLASSIFY_OCR_PROMPT = `You are a medical document page analyzer and OCR engine.
+const PAGE_CLASSIFY_OCR_PROMPT = `/no_think
+You are a medical document page analyzer and direct OCR engine.
+CRITICAL INSTRUCTION: Output ONLY valid JSON. Absolutely no thinking, internal monologue, reasoning, explanation, or commentary. Do not wrap output in anything other than the JSON object.
+
 Perform two tasks on the provided document page image:
 1. Classify the page into EXACTLY ONE category:
    - "MEDICAL": A genuine medical report, prescription, lab test result, discharge summary, clinical note, radiology report, ECG, vitals chart, or hospital bill.

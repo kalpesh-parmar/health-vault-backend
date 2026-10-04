@@ -7,6 +7,99 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Single character exclusions for token fragmentation check
+# Standalone digits (0-9) and these punctuation/units are NOT counted as fragments
+SINGLE_CHAR_EXCLUSIONS = frozenset({
+    "-", "+", "/", ".", ":", ",", ";", "(", ")", "[", "]", "=", "<", ">", "%",
+    "g", "l", "m", "u", "s", "d", "h",
+    "G", "L", "M", "U", "S", "D", "H",
+})
+
+# Comprehensive in-memory clinical, laboratory, pharmaceutical, and document vocabulary
+CLINICAL_LEXICON = frozenset({
+    # Common laboratory tests, analytes & panels
+    "glucose", "fasting", "postprandial", "random", "cholesterol", "triglycerides",
+    "creatinine", "urea", "bilirubin", "direct", "indirect", "protein", "albumin",
+    "globulin", "ratio", "sodium", "potassium", "chloride", "calcium", "phosphorus",
+    "magnesium", "uric", "acid", "amylase", "lipase", "alkaline", "phosphatase",
+    "transaminase", "ferritin", "iron", "tibc", "vitamin", "folate", "thyroid",
+    "stimulating", "hormone", "hemoglobin", "platelets", "neutrophils", "lymphocytes",
+    "monocytes", "eosinophils", "basophils", "differential", "leukocyte", "erythrocyte",
+    "smear", "peripheral", "routine", "microscopy", "pus", "cells", "epithelial",
+    "casts", "crystals", "bacteria", "sugar", "acetone", "bile", "salts", "pigments",
+    "urobilinogen", "stool", "occult", "culture", "sensitivity", "growth", "sterile",
+    "isolated", "gram", "stain", "negative", "positive", "reactive", "nonreactive",
+    "specimen", "serum", "plasma", "urine", "blood", "fluid", "csf", "swab", "sputum",
+
+    # Units & abbreviations
+    "mg", "dl", "ml", "ug", "mcg", "ng", "pg", "pmol", "mmol", "meq", "iu", "mu",
+    "mmhg", "cumm", "mill", "thou", "fl", "bpm", "gm", "vol", "percent", "pct",
+    "sec", "mins", "hrs", "hours", "days", "weeks", "months", "years", "yrs",
+
+    # Vitals & clinical findings
+    "bp", "pulse", "temp", "temperature", "weight", "height", "bmi", "spo2", "rr",
+    "pr", "pallor", "icterus", "cyanosis", "clubbing", "edema", "lymphadenopathy",
+    "chest", "abdomen", "heart", "lungs", "liver", "spleen", "kidney", "head", "neck",
+    "fever", "cough", "cold", "pain", "headache", "vomiting", "nausea", "diarrhea",
+    "weakness", "fatigue", "dyspnea", "hypertension", "diabetes", "mellitus", "asthma",
+    "copd", "gerd", "infection", "allergy", "clear", "turbid", "yellow", "pale",
+    "straw", "amber", "trace", "nil", "absent", "present", "moderate", "marked",
+    "severe", "mild", "acute", "chronic", "normal", "abnormal", "high", "low",
+
+    # Prescriptions, forms & medications
+    "rx", "tab", "tablet", "tablets", "cap", "capsule", "capsules", "syp", "syrup",
+    "inj", "injection", "oint", "ointment", "drops", "cream", "gel", "lotion",
+    "oral", "daily", "once", "twice", "thrice", "morning", "night", "afternoon",
+    "bedtime", "before", "after", "food", "meals", "od", "bd", "bid", "tid", "qid",
+    "hs", "sos", "stat", "prn", "dose", "dosage", "duration", "qty", "quantity",
+    "paracetamol", "amoxicillin", "clavulanate", "azithromycin", "ciprofloxacin",
+    "ofloxacin", "cefixime", "cefpodoxime", "metronidazole", "doxycycline",
+    "pantoprazole", "omeprazole", "rabeprazole", "esomeprazole", "ranitidine",
+    "famotidine", "antacid", "cetirizine", "levocetirizine", "loratadine",
+    "fexofenadine", "montelukast", "ibuprofen", "diclofenac", "aceclofenac",
+    "tramadol", "metformin", "glimepiride", "gliclazide", "vildagliptin",
+    "sitagliptin", "dapagliflozin", "empagliflozin", "insulin", "amlodipine",
+    "telmisartan", "losartan", "olmesartan", "ramipril", "enalapril", "atenolol",
+    "metoprolol", "bisoprolol", "carvedilol", "atorvastatin", "rosuvastatin",
+    "aspirin", "clopidogrel", "levothyroxine", "prednisolone", "dexamethasone",
+    "salbutamol", "budesonide", "formoterol", "ondansetron", "domperidone",
+    "multivitamin", "folic", "calcium", "zinc", "b12", "d3",
+
+    # Administrative, report headers & general vocabulary
+    "patient", "name", "age", "sex", "gender", "male", "female", "dob", "date",
+    "time", "dr", "mr", "mrs", "ms", "doctor", "physician", "consultant", "hospital",
+    "clinic", "healthcare", "center", "centre", "ward", "bed", "room", "floor",
+    "opd", "ipd", "emergency", "admission", "discharge", "diagnosis", "provisional",
+    "final", "history", "examination", "vitals", "investigation", "department",
+    "pathology", "biochemistry", "hematology", "microbiology", "serology", "radiology",
+    "verified", "authorized", "sign", "signature", "signatory", "pathologist",
+    "technician", "notes", "clinical", "remarks", "sample", "collected", "received",
+    "reported", "printed", "status", "address", "phone", "tel", "mob", "mobile",
+    "reg", "id", "no", "page", "total", "count", "value", "method", "impression",
+    "interpretation", "finding", "findings", "advice", "treatment", "consultation",
+    "medical", "health", "care", "laboratory", "labs", "diagnostic", "diagnostics",
+    "reference", "interval", "range", "ranges", "unit", "units", "comment", "comments",
+    "remark", "note", "recommendation", "correlation", "suggested", "clinically",
+    "receipt", "invoice", "bill", "cash", "credit", "amount", "paid", "due", "balance",
+    "tax", "gst", "uhid", "mrn", "referred", "ref", "by",
+
+    # High frequency English stopwords / connectors
+    "the", "of", "and", "in", "to", "for", "with", "on", "at", "by", "from",
+    "is", "was", "are", "were", "been", "has", "have", "had", "this", "that",
+    "these", "those", "not", "or", "as", "an", "be", "all", "any", "each",
+    "every", "both", "few", "more", "most", "other", "some", "such", "than",
+    "too", "very", "can", "will", "just", "should", "now", "after", "before",
+    "between", "under", "over", "above", "below", "into", "out", "up", "down",
+    "only", "also", "then", "there", "where", "which", "who", "whom", "whose",
+    "when", "while", "during", "end", "please", "correlate",
+})
+
+try:
+    from app.modules.file_processing.pdf_text import _COMMON_LEXICON
+    CLINICAL_LEXICON = CLINICAL_LEXICON | _COMMON_LEXICON
+except Exception:
+    pass
+
 
 @dataclass
 class QualityGateResult:
@@ -27,8 +120,9 @@ class QualityGate:
     """Deterministic quality evaluator for primary OCR output.
     
     Evaluates mean confidence, character yield, line-level confidence distributions,
-    and symbol noise ratios to decide whether an OCR result can be accepted or
-    requires fallback to a multimodal vision language model (e.g. Qwen3-VL).
+    symbol noise ratios, token fragmentation, lexical validity, and borderline confidence
+    to decide whether an OCR result can be accepted or requires fallback to a
+    multimodal vision language model (e.g. Qwen3-VL).
     """
 
     def __init__(
@@ -38,12 +132,22 @@ class QualityGate:
         line_confidence_floor: float = 0.60,
         max_low_confidence_line_ratio: float = 0.20,
         min_alphanumeric_ratio: float = 0.40,
+        max_fragment_ratio: float = 0.35,
+        min_avg_token_len: float = 2.5,
+        min_valid_token_ratio: float = 0.35,
+        borderline_min_conf: float = 0.70,
+        borderline_max_conf: float = 0.85,
     ) -> None:
         self.min_mean_confidence = min_mean_confidence
         self.min_char_count = min_char_count
         self.line_confidence_floor = line_confidence_floor
         self.max_low_confidence_line_ratio = max_low_confidence_line_ratio
         self.min_alphanumeric_ratio = min_alphanumeric_ratio
+        self.max_fragment_ratio = max_fragment_ratio
+        self.min_avg_token_len = min_avg_token_len
+        self.min_valid_token_ratio = min_valid_token_ratio
+        self.borderline_min_conf = borderline_min_conf
+        self.borderline_max_conf = borderline_max_conf
 
     def evaluate(
         self,
@@ -99,6 +203,29 @@ class QualityGate:
         else:
             alnum_ratio = 0.0
 
+        # Calculate tokens and fragmentation metrics
+        tokens = full_text.split()
+        total_tokens = len(tokens)
+
+        # Single-character tokens (excluding digits, punctuation, and single-char medical units)
+        fragment_count = sum(
+            1 for t in tokens
+            if len(t) == 1 and not t.isdigit() and t not in SINGLE_CHAR_EXCLUSIONS
+        )
+        fragment_ratio = fragment_count / total_tokens if total_tokens > 0 else 0.0
+        avg_token_len = (sum(len(t) for t in tokens) / total_tokens) if total_tokens > 0 else 0.0
+
+        # Valid-token lexical check against clinical and general lexicon
+        alpha_words = re.findall(r"[a-zA-Z]+", full_text)
+        if alpha_words:
+            valid_token_count = sum(1 for w in alpha_words if w.lower() in CLINICAL_LEXICON)
+            valid_token_ratio = valid_token_count / len(alpha_words)
+        else:
+            valid_token_ratio = 1.0
+
+        # Borderline confidence flag
+        is_borderline = (self.borderline_min_conf <= mean_conf <= self.borderline_max_conf)
+
         details = {
             "low_conf_line_count": low_conf_line_count,
             "total_lines": line_count,
@@ -107,6 +234,10 @@ class QualityGate:
             "min_confidence": round(min_conf, 4),
             "low_confidence_line_ratio": round(low_conf_ratio, 4),
             "alphanumeric_ratio": round(alnum_ratio, 4),
+            "fragment_ratio": round(fragment_ratio, 4),
+            "avg_token_len": round(avg_token_len, 4),
+            "valid_token_ratio": round(valid_token_ratio, 4),
+            "is_borderline": is_borderline,
         }
 
         # 0. Check Non-Latin Script Invariant (Invariant 3)
@@ -221,6 +352,81 @@ class QualityGate:
                 details=details,
             )
 
+        # 5. Token fragmentation checks
+        if total_tokens > 0 and fragment_ratio > self.max_fragment_ratio:
+            reason = (
+                f"EXCESSIVE_TOKEN_FRAGMENTATION: fragment ratio ({fragment_ratio:.1%}) "
+                f"exceeds maximum allowed ({self.max_fragment_ratio:.1%})"
+            )
+            logger.info("QualityGate rejected: %s", reason)
+            return QualityGateResult(
+                passed=False,
+                reason=reason,
+                mean_confidence=mean_conf,
+                min_confidence=min_conf,
+                line_count=line_count,
+                char_count=char_count,
+                low_confidence_line_ratio=low_conf_ratio,
+                alphanumeric_ratio=alnum_ratio,
+                details=details,
+            )
+
+        if total_tokens > 10 and avg_token_len < self.min_avg_token_len:
+            reason = (
+                f"LOW_AVERAGE_TOKEN_LENGTH: average token length ({avg_token_len:.2f}) "
+                f"is below minimum allowed ({self.min_avg_token_len:.2f})"
+            )
+            logger.info("QualityGate rejected: %s", reason)
+            return QualityGateResult(
+                passed=False,
+                reason=reason,
+                mean_confidence=mean_conf,
+                min_confidence=min_conf,
+                line_count=line_count,
+                char_count=char_count,
+                low_confidence_line_ratio=low_conf_ratio,
+                alphanumeric_ratio=alnum_ratio,
+                details=details,
+            )
+
+        # 6. Valid-token lexical ratio check
+        if char_count > 30 and valid_token_ratio < self.min_valid_token_ratio:
+            reason = (
+                f"LOW_VALID_TOKEN_RATIO: valid token ratio ({valid_token_ratio:.1%}) "
+                f"is below minimum allowed ({self.min_valid_token_ratio:.1%})"
+            )
+            logger.info("QualityGate rejected: %s", reason)
+            return QualityGateResult(
+                passed=False,
+                reason=reason,
+                mean_confidence=mean_conf,
+                min_confidence=min_conf,
+                line_count=line_count,
+                char_count=char_count,
+                low_confidence_line_ratio=low_conf_ratio,
+                alphanumeric_ratio=alnum_ratio,
+                details=details,
+            )
+
+        # 7. Borderline confidence inspection
+        if is_borderline and valid_token_ratio < 0.50:
+            reason = (
+                f"BORDERLINE_LOW_VALIDITY: borderline confidence ({mean_conf:.3f}) "
+                f"with valid token ratio ({valid_token_ratio:.1%}) below 50%"
+            )
+            logger.info("QualityGate rejected: %s", reason)
+            return QualityGateResult(
+                passed=False,
+                reason=reason,
+                mean_confidence=mean_conf,
+                min_confidence=min_conf,
+                line_count=line_count,
+                char_count=char_count,
+                low_confidence_line_ratio=low_conf_ratio,
+                alphanumeric_ratio=alnum_ratio,
+                details=details,
+            )
+
         # All checks passed
         return QualityGateResult(
             passed=True,
@@ -233,3 +439,4 @@ class QualityGate:
             alphanumeric_ratio=alnum_ratio,
             details=details,
         )
+

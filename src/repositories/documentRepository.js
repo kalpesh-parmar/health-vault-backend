@@ -125,6 +125,22 @@ class DocumentRepository {
     const result = await db.insert(document).values(data).returning();
     return result[0] || null;
   }
+
+  async upsertInitialDocument(data) {
+    const [row] = await db
+      .insert(document)
+      .values(data)
+      .onConflictDoUpdate({
+        target: document.s3Key,
+        set: {
+          fileName: data.fileName,
+          s3Bucket: data.s3Bucket,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row || null;
+  }
   async update(id, data) {
     const result = await db
       .update(document)

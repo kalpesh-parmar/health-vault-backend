@@ -1,0 +1,45 @@
+{
+  "docId": "gu_04_lab_report",
+  "language": "gu",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "ગુજરાત પેથોલોજી લેબોરેટરી\nએન.એ.બી.એલ. માન્ય ક્લિનિકલ ડાયગ્નોસ્ટિક લેબ | આશ્રમ રોડ, અમદાવાદ\nડૉ. કિરીટ પરીખ\nએમ.ડી. (પેથોલોજી), લેબ ડિરેક્ટર\nદર્દીનું નામ / Patient Name: શ્રી વિનોદભાઈ દેસાઈ    |    ઉંમર / Age: ૪૭ વર્ષ    |    જાતિ / Gender: પુરુષ\nતારીખ: ૨૭/૦૩/૨૦૨૬\nસંપૂર્ણ રક્ત તપાસ અહેવાલ (Complete Blood Count)\nતપાસ વિગત (Investigation) | પરિણામ (Result) | એકમ (Unit) | સામાન્ય મર્યાદા (Reference)\nહિમોગ્લોબિન (Hemoglobin) | 13.4 | gm% | 13.0 - 17.0\nકુલ શ્વેતકણ (Total WBC Count) | 7,200 | /cumm | 4,000 - 10,000\nરક્તકણ (RBC Count) | 4.7 | million/cumm | 4.5 - 5.5\nપ્લેટલેટ્સ (Platelet Count) | 2,40,000 | /cumm | 1,50,000 - 4,50,000\nઇ.એસ.આર. (ESR 1st Hour) | 14 | mm | 0 - 15\nપી.સી.વી. (PCV) | 41.5 | % | 40.0 - 50.0",
+  "patientInfo": {
+    "name": "શ્રી વિનોદભાઈ દેસાઈ",
+    "age": 47,
+    "gender": "M",
+    "doctorName": "ડૉ. કિરીટ પરીખ",
+    "date": "2026-03-27"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Hemoglobin",
+      "value": 13.4,
+      "unit": "gm%",
+      "referenceRange": "13.0 - 17.0"
+    },
+    {
+      "testName": "Total WBC",
+      "value": 7200,
+      "unit": "/cumm",
+      "referenceRange": "4000 - 10000"
+    },
+    {
+      "testName": "Platelets",
+      "value": 240000,
+      "unit": "/cumm",
+      "referenceRange": "150000 - 450000"
+    },
+    {
+      "testName": "ESR",
+      "value": 14,
+      "unit": "mm",
+      "referenceRange": "0 - 15"
+    }
+  ]
+}

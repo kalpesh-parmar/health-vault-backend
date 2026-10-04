@@ -25,6 +25,7 @@ from app.constants.stages import (
 )
 from app.core.errors import NonMedicalDocumentException
 from app.infrastructure.db.repositories.job_repository import JobRepository
+from app.infrastructure.db.repositories.lab_result_repository import LabResultRepository
 from app.infrastructure.storage.s3 import CorruptFileException, S3StorageClient
 from app.services.pipeline.analysis_stage import AnalysisStageHandler
 from app.services.pipeline.checkpoint_service import CheckpointService
@@ -60,6 +61,7 @@ class PipelineOrchestrator:
         analysis_handler: AnalysisStageHandler,
         summary_handler: SummaryStageHandler,
         embedding_handler: EmbeddingStageHandler,
+        lab_result_repo: LabResultRepository | None = None,
     ) -> None:
         self.repo = job_repo
         self.lifecycle = lifecycle_service
@@ -72,6 +74,8 @@ class PipelineOrchestrator:
         self.analysis_handler = analysis_handler
         self.summary_handler = summary_handler
         self.embedding_handler = embedding_handler
+        self.lab_result_repo = lab_result_repo
+
 
     async def process_job(self, job: dict[str, Any]) -> None:
         job_id = UUID(str(job["id"]))
@@ -336,6 +340,41 @@ class PipelineOrchestrator:
                     raw_ocr_data=raw_ocr_data or {},
                     layout_data=layout_data,
                 )
+
+                # Persist evaluated lab results into relational patient_lab_results
+                if self.lab_result_repo is not None and extracted_structured_data:
+                    raw_labs = extracted_structured_data.get("labResults") or []
+                    target_user_id = (
+                        job.get("user_id")
+                        or (metadata.get("userId") if metadata else None)
+                        or (metadata.get("patientId") if metadata else None)
+                    )
+                    if target_user_id and raw_labs:
+                        try:
+                            user_uuid = UUID(str(target_user_id))
+                            doc_date = (
+                                extracted_structured_data.get("documentInfo", {}).get("date")
+                                or (metadata.get("reportDate") if metadata else None)
+                            )
+                            persisted_labs = await self.lab_result_repo.persist_lab_results(
+                                user_id=user_uuid,
+                                document_id=document_id,
+                                report_id=file_key,
+                                lab_items=raw_labs,
+                                test_date=doc_date,
+                            )
+                            logger.info(
+                                "Persisted %d structured lab results to patient_lab_results (user=%s, doc=%s)",
+                                len(persisted_labs),
+                                user_uuid,
+                                document_id,
+                            )
+                        except Exception as p_err:
+                            logger.error(
+                                "Failed to persist lab results to patient_lab_results: %s",
+                                p_err,
+                                exc_info=True,
+                            )
 
                 completed_stages.append(STAGE_FIELD_EXTRACTION)
                 current_pct = ensure_monotonic_progress(

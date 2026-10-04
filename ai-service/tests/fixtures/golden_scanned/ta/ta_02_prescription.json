@@ -1,0 +1,39 @@
+{
+  "docId": "ta_02_prescription",
+  "language": "ta",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "மீனாட்சி மெடிக்கல் சென்டர்\nமேலூர் சாலை, மதுரை | 24 மணி நேர அவசர சிகிச்சை பிரிவு\nடாக்டர் கே. லட்சுமி\nM.B.B.S., D.C.H., குழந்தைகள் நல சிறப்பு மருத்துவர்\nநோயாளி பெயர்: செல்வன் பிரவீன்    |    வயது: 12 வயது    |    பாலினம்: ஆண்\nதேதி / Date: 24/03/2026\nகடுமையான தொண்டை வலி மற்றும் சளி காய்ச்சல் (Acute Tonsillitis)\n1. Tab. Azithromycin (அசித்ரோமைசின்) 250 mg - மதிய உணவுக்கு பின் 1 மாத்திரை (0-1-0) (3 நாட்கள்)\n2. Tab. Paracetamol (பாராசிட்டமால்) 500 mg - காய்ச்சல் இருந்தால் மட்டும் 1 மாத்திரை (3 நாட்கள்)\n3. Syrup Levocetirizine 5 ml - இரவு படுக்கைக்கு முன் 1 முறை (5 நாட்கள்)\nவெதுவெதுப்பான உப்பு நீரில் தொண்டையை கொப்பளிக்கவும். குளிர்ந்த உணவுகளை தவிர்க்கவும்.",
+  "patientInfo": {
+    "name": "செல்வன் பிரவீன்",
+    "age": 12,
+    "gender": "M",
+    "doctorName": "டாக்டர் கே. லட்சுமி",
+    "date": "2026-03-24"
+  },
+  "medications": [
+    {
+      "name": "Azithromycin",
+      "dosage": "250 mg",
+      "frequency": "0-1-0",
+      "duration": "3 days"
+    },
+    {
+      "name": "Paracetamol",
+      "dosage": "500 mg",
+      "frequency": "SOS",
+      "duration": "3 days"
+    },
+    {
+      "name": "Levocetirizine",
+      "dosage": "5 ml",
+      "frequency": "HS",
+      "duration": "5 days"
+    }
+  ],
+  "labResults": []
+}

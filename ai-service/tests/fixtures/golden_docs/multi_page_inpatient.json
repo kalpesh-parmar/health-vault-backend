@@ -1,0 +1,36 @@
+{
+  "documentType": "DISCHARGE_SUMMARY",
+  "pageCount": 3,
+  "patientInfo": {
+    "name": "David Miller",
+    "age": 62,
+    "gender": "MALE"
+  },
+  "vitals": [
+    {
+      "parameter": "Blood Pressure",
+      "systolic": 155,
+      "diastolic": 95
+    }
+  ],
+  "criticalLabs": ["Troponin I"],
+  "diagnosis": ["Acute Non-ST-Elevation Myocardial Infarction", "Hyperlipidemia"],
+  "medications": [
+    {
+      "name": "Aspirin 75mg",
+      "dosage": "75mg"
+    },
+    {
+      "name": "Clopidogrel 75mg",
+      "dosage": "75mg"
+    },
+    {
+      "name": "Atorvastatin 40mg",
+      "dosage": "40mg"
+    },
+    {
+      "name": "Metoprolol 25mg",
+      "dosage": "25mg"
+    }
+  ]
+}

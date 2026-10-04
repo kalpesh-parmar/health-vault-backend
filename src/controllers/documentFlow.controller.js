@@ -174,7 +174,7 @@ function formatJobStatusPayload(job) {
   return {
     processName: "document_processing",
     fileKey: job.fileKey,
-    documentId: job.checkpointData?.documentId || null,
+    documentId: job.checkpointData?.documentId || job.metadata?.documentId || null,
     fileName: job.metadata?.originalName || job.fileKey.split("/").pop(),
     batchId: job.metadata?.batchId || null,
     patientId: job.userId,

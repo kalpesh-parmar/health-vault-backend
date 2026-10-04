@@ -173,10 +173,14 @@ describe("Phase 1: Streaming Ingestion & Memory Safety Tests", () => {
     });
 
     it("should accept valid batches of up to 20 files", async () => {
+      const validateSpy = jest
+        .spyOn(aiServiceClient, "validateMedicalDocument")
+        .mockResolvedValue({ isMedical: true });
       const files = Array.from({ length: 20 }, (_, i) => ({
         originalname: `file_${i}.pdf`,
         mimetype: "application/pdf",
         size: 1024,
+        buffer: Buffer.from("%PDF-1.4 mock pdf content"),
       }));
       const req = { files };
       const res = {};
@@ -184,6 +188,7 @@ describe("Phase 1: Streaming Ingestion & Memory Safety Tests", () => {
 
       await validateDocumentUpload(req, res, next);
       expect(next).toHaveBeenCalledWith();
+      validateSpy.mockRestore();
     });
 
     it("should reject unsupported MIME types and clean up any temp files on disk", async () => {

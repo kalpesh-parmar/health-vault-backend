@@ -1,0 +1,15 @@
+stage,status,duration_sec,duration_ms,input_summary,output_summary,error_classification,retries
+01_select_document,SUCCESS,0.0,0,D:\TECHROVER\PROJECTS\RTH\healh-vault-project\Medical Reports\Masa's Report\5069200904.pdf,Selected 5069200904.pdf,,0
+02_file_read,SUCCESS,0.013,13,5069200904.pdf,"2132805 bytes, sha256=6d367dc6ecf3",,0
+03_pdf_validation,SUCCESS,0.146,145,6 pages,"is_scanned=False, chars=51220",,0
+04_preupload_validation,SUCCESS,0.019,19,2132805 bytes,isValid=True,,0
+05_medical_classification,SUCCESS,0.0,0,Gate,isMedical=True,,0
+06_page_preprocessing,SUCCESS,1.548,1548,6 pages,6 pages preprocessed,,0
+07_page_ocr_extraction,SUCCESS,0.024,24,6 pages,51220 chars,,0
+08_merge_ocr_results,SUCCESS,0.0,0,6 pages,51230 characters compiled,,0
+09_layout_parsing,SUCCESS,0.046,45,51230 chars,"2 sections, 2 tables",,0
+10_structured_extraction,SUCCESS,16.184,16183,51230 chars,"patient=Manjulaben Ranoliya, 19 labs",,0
+11_graph_extraction,SUCCESS,0.027,26,5069200904.pdf,12 visual crops,,0
+12_embedding_generation,SUCCESS,1.081,1081,51230 chars,40 chunks,,0
+13_database_persistence,SUCCESS,0.0,0,DryRun,Verified (4501 bytes JSON),,0
+14_final_response,SUCCESS,0.0,0,All,Assembled in 19.094s,,0

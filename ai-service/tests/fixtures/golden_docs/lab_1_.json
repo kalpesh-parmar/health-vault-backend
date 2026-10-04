@@ -1,0 +1,25 @@
+{
+  "groundTruthText": "Uma Clinic\n14, Bhavani Complex, Kamrej Char Rasta, Surat - 394 185\nPh: -9408654092 Prescription\nNAME : URMILA RITEN BHAIRAPARA\nADDRESS : SHANTI NAGAR AGE & SEX : 45/FEMALE\nTREATING DR. : BAKUL PATEL\nNO. : 64902 PATIENT ID : 22916 DATE : 08/04/2024\nSR TYPE MEDICINE NAME DOSE TIMES/DAY DURATION QTY INSTRUCTION\n1 TAB. MBSON SL 1-0-0 30 Days 30\n2 Tab. Caldison D3 1-0-0 4 Days 4\n",
+  "patientInfo": {
+    "name": "URMILA RITEN BHAIRAPARA",
+    "age": "45",
+    "gender": "FEMALE",
+    "address": "SHANTI NAGAR",
+    "doctorName": "BAKUL PATEL",
+    "date": "08/04/2024"
+  },
+  "medications": [
+    {
+      "name": "MBSON SL",
+      "dosage": "1-0-0",
+      "frequency": "1-0-0",
+      "duration": "30 Days"
+    },
+    {
+      "name": "Caldison D3",
+      "dosage": "1-0-0",
+      "frequency": "1-0-0",
+      "duration": "4 Days"
+    }
+  ]
+}

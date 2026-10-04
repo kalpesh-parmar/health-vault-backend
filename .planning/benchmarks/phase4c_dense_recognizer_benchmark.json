@@ -1,0 +1,213 @@
+{
+  "timestamp": "2026-10-04T04:58:10Z",
+  "milestone": "v7.0",
+  "phase": "04c-dense-page-recognizer-speed",
+  "benchmark": "dense_clinical_scans_thread_and_batch_tuning",
+  "results": [
+    {
+      "configuration": {
+        "threads": 4,
+        "batch_num": 6,
+        "label": "Baseline (4 threads, batch=6)"
+      },
+      "overall_p50_ms": 4307.3,
+      "overall_p95_ms": 5287.2,
+      "documents": [
+        {
+          "document": "en_01_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4106.3,
+          "p95_ms": 5058.7,
+          "detector_avg_ms": 523.0,
+          "recognizer_avg_ms": 3705.7,
+          "line_count": 65,
+          "mean_confidence": 0.9742
+        },
+        {
+          "document": "en_02_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4307.3,
+          "p95_ms": 5312.6,
+          "detector_avg_ms": 458.0,
+          "recognizer_avg_ms": 3997.0,
+          "line_count": 76,
+          "mean_confidence": 0.9789
+        },
+        {
+          "document": "en_03_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4674.5,
+          "p95_ms": 4974.7,
+          "detector_avg_ms": 421.3,
+          "recognizer_avg_ms": 4161.7,
+          "line_count": 64,
+          "mean_confidence": 0.9619
+        }
+      ]
+    },
+    {
+      "configuration": {
+        "threads": 4,
+        "batch_num": 16,
+        "label": "Production Tuned (4 threads, batch=16)"
+      },
+      "overall_p50_ms": 3423.1,
+      "overall_p95_ms": 4921.4,
+      "documents": [
+        {
+          "document": "en_01_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 2959.2,
+          "p95_ms": 4474.5,
+          "detector_avg_ms": 477.0,
+          "recognizer_avg_ms": 2960.7,
+          "line_count": 65,
+          "mean_confidence": 0.9727
+        },
+        {
+          "document": "en_02_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3877.3,
+          "p95_ms": 4971.1,
+          "detector_avg_ms": 451.3,
+          "recognizer_avg_ms": 3732.0,
+          "line_count": 76,
+          "mean_confidence": 0.978
+        },
+        {
+          "document": "en_03_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3423.1,
+          "p95_ms": 3930.1,
+          "detector_avg_ms": 214.7,
+          "recognizer_avg_ms": 3306.7,
+          "line_count": 64,
+          "mean_confidence": 0.9609
+        }
+      ]
+    },
+    {
+      "configuration": {
+        "threads": 4,
+        "batch_num": 30,
+        "label": "High Batch (4 threads, batch=30)"
+      },
+      "overall_p50_ms": 3917.3,
+      "overall_p95_ms": 5135.7,
+      "documents": [
+        {
+          "document": "en_01_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3075.7,
+          "p95_ms": 4323.8,
+          "detector_avg_ms": 472.3,
+          "recognizer_avg_ms": 2951.7,
+          "line_count": 65,
+          "mean_confidence": 0.9725
+        },
+        {
+          "document": "en_02_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4259.5,
+          "p95_ms": 5225.9,
+          "detector_avg_ms": 460.3,
+          "recognizer_avg_ms": 4050.3,
+          "line_count": 76,
+          "mean_confidence": 0.9787
+        },
+        {
+          "document": "en_03_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3917.3,
+          "p95_ms": 4303.4,
+          "detector_avg_ms": 211.0,
+          "recognizer_avg_ms": 3726.0,
+          "line_count": 64,
+          "mean_confidence": 0.96
+        }
+      ]
+    },
+    {
+      "configuration": {
+        "threads": 8,
+        "batch_num": 16,
+        "label": "High Threads (8 threads, batch=16)"
+      },
+      "overall_p50_ms": 3517.7,
+      "overall_p95_ms": 4850.9,
+      "documents": [
+        {
+          "document": "en_01_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3107.7,
+          "p95_ms": 4323.5,
+          "detector_avg_ms": 500.0,
+          "recognizer_avg_ms": 2934.3,
+          "line_count": 65,
+          "mean_confidence": 0.9727
+        },
+        {
+          "document": "en_02_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4068.7,
+          "p95_ms": 4909.5,
+          "detector_avg_ms": 443.0,
+          "recognizer_avg_ms": 3824.0,
+          "line_count": 76,
+          "mean_confidence": 0.978
+        },
+        {
+          "document": "en_03_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3517.7,
+          "p95_ms": 3965.9,
+          "detector_avg_ms": 224.7,
+          "recognizer_avg_ms": 3371.0,
+          "line_count": 64,
+          "mean_confidence": 0.9609
+        }
+      ]
+    },
+    {
+      "configuration": {
+        "threads": 2,
+        "batch_num": 16,
+        "label": "Low Threads (2 threads, batch=16)"
+      },
+      "overall_p50_ms": 4021.4,
+      "overall_p95_ms": 4935.2,
+      "documents": [
+        {
+          "document": "en_01_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 3162.1,
+          "p95_ms": 4226.5,
+          "detector_avg_ms": 482.0,
+          "recognizer_avg_ms": 2924.3,
+          "line_count": 65,
+          "mean_confidence": 0.9727
+        },
+        {
+          "document": "en_02_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4151.0,
+          "p95_ms": 5013.9,
+          "detector_avg_ms": 455.3,
+          "recognizer_avg_ms": 3872.7,
+          "line_count": 76,
+          "mean_confidence": 0.978
+        },
+        {
+          "document": "en_03_clinical_record.jpg",
+          "trials": 3,
+          "p50_ms": 4021.4,
+          "p95_ms": 4117.5,
+          "detector_avg_ms": 227.0,
+          "recognizer_avg_ms": 3594.7,
+          "line_count": 64,
+          "mean_confidence": 0.9609
+        }
+      ]
+    }
+  ]
+}

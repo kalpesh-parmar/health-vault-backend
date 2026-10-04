@@ -1,6 +1,7 @@
 const { and, eq, lt, ne, sql, or, isNull } = require("drizzle-orm");
 
 const { db } = require("../configs/db");
+const { env } = require("../configs/env");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
 
 const DEFAULT_TTL_HOURS = 24;
@@ -14,6 +15,7 @@ class DocumentProcessingJobRepository {
       originalName,
       pageCount = 1,
       metadata = {},
+      checkpointData = {},
       ttlHours = DEFAULT_TTL_HOURS,
     },
     tx = null,
@@ -38,6 +40,7 @@ class DocumentProcessingJobRepository {
       },
       checkpointData: {
         pageCount: Number(pageCount) || 1,
+        ...checkpointData,
       },
       pendingSteps: 0,
       percentage: 0,
@@ -60,11 +63,16 @@ class DocumentProcessingJobRepository {
         ...(existing.metadata || {}),
         ...baseValues.metadata,
       };
+      const mergedCheckpointData = {
+        ...(existing.checkpointData || {}),
+        ...baseValues.checkpointData,
+      };
       const [updated] = await client
         .update(documentProcessingJob)
         .set({
           ...baseValues,
           metadata: mergedMetadata,
+          checkpointData: mergedCheckpointData,
         })
         .where(eq(documentProcessingJob.id, existing.id))
         .returning();
@@ -319,6 +327,7 @@ class DocumentProcessingJobRepository {
   }
 
   async claimNextQueuedJob() {
+    const isPythonMode = Boolean(env.usePythonPipeline);
     const result = await db.execute(sql`
       UPDATE document_processing_jobs
       SET status = 'RUNNING',
@@ -330,6 +339,10 @@ class DocumentProcessingJobRepository {
       WHERE id = (
         SELECT id FROM document_processing_jobs
         WHERE status = 'QUEUED'
+          AND (
+            metadata->>'processor' = 'node'
+            OR (metadata->>'processor' IS NULL AND NOT ${isPythonMode})
+          )
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1

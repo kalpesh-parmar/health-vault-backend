@@ -1,0 +1,45 @@
+{
+  "docId": "hi_01_prescription",
+  "language": "hi",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "अपोलो क्लिनिक एवं अनुसंधान केंद्र\n12, एमजी रोड, सिविल लाइंस, नई दिल्ली | दूरभाष: 011-23456789\nडॉ. राजेश कुमार शर्मा\nएम.डी. (जनरल मेडिसिन), वरिष्ठ चिकित्सक\nरोगी का नाम: श्री अमित वर्मा    |    आयु: 45 वर्ष    |    लिंग: पुरुष\nदिनांक: 12/03/2026\nप्राथमिक उच्च रक्तचाप एवं टाइप २ मधुमेह (Hypertension & Type 2 Diabetes)\n1. Tab. Metformin (मेटफॉर्मिन) 500 mg - 1 गोली दिन में दो बार भोजन के बाद (1-0-1) (30 दिन)\n2. Tab. Telmisartan (टेल्मिसार्टन) 40 mg - 1 गोली सुबह नाश्ते के बाद (1-0-0) (30 दिन)\n3. Tab. Pan 40 (पैंटोप्राजोल) 40 mg - 1 गोली खाली पेट सुबह (1-0-0) (15 दिन)\n4. Tab. Neurobion Forte - 1 गोली रात को भोजन के बाद (0-0-1) (30 दिन)\nमीठा, तला हुआ और अत्यधिक नमक युक्त भोजन न करें। प्रतिदिन ३० मिनट टहलें।\nरक्त शर्करा स्तर की नियमित निगरानी करें। पुनः परामर्श: २ सप्ताह बाद।",
+  "patientInfo": {
+    "name": "श्री अमित वर्मा",
+    "age": 45,
+    "gender": "M",
+    "doctorName": "डॉ. राजेश कुमार शर्मा",
+    "date": "2026-03-12"
+  },
+  "medications": [
+    {
+      "name": "Metformin",
+      "dosage": "500 mg",
+      "frequency": "1-0-1",
+      "duration": "30 days"
+    },
+    {
+      "name": "Telmisartan",
+      "dosage": "40 mg",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Pan 40",
+      "dosage": "40 mg",
+      "frequency": "1-0-0",
+      "duration": "15 days"
+    },
+    {
+      "name": "Neurobion Forte",
+      "dosage": "1 tab",
+      "frequency": "0-0-1",
+      "duration": "30 days"
+    }
+  ],
+  "labResults": []
+}

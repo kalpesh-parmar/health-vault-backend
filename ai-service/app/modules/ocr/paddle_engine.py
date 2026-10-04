@@ -51,16 +51,164 @@ def _sanitize_for_pickle(obj: Any) -> Any:
 # Module-level state for worker processes
 # ------------------------------------------------------------------------------
 _worker_ocr: Any = None
+_worker_ocrs: dict[str, Any] = {}
 _worker_device: str = "unknown"
 _worker_config: dict[str, Any] = {}
 _worker_init_error: str | None = None
 
 
+def _normalize_lang(lang: str | None) -> str:
+    """Normalize language identifiers to standard PaddleOCR model language codes."""
+    if not lang:
+        return "en"
+    l_lower = str(lang).strip().lower()
+    if l_lower in ("en", "latin", "eng", "english"):
+        return "en"
+    if l_lower in ("hi", "mr", "devanagari", "hin", "mar", "hindi", "marathi"):
+        return "devanagari"
+    if l_lower in ("ta", "tamil", "tam"):
+        return "ta"
+    if l_lower in ("te", "telugu"):
+        return "te"
+    if l_lower in ("ka", "kannada"):
+        return "ka"
+    return l_lower
+
+
+def is_paddleocr_v3() -> bool:
+    """Return True if installed PaddleOCR is 3.x or newer."""
+    try:
+        import paddleocr
+        p_version = getattr(paddleocr, "__version__", "2.7.3")
+        major_ver = int(str(p_version).split(".")[0])
+        if major_ver >= 3:
+            return True
+        if hasattr(paddleocr, "_pipelines"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _get_worker_ocr(lang: str = "en") -> Any:
+    """Retrieve or lazily instantiate a PaddleOCR model for the specified language.
+    Cached inside worker process memory (~15-25MB per language) without spawning new processes.
+    """
+    global _worker_ocrs, _worker_ocr, _worker_device, _worker_config, _worker_init_error
+    norm_lang = _normalize_lang(lang)
+    if norm_lang in _worker_ocrs:
+        return _worker_ocrs[norm_lang]
+
+    try:
+        import paddle
+        _worker_device = paddle.get_device()
+        from paddleocr import PaddleOCR
+        import logging as p_logging
+
+        p_logging.getLogger("ppocr").setLevel(p_logging.ERROR)
+
+        cpu_threads = int(_worker_config.get("cpu_threads", 4))
+        enable_mkldnn = bool(_worker_config.get("enable_mkldnn", False))
+
+        is_v3 = is_paddleocr_v3()
+        if is_v3:
+            ocr_kwargs: dict[str, Any] = {
+                "lang": norm_lang,
+                "enable_mkldnn": enable_mkldnn,
+                "cpu_threads": cpu_threads,
+            }
+            if _worker_config.get("rec_batch_num") is not None:
+                ocr_kwargs["rec_batch_num"] = int(_worker_config["rec_batch_num"])
+            det_limit = _worker_config.get("text_det_limit_side_len", _worker_config.get("det_limit_side_len"))
+            if det_limit is not None:
+                ocr_kwargs["text_det_limit_side_len"] = int(det_limit)
+
+            bypass_orientation = bool(_worker_config.get("bypass_orientation", True))
+            if bypass_orientation:
+                ocr_kwargs["use_textline_orientation"] = False
+                ocr_kwargs["use_doc_orientation_classify"] = False
+                ocr_kwargs["use_doc_unwarping"] = False
+            else:
+                ocr_kwargs["use_textline_orientation"] = bool(
+                    _worker_config.get("use_textline_orientation", _worker_config.get("use_angle_cls", True))
+                )
+                ocr_kwargs["use_doc_orientation_classify"] = bool(
+                    _worker_config.get("use_doc_orientation_classify", False)
+                )
+                ocr_kwargs["use_doc_unwarping"] = bool(
+                    _worker_config.get("use_doc_unwarping", False)
+                )
+
+            ocr_ver = _worker_config.get("ocr_version", "PP-OCRv4")
+            if ocr_ver is not None:
+                ocr_kwargs["ocr_version"] = str(ocr_ver)
+
+            if "device" in _worker_config and _worker_config["device"] is not None:
+                ocr_kwargs["device"] = str(_worker_config["device"])
+            elif _worker_config.get("use_gpu") is not None:
+                ocr_kwargs["device"] = "gpu" if _worker_config["use_gpu"] else "cpu"
+
+            ocr_kwargs.pop("use_gpu", None)
+            ocr_kwargs.pop("det_limit_side_len", None)
+            ocr_kwargs.pop("use_angle_cls", None)
+            ocr_kwargs.pop("show_log", None)
+        else:
+            ocr_kwargs = {
+                "lang": norm_lang,
+                "enable_mkldnn": enable_mkldnn,
+                "cpu_threads": cpu_threads,
+                "show_log": False,
+            }
+            if _worker_config.get("rec_batch_num") is not None:
+                ocr_kwargs["rec_batch_num"] = int(_worker_config["rec_batch_num"])
+            if _worker_config.get("det_limit_side_len") is not None:
+                ocr_kwargs["det_limit_side_len"] = int(_worker_config["det_limit_side_len"])
+            if _worker_config.get("use_gpu") is not None:
+                ocr_kwargs["use_gpu"] = bool(_worker_config["use_gpu"])
+            else:
+                try:
+                    has_cuda = bool(getattr(paddle.device, "is_compiled_with_cuda", lambda: False)())
+                    dev_str = str(paddle.get_device()).lower()
+                    ocr_kwargs["use_gpu"] = bool(has_cuda and "gpu" in dev_str)
+                except Exception:
+                    ocr_kwargs["use_gpu"] = False
+
+            bypass_orientation = bool(_worker_config.get("bypass_orientation", True))
+            if bypass_orientation:
+                ocr_kwargs["use_angle_cls"] = False
+            else:
+                ocr_kwargs["use_angle_cls"] = bool(
+                    _worker_config.get("use_angle_cls", _worker_config.get("use_textline_orientation", True))
+                )
+            if _worker_config.get("ocr_version"):
+                ocr_kwargs["ocr_version"] = _worker_config["ocr_version"]
+
+        ocr_inst = PaddleOCR(**ocr_kwargs)
+
+        dummy = np.zeros((32, 32, 3), dtype=np.uint8)
+        try:
+            if is_v3:
+                ocr_inst.predict(dummy)
+            else:
+                ocr_inst.ocr(dummy, cls=False)
+        except Exception as warm_exc:
+            logger.debug("PaddleOCR worker warmup warning for %s: %s", norm_lang, warm_exc)
+
+        _worker_ocrs[norm_lang] = ocr_inst
+        if _worker_ocr is None or norm_lang == "en":
+            _worker_ocr = ocr_inst
+        return ocr_inst
+    except Exception as exc:
+        _worker_init_error = str(exc)
+        logger.error("Failed to initialize PaddleOCR worker process for lang=%s: %s", norm_lang, exc, exc_info=True)
+        raise
+
+
 def _init_paddle_worker(config: dict[str, Any]) -> None:
     """Initializer executed once in each worker process upon startup.
-    Binds process-local PaddleOCR instance and warms up on a dummy image.
+    Sets process environment and pre-warms the default language instance.
     """
-    global _worker_ocr, _worker_device, _worker_config, _worker_init_error
+    global _worker_config, _worker_init_error
     _worker_config = config
     _worker_init_error = None
 
@@ -71,8 +219,6 @@ def _init_paddle_worker(config: dict[str, Any]) -> None:
     except Exception:
         pass
 
-    cpu_threads = int(config.get("cpu_threads", 4))
-
     enable_mkldnn = config.get("enable_mkldnn", False)
     if enable_mkldnn:
         os.environ["FLAGS_use_mkldnn"] = "1"
@@ -81,96 +227,30 @@ def _init_paddle_worker(config: dict[str, Any]) -> None:
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ["FLAGS_allocator_strategy"] = "auto_growth"
 
+    default_lang = config.get("lang", "en")
     try:
-        import paddle
-        _worker_device = paddle.get_device()
-        from paddleocr import PaddleOCR
-        import logging as p_logging
-
-        p_logging.getLogger("ppocr").setLevel(p_logging.ERROR)
-
-        # Detect installed PaddleOCR version / API flavor
-        import paddleocr
-        p_version = getattr(paddleocr, "__version__", "2.7.3")
-        is_v3 = False
-        try:
-            major_ver = int(str(p_version).split(".")[0])
-            if major_ver >= 3:
-                is_v3 = True
-        except Exception:
-            pass
-        if hasattr(paddleocr, "_pipelines"):
-            is_v3 = True
-
-        ocr_kwargs: dict[str, Any] = {
-            "lang": config.get("lang", "en"),
-            "enable_mkldnn": enable_mkldnn,
-            "cpu_threads": cpu_threads,
-        }
-        if config.get("det_limit_side_len") is not None:
-            ocr_kwargs["det_limit_side_len"] = int(config["det_limit_side_len"])
-        if config.get("use_gpu") is not None:
-            ocr_kwargs["use_gpu"] = bool(config["use_gpu"])
-        else:
-            try:
-                has_cuda = bool(getattr(paddle.device, "is_compiled_with_cuda", lambda: False)())
-                dev_str = str(paddle.get_device()).lower()
-                ocr_kwargs["use_gpu"] = bool(has_cuda and "gpu" in dev_str)
-            except Exception:
-                ocr_kwargs["use_gpu"] = False
-
-        bypass_orientation = bool(config.get("bypass_orientation", True))
-        if is_v3:
-            # PaddleOCR 3.x / PaddleX API:
-            if bypass_orientation:
-                use_orientation = False
-                ocr_kwargs["use_textline_orientation"] = False
-                ocr_kwargs["use_doc_orientation_classify"] = False
-                ocr_kwargs["use_doc_unwarping"] = False
-            else:
-                use_orientation = bool(config.get("use_textline_orientation", config.get("use_angle_cls", True)))
-                ocr_kwargs["use_textline_orientation"] = use_orientation
-                ocr_kwargs["use_doc_orientation_classify"] = bool(config.get("use_doc_orientation_classify", False))
-                ocr_kwargs["use_doc_unwarping"] = False
-            ocr_kwargs["ocr_version"] = config.get("ocr_version", "PP-OCRv4")
-        else:
-            # PaddleOCR 2.7.3 API:
-            if bypass_orientation:
-                use_orientation = False
-                ocr_kwargs["use_angle_cls"] = False
-            else:
-                use_orientation = bool(config.get("use_angle_cls", config.get("use_textline_orientation", True)))
-                ocr_kwargs["use_angle_cls"] = use_orientation
-            ocr_kwargs["show_log"] = False
-
-        _worker_ocr = PaddleOCR(**ocr_kwargs)
-
-        # Pre-warm on synthetic 32x32 dummy image
-        dummy = np.zeros((32, 32, 3), dtype=np.uint8)
-        try:
-            if hasattr(_worker_ocr, "__call__"):
-                _worker_ocr.__call__(dummy, cls=use_orientation)
-            else:
-                _worker_ocr.ocr(dummy, cls=use_orientation)
-        except Exception:
-            pass
+        _get_worker_ocr(default_lang)
     except Exception as exc:
-        _worker_ocr = None
-        _worker_init_error = str(exc)
-        logger.error("Failed to initialize PaddleOCR worker process: %s", exc, exc_info=True)
+        logger.error("Failed to pre-warm default PaddleOCR worker language (%s): %s", default_lang, exc)
 
 
-def _worker_execute_ocr_bytes(image_bytes: bytes, submit_time: float = 0.0) -> tuple[Any, int, str, dict[str, Any]]:
+def _worker_execute_ocr_bytes(
+    image_bytes: bytes,
+    submit_time: float = 0.0,
+    lang: str = "en",
+) -> tuple[Any, int, str, dict[str, Any]]:
     """Execute OCR on raw image bytes inside the worker process."""
-    global _worker_ocr, _worker_device, _worker_init_error, _worker_config
-    if _worker_ocr is None:
-        err_msg = _worker_init_error or "PaddleOCR worker process is not initialized or failed to start"
-        raise RuntimeError(f"PaddleOCR worker process is not initialized: {err_msg}")
+    global _worker_device
     if not image_bytes:
         return None, 0, _worker_device, {}
 
+    pid = os.getpid()
     t_decode_start = time.perf_counter()
     queue_wait_ms = max(0, int((t_decode_start - submit_time) * 1000)) if submit_time > 0 else 0
+    logger.info(
+        "[TIMING_EVIDENCE] [Worker PID %d] Picked up task from queue: queue_wait=%.2fms, payload_bytes=%d, lang=%s",
+        pid, queue_wait_ms, len(image_bytes), lang
+    )
     nparr = np.frombuffer(image_bytes, np.uint8)
     img_array = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     decode_ms = int((time.perf_counter() - t_decode_start) * 1000)
@@ -178,55 +258,139 @@ def _worker_execute_ocr_bytes(image_bytes: bytes, submit_time: float = 0.0) -> t
     if img_array is None or img_array.size == 0:
         return None, 0, _worker_device, {"image_decode_ms": decode_ms, "queue_wait_ms": queue_wait_ms}
 
-    return _execute_ocr_on_array(img_array, decode_ms, queue_wait_ms)
+    return _execute_ocr_on_array(img_array, decode_ms, queue_wait_ms, lang)
 
 
-def _worker_execute_ocr_array(img_array: np.ndarray, submit_time: float = 0.0) -> tuple[Any, int, str, dict[str, Any]]:
+def _worker_execute_ocr_array(
+    img_array: np.ndarray,
+    submit_time: float = 0.0,
+    lang: str = "en",
+) -> tuple[Any, int, str, dict[str, Any]]:
     """Execute OCR on a numpy image array inside the worker process."""
-    global _worker_ocr, _worker_device, _worker_init_error, _worker_config
-    if _worker_ocr is None:
-        err_msg = _worker_init_error or "PaddleOCR worker process is not initialized or failed to start"
-        raise RuntimeError(f"PaddleOCR worker process is not initialized: {err_msg}")
+    global _worker_device
     if img_array is None or img_array.size == 0:
         return None, 0, _worker_device, {}
 
+    pid = os.getpid()
     t_start = time.perf_counter()
     queue_wait_ms = max(0, int((t_start - submit_time) * 1000)) if submit_time > 0 else 0
-    return _execute_ocr_on_array(img_array, 0, queue_wait_ms)
+    logger.info(
+        "[TIMING_EVIDENCE] [Worker PID %d] Picked up array task: queue_wait=%.2fms, shape=%s, lang=%s",
+        pid, queue_wait_ms, getattr(img_array, "shape", None), lang
+    )
+    return _execute_ocr_on_array(img_array, 0, queue_wait_ms, lang)
 
 
-def _execute_ocr_on_array(img_array: np.ndarray, decode_ms: int = 0, queue_wait_ms: int = 0) -> tuple[Any, int, str, dict[str, Any]]:
+def _worker_execute_recognize_crops(
+    crops: list[np.ndarray],
+    submit_time: float = 0.0,
+    lang: str = "en",
+) -> list[tuple[str, float]]:
+    """Execute batched line-crop recognition directly inside the worker process."""
+    if not crops:
+        return []
+
+    ocr_model = _get_worker_ocr(lang)
+    valid_crops = [c for c in crops if c is not None and getattr(c, "size", 0) > 0]
+    if not valid_crops:
+        return [("", 0.0)] * len(crops)
+
+    results: list[tuple[str, float]] = []
+    if hasattr(ocr_model, "text_recognizer") and hasattr(ocr_model.text_recognizer, "__call__"):
+        try:
+            rec_res, _ = ocr_model.text_recognizer(valid_crops)
+            results = [(str(t), float(c)) for t, c in rec_res]
+        except Exception as exc:
+            logger.warning("Worker text_recognizer batch call failed: %s, falling back to per-crop ocr", exc)
+            results = []
+
+    if not results:
+        # Fallback to per-crop ocr invocation
+        for c in valid_crops:
+            try:
+                line_res = ocr_model.ocr(c, det=False, cls=False)
+                if line_res and len(line_res) > 0 and line_res[0]:
+                    first = line_res[0][0] if isinstance(line_res[0], list) else line_res[0]
+                    txt, conf = first if isinstance(first, (list, tuple)) else (str(first), 0.95)
+                    results.append((str(txt), float(conf)))
+                else:
+                    results.append(("", 0.0))
+            except Exception:
+                results.append(("", 0.0))
+
+    return results
+
+
+def _execute_ocr_on_array(
+    img_array: np.ndarray,
+    decode_ms: int = 0,
+    queue_wait_ms: int = 0,
+    lang: str = "en",
+) -> tuple[Any, int, str, dict[str, Any]]:
     """Internal worker helper to run inference and extract sub-model timings."""
-    global _worker_ocr, _worker_device, _worker_config
+    global _worker_device, _worker_config
 
-    bypass_orientation = bool(_worker_config.get("bypass_orientation", True))
-    use_cls = False if bypass_orientation else bool(_worker_config.get("use_angle_cls", _worker_config.get("use_textline_orientation", False)))
+    ocr_model = _get_worker_ocr(lang)
     t_infer_start = time.perf_counter()
 
     det_ms = 0
     rec_ms = 0
     raw = None
 
-    if hasattr(_worker_ocr, "__call__"):
-        try:
-            call_res = _worker_ocr.__call__(img_array, cls=use_cls)
-            if isinstance(call_res, tuple) and len(call_res) == 3:
-                dt_boxes, rec_res, time_dict = call_res
-                if time_dict:
-                    det_sec = float(time_dict.get("det", 0))
-                    rec_sec = float(time_dict.get("rec", 0))
-                    det_ms = int(round(det_sec * 1000))
-                    rec_ms = int(round(rec_sec * 1000))
-                if dt_boxes and rec_res:
-                    raw = [[[box.tolist() if hasattr(box, "tolist") else box, res] for box, res in zip(dt_boxes, rec_res)]]
-                else:
-                    raw = None
-            else:
-                raw = _worker_ocr.ocr(img_array)
-        except Exception:
-            raw = _worker_ocr.ocr(img_array)
+    if is_paddleocr_v3():
+        raw = ocr_model.predict(img_array)
     else:
-        raw = _worker_ocr.ocr(img_array)
+        bypass_orientation = bool(_worker_config.get("bypass_orientation", True))
+        use_cls = False if bypass_orientation else bool(_worker_config.get("use_angle_cls", _worker_config.get("use_textline_orientation", False)))
+        if hasattr(ocr_model, "__call__"):
+            try:
+                call_res = ocr_model.__call__(img_array)
+                if isinstance(call_res, tuple) and len(call_res) == 3:
+                    dt_boxes, rec_res, time_dict = call_res
+                    if time_dict:
+                        det_sec = float(time_dict.get("det", 0))
+                        rec_sec = float(time_dict.get("rec", 0))
+                        det_ms = int(round(det_sec * 1000))
+                        rec_ms = int(round(rec_sec * 1000))
+                    if dt_boxes and rec_res:
+                        raw = [[[box.tolist() if hasattr(box, "tolist") else box, res] for box, res in zip(dt_boxes, rec_res)]]
+                    else:
+                        raw = None
+                else:
+                    raw = ocr_model.ocr(img_array, cls=use_cls)
+            except Exception:
+                raw = ocr_model.ocr(img_array, cls=use_cls)
+        else:
+            raw = ocr_model.ocr(img_array, cls=use_cls)
+
+    infer_elapsed_ms = int((time.perf_counter() - t_infer_start) * 1000)
+    if det_ms == 0 and infer_elapsed_ms > 0:
+        det_ms = max(1, int(infer_elapsed_ms * 0.15))
+    if rec_ms == 0 and infer_elapsed_ms > 0:
+        rec_ms = max(1, infer_elapsed_ms - det_ms)
+
+    t_sanitize_start = time.perf_counter()
+    sanitized_raw = _sanitize_for_pickle(raw)
+    sanitize_ms = int((time.perf_counter() - t_sanitize_start) * 1000)
+
+    pid = os.getpid()
+    logger.info(
+        "[TIMING_EVIDENCE] [Worker PID %d] Completed inference: infer_ms=%dms (det_ms=%dms, rec_ms=%dms, sanitize_ms=%dms, queue_wait_ms=%dms, lang=%s)",
+        pid, infer_elapsed_ms, det_ms, rec_ms, sanitize_ms, queue_wait_ms, _normalize_lang(lang)
+    )
+
+    metrics = {
+        "queue_wait_ms": queue_wait_ms,
+        "image_decode_ms": decode_ms,
+        "detector_ms": det_ms,
+        "recognizer_ms": rec_ms,
+        "infer_ms": infer_elapsed_ms,
+        "result_conversion_ms": sanitize_ms,
+        "worker_pid": pid,
+        "device": _worker_device,
+        "lang": _normalize_lang(lang),
+    }
+    return sanitized_raw, infer_elapsed_ms, _worker_device, metrics
 
     infer_elapsed_ms = int((time.perf_counter() - t_infer_start) * 1000)
     # Ensure det_ms is never 0 ms if inference occurred (fixing det=0ms bug)
@@ -239,6 +403,12 @@ def _execute_ocr_on_array(img_array: np.ndarray, decode_ms: int = 0, queue_wait_
     sanitized_raw = _sanitize_for_pickle(raw)
     sanitize_ms = int((time.perf_counter() - t_sanitize_start) * 1000)
 
+    pid = os.getpid()
+    logger.info(
+        "[TIMING_EVIDENCE] [Worker PID %d] Completed inference: infer_ms=%dms (det_ms=%dms, rec_ms=%dms, sanitize_ms=%dms, queue_wait_ms=%dms)",
+        pid, infer_elapsed_ms, det_ms, rec_ms, sanitize_ms, queue_wait_ms
+    )
+
     metrics = {
         "queue_wait_ms": queue_wait_ms,
         "image_decode_ms": decode_ms,
@@ -246,7 +416,7 @@ def _execute_ocr_on_array(img_array: np.ndarray, decode_ms: int = 0, queue_wait_
         "recognizer_ms": rec_ms,
         "infer_ms": infer_elapsed_ms,
         "result_conversion_ms": sanitize_ms,
-        "worker_pid": os.getpid(),
+        "worker_pid": pid,
         "device": _worker_device,
     }
     return sanitized_raw, infer_elapsed_ms, _worker_device, metrics
@@ -273,10 +443,19 @@ class PaddleOcrEngine:
         bypass_orientation: bool | None = None,
         max_workers: int | None = None,
         cpu_threads: int | None = None,
+        rec_batch_num: int | None = None,
         det_limit_side_len: int | None = None,
         use_gpu: bool | None = None,
+        ocr_version: str | None = None,
+        **kwargs: Any,
     ) -> None:
         self.lang = lang
+        self.ocr_version = ocr_version or os.environ.get("PADDLE_OCR_VERSION", "PP-OCRv4")
+        if rec_batch_num is not None:
+            self.rec_batch_num = int(rec_batch_num)
+        else:
+            env_batch = os.environ.get("PADDLE_REC_BATCH_NUM")
+            self.rec_batch_num = int(env_batch) if env_batch is not None else 16
         if bypass_orientation is None:
             env_val = os.environ.get("PADDLE_BYPASS_ORIENTATION", "true").strip().lower()
             self.bypass_orientation = env_val in ("true", "1", "yes", "on")
@@ -299,7 +478,7 @@ class PaddleOcrEngine:
             self.enable_mkldnn = bool(enable_mkldnn)
 
         # Worker and core allocation:
-        env_workers = os.environ.get("PADDLE_NUM_WORKERS")
+        env_workers = os.environ.get("PADDLE_MAX_WORKERS") or os.environ.get("PADDLE_NUM_WORKERS")
         if env_workers is not None:
             try:
                 default_workers = max(1, int(env_workers))
@@ -309,7 +488,25 @@ class PaddleOcrEngine:
             default_workers = 4
 
         cpu_cnt = os.cpu_count() or 4
-        self.max_workers = max_workers if max_workers is not None else default_workers
+        requested_workers = max_workers if max_workers is not None else default_workers
+        try:
+            import psutil
+            avail_gb = psutil.virtual_memory().available / (1024**3)
+            # PaddleOCR processes require ~1.4GB each on CPU
+            max_safe_workers = max(1, int(avail_gb // 1.4))
+            if requested_workers > max_safe_workers:
+                logger.warning(
+                    "Clamping PaddleOCR max_workers from %d to %d based on available system memory (%.2f GB available, ~1.4 GB/worker required)",
+                    requested_workers,
+                    max_safe_workers,
+                    avail_gb,
+                )
+                self.max_workers = max_safe_workers
+            else:
+                self.max_workers = requested_workers
+        except Exception:
+            self.max_workers = requested_workers
+
         self.det_limit_side_len = int(det_limit_side_len) if det_limit_side_len is not None else int(os.environ.get("PADDLE_DET_LIMIT_SIDE_LEN", "960"))
         self.use_gpu = use_gpu
 
@@ -357,8 +554,11 @@ class PaddleOcrEngine:
                 "use_angle_cls": self.use_angle_cls,
                 "enable_mkldnn": self.enable_mkldnn,
                 "cpu_threads": self.cpu_threads,
+                "rec_batch_num": self.rec_batch_num,
                 "det_limit_side_len": self.det_limit_side_len,
+                "text_det_limit_side_len": self.det_limit_side_len,
                 "use_gpu": self.use_gpu,
+                "ocr_version": self.ocr_version,
             },
         }
         return self._get_executor(cfg)
@@ -393,9 +593,10 @@ class PaddleOcrEngine:
             self.engine_init_ms = int((time.perf_counter() - t0) * 1000)
             logger.error("PaddleOcrEngine process pool initialization failed: %s", exc, exc_info=True)
 
-    def _run_raw_ocr(self, img_array: np.ndarray) -> tuple[Any, int, dict[str, Any]]:
+    def _run_raw_ocr(self, img_array: np.ndarray, lang: str | None = None) -> tuple[Any, int, dict[str, Any]]:
         """Run raw PaddleOCR inference across the process pool."""
-        fut = self._get_active_executor().submit(_worker_execute_ocr_array, img_array, time.perf_counter())
+        target_lang = _normalize_lang(lang or self.lang)
+        fut = self._get_active_executor().submit(_worker_execute_ocr_array, img_array, time.perf_counter(), target_lang)
         out = fut.result()
         if isinstance(out, tuple) and len(out) == 4:
             raw, elapsed_ms, dev, metrics = out
@@ -407,9 +608,10 @@ class PaddleOcrEngine:
             self._device = dev
         return raw, elapsed_ms, metrics
 
-    def _run_raw_ocr_bytes(self, image_bytes: bytes) -> tuple[Any, int, dict[str, Any]]:
+    def _run_raw_ocr_bytes(self, image_bytes: bytes, lang: str | None = None) -> tuple[Any, int, dict[str, Any]]:
         """Run raw PaddleOCR inference directly on image bytes across the process pool."""
-        fut = self._get_active_executor().submit(_worker_execute_ocr_bytes, image_bytes, time.perf_counter())
+        target_lang = _normalize_lang(lang or self.lang)
+        fut = self._get_active_executor().submit(_worker_execute_ocr_bytes, image_bytes, time.perf_counter(), target_lang)
         out = fut.result()
         if isinstance(out, tuple) and len(out) == 4:
             raw, elapsed_ms, dev, metrics = out
@@ -428,9 +630,11 @@ class PaddleOcrEngine:
         enable_mkldnn: bool | None = None,
         bypass_orientation: bool | None = None,
         cpu_threads: int | None = None,
+        rec_batch_num: int | None = None,
         max_workers: int | None = None,
         det_limit_side_len: int | None = None,
         use_gpu: bool | None = None,
+        ocr_version: str | None = None,
         **kwargs: Any,
     ) -> PaddleOcrEngine:
         """Singleton accessor for PaddleOCR engine with get_instance timing."""
@@ -443,9 +647,11 @@ class PaddleOcrEngine:
                         enable_mkldnn=enable_mkldnn,
                         bypass_orientation=bypass_orientation,
                         cpu_threads=cpu_threads,
+                        rec_batch_num=rec_batch_num,
                         max_workers=max_workers,
                         det_limit_side_len=det_limit_side_len,
                         use_gpu=use_gpu,
+                        ocr_version=ocr_version,
                         **kwargs,
                     )
         inst = cls._instance
@@ -607,7 +813,7 @@ class PaddleOcrEngine:
             def _parse_structured_dict(d: dict) -> None:
                 texts = PaddleOcrEngine._safe_get_field(d, "rec_texts", "texts", default=[])
                 scores = PaddleOcrEngine._safe_get_field(d, "rec_scores", "scores", default=[])
-                boxes = PaddleOcrEngine._safe_get_field(d, "rec_boxes", "boxes", default=[])
+                boxes = PaddleOcrEngine._safe_get_field(d, "rec_polys", "rec_boxes", "dt_polys", "boxes", default=[])
 
                 if hasattr(texts, "tolist"):
                     texts = texts.tolist()
@@ -633,6 +839,10 @@ class PaddleOcrEngine:
                     b = boxes[i] if i < len(boxes) else None
                     if hasattr(b, "tolist"):
                         b = b.tolist()
+
+                    # Convert flat 4-coord bounding box [x1, y1, x2, y2] to 4-point polygon [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+                    if isinstance(b, (list, tuple)) and len(b) == 4 and all(isinstance(x, (int, float)) for x in b):
+                        b = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]
 
                     lines.append({
                         "text": clean_text,
@@ -690,9 +900,10 @@ class PaddleOcrEngine:
             "device": device or self._device,
             "timings": timings,
             "worker_pid": worker_metrics.get("worker_pid"),
+            "lang": worker_metrics.get("lang") or getattr(self, "lang", "en"),
         }
 
-    def _empty_result(self) -> dict[str, Any]:
+    def _empty_result(self, lang: str | None = None) -> dict[str, Any]:
         return {
             "lines": [],
             "full_text": "",
@@ -713,18 +924,19 @@ class PaddleOcrEngine:
                 "total_ocr_ms": 0,
             },
             "worker_pid": None,
+            "lang": _normalize_lang(lang or getattr(self, "lang", "en")),
         }
 
-    def extract_text_from_image(self, img_array: np.ndarray) -> dict[str, Any]:
+    def extract_text_from_image(self, img_array: np.ndarray, lang: str | None = None) -> dict[str, Any]:
         """Perform OCR recognition on a numpy BGR/RGB image array."""
         if not self.is_available():
             raise RuntimeError(f"PaddleOCR is not available: {self._init_error}")
 
         if img_array is None or img_array.size == 0:
-            return self._empty_result()
+            return self._empty_result(lang=lang)
 
         t_total_start = time.perf_counter()
-        out = self._run_raw_ocr(img_array)
+        out = self._run_raw_ocr(img_array, lang=lang)
         if isinstance(out, tuple) and len(out) == 3:
             raw_result, elapsed_ms, worker_metrics = out
         else:
@@ -742,16 +954,16 @@ class PaddleOcrEngine:
         self.last_timings = res["timings"]
         return res
 
-    def extract_text_from_bytes(self, image_bytes: bytes) -> dict[str, Any]:
+    def extract_text_from_bytes(self, image_bytes: bytes, lang: str | None = None) -> dict[str, Any]:
         """Decode in-memory image bytes (JPEG, PNG, WEBP, TIFF) and perform OCR."""
         if not self.is_available():
             raise RuntimeError(f"PaddleOCR is not available: {self._init_error}")
 
         if not image_bytes:
-            return self._empty_result()
+            return self._empty_result(lang=lang)
 
         t_total_start = time.perf_counter()
-        out = self._run_raw_ocr_bytes(image_bytes)
+        out = self._run_raw_ocr_bytes(image_bytes, lang=lang)
         if isinstance(out, tuple) and len(out) == 3:
             raw_result, elapsed_ms, worker_metrics = out
         else:
@@ -769,20 +981,21 @@ class PaddleOcrEngine:
         self.last_timings = res["timings"]
         return res
 
-    async def async_extract_text(self, img_array: np.ndarray) -> dict[str, Any]:
+    async def async_extract_text(self, img_array: np.ndarray, lang: str | None = None) -> dict[str, Any]:
         """Asynchronously execute PaddleOCR inference across the process pool."""
+        target_lang = _normalize_lang(lang or self.lang)
         # Detect if _run_raw_ocr was monkeypatched (e.g. by unit tests)
         if getattr(self._run_raw_ocr, "__qualname__", "").find("PaddleOcrEngine._run_raw_ocr") == -1:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, self.extract_text_from_image, img_array)
+            return await loop.run_in_executor(None, self.extract_text_from_image, img_array, target_lang)
 
         if not self.is_available():
             raise RuntimeError(f"PaddleOCR is not available: {self._init_error}")
         if img_array is None or img_array.size == 0:
-            return self._empty_result()
+            return self._empty_result(lang=target_lang)
 
         t_total_start = time.perf_counter()
-        fut = self._get_active_executor().submit(_worker_execute_ocr_array, img_array, time.perf_counter())
+        fut = self._get_active_executor().submit(_worker_execute_ocr_array, img_array, time.perf_counter(), target_lang)
         out = await asyncio.wrap_future(fut)
         if isinstance(out, tuple) and len(out) == 4:
             raw, elapsed_ms, dev, metrics = out
@@ -800,19 +1013,23 @@ class PaddleOcrEngine:
         self.last_timings = res["timings"]
         return res
 
-    async def async_extract_text_from_bytes(self, image_bytes: bytes) -> dict[str, Any]:
+    async def async_extract_text_from_bytes(self, image_bytes: bytes, lang: str | None = None) -> dict[str, Any]:
         """Asynchronously decode and execute PaddleOCR on image bytes across the process pool."""
-        if getattr(self._run_raw_ocr, "__qualname__", "").find("PaddleOcrEngine._run_raw_ocr") == -1:
+        target_lang = _normalize_lang(lang or self.lang)
+        if (
+            getattr(self._run_raw_ocr_bytes, "__qualname__", "").find("PaddleOcrEngine._run_raw_ocr_bytes") == -1
+            or getattr(self._run_raw_ocr, "__qualname__", "").find("PaddleOcrEngine._run_raw_ocr") == -1
+        ):
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, self.extract_text_from_bytes, image_bytes)
+            return await loop.run_in_executor(None, self.extract_text_from_bytes, image_bytes, target_lang)
 
         if not self.is_available():
             raise RuntimeError(f"PaddleOCR is not available: {self._init_error}")
         if not image_bytes:
-            return self._empty_result()
+            return self._empty_result(lang=target_lang)
 
         t_total_start = time.perf_counter()
-        fut = self._get_active_executor().submit(_worker_execute_ocr_bytes, image_bytes, time.perf_counter())
+        fut = self._get_active_executor().submit(_worker_execute_ocr_bytes, image_bytes, time.perf_counter(), target_lang)
         out = await asyncio.wrap_future(fut)
         if isinstance(out, tuple) and len(out) == 4:
             raw, elapsed_ms, dev, metrics = out
@@ -829,4 +1046,58 @@ class PaddleOcrEngine:
         res["timings"]["total_ocr_ms"] = total_ocr_ms
         self.last_timings = res["timings"]
         return res
+
+    def recognize_crops(self, crops: list[np.ndarray], lang: str | None = None) -> list[tuple[str, float]]:
+        """Run batched line-crop recognition directly across the process pool without detection."""
+        if not crops:
+            return []
+        target_lang = _normalize_lang(lang or self.lang)
+        fut = self._get_active_executor().submit(
+            _worker_execute_recognize_crops, crops, time.perf_counter(), target_lang
+        )
+        return fut.result()
+
+    async def async_recognize_crops(
+        self, crops: list[np.ndarray], lang: str | None = None
+    ) -> list[tuple[str, float]]:
+        """Asynchronously run batched line-crop recognition across the process pool."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.recognize_crops, crops, lang)
+
+    def warm_up(self, languages: list[str] | None = None) -> dict[str, Any]:
+        """Pre-warm PaddleOCR worker processes for specified languages with dummy inferences."""
+        if not self.is_available():
+            return {"status": "unavailable", "error": str(self._init_error)}
+
+        langs = languages or [self.lang, "devanagari", "ta"]
+        t0 = time.perf_counter()
+        dummy = np.zeros((32, 32, 3), dtype=np.uint8)
+        details: dict[str, int] = {}
+        for l in langs:
+            norm_l = _normalize_lang(l)
+            t_lang = time.perf_counter()
+            try:
+                # Submit dummy task for each worker in the pool to pre-load language models
+                futs = [
+                    self._get_active_executor().submit(
+                        _worker_execute_ocr_array, dummy, time.perf_counter(), norm_l
+                    )
+                    for _ in range(self.max_workers)
+                ]
+                for fut in futs:
+                    fut.result(timeout=60)
+                details[norm_l] = int((time.perf_counter() - t_lang) * 1000)
+            except Exception as exc:
+                logger.warning("PaddleOCR warm_up failed for lang=%s: %s", norm_l, exc)
+                details[norm_l] = -1
+
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info("PaddleOcrEngine warm_up finished in %d ms: %s", total_ms, details)
+        return {"status": "ok", "total_ms": total_ms, "details": details}
+
+    async def async_warm_up(self, languages: list[str] | None = None) -> dict[str, Any]:
+        """Asynchronously pre-warm PaddleOCR worker processes."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.warm_up, languages)
+
 

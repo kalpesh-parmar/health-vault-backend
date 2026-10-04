@@ -1,5 +1,5 @@
 """API route modules."""
-from . import chat, embeddings, extraction, health, ocr, rag, summary, voice, translation, language
+from . import chat, embeddings, extraction, health, ocr, rag, summary, voice, translation, language, internal_documents
 
 __all__ = [
     "chat",
@@ -12,4 +12,5 @@ __all__ = [
     "voice",
     "translation",
     "language",
+    "internal_documents",
 ]

@@ -10,7 +10,7 @@ Designed to run independently or as part of the Health Vault monorepo, it featur
 
 - **Fast Direct-Text Routing**: Automatically detects native/born-digital PDFs and extracts their text using PyMuPDF (rendering latency < 100ms), bypassing slow and expensive vision models.
 - **Vision-Based OCR & Fallback**: Renders scanned PDFs or images and extracts structured data using vision LLMs (e.g., Qwen-VL, Gemini), fallback-parsing summaries to prevent slow roundtrips.
-- **Vector Search & RAG Chat**: Integrates with PostgreSQL (`pgvector`) using SentenceTransformers (`all-MiniLM-L6-v2`) to perform semantic retrieval and contextual Q&A.
+- **Vector Search & RAG Chat**: Integrates with PostgreSQL (`pgvector`) using Ollama (`bge-m3:latest`, 1024-dim, 8192-token context) to perform semantic retrieval and contextual Q&A.
 - **Real-time Voice websocket**: Features WebSocket-based speech-to-text (Whisper) and text-to-speech (TTS) pipelines with clean session buffers.
 - **Production Readiness**: Includes health checks, automated CORS parsing, PM2 process configs, optimized Nginx buffer rules, and GitHub Actions CI.
 
@@ -21,7 +21,7 @@ Designed to run independently or as part of the Health Vault monorepo, it featur
 - **Framework**: FastAPI, Uvicorn
 - **Database ORM**: SQLAlchemy 2.0 (Async) + `asyncpg`
 - **Machine Learning / AI**:
-  - _Embeddings_: `sentence-transformers`
+  - _Embeddings_: Ollama `bge-m3:latest` (1024-dimension, 8192-token context)
   - _Speech-to-Text_: `faster-whisper`
   - _Text-to-Speech_: `TTS`
   - _Vision/LLM Client_: `google-genai` / HTTP Client for Ollama & OpenAI compatibility

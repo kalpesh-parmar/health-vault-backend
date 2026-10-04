@@ -70,6 +70,7 @@
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^7.0.0",
     "to-words": "^7.1.0",
+    "uvicorn": "^0.0.1-security",
     "zod": "^3.25.76"
   },
   "devDependencies": {

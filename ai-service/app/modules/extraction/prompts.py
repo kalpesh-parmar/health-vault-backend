@@ -1,78 +1,93 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+
+from app.modules.ocr.cleanup import clean_ocr_text, compress_for_llm
+
+
+def _format_tables(tables: list[Any]) -> str:
+    if not tables:
+        return ""
+    rendered: list[str] = []
+    for i, table in enumerate(tables):
+        if not isinstance(table, dict):
+            continue
+        rows = table.get("rows") or table.get("cells") or []
+        if isinstance(rows, list) and rows:
+            table_lines = [f"Table {i+1}:"]
+            for row in rows:
+                if isinstance(row, list):
+                    table_lines.append(" | ".join(str(c).strip() for c in row if str(c).strip()))
+                elif isinstance(row, dict):
+                    table_lines.append(" | ".join(f"{k}: {v}" for k, v in row.items() if str(v).strip()))
+            rendered.append("\n".join(table_lines))
+    return "\n\n".join(rendered)
 
 
 def structured_document_prompt(structured_ocr: dict) -> list[dict]:
+    full_text = structured_ocr.get("fullText") if isinstance(structured_ocr, dict) else ""
+    if not full_text and isinstance(structured_ocr, dict) and "paragraphs" in structured_ocr:
+        full_text = "\n".join(
+            p.get("text", "") for p in structured_ocr.get("paragraphs", []) if isinstance(p, dict)
+        )
+
+    tables = structured_ocr.get("tables") if isinstance(structured_ocr, dict) else []
+    tables_text = _format_tables(tables) if isinstance(tables, list) else ""
+
+    if full_text:
+        cleaned_text = clean_ocr_text(full_text)
+        if not cleaned_text:
+            cleaned_text = full_text.strip()
+        if len(cleaned_text) > 48_000:
+            cleaned_text = compress_for_llm(cleaned_text, max_chars=48_000)
+
+        doc_content = cleaned_text
+        if tables_text:
+            doc_content += "\n\nExtracted Tables:\n" + tables_text
+    else:
+        doc_content = json.dumps(structured_ocr, ensure_ascii=False)
+        if len(doc_content) > 48_000:
+            doc_content = doc_content[:48_000]
+
     return [
         {
             "role": "system",
             "content": (
                 "You are a deterministic medical document extraction engine. "
-                "Return only valid JSON. Do not diagnose, prescribe, or invent missing facts."
+                "Return only valid JSON matching the 14-section healthcare schema. "
+                "Do not diagnose, prescribe, or invent missing facts. "
+                "Never derive date of birth from age. Genuinely absent sections must be empty arrays or null."
             ),
         },
         {
             "role": "user",
-            "content": f"""
-Convert this OCR/layout JSON into normalized healthcare JSON.
-
-Required schema example:
+            "content": f"""Convert this OCR content into normalized JSON conforming to the 14-section schema:
 {{
-  "patientInfo": {{}},
-  "hospitalInfo": {{}},
-  "doctorInfo": {{}},
+  "documentInfo": {{"documentType": "PRESCRIPTION", "language": "en"}},
+  "patientInfo": {{"fullName": null, "age": null, "gender": null}},
+  "providerInfo": {{"primary": {{"name": null, "specialty": null}}, "providers": []}},
+  "facilityInfo": {{"name": null, "address": null}},
   "diagnosis": [],
-  "medications": [],
-  "labResults": [],
+  "symptoms": [],
   "vitals": [],
-  "recommendations": [],
-  "summary": "",
-  "language": null,
-  "pageCount": 1,
-  "sections": [],
-  "paragraphs": [],
-  "tables": [],
-  "forms": [],
-  "prescriptions": [
-    {{
-      "doctorName": null,
-      "pharmacyName": null,
-      "issueDate": null,
-      "refillInstructions": null,
-      "medications": [],
-      "prescribedBy": null,
-      "timing": null
-    }}
-  ],
-  "labReports": [],
-  "medicalEntities": [
-    {{
-      "type": "medicine",
-      "name": "Paracetamol",
-      "value": "500",
-      "unit": "mg",
-      "normalRange": null,
-      "isAbnormal": false,
-      "confidence": 0.95,
-      "sourceText": null,
-      "metadata": {{}}
-    }}
-  ],
-  "confidence": 0.95,
-  "fullText": ""
+  "labResults": [{{"testName": "Test", "value": "10", "unit": "mg/dL"}}],
+  "medications": [{{"name": "Drug", "dosage": "500mg", "frequency": "1-0-1"}}],
+  "procedures": [],
+  "treatments": [],
+  "treatmentPlan": [],
+  "financialSummary": {{"currency": "INR", "estimatedTotal": null}},
+  "additionalInformation": {{"followUpDate": null, "remarks": null}}
 }}
 
 Rules:
-- Keep the top-level patientInfo, hospitalInfo, doctorInfo, diagnosis,
-  medications, labResults, vitals, recommendations, and summary keys even
-  when values are empty.
-- Do not invent missing medical facts. Empty objects and arrays are valid.
-- Preserve values, units, ranges, dates, and abnormal flags exactly when present.
-- Use null for unknown or absent optional values. Never output placeholder tokens or type names.
+1. Output all 14 top-level keys even if empty.
+2. Patient Info: Preserve fullName verbatim. NEVER compute dateOfBirth from age.
+3. Providers: Capture all identified doctors/clinicians.
+4. Grounding: Do not invent facts. Use null for absent fields and [] for absent lists. Never output placeholder tokens.
 
-OCR JSON:
-{json.dumps(structured_ocr, ensure_ascii=False)}
+Document Content:
+{doc_content}
 """,
         },
     ]

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+import logging
+import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.infrastructure.db.session import Database
 from app.infrastructure.storage.gcs import GcsStorageClient
@@ -114,6 +118,7 @@ class Container:
 
         # Pipeline Stage Handlers & Orchestrator
         from app.infrastructure.db.repositories.job_repository import JobRepository
+        from app.infrastructure.db.repositories.lab_result_repository import LabResultRepository
         from app.services.notifier import ProgressNotifier
         from app.services.pipeline.lifecycle_service import PipelineLifecycleService
         from app.services.pipeline.checkpoint_service import CheckpointService
@@ -129,6 +134,7 @@ class Container:
         from app.services.pipeline.orchestrator import PipelineOrchestrator
 
         self.job_repo = JobRepository(self.db)
+        self.lab_result_repo = LabResultRepository(self.db)
         self.notifier = ProgressNotifier(self.db)
         self.lifecycle_service = PipelineLifecycleService(self.job_repo, self.notifier)
         self.checkpoint_service = CheckpointService(self.job_repo, self.storage)
@@ -137,6 +143,7 @@ class Container:
             enable_mkldnn=settings.paddle_enable_mkldnn,
             bypass_orientation=settings.paddle_bypass_orientation,
             cpu_threads=settings.paddle_cpu_threads,
+            rec_batch_num=settings.paddle_rec_batch_num,
             max_workers=settings.paddle_max_workers,
             det_limit_side_len=settings.paddle_det_limit_side_len,
             use_gpu=settings.paddle_use_gpu,
@@ -149,6 +156,7 @@ class Container:
             paddle_engine=self.paddle_ocr,
             min_direct_text_chars=settings.ai_min_text_chars,
             cache=self.ocr_cache,
+            settings=settings,
         )
         self.layout_stage_handler = LayoutStageHandler()
         self.graph_stage_handler = GraphStageHandler(self.storage)
@@ -172,13 +180,64 @@ class Container:
             analysis_handler=self.analysis_stage_handler,
             summary_handler=self.summary_stage_handler,
             embedding_handler=self.embedding_stage_handler,
+            lab_result_repo=self.lab_result_repo,
         )
 
     @property
     def vision(self):
         return self.vision_model
 
+    async def _prewarm_ollama_models(self) -> None:
+        """Pre-warm Ollama vision/classification models with keep_alive to avoid first-request loading penalty."""
+        base_url = (self.settings.ollama_base_url or self.settings.ai_base_url or "").rstrip("/")
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+        if not base_url:
+            return
+
+        models_to_warm: list[str] = []
+        for m in (self.settings.medgemma_model, self.settings.ai_model):
+            if m and m not in models_to_warm:
+                models_to_warm.append(m)
+
+        timeout = min(15.0, self.settings.ai_timeout_seconds)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                for model_name in models_to_warm:
+                    try:
+                        payload = {
+                            "model": model_name,
+                            "prompt": "warmup",
+                            "stream": False,
+                            "keep_alive": self.settings.ollama_keep_alive,
+                            "options": {"num_predict": 1},
+                        }
+                        resp = await client.post(f"{base_url}/api/generate", json=payload)
+                        if resp.status_code == 200:
+                            logger.info(
+                                "Ollama model pre-warmed successfully: %s (keep_alive=%s)",
+                                model_name,
+                                self.settings.ollama_keep_alive,
+                            )
+                        else:
+                            logger.debug(
+                                "Ollama pre-warm returned HTTP %s for model %s",
+                                resp.status_code,
+                                model_name,
+                            )
+                    except Exception as exc:
+                        logger.warning("Ollama pre-warm skipped for %s: %s", model_name, exc)
+        except Exception as exc:
+            logger.warning("Ollama client connection failed during pre-warm: %s", exc)
+
     async def start(self) -> None:
+        if self.settings.lifespan_warmup_enabled:
+            try:
+                await self.paddle_ocr.async_warm_up(self.settings.lifespan_warmup_ocr_languages)
+            except Exception as exc:
+                logger.warning("Lifespan PaddleOCR warm-up warning: %s", exc)
+            await self._prewarm_ollama_models()
+
         await self.vision.warm_up()
         await self.translation.warm_up()
         await self.language_detection.warm_up()

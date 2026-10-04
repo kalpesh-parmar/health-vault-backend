@@ -1,0 +1,45 @@
+{
+  "docId": "gu_03_prescription",
+  "language": "gu",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "શિવમ ક્લિનિક અને ડે કેર સેન્ટર\nઘોડદોડ રોડ, સુરત | હેલ્પલાઇન: ૦૨૬૧-૨૭૮૯૧૨૩\nડૉ. ભાવનાબેન શાહ\nએમ.બી.બી.એસ., ફેમિલી ફિઝિશિયન\nદર્દીનું નામ / Patient Name: શ્રીમતી જયાબેન સોલંકી    |    ઉંમર / Age: ૪૨ વર્ષ    |    જાતિ / Gender: સ્ત્રી\nતારીખ: ૨૬/૦૩/૨૦૨૬\nતીવ્ર ગેસ્ટ્રોએન્ટેરાઇટિસ અને પેટનો દુખાવો (Acute Gastroenteritis)\n૧. Tab. Oflox-OZ (ઓફ્લોક્સ ઓઝેડ) - સવારે અને રાત્રે જમ્યા પછી ૧ ગોળી (૧-૦-૧) (૫ દિવસ)\n૨. Tab. Dolo 650 (ડોલો ૬૫૦) - તાવ કે શરીરના દુખાવા માટે જરૂર મુજબ (૩ દિવસ)\n૩. Tab. Razo 20 (રેબેપ્રાઝોલ ૨૦) - સવારે ભૂખ્યા પેટે ૧ ગોળી (૧-૦-૦) (૭ દિવસ)\n૪. Electral Powder (ORS) - ૧ લીટર સ્વચ્છ પાણીમાં ૧ પેકેટ ઓગાળી દિવસ દરમિયાન પીવું (૩ દિવસ)\nહળવો અને બાફેલો ખોરાક લેવો (ખીચડી, છાશ). બહારનો ખોરાક સદંતર બંધ કરવો.",
+  "patientInfo": {
+    "name": "શ્રીમતી જયાબેન સોલંકી",
+    "age": 42,
+    "gender": "F",
+    "doctorName": "ડૉ. ભાવનાબેન શાહ",
+    "date": "2026-03-26"
+  },
+  "medications": [
+    {
+      "name": "Oflox-OZ",
+      "dosage": "1 tab",
+      "frequency": "1-0-1",
+      "duration": "5 days"
+    },
+    {
+      "name": "Dolo 650",
+      "dosage": "650 mg",
+      "frequency": "SOS",
+      "duration": "3 days"
+    },
+    {
+      "name": "Razo 20",
+      "dosage": "20 mg",
+      "frequency": "1-0-0",
+      "duration": "7 days"
+    },
+    {
+      "name": "Electral Powder",
+      "dosage": "1 sachet",
+      "frequency": "TID",
+      "duration": "3 days"
+    }
+  ],
+  "labResults": []
+}

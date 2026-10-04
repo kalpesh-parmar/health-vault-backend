@@ -96,30 +96,13 @@ const documentAiSummary = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => patient.id, { onDelete: "cascade" }),
-    hospitalName: varchar("hospital_name", { length: 255 }),
-    doctorName: varchar("doctor_name", { length: 255 }),
-    patientName: varchar("patient_name", { length: 255 }),
-    reportType: varchar("report_type", { length: 128 }),
-    reportDate: timestamp("report_date"),
-    diagnosis: text("diagnosis"),
-    observations: jsonb("observations").default([]).notNull(),
-    recommendations: jsonb("recommendations").default([]).notNull(),
-    medications: jsonb("medications").default([]).notNull(),
-    allergies: jsonb("allergies").default([]).notNull(),
-    bloodGroup: varchar("blood_group", { length: 8 }),
-    testResults: jsonb("test_results").default([]).notNull(),
-    summary: text("summary"),
     aiModel: varchar("ai_model", { length: 128 }),
     aiProvider: varchar("ai_provider", { length: 32 }),
     rawAiResponse: jsonb("raw_ai_response"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => [
-    index("document_ai_summary_user_id_idx").on(table.userId),
-    index("document_ai_summary_report_type_idx").on(table.reportType),
-    index("document_ai_summary_report_date_idx").on(table.reportDate),
-  ],
+  (table) => [index("document_ai_summary_user_id_idx").on(table.userId)],
 );
 
 const medicalGraph = pgTable(

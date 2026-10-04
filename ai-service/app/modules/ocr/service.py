@@ -237,14 +237,6 @@ class OcrService:
             return
 
         page_errors = [err for err in (metrics.get("page_errors") or []) if err]
-        # All pages blank and no error → the document really is empty. Allow it.
-        recoverable = {"http_error", "timeout", "transport_error", "exhausted", "unknown", "empty_response"}
-        if not page_errors or not (set(page_errors) & recoverable):
-            logger.info(
-                "ocr_empty_but_blank_document",
-                extra={"document_name": filename, "page_errors": ",".join(sorted(set(page_errors))) if page_errors else "none"},
-            )
-            return
 
         logger.error(
             "ocr_empty_result_rejected",

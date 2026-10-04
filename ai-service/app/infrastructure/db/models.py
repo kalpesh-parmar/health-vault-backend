@@ -27,6 +27,12 @@ class Patient(Base):
     soft_delete: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+
+
 class ChatHistory(Base):
     __tablename__ = "chat_history"
 
@@ -39,3 +45,28 @@ class ChatHistory(Base):
     citations: Mapped[list] = mapped_column(JSONB, default=list)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PatientLabResult(Base):
+    __tablename__ = "patient_lab_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True)
+    report_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    canonical_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    test_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    value_numeric: Mapped[float | None] = mapped_column(nullable=True)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reference_range: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    flag: Mapped[str] = mapped_column(String(32), default="NORMAL", nullable=False)
+    is_abnormal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    test_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    page_no: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+

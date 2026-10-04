@@ -1,0 +1,7 @@
+page,method,status,prep_duration_sec,ocr_duration_sec,total_duration_sec,chars_extracted,lines_count,confidence,retries,error
+1,PyMuPDF Direct Text,SUCCESS,0.345,0.004,0.349,8594,177,1.0,0,
+2,PyMuPDF Direct Text,SUCCESS,0.245,0.003,0.248,8108,102,1.0,0,
+3,PyMuPDF Direct Text,SUCCESS,0.234,0.004,0.238,7994,101,1.0,0,
+4,PyMuPDF Direct Text,SUCCESS,0.237,0.004,0.241,8606,119,1.0,0,
+5,PyMuPDF Direct Text,SUCCESS,0.24,0.004,0.244,8362,125,1.0,0,
+6,PyMuPDF Direct Text,SUCCESS,0.246,0.004,0.251,9556,132,1.0,0,

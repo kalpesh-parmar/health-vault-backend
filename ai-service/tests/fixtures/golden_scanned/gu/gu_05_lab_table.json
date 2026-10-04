@@ -1,0 +1,39 @@
+{
+  "docId": "gu_05_lab_table",
+  "language": "gu",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "ગુજરાત પેથોલોજી લેબોરેટરી\nથાઇરોઇડ પ્રોફાઇલ રિપોર્ટ (Thyroid Profile Panel)\nડૉ. કિરીટ પરીખ\nએમ.ડી. (પેથોલોજી)\nદર્દીનું નામ / Patient Name: શ્રીમતી મનીષાબેન ત્રિવેદી    |    ઉંમર / Age: ૩૯ વર્ષ    |    જાતિ / Gender: સ્ત્રી\nતારીખ: ૨૮/૦૩/૨૦૨૬\nથાઇરોઇડ હોર્મોન તપાસ (Thyroid Function Test)\nહોર્મોન તપાસ (Test Name) | તપાસ મૂલ્ય (Result) | એકમ (Unit) | સામાન્ય શ્રેણી (Biological Range)\nકુલ ટી૩ (Total Triiodothyronine T3) | 1.28 | ng/mL | 0.80 - 2.00\nકુલ ટી૪ (Total Thyroxine T4) | 8.2 | mcg/dL | 5.1 - 14.1\nટી.એસ.એચ. (TSH Ultrasensitive) | 2.65 | uIU/mL | 0.27 - 4.20",
+  "patientInfo": {
+    "name": "શ્રીમતી મનીષાબેન ત્રિવેદી",
+    "age": 39,
+    "gender": "F",
+    "doctorName": "ડૉ. કિરીટ પરીખ",
+    "date": "2026-03-28"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Total T3",
+      "value": 1.28,
+      "unit": "ng/mL",
+      "referenceRange": "0.80 - 2.00"
+    },
+    {
+      "testName": "Total T4",
+      "value": 8.2,
+      "unit": "mcg/dL",
+      "referenceRange": "5.1 - 14.1"
+    },
+    {
+      "testName": "TSH",
+      "value": 2.65,
+      "unit": "uIU/mL",
+      "referenceRange": "0.27 - 4.20"
+    }
+  ]
+}

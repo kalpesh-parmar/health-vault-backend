@@ -59,8 +59,68 @@ def extract_first_json_object(text: str) -> str | None:
     return None
 
 
+def repair_truncated_json(text: str) -> str:
+    """Repair JSON that was truncated (e.g. by token length limits)."""
+    s = text.strip()
+    if not s:
+        return s
+
+    in_string = False
+    escape = False
+    for char in s:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+
+    if in_string:
+        s += '"'
+
+    # Remove trailing dangling colon, comma, or incomplete key
+    s = re.sub(r':\s*"[^"]*$', r': null', s)
+    s = re.sub(r':\s*$', r': null', s)
+    s = re.sub(r',\s*$', '', s)
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+
+    # Balance brackets
+    stack = []
+    in_string = False
+    escape = False
+    for char in s:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(char)
+        elif char in "}]":
+            if stack:
+                if (char == "}" and stack[-1] == "{") or (char == "]" and stack[-1] == "["):
+                    stack.pop()
+
+    for open_bracket in reversed(stack):
+        if open_bracket == "{":
+            s += "}"
+        elif open_bracket == "[":
+            s += "]"
+
+    return s
+
+
 def parse_json_object(text: str) -> Any:
-    """Attempt to parse JSON from the text, handling code fences and trailing/leading junk.
+    """Attempt to parse JSON from the text, handling code fences, trailing junk, and truncation.
 
     Raises json.JSONDecodeError if parsing fails completely.
     """
@@ -81,4 +141,13 @@ def parse_json_object(text: str) -> Any:
                 return json.loads(extracted)
             except json.JSONDecodeError:
                 pass
+
+        # Step 4: Try repairing truncated JSON (e.g. hit token length limit)
+        try:
+            candidate = extracted or cleaned
+            repaired = repair_truncated_json(candidate)
+            return json.loads(repaired)
+        except Exception:
+            pass
+
         raise direct_err

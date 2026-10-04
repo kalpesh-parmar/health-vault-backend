@@ -63,4 +63,3 @@ async def validate_medical(
         ) from exc
     finally:
         await file.close()
-

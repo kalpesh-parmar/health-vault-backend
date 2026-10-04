@@ -1,0 +1,22 @@
+{
+  "documentType": "DISCHARGE_SUMMARY",
+  "pageCount": 2,
+  "page1Routing": "pymupdf_direct",
+  "page2Routing": "vision_ocr",
+  "patientInfo": {
+    "name": "Emily Clark",
+    "age": 34,
+    "gender": "FEMALE"
+  },
+  "diagnosis": ["Acute Gastroenteritis"],
+  "medications": [
+    {
+      "name": "Ondansetron 4mg",
+      "dosage": "4mg"
+    },
+    {
+      "name": "Ofloxacin 200mg",
+      "dosage": "200mg"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator
 
 from app.core.errors import ModelUnavailableError
+from app.core.json_utils import parse_json_object
 from app.services.ai_client import AiClient, AiClientConfig, build_ai_client
 from app.services.llm.utils import clean_messages
 from app.settings import Settings
@@ -27,6 +28,7 @@ class LLMService:
         timeout_seconds: float,
         max_retries: int,
         max_output_tokens: int,
+        keep_alive: str = "10m",
     ) -> None:
         if not base_url:
             raise ValueError("AI_BASE_URL is required")
@@ -34,6 +36,7 @@ class LLMService:
             raise ValueError("AI_MODEL is required")
 
         self.model = model.strip()
+        self.keep_alive = keep_alive
         self._client: AiClient = build_ai_client(
             AiClientConfig(
                 api_key=api_key or "",
@@ -42,6 +45,7 @@ class LLMService:
                 timeout_seconds=float(timeout_seconds),
                 max_retries=int(max_retries),
                 max_output_tokens=int(max_output_tokens),
+                keep_alive=self.keep_alive,
             )
         )
 
@@ -54,21 +58,27 @@ class LLMService:
         format_json: bool = False,
         num_predict: int | None = None,
     ) -> str:
-        del model
+        effective_model = (model or self.model).strip()
         started = time.monotonic()
         try:
-            text, _finish_reason = await self._client.generate_text(
+            text, finish_reason = await self._client.generate_text(
+                model=effective_model,
                 messages=clean_messages(messages),
                 temperature=temperature,
                 format_json=format_json,
                 max_tokens=num_predict,
             )
         except Exception as exc:
-            logger.error("llm_model_failed", extra={"engine": self._client.engine, "model": self.model, "error": str(exc)})
-            raise LLMModelError(f"Configured AI model failed: {exc}") from exc
+            logger.error(
+                "llm_model_failed",
+                extra={"engine": self._client.engine, "model": effective_model, "error": str(exc)},
+            )
+            raise LLMModelError(f"Configured AI model ({effective_model}) failed: {exc}") from exc
 
         if not text.strip():
-            raise LLMModelError("Configured AI model returned an empty response")
+            raise LLMModelError(
+                f"Configured AI model ({effective_model}) returned an empty response (finish_reason={finish_reason})"
+            )
         if format_json:
             _validate_json(text)
 
@@ -76,7 +86,8 @@ class LLMService:
             "llm_chat_ok",
             extra={
                 "engine": self._client.engine,
-                "model": self.model,
+                "model": effective_model,
+                "finish_reason": finish_reason,
                 "elapsed_ms": int((time.monotonic() - started) * 1000),
                 "fallback_used": False,
             },
@@ -118,12 +129,12 @@ def build_llm_service(settings: Settings) -> LLMService:
         timeout_seconds=settings.ai_timeout_seconds,
         max_retries=settings.ai_max_retries,
         max_output_tokens=settings.ai_max_output_tokens,
+        keep_alive=getattr(settings, "ollama_keep_alive", "10m") or "10m",
     )
 
 
 def _validate_json(text: str) -> None:
-    candidate = (text or "").replace("```json", "").replace("```", "").strip()
     try:
-        json.loads(candidate)
-    except json.JSONDecodeError as exc:
+        parse_json_object(text)
+    except Exception as exc:
         raise LLMModelError("Configured AI model returned invalid JSON") from exc

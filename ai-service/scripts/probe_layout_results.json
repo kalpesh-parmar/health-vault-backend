@@ -1,0 +1,15 @@
+{
+  "ocr_elapsed_ms": 3700.303499994334,
+  "total_lines": 33,
+  "lines_with_boxes": 33,
+  "layout_total_ms_mean": 0.9556840010918677,
+  "layout_total_ms_p50": 0.5512000061571598,
+  "layout_total_ms_p95": 1.5599000005749986,
+  "table_extraction_ms_mean": 0.10633300174959004,
+  "table_extraction_ms_p50": 0.05815000622533262,
+  "column_reorder_ms_mean": 0.07130299869459122,
+  "column_reorder_ms_p50": 0.038350000977516174,
+  "tables_found_current": 0,
+  "visual_lines_clustered": 11,
+  "multi_column_rows_detected": 6
+}

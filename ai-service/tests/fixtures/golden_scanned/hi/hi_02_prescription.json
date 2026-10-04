@@ -1,0 +1,45 @@
+{
+  "docId": "hi_02_prescription",
+  "language": "hi",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "संजीवनी मल्टीस्पेशलिटी अस्पताल\nस्टेशन रोड, लखनऊ | आपातकालीन सेवा २४ घंटे उपलब्ध\nडॉ. सुनीता गुप्ता\nएम.एस. (ई.एन.टी.), कान, नाक एवं गला विशेषज्ञ\nरोगी का नाम: श्रीमती रेखा देवी    |    आयु: 38 वर्ष    |    लिंग: महिला\nदिनांक: 15/03/2026\nतीव्र ग्रसनीशोथ एवं एलर्जिक राइनाइटिस (Acute Pharyngitis)\n1. Cap. Amoxicillin (एमोक्सिसिलिन) 500 mg - 1 कैप्सूल दिन में तीन बार खाने के बाद (5 दिन)\n2. Tab. Dolo (पैरासिटामोल) 650 mg - 1 गोली आवश्यकतानुसार दर्द व बुखार होने पर (3 दिन)\n3. Tab. Cetirizine (सेटिरिज़िन) 10 mg - 1 गोली रात को सोते समय (7 दिन)\n4. Betadine Gargle (गर्गल लिक्विड) - गुनगुने पानी में डालकर दिन में ३ बार गरारे करें (5 दिन)\nठंडा पानी व तैलीय खाद्य पदार्थों से बचें। भाप लें और पर्याप्त आराम करें।\nलक्षण बने रहने पर तुरंत संपर्क करें।",
+  "patientInfo": {
+    "name": "श्रीमती रेखा देवी",
+    "age": 38,
+    "gender": "F",
+    "doctorName": "डॉ. सुनीता गुप्ता",
+    "date": "2026-03-15"
+  },
+  "medications": [
+    {
+      "name": "Amoxicillin",
+      "dosage": "500 mg",
+      "frequency": "TID",
+      "duration": "5 days"
+    },
+    {
+      "name": "Dolo",
+      "dosage": "650 mg",
+      "frequency": "SOS",
+      "duration": "3 days"
+    },
+    {
+      "name": "Cetirizine",
+      "dosage": "10 mg",
+      "frequency": "HS",
+      "duration": "7 days"
+    },
+    {
+      "name": "Betadine Gargle",
+      "dosage": "liquid",
+      "frequency": "TID",
+      "duration": "5 days"
+    }
+  ],
+  "labResults": []
+}

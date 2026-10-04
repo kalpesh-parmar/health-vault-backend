@@ -1,5 +1,6 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const { parsePdf } = require("./pdfParser");
 
 const newFileKey = () => "doc_" + crypto.randomBytes(6).toString("hex");
 const newBatchId = () => "bat_" + crypto.randomBytes(5).toString("hex");
@@ -60,8 +61,7 @@ async function getPageCount(file) {
 
   if (isPdf && buffer) {
     try {
-      const pdfParse = require("pdf-parse");
-      const data = await pdfParse(buffer);
+      const data = await parsePdf(buffer);
       const count = Number(data?.numpages);
       if (Number.isFinite(count) && count > 0) {
         return count;

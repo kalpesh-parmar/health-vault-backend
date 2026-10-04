@@ -1,0 +1,33 @@
+{
+  "documentType": "PRESCRIPTION",
+  "language": "english",
+  "patientInfo": {
+    "name": "Robert Miller",
+    "age": 58,
+    "gender": "MALE"
+  },
+  "vitals": [
+    {
+      "parameter": "Blood Pressure",
+      "systolic": 130,
+      "diastolic": 85
+    },
+    {
+      "parameter": "SpO2",
+      "value": 98
+    }
+  ],
+  "medications": [
+    {
+      "name": "Amlodipine 5mg",
+      "dosage": "5mg",
+      "frequency": "once daily"
+    },
+    {
+      "name": "Atorvastatin 20mg",
+      "dosage": "20mg",
+      "frequency": "once daily"
+    }
+  ],
+  "diagnosis": ["Essential Hypertension", "Dyslipidemia"]
+}

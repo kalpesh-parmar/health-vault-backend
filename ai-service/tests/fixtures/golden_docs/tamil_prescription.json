@@ -1,0 +1,22 @@
+{
+  "language": "tamil",
+  "patientInfo": {
+    "name": "\u0b9a\u0bc6\u0bb2\u0bcd\u0bb5\u0bbf \u0b9a\u0bc1\u0ba8\u0bcd\u0ba4\u0bb0\u0bbf",
+    "age": 40,
+    "gender": "FEMALE"
+  },
+  "medications": [
+    {
+      "name": "Paracetamol 650mg",
+      "dosage": "650mg"
+    },
+    {
+      "name": "Azithromycin 500mg",
+      "dosage": "500mg"
+    },
+    {
+      "name": "Cetirizine 10mg",
+      "dosage": "10mg"
+    }
+  ]
+}

@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -12,6 +14,8 @@ from typing import Any
 import boto3
 
 from app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class CorruptFileException(Exception):
@@ -70,9 +74,16 @@ class S3StorageClient:
 
         hasher = hashlib.sha256()
 
-        def _do_download_and_hash() -> None:
+        def _do_download_and_hash() -> tuple[float, float, float, int]:
+            t_get_start = time.perf_counter()
             response = self.client.get_object(Bucket=bucket, Key=key)
+            t_get_done = time.perf_counter()
+            get_obj_ms = (t_get_done - t_get_start) * 1000
+
             body = response["Body"]
+            t_stream_start = time.perf_counter()
+            total_bytes = 0
+            chunks_count = 0
             try:
                 with open(temp_file, "wb") as f:
                     while True:
@@ -81,13 +92,27 @@ class S3StorageClient:
                             break
                         f.write(chunk)
                         hasher.update(chunk)
+                        total_bytes += len(chunk)
+                        chunks_count += 1
             finally:
                 body.close()
+            t_stream_done = time.perf_counter()
+            stream_ms = (t_stream_done - t_stream_start) * 1000
+            total_ms = (t_stream_done - t_get_start) * 1000
+            return get_obj_ms, stream_ms, total_ms, total_bytes
 
-        await asyncio.to_thread(_do_download_and_hash)
+        get_obj_ms, stream_ms, total_ms, total_bytes = await asyncio.to_thread(_do_download_and_hash)
+        speed_kb_s = (total_bytes / 1024.0) / (stream_ms / 1000.0) if stream_ms > 0 else 0.0
+        logger.info(
+            "[TIMING_EVIDENCE] s3_download: get_object_headers=%.2fms, stream_body=%.2fms, total=%.2fms (bytes=%d, speed=%.2f KB/s, %.2f Mbps)",
+            get_obj_ms, stream_ms, total_ms, total_bytes, speed_kb_s, speed_kb_s * 8 / 1024.0
+        )
 
         if expected_sha256:
+            t_hash_start = time.perf_counter()
             computed_sha = hasher.hexdigest().lower()
+            hash_ms = (time.perf_counter() - t_hash_start) * 1000
+            logger.info("[TIMING_EVIDENCE] sha256_verify: took %.2fms (match=%s)", hash_ms, computed_sha == expected_sha256.strip().lower())
             if computed_sha != expected_sha256.strip().lower():
                 # Remove corrupt file
                 if temp_file.exists():

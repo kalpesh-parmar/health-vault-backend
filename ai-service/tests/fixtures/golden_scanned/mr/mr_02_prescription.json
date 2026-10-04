@@ -1,0 +1,39 @@
+{
+  "docId": "mr_02_prescription",
+  "language": "mr",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "धन्वंतरी क्लिनिक व आरोग्य केंद्र\nटिळक पथ, नाशिक | रुग्णसेवा हीच ईश्वरसेवा\nडॉ. अनिता देशमुख\nएम.बी.बी.एस., डी.जी.ओ., स्त्रीरोग व प्रसूती तज्ज्ञ\nरुग्णाचे नाव: सौ. स्वाती पाटील    |    वय: ३४ वर्षे    |    लिंग: स्त्री\nदिनांक: २०/०३/२०२६\nतीव्र श्वसननलिका दाह आणि खोकला (Acute Bronchitis)\n१. Tab. Cefixime (सेफिक्सिम) 200 mg - सकाळी व संध्याकाळी जेवणानंतर १ गोळी (१-०-१) (५ दिवस)\n२. Tab. Dolo (डोलो) 650 mg - ताप किंवा अंगदुखी असल्यास १ गोळी (३ दिवस)\n३. Tab. Montair-LC (माँटेअर एलसी) - रात्री जेवणानंतर १ गोळी (०-०-१) (१० दिवस)\n४. Cough Syrup Ascoril-LS - २ चमचे दिवसातून तीन वेळा कोमट पाण्यासोबत (५ दिवस)\nकोमट पाण्याचे सेवन करा. थंड पाणी व शीतपेये टाळा. पुरेशी विश्रांती घ्या.",
+  "patientInfo": {
+    "name": "सौ. स्वाती पाटील",
+    "age": 34,
+    "gender": "F",
+    "doctorName": "डॉ. अनिता देशमुख",
+    "date": "2026-03-20"
+  },
+  "medications": [
+    {
+      "name": "Cefixime",
+      "dosage": "200 mg",
+      "frequency": "1-0-1",
+      "duration": "5 days"
+    },
+    {
+      "name": "Dolo",
+      "dosage": "650 mg",
+      "frequency": "SOS",
+      "duration": "3 days"
+    },
+    {
+      "name": "Montair-LC",
+      "dosage": "1 tab",
+      "frequency": "0-0-1",
+      "duration": "10 days"
+    }
+  ],
+  "labResults": []
+}

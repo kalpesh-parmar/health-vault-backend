@@ -1,0 +1,19 @@
+{
+  "document": "lab_1_.jpeg",
+  "ocr_engine": "paddleocr",
+  "ocr_time_ms": 3287.81,
+  "ocr_confidence": 0.9451,
+  "lines_count": 33,
+  "has_spatial_boxes": true,
+  "layout_total_ms": 10.575,
+  "spatial_cluster_ms": 0.799,
+  "table_extraction_ms": 6.745,
+  "before_table_count": 0,
+  "after_table_count": 1,
+  "before_row_count": 0,
+  "after_row_count": 2,
+  "before_medications_count": 0,
+  "after_medications_count": 0,
+  "fallback_count": 0,
+  "qwen_vl_calls": 0
+}

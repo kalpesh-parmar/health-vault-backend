@@ -80,7 +80,7 @@ class _InvalidOutputClient:
     engine = "chat-completions"
 
     async def generate_json_from_bytes(self, **_kwargs) -> tuple[str, str | None]:
-        return "not json", "stop"
+        return "", "stop"
 
     async def validate_model_available(self) -> None:
         return None
@@ -117,12 +117,21 @@ class _MixedPageOutputClient:
         return None
 
 
+import fitz
+
+def _blank_pdf() -> bytes:
+    doc = fitz.open()
+    doc.new_page()
+    data = doc.tobytes()
+    doc.close()
+    return data
+
 @pytest.mark.asyncio
 async def test_model_failure_stops_processing() -> None:
     service = OcrService(_FailingVision(), max_pdf_pages=3, fail_on_empty=True)
     with pytest.raises(ModelUnavailableError):
         await service.extract_document_bytes(
-            document_bytes=b"%PDF-1.4\n%%EOF",
+            document_bytes=_blank_pdf(),
             filename="scan.pdf",
             mime_type="application/pdf",
         )
@@ -133,7 +142,7 @@ async def test_invalid_model_result_stops_processing() -> None:
     service = OcrService(_InvalidVision(), max_pdf_pages=3, fail_on_empty=True)
     with pytest.raises(OcrEmptyResultError):
         await service.extract_document_bytes(
-            document_bytes=b"%PDF-1.4\n%%EOF",
+            document_bytes=_blank_pdf(),
             filename="scan.pdf",
             mime_type="application/pdf",
         )

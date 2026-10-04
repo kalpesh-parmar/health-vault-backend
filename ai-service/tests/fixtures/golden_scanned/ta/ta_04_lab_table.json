@@ -1,0 +1,51 @@
+{
+  "docId": "ta_04_lab_table",
+  "language": "ta",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "அப்பல்லோ டயக்னாஸ்டிக்ஸ் மையம்\nசிறுநீரக செயல்பாடு பரிசோதனை அறிக்கை (Renal Function Test)\nடாக்டர் எம். நடராஜன்\nM.D. (பத்தாலஜி)\nநோயாளி பெயர்: திரு. எஸ். தர்மலிங்கம்    |    வயது: 55 வயது    |    பாலினம்: ஆண்\nதேதி / Date: 26/03/2026\nசிறுநீரக செயல்பாடு பரிசோதனை (RFT Panel)\nபரிசோதனை விபரம் (Test) | முடிவு அளவு (Result) | அலகு (Unit) | இயல்பு எல்லை (Normal)\nரத்த யூரியா (Blood Urea) | 26 | mg/dL | 15 - 40\nசீரம் கிரியேட்டினின் (Creatinine) | 0.95 | mg/dL | 0.6 - 1.2\nயூரிக் அமிலம் (Serum Uric Acid) | 5.4 | mg/dL | 3.5 - 7.2\nசீரம் சோடியம் (Serum Sodium) | 139 | mEq/L | 136 - 145\nசீரம் பொட்டாசியம் (Potassium) | 4.3 | mEq/L | 3.5 - 5.1",
+  "patientInfo": {
+    "name": "திரு. எஸ். தர்மலிங்கம்",
+    "age": 55,
+    "gender": "M",
+    "doctorName": "டாக்டர் எம். நடராஜன்",
+    "date": "2026-03-26"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Blood Urea",
+      "value": 26,
+      "unit": "mg/dL",
+      "referenceRange": "15 - 40"
+    },
+    {
+      "testName": "Serum Creatinine",
+      "value": 0.95,
+      "unit": "mg/dL",
+      "referenceRange": "0.6 - 1.2"
+    },
+    {
+      "testName": "Serum Uric Acid",
+      "value": 5.4,
+      "unit": "mg/dL",
+      "referenceRange": "3.5 - 7.2"
+    },
+    {
+      "testName": "Sodium",
+      "value": 139,
+      "unit": "mEq/L",
+      "referenceRange": "136 - 145"
+    },
+    {
+      "testName": "Potassium",
+      "value": 4.3,
+      "unit": "mEq/L",
+      "referenceRange": "3.5 - 5.1"
+    }
+  ]
+}

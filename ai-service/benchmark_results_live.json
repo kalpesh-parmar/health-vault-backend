@@ -1,0 +1,740 @@
+[
+  {
+    "file": "5069200904.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a laboratory report, specifically a complete blood count (CBC) report, including blood cell counts, hematocrit, and clotting time measurements.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 3.766,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 4.547
+  },
+  {
+    "file": "60300505154.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a laboratory report, specifically a Hemogram report, including RBC count, WBC count, and other hematological parameters.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.235,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.266
+  },
+  {
+    "file": "body_scan_report.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "IMAGING_REPORT",
+      "reason": "The document is an ultrasound report of the abdomen and pelvis.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.031,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.078
+  },
+  {
+    "file": "lab_1_.jpeg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "PRESCERIPTION",
+      "reason": "The document is a prescription from a clinic, including patient information, medication details, and instructions.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.125,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.125
+  },
+  {
+    "file": "Manjuben Ranoliya.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "CONSULTATION_REPORT",
+      "reason": "The document is a dental quotation, including details of the patient, procedure, and estimated cost. It is a consultation report for dental treatment.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.094,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.125
+  },
+  {
+    "file": "Media (1).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a urine analysis report",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.984,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.031
+  },
+  {
+    "file": "Media (10).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a urine test result, including parameters, results, and reference values, indicating it is a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.921,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 1.937
+  },
+  {
+    "file": "Media (11).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains lab results, including creatinine, electrolytes, and protein levels, and is labeled as a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.969,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.0
+  },
+  {
+    "file": "Media (12).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.99,
+      "documentType": "DISCHARGE_SUMMARY",
+      "reason": "The document is a discharge summary from a hospital, containing patient information, medical history, diagnosis, treatment, and medications.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.328,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.344
+  },
+  {
+    "file": "Media (13).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a urine analysis report from a laboratory.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 3.484,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 3.5
+  },
+  {
+    "file": "Media (14).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "DISCHARGE_SUMMARY",
+      "reason": "The document is a discharge summary from a hospital, containing patient information, medical history, diagnosis, treatment, and lab results.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.969,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 1.985
+  },
+  {
+    "file": "Media (15).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains test results, sample types, and clinical information, indicating it is a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.938,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 1.953
+  },
+  {
+    "file": "Media (16).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "IMAGING_REPORT",
+      "reason": "The document is an ultrasound report of the abdomen and pelvis, including findings on the liver, gallbladder, pancreas, spleen, kidneys, uterus, and ovaries. It also includes the patient's name, date, and the names of the doctors who performed the ultrasound.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.078,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.109
+  },
+  {
+    "file": "Media (17).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a lab report, specifically a CBC (Complete Blood Count) result.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.032,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.141
+  },
+  {
+    "file": "Media (18).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a urine analysis, physical examination results, and chemical examination results, indicating it is a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.0,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.031
+  },
+  {
+    "file": "Media (19).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a complete blood count (CBC) result, including various parameters and reference values.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.0,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.062
+  },
+  {
+    "file": "Media (2).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a urine analysis report with various parameters and results, including physical examination, chemical examination, and microscopic examination.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.968,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.047
+  },
+  {
+    "file": "Media (20).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a urine test report from a hospital laboratory.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 1.906,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 1.922
+  },
+  {
+    "file": "Media (21).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a lab report with various medical parameters and results.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.062,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.125
+  },
+  {
+    "file": "Media (22).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains lab results, including CBC, blood urea, and electrolytes.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.062,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.078
+  },
+  {
+    "file": "Media (23).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a lab report with information about a patient's blood test results, including the type of test, results, and clinical significance.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.078,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.094
+  },
+  {
+    "file": "Media (24).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains lab results, including serum, enzyme, and other parameters, and is likely a medical laboratory report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.093,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.109
+  },
+  {
+    "file": "Media (25).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a complete blood count (CBC) report from a hospital laboratory.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.25,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.282
+  },
+  {
+    "file": "Media (3).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a bone marker test result, indicating it is a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.047,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.062
+  },
+  {
+    "file": "Media (4).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.99,
+      "documentType": "DISCHARGE_SUMMARY",
+      "reason": "The document is a discharge summary from a hospital, containing patient information, medical history, diagnosis, treatment, and medications.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.578,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.594
+  },
+  {
+    "file": "Media (5).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a lab report with blood test results, including blood urea, creatinine, electrolytes, and other parameters. It also includes the patient's name, age, gender, and the lab's information. The report is signed by a pathologist.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.765,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.781
+  },
+  {
+    "file": "Media (6).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains lab results, including the name of the test (Creatinine Phospho Kinase), the method used (IFCC Kinetic), the result, the unit, and the biological reference interval. It also includes information about the sample source and the lab.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.406,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.422
+  },
+  {
+    "file": "Media (7).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a lab report, containing results of a blood test, including the name of the test, the method used, the results, and the units of measurement. It also includes information about the sample type, the instrument used, and the laboratory name.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 3.75,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 3.781
+  },
+  {
+    "file": "Media (8).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document contains a Parathyroid Hormone (PTH) test result, indicating it is a lab report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 2.266,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 2.282
+  },
+  {
+    "file": "Media (9).jpg",
+    "status": "success",
+    "result": {
+      "isMedical": false,
+      "confidence": 0.0,
+      "documentType": null,
+      "reason": "Failed to parse document classification output",
+      "method": "fallback",
+      "model": "qwen3-vl:latest",
+      "metrics": {
+        "processing_seconds": 12.719,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 12.75
+  },
+  {
+    "file": "Media.jpg",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a urine examination report from a laboratory.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 9.235,
+        "pages_used": 1,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 9.265
+  },
+  {
+    "file": "P1(CIMS)(21042022).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "CONSULTATION_REPORT",
+      "reason": "The document contains patient information, vital signs, chief complaint, diagnosis, and doctor's notes, indicating a consultation report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 6.547,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 6.985
+  },
+  {
+    "file": "P1(CIMS)(27112023).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "CONSULTATION_REPORT",
+      "reason": "The document is a consultation report from a cardiologist, including patient information, examination findings, and a doctor's signature.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 7.75,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 8.625
+  },
+  {
+    "file": "P2(CIMS)(21042022).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "OTHER_MEDICAL_DOCUMENT",
+      "reason": "The document is an echocardiogram report, including patient details, echo identification, findings description, and doctor's signature.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 7.75,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 8.187
+  },
+  {
+    "file": "P2(CIMS)(27112023.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "SURGERY_PROCEDURE_REPORT",
+      "reason": "The document describes a linear ablation procedure, including the location, catheter termination, and post-ablation findings. It also includes relevant parameters like conduction intervals, AV block, and heart rate measurements. The document is a patient copy of a surgical procedure report.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 10.953,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 11.109
+  },
+  {
+    "file": "Reports.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "LAB_REPORT",
+      "reason": "The document is a blood test report with various tests and results, including CBC, Hemoglobin, RBC, etc.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 3.36,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 3.407
+  },
+  {
+    "file": "Trimutri(30082024).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "OTHER_MEDICAL_DOCUMENT",
+      "reason": "The document is a medical invoice from a hospital, including patient details, medications, and doctor's information. It is not a prescription, lab report, or other specific medical document type.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 7.484,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 7.547
+  },
+  {
+    "file": "Unique(28122024).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": false,
+      "confidence": 0.0,
+      "documentType": null,
+      "reason": "Failed to parse document classification output",
+      "method": "fallback",
+      "model": "qwen3-vl:latest",
+      "metrics": {
+        "processing_seconds": 16.672,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 16.718
+  },
+  {
+    "file": "Urocare(10012025).pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "CONSULTATION_REPORT",
+      "reason": "The document is a consultation paper from a doctor's office, including patient information, appointment details, and the doctor's notes.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 13.391,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 13.485
+  },
+  {
+    "file": "Urocare(10012025.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.9,
+      "documentType": "CONSULTATION_REPORT",
+      "reason": "The document is a consultation report from a hospital, including patient information, doctor's details, and medical findings.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 6.828,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 6.906
+  },
+  {
+    "file": "Valjibhai Dis Rep 0326.pdf",
+    "status": "success",
+    "result": {
+      "isMedical": true,
+      "confidence": 0.99,
+      "documentType": "DISCHARGE_SUMMARY",
+      "reason": "The document is a discharge summary from a hospital, containing patient information, medical history, treatment details, and discharge instructions.",
+      "method": "vision",
+      "model": "medgemma:4b",
+      "metrics": {
+        "processing_seconds": 7.703,
+        "pages_used": 2,
+        "used_ollama": true
+      }
+    },
+    "elapsed_seconds": 7.875
+  }
+]

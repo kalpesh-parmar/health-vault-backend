@@ -1,0 +1,995 @@
+{
+  "file": "D:\\TECHROVER\\health-vault\\health-vault-backend\\ai-service\\tests\\fixtures\\anonymized\\anonymized_4page_hybrid.pdf",
+  "file_name": "anonymized_4page_hybrid.pdf",
+  "runs": 3,
+  "run_wall_times_ms": [368413.14, 23932.79, 186256.5],
+  "total_wall_stats": {
+    "min": 23932.79,
+    "max": 368413.14,
+    "mean": 192867.48,
+    "p50": 186256.5,
+    "p95": 186256.5
+  },
+  "stage_stats": {
+    "queue_wait_ms": {
+      "min": 0.0,
+      "max": 3.02,
+      "mean": 0.27,
+      "p50": 0.0,
+      "p95": 0.19
+    },
+    "render_ms": {
+      "min": 0.0,
+      "max": 741.99,
+      "mean": 302.87,
+      "p50": 0.0,
+      "p95": 658.61
+    },
+    "preprocess_ms": {
+      "min": 0.0,
+      "max": 0.23,
+      "mean": 0.09,
+      "p50": 0.0,
+      "p95": 0.22
+    },
+    "lang_detect_ms": {
+      "min": 0.0,
+      "max": 8.09,
+      "mean": 0.78,
+      "p50": 0.0,
+      "p95": 0.56
+    },
+    "engine_init_ms": {
+      "min": 0.0,
+      "max": 133191.14,
+      "mean": 11099.41,
+      "p50": 0.0,
+      "p95": 0.98
+    },
+    "det_ms": {
+      "min": 0.0,
+      "max": 2707.0,
+      "mean": 225.58,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "rec_ms": {
+      "min": 0.0,
+      "max": 12935.0,
+      "mean": 1077.92,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "ocr_infer_ms": {
+      "min": 0.0,
+      "max": 20015.26,
+      "mean": 9815.78,
+      "p50": 0.0,
+      "p95": 20014.59
+    },
+    "quality_gate_ms": {
+      "min": 0.0,
+      "max": 3.8,
+      "mean": 0.32,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "vlm_call_ms": {
+      "min": 0.0,
+      "max": 363747.84,
+      "mean": 91143.13,
+      "p50": 0.0,
+      "p95": 362035.47
+    },
+    "postprocess_ms": {
+      "min": 0.0,
+      "max": 287.39,
+      "mean": 49.72,
+      "p50": 0.0,
+      "p95": 110.38
+    },
+    "total_page_ms": {
+      "min": 3.53,
+      "max": 366414.0,
+      "mean": 95488.8,
+      "p50": 287.39,
+      "p95": 365620.0
+    }
+  },
+  "records": [
+    {
+      "run": 1,
+      "wall_ms": 368413.14,
+      "page_count": 4,
+      "confidence": 0.5,
+      "metrics": {
+        "used_direct_text": true,
+        "used_ocr": false,
+        "used_paddle_ocr": false,
+        "used_qwen_vl": false,
+        "used_ai_model": false,
+        "direct_text_page_count": 2,
+        "raster_ocr_page_count": 2,
+        "per_page_routing_decisions": [
+          {
+            "page": 1,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 2,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 3,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          },
+          {
+            "page": 4,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          }
+        ],
+        "hybrid_extraction": true,
+        "detected_scripts": ["latin"],
+        "has_non_latin": false,
+        "cache_hits": 0,
+        "cache_misses": 4,
+        "fallback_count": 0,
+        "failed_page_count": 2,
+        "page_count": 4,
+        "processing_seconds": 368.327,
+        "elapsed_ms": 368327,
+        "telemetry": [],
+        "stage_timings": {
+          "1": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 287.39,
+            "total_page_ms": 287.39
+          },
+          "2": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 3.53,
+            "total_page_ms": 3.53
+          },
+          "3": {
+            "queue_wait_ms": 3.02,
+            "render_ms": 589.13,
+            "preprocess_ms": 0.23,
+            "lang_detect_ms": 8.09,
+            "engine_init_ms": 133191.14,
+            "det_ms": 2707.0,
+            "rec_ms": 12935.0,
+            "ocr_infer_ms": 17743.4,
+            "quality_gate_ms": 3.8,
+            "vlm_call_ms": 363747.84,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 366414.0
+          },
+          "4": {
+            "queue_wait_ms": 0.01,
+            "render_ms": 545.24,
+            "preprocess_ms": 0.15,
+            "lang_detect_ms": 0.13,
+            "engine_init_ms": 0.98,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20014.59,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 362035.47,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 365620.0
+          }
+        },
+        "stage_summary": {
+          "queue_wait_ms": {
+            "min": 0.0,
+            "max": 3.02,
+            "mean": 0.76,
+            "p50": 0.0,
+            "p95": 0.01,
+            "sum": 3.03
+          },
+          "render_ms": {
+            "min": 0.0,
+            "max": 589.13,
+            "mean": 283.59,
+            "p50": 0.0,
+            "p95": 545.24,
+            "sum": 1134.37
+          },
+          "preprocess_ms": {
+            "min": 0.0,
+            "max": 0.23,
+            "mean": 0.1,
+            "p50": 0.0,
+            "p95": 0.15,
+            "sum": 0.38
+          },
+          "lang_detect_ms": {
+            "min": 0.0,
+            "max": 8.09,
+            "mean": 2.06,
+            "p50": 0.0,
+            "p95": 0.13,
+            "sum": 8.22
+          },
+          "engine_init_ms": {
+            "min": 0.0,
+            "max": 133191.14,
+            "mean": 33298.03,
+            "p50": 0.0,
+            "p95": 0.98,
+            "sum": 133192.12
+          },
+          "det_ms": {
+            "min": 0.0,
+            "max": 2707.0,
+            "mean": 676.75,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 2707.0
+          },
+          "rec_ms": {
+            "min": 0.0,
+            "max": 12935.0,
+            "mean": 3233.75,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 12935.0
+          },
+          "ocr_infer_ms": {
+            "min": 0.0,
+            "max": 20014.59,
+            "mean": 9439.5,
+            "p50": 0.0,
+            "p95": 17743.4,
+            "sum": 37757.99
+          },
+          "quality_gate_ms": {
+            "min": 0.0,
+            "max": 3.8,
+            "mean": 0.95,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 3.8
+          },
+          "vlm_call_ms": {
+            "min": 0.0,
+            "max": 363747.84,
+            "mean": 181445.83,
+            "p50": 0.0,
+            "p95": 362035.47,
+            "sum": 725783.31
+          },
+          "postprocess_ms": {
+            "min": 0.0,
+            "max": 287.39,
+            "mean": 72.73,
+            "p50": 0.0,
+            "p95": 3.53,
+            "sum": 290.92
+          },
+          "total_page_ms": {
+            "min": 3.53,
+            "max": 366414.0,
+            "mean": 183081.23,
+            "p50": 287.39,
+            "p95": 365620.0,
+            "sum": 732324.92
+          }
+        }
+      },
+      "pages": [
+        {
+          "page": 1,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 643,
+          "elapsed_ms": 287,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 287.39,
+            "total_page_ms": 287.39
+          }
+        },
+        {
+          "page": 2,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 598,
+          "elapsed_ms": 3,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 3.53,
+            "total_page_ms": 3.53
+          }
+        },
+        {
+          "page": 3,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 366414,
+          "fallback_reason": "UNREAD_NON_LATIN_SCRIPT",
+          "stage_timings": {
+            "queue_wait_ms": 3.02,
+            "render_ms": 589.13,
+            "preprocess_ms": 0.23,
+            "lang_detect_ms": 8.09,
+            "engine_init_ms": 133191.14,
+            "det_ms": 2707.0,
+            "rec_ms": 12935.0,
+            "ocr_infer_ms": 17743.4,
+            "quality_gate_ms": 3.8,
+            "vlm_call_ms": 363747.84,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 366414.0
+          }
+        },
+        {
+          "page": 4,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 365620,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.01,
+            "render_ms": 545.24,
+            "preprocess_ms": 0.15,
+            "lang_detect_ms": 0.13,
+            "engine_init_ms": 0.98,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20014.59,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 362035.47,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 365620.0
+          }
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "wall_ms": 23932.79,
+      "page_count": 4,
+      "confidence": 0.5,
+      "metrics": {
+        "used_direct_text": true,
+        "used_ocr": false,
+        "used_paddle_ocr": false,
+        "used_qwen_vl": false,
+        "used_ai_model": false,
+        "direct_text_page_count": 2,
+        "raster_ocr_page_count": 2,
+        "per_page_routing_decisions": [
+          {
+            "page": 1,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 2,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 3,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          },
+          {
+            "page": 4,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          }
+        ],
+        "hybrid_extraction": true,
+        "detected_scripts": ["latin"],
+        "has_non_latin": false,
+        "cache_hits": 0,
+        "cache_misses": 4,
+        "fallback_count": 0,
+        "failed_page_count": 2,
+        "page_count": 4,
+        "processing_seconds": 23.921,
+        "elapsed_ms": 23921,
+        "telemetry": [],
+        "stage_timings": {
+          "1": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 86.6,
+            "total_page_ms": 86.6
+          },
+          "2": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 110.38,
+            "total_page_ms": 110.38
+          },
+          "3": {
+            "queue_wait_ms": 0.19,
+            "render_ms": 658.61,
+            "preprocess_ms": 0.22,
+            "lang_detect_ms": 0.56,
+            "engine_init_ms": 0.34,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20006.82,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 1908.38,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 22505.0
+          },
+          "4": {
+            "queue_wait_ms": 0.02,
+            "render_ms": 619.8,
+            "preprocess_ms": 0.16,
+            "lang_detect_ms": 0.16,
+            "engine_init_ms": 0.14,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20015.26,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 1846.67,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 22129.0
+          }
+        },
+        "stage_summary": {
+          "queue_wait_ms": {
+            "min": 0.0,
+            "max": 0.19,
+            "mean": 0.05,
+            "p50": 0.0,
+            "p95": 0.02,
+            "sum": 0.21
+          },
+          "render_ms": {
+            "min": 0.0,
+            "max": 658.61,
+            "mean": 319.6,
+            "p50": 0.0,
+            "p95": 619.8,
+            "sum": 1278.41
+          },
+          "preprocess_ms": {
+            "min": 0.0,
+            "max": 0.22,
+            "mean": 0.1,
+            "p50": 0.0,
+            "p95": 0.16,
+            "sum": 0.38
+          },
+          "lang_detect_ms": {
+            "min": 0.0,
+            "max": 0.56,
+            "mean": 0.18,
+            "p50": 0.0,
+            "p95": 0.16,
+            "sum": 0.72
+          },
+          "engine_init_ms": {
+            "min": 0.0,
+            "max": 0.34,
+            "mean": 0.12,
+            "p50": 0.0,
+            "p95": 0.14,
+            "sum": 0.48
+          },
+          "det_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "rec_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "ocr_infer_ms": {
+            "min": 0.0,
+            "max": 20015.26,
+            "mean": 10005.52,
+            "p50": 0.0,
+            "p95": 20006.82,
+            "sum": 40022.08
+          },
+          "quality_gate_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "vlm_call_ms": {
+            "min": 0.0,
+            "max": 1908.38,
+            "mean": 938.76,
+            "p50": 0.0,
+            "p95": 1846.67,
+            "sum": 3755.05
+          },
+          "postprocess_ms": {
+            "min": 0.0,
+            "max": 110.38,
+            "mean": 49.24,
+            "p50": 0.0,
+            "p95": 86.6,
+            "sum": 196.98
+          },
+          "total_page_ms": {
+            "min": 86.6,
+            "max": 22505.0,
+            "mean": 11207.74,
+            "p50": 110.38,
+            "p95": 22129.0,
+            "sum": 44830.98
+          }
+        }
+      },
+      "pages": [
+        {
+          "page": 1,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 643,
+          "elapsed_ms": 86,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 86.6,
+            "total_page_ms": 86.6
+          }
+        },
+        {
+          "page": 2,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 598,
+          "elapsed_ms": 110,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 110.38,
+            "total_page_ms": 110.38
+          }
+        },
+        {
+          "page": 3,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 22505,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.19,
+            "render_ms": 658.61,
+            "preprocess_ms": 0.22,
+            "lang_detect_ms": 0.56,
+            "engine_init_ms": 0.34,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20006.82,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 1908.38,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 22505.0
+          }
+        },
+        {
+          "page": 4,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 22129,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.02,
+            "render_ms": 619.8,
+            "preprocess_ms": 0.16,
+            "lang_detect_ms": 0.16,
+            "engine_init_ms": 0.14,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20015.26,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 1846.67,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 22129.0
+          }
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "wall_ms": 186256.5,
+      "page_count": 4,
+      "confidence": 0.5,
+      "metrics": {
+        "used_direct_text": true,
+        "used_ocr": false,
+        "used_paddle_ocr": false,
+        "used_qwen_vl": false,
+        "used_ai_model": false,
+        "direct_text_page_count": 2,
+        "raster_ocr_page_count": 2,
+        "per_page_routing_decisions": [
+          {
+            "page": 1,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 2,
+            "decision": "pymupdf_direct",
+            "reason": null
+          },
+          {
+            "page": 3,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          },
+          {
+            "page": 4,
+            "decision": "raster_ocr",
+            "reason": "INSUFFICIENT_TEXT"
+          }
+        ],
+        "hybrid_extraction": true,
+        "detected_scripts": ["latin"],
+        "has_non_latin": false,
+        "cache_hits": 0,
+        "cache_misses": 4,
+        "fallback_count": 0,
+        "failed_page_count": 2,
+        "page_count": 4,
+        "processing_seconds": 186.234,
+        "elapsed_ms": 186234,
+        "telemetry": [],
+        "stage_timings": {
+          "1": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 67.8,
+            "total_page_ms": 67.8
+          },
+          "2": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 40.94,
+            "total_page_ms": 40.94
+          },
+          "3": {
+            "queue_wait_ms": 0.02,
+            "render_ms": 741.99,
+            "preprocess_ms": 0.15,
+            "lang_detect_ms": 0.22,
+            "engine_init_ms": 0.13,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20003.1,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 182004.26,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 184369.0
+          },
+          "4": {
+            "queue_wait_ms": 0.01,
+            "render_ms": 479.64,
+            "preprocess_ms": 0.17,
+            "lang_detect_ms": 0.19,
+            "engine_init_ms": 0.14,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20006.18,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 182175.0,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 184232.0
+          }
+        },
+        "stage_summary": {
+          "queue_wait_ms": {
+            "min": 0.0,
+            "max": 0.02,
+            "mean": 0.01,
+            "p50": 0.0,
+            "p95": 0.01,
+            "sum": 0.03
+          },
+          "render_ms": {
+            "min": 0.0,
+            "max": 741.99,
+            "mean": 305.41,
+            "p50": 0.0,
+            "p95": 479.64,
+            "sum": 1221.63
+          },
+          "preprocess_ms": {
+            "min": 0.0,
+            "max": 0.17,
+            "mean": 0.08,
+            "p50": 0.0,
+            "p95": 0.15,
+            "sum": 0.32
+          },
+          "lang_detect_ms": {
+            "min": 0.0,
+            "max": 0.22,
+            "mean": 0.1,
+            "p50": 0.0,
+            "p95": 0.19,
+            "sum": 0.41
+          },
+          "engine_init_ms": {
+            "min": 0.0,
+            "max": 0.14,
+            "mean": 0.07,
+            "p50": 0.0,
+            "p95": 0.13,
+            "sum": 0.27
+          },
+          "det_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "rec_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "ocr_infer_ms": {
+            "min": 0.0,
+            "max": 20006.18,
+            "mean": 10002.32,
+            "p50": 0.0,
+            "p95": 20003.1,
+            "sum": 40009.28
+          },
+          "quality_gate_ms": {
+            "min": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+            "p50": 0.0,
+            "p95": 0.0,
+            "sum": 0.0
+          },
+          "vlm_call_ms": {
+            "min": 0.0,
+            "max": 182175.0,
+            "mean": 91044.82,
+            "p50": 0.0,
+            "p95": 182004.26,
+            "sum": 364179.26
+          },
+          "postprocess_ms": {
+            "min": 0.0,
+            "max": 67.8,
+            "mean": 27.18,
+            "p50": 0.0,
+            "p95": 40.94,
+            "sum": 108.74
+          },
+          "total_page_ms": {
+            "min": 40.94,
+            "max": 184369.0,
+            "mean": 92177.43,
+            "p50": 67.8,
+            "p95": 184232.0,
+            "sum": 368709.74
+          }
+        }
+      },
+      "pages": [
+        {
+          "page": 1,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 643,
+          "elapsed_ms": 67,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 67.8,
+            "total_page_ms": 67.8
+          }
+        },
+        {
+          "page": 2,
+          "engine": "pymupdf_direct",
+          "status": "SUCCESS",
+          "confidence": 1.0,
+          "chars": 598,
+          "elapsed_ms": 40,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.0,
+            "render_ms": 0.0,
+            "preprocess_ms": 0.0,
+            "lang_detect_ms": 0.0,
+            "engine_init_ms": 0.0,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 0.0,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 0.0,
+            "postprocess_ms": 40.94,
+            "total_page_ms": 40.94
+          }
+        },
+        {
+          "page": 3,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 184369,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.02,
+            "render_ms": 741.99,
+            "preprocess_ms": 0.15,
+            "lang_detect_ms": 0.22,
+            "engine_init_ms": 0.13,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20003.1,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 182004.26,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 184369.0
+          }
+        },
+        {
+          "page": 4,
+          "engine": "none",
+          "status": "FAILED",
+          "confidence": 0.0,
+          "chars": 0,
+          "elapsed_ms": 184232,
+          "fallback_reason": null,
+          "stage_timings": {
+            "queue_wait_ms": 0.01,
+            "render_ms": 479.64,
+            "preprocess_ms": 0.17,
+            "lang_detect_ms": 0.19,
+            "engine_init_ms": 0.14,
+            "det_ms": 0.0,
+            "rec_ms": 0.0,
+            "ocr_infer_ms": 20006.18,
+            "quality_gate_ms": 0.0,
+            "vlm_call_ms": 182175.0,
+            "postprocess_ms": 0.0,
+            "total_page_ms": 184232.0
+          }
+        }
+      ]
+    }
+  ]
+}

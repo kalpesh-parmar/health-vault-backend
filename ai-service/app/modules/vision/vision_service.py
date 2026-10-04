@@ -280,6 +280,7 @@ class VisionModelService:
         filename: str = "",
         mime_type: str | None = None,
         max_pages: int = 1,
+        prompt: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         del filename, max_pages, kwargs
@@ -288,9 +289,9 @@ class VisionModelService:
         resolved = (mime_type or "image/png").split(";")[0].strip().lower()
         if resolved == "image/tiff":
             raise VisionModelRequestError("TIFF is not supported by the configured single-model OCR path")
-        return await self._extract(image_bytes, mime_type=resolved)
+        return await self._extract(image_bytes, mime_type=resolved, prompt=prompt)
 
-    async def _extract(self, data: bytes, *, mime_type: str) -> dict[str, Any]:
+    async def _extract(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> dict[str, Any]:
         started = time.monotonic()
         if len(data) > self.max_inline_bytes:
             raise VisionModelRequestError(
@@ -302,11 +303,18 @@ class VisionModelService:
         processed_data = data
         processed_mime = mime_type
         if mime_type.startswith("image/"):
+            t_downscale = time.perf_counter()
             processed_data, downscale_info = downscale_image_if_needed(data, max_side=self.max_image_side)
+            downscale_ms = (time.perf_counter() - t_downscale) * 1000
+            logger.info(
+                "[TIMING_EVIDENCE] downscale_image_if_needed on event loop: duration=%.2fms, orig=%s, scaled=%s, bytes_saved_pct=%.1f%%",
+                downscale_ms, downscale_info.get("original_dims"), downscale_info.get("scaled_dims"), downscale_info.get("bytes_saved_pct", 0.0)
+            )
             if downscale_info["downscaled"]:
                 processed_mime = "image/jpeg"
 
-        cache_key = f"{self.model}:{processed_mime}:{hashlib.sha256(processed_data).hexdigest()}"
+        prompt_hash = hashlib.sha256((prompt or "").encode("utf-8")).hexdigest()[:8] if prompt else "default"
+        cache_key = f"{self.model}:{processed_mime}:{hashlib.sha256(processed_data).hexdigest()}:{prompt_hash}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             payload = json.loads(json.dumps(cached))
@@ -319,7 +327,7 @@ class VisionModelService:
             return payload
 
         request_started = time.monotonic()
-        raw, finish_reason = await self._generate(processed_data, mime_type=processed_mime)
+        raw, finish_reason = await self._generate(processed_data, mime_type=processed_mime, prompt=prompt)
         request_ms = int((time.monotonic() - request_started) * 1000)
         parse_started = time.monotonic()
         _log_raw_ai_response(raw, model=self.model, mime_type=processed_mime)

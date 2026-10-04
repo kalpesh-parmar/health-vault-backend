@@ -1,0 +1,45 @@
+{
+  "docId": "mr_04_lab_table",
+  "language": "mr",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "पुणे पॅथॉलॉजी व मायक्रोबायोलॉजी लॅब\nयकृत कार्य चाचणी अहवाल (Liver Function Test)\nडॉ. सुहास चितळे\nएम.डी. (पॅथॉलॉजी)\nरुग्णाचे नाव: श्रीमती मीनाक्षी जोशी    |    वय: ५० वर्षे    |    लिंग: स्त्री\nदिनांक: २२/०३/२०२६\nयकृत कार्य चाचणी (LFT Panel)\nचाचणी तपशील (Test) | चाचणी निकाल (Result) | एकक (Unit) | प्रमाणित मर्यादा (Range)\nएकूण बिलीरुबिन (Total Bilirubin) | 0.85 | mg/dL | 0.2 - 1.2\nथेट बिलीरुबिन (Direct Bilirubin) | 0.22 | mg/dL | 0.0 - 0.3\nएस.जी.ओ.टी. (SGOT / AST) | 29 | U/L | 5 - 40\nएस.जी.पी.टी. (SGPT / ALT) | 34 | U/L | 5 - 45\nअल्कधर्मी फॉस्फेटस (ALP) | 88 | U/L | 30 - 120\nएकूण प्रथिने (Total Protein) | 7.2 | g/dL | 6.0 - 8.3",
+  "patientInfo": {
+    "name": "श्रीमती मीनाक्षी जोशी",
+    "age": 50,
+    "gender": "F",
+    "doctorName": "डॉ. सुहास चितळे",
+    "date": "2026-03-22"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Total Bilirubin",
+      "value": 0.85,
+      "unit": "mg/dL",
+      "referenceRange": "0.2 - 1.2"
+    },
+    {
+      "testName": "SGOT",
+      "value": 29,
+      "unit": "U/L",
+      "referenceRange": "5 - 40"
+    },
+    {
+      "testName": "SGPT",
+      "value": 34,
+      "unit": "U/L",
+      "referenceRange": "5 - 45"
+    },
+    {
+      "testName": "Alkaline Phosphatase",
+      "value": 88,
+      "unit": "U/L",
+      "referenceRange": "30 - 120"
+    }
+  ]
+}

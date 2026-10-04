@@ -19,6 +19,7 @@ const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
 const { normalizeMedicine } = require("../../../helpers/medicineNormalize.helper");
 const { toDbDate } = require("../../../utils/dateUtils");
+const documentIdentityService = require("../../documentIdentity.service");
 
 const {
   cleanAndParseJson,
@@ -2089,8 +2090,10 @@ class OnboardingService {
       try {
         let docRow = null;
         if (state.documentId) {
-          const rows = await db.select().from(document).where(eq(document.id, state.documentId));
-          docRow = rows[0] || null;
+          docRow = await documentIdentityService.resolveCanonicalDocument({
+            documentIdOrFileKey: state.documentId,
+            userId,
+          });
         } else if (userId) {
           const rows = await db
             .select()
@@ -2497,7 +2500,14 @@ class OnboardingService {
         `[OnboardingService] Fetching pre-extracted document data for documentId: ${state.documentId}...`,
       );
       try {
-        const [doc] = await db.select().from(document).where(eq(document.id, state.documentId));
+        const doc = await documentIdentityService.resolveCanonicalDocument({
+          documentIdOrFileKey: state.documentId,
+          userId,
+        });
+
+        if (doc) {
+          state.documentId = doc.id;
+        }
 
         const extracted = doc?.structuredExtractedData;
         const hasStructuredData =

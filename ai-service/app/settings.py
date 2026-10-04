@@ -37,6 +37,12 @@ class Settings(BaseSettings):
                 parsed = [origin.strip() for origin in val.split(",") if origin.strip()]
                 data["CORS_ORIGINS"] = parsed
                 data["cors_origins"] = parsed
+
+            val_langs = data.get("LIFESPAN_WARMUP_OCR_LANGUAGES") or data.get("lifespan_warmup_ocr_languages")
+            if isinstance(val_langs, str):
+                parsed_langs = [lang.strip() for lang in val_langs.split(",") if lang.strip()]
+                data["LIFESPAN_WARMUP_OCR_LANGUAGES"] = parsed_langs
+                data["lifespan_warmup_ocr_languages"] = parsed_langs
         return data
 
     database_url: str = Field(alias="DATABASE_URL")
@@ -169,6 +175,11 @@ class Settings(BaseSettings):
         alias="PADDLE_CPU_THREADS",
         description="Number of CPU/OpenMP threads dedicated to PaddleOCR inference to prevent core contention.",
     )
+    paddle_rec_batch_num: int = Field(
+        default=16,
+        alias="PADDLE_REC_BATCH_NUM",
+        description="Batch size for PaddleOCR text line recognition to accelerate dense multi-line documents.",
+    )
     vlm_max_image_side: int = Field(
         default=1500,
         alias="VLM_MAX_IMAGE_SIDE",
@@ -194,6 +205,88 @@ class Settings(BaseSettings):
         alias="AI_EMBEDDING_MODEL",
         validation_alias=AliasChoices("AI_EMBEDDING_MODEL", "EMBEDDING_MODEL"),
     )
+
+    # Preprocessing settings (Plan 3.2)
+    preprocess_deskew_enabled: bool = Field(
+        default=True,
+        alias="PREPROCESS_DESKEW_ENABLED",
+        description="Enable automatic OpenCV-based deskewing on rotated/skewed scans.",
+    )
+    preprocess_remove_shadows: bool = Field(
+        default=False,
+        alias="PREPROCESS_REMOVE_SHADOWS",
+        description="Enable morphological background subtraction and shadow removal.",
+    )
+    preprocess_max_deskew_angle: float = Field(
+        default=45.0,
+        alias="PREPROCESS_MAX_DESKEW_ANGLE",
+        description="Maximum rotation angle allowed during deskewing.",
+    )
+
+    @property
+    def PREPROCESS_DESKEW_ENABLED(self) -> bool:
+        return self.preprocess_deskew_enabled
+
+    @property
+    def PREPROCESS_REMOVE_SHADOWS(self) -> bool:
+        return self.preprocess_remove_shadows
+
+    @property
+    def PREPROCESS_MAX_DESKEW_ANGLE(self) -> float:
+        return self.preprocess_max_deskew_angle
+
+    paddle_timeout_seconds: float = Field(
+        default=30.0,
+        alias="PADDLE_TIMEOUT_SECONDS",
+        description="Maximum seconds to wait for PaddleOCR inference before fallback.",
+    )
+
+    # Quality Gate settings (Plan 3.3)
+    quality_gate_max_fragment_ratio: float = Field(
+        default=0.35,
+        alias="QUALITY_GATE_MAX_FRAGMENT_RATIO",
+        description="Maximum ratio of single-character non-numeric tokens before rejecting text.",
+    )
+    quality_gate_min_avg_token_len: float = Field(
+        default=2.5,
+        alias="QUALITY_GATE_MIN_AVG_TOKEN_LEN",
+        description="Minimum average token length on pages with >10 tokens.",
+    )
+    quality_gate_min_valid_token_ratio: float = Field(
+        default=0.35,
+        alias="QUALITY_GATE_MIN_VALID_TOKEN_RATIO",
+        description="Minimum ratio of tokens matching clinical/general lexicon on >30 char text.",
+    )
+    quality_gate_borderline_min_conf: float = Field(
+        default=0.70,
+        alias="QUALITY_GATE_BORDERLINE_MIN_CONF",
+        description="Lower bound of borderline OCR confidence range.",
+    )
+    quality_gate_borderline_max_conf: float = Field(
+        default=0.85,
+        alias="QUALITY_GATE_BORDERLINE_MAX_CONF",
+        description="Upper bound of borderline OCR confidence range.",
+    )
+
+    @property
+    def QUALITY_GATE_MAX_FRAGMENT_RATIO(self) -> float:
+        return self.quality_gate_max_fragment_ratio
+
+    @property
+    def QUALITY_GATE_MIN_AVG_TOKEN_LEN(self) -> float:
+        return self.quality_gate_min_avg_token_len
+
+    @property
+    def QUALITY_GATE_MIN_VALID_TOKEN_RATIO(self) -> float:
+        return self.quality_gate_min_valid_token_ratio
+
+    @property
+    def QUALITY_GATE_BORDERLINE_MIN_CONF(self) -> float:
+        return self.quality_gate_borderline_min_conf
+
+    @property
+    def QUALITY_GATE_BORDERLINE_MAX_CONF(self) -> float:
+        return self.quality_gate_borderline_max_conf
 
     chat_concurrency: int = Field(default=4, alias="CHAT_CONCURRENCY")
     embedding_batch_size: int = Field(default=32, alias="EMBEDDING_BATCH_SIZE")
@@ -226,7 +319,12 @@ class Settings(BaseSettings):
     summary_max_chunks: int = Field(default=8, alias="SUMMARY_MAX_CHUNKS")
     summary_num_predict: int = Field(default=220, alias="SUMMARY_NUM_PREDICT")
     extraction_num_predict: int = Field(default=1024, alias="EXTRACTION_NUM_PREDICT")
-    ollama_keep_alive: str = Field(default="10m", alias="OLLAMA_KEEP_ALIVE")
+    ollama_keep_alive: str = Field(default="15m", alias="OLLAMA_KEEP_ALIVE")
+    lifespan_warmup_enabled: bool = Field(default=True, alias="LIFESPAN_WARMUP_ENABLED")
+    lifespan_warmup_ocr_languages: list[str] = Field(
+        default=["en", "devanagari", "ta"], alias="LIFESPAN_WARMUP_OCR_LANGUAGES"
+    )
+    validation_max_image_side: int = Field(default=1200, alias="VALIDATION_MAX_IMAGE_SIDE")
 
     medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")
     medgemma_max_pages: int = Field(default=2, alias="MEDGEMMA_MAX_PAGES")

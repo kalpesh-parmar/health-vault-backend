@@ -1,0 +1,168 @@
+{
+  "timestamp": "2026-10-04T02:39:59.891241",
+  "configuration": {
+    "reports_dir": "D:\\TECHROVER\\PROJECTS\\RTH\\healh-vault-project\\Medical Reports\\Masa's Report",
+    "selected_documents": ["P2(CIMS)(27112023.pdf"],
+    "preferred_language": "english",
+    "total_documents": 1
+  },
+  "aggregate_statistics": [
+    {
+      "Metric": "Total Time (s)",
+      "Count": 1,
+      "Min": 219.01,
+      "Max": 219.01,
+      "Mean": 219.01,
+      "p50 (Median)": 219.01,
+      "p90": 219.01,
+      "p95": 219.01
+    },
+    {
+      "Metric": "Total Time (ms)",
+      "Count": 1,
+      "Min": 219015.0,
+      "Max": 219015.0,
+      "Mean": 219015.0,
+      "p50 (Median)": 219015.0,
+      "p90": 219015.0,
+      "p95": 219015.0
+    },
+    {
+      "Metric": "OCR Time (ms)",
+      "Count": 1,
+      "Min": 95530.0,
+      "Max": 95530.0,
+      "Mean": 95530.0,
+      "p50 (Median)": 95530.0,
+      "p90": 95530.0,
+      "p95": 95530.0
+    },
+    {
+      "Metric": "VLM Time (ms)",
+      "Count": 1,
+      "Min": 95514.0,
+      "Max": 95514.0,
+      "Mean": 95514.0,
+      "p50 (Median)": 95514.0,
+      "p90": 95514.0,
+      "p95": 95514.0
+    },
+    {
+      "Metric": "Stage 1 Validating (ms)",
+      "Count": 1,
+      "Min": 82686.0,
+      "Max": 82686.0,
+      "Mean": 82686.0,
+      "p50 (Median)": 82686.0,
+      "p90": 82686.0,
+      "p95": 82686.0
+    },
+    {
+      "Metric": "Stage 2 Uploading (ms)",
+      "Count": 1,
+      "Min": 32.0,
+      "Max": 32.0,
+      "Mean": 32.0,
+      "p50 (Median)": 32.0,
+      "p90": 32.0,
+      "p95": 32.0
+    },
+    {
+      "Metric": "Stage 3 OCR (ms)",
+      "Count": 1,
+      "Min": 95530.0,
+      "Max": 95530.0,
+      "Mean": 95530.0,
+      "p50 (Median)": 95530.0,
+      "p90": 95530.0,
+      "p95": 95530.0
+    },
+    {
+      "Metric": "Stage 4 Parsing (ms)",
+      "Count": 1,
+      "Min": 46.0,
+      "Max": 46.0,
+      "Mean": 46.0,
+      "p50 (Median)": 46.0,
+      "p90": 46.0,
+      "p95": 46.0
+    },
+    {
+      "Metric": "Stage 5 Graph Ext (ms)",
+      "Count": 1,
+      "Min": 5453.0,
+      "Max": 5453.0,
+      "Mean": 5453.0,
+      "p50 (Median)": 5453.0,
+      "p90": 5453.0,
+      "p95": 5453.0
+    },
+    {
+      "Metric": "Stage 6 Field Ext (ms)",
+      "Count": 1,
+      "Min": 30.0,
+      "Max": 30.0,
+      "Mean": 30.0,
+      "p50 (Median)": 30.0,
+      "p90": 30.0,
+      "p95": 30.0
+    },
+    {
+      "Metric": "Stage 7 Analyzing (ms)",
+      "Count": 1,
+      "Min": 15.0,
+      "Max": 15.0,
+      "Mean": 15.0,
+      "p50 (Median)": 15.0,
+      "p90": 15.0,
+      "p95": 15.0
+    },
+    {
+      "Metric": "Stage 8 Summary (ms)",
+      "Count": 1,
+      "Min": 27140.0,
+      "Max": 27140.0,
+      "Mean": 27140.0,
+      "p50 (Median)": 27140.0,
+      "p90": 27140.0,
+      "p95": 27140.0
+    },
+    {
+      "Metric": "Stage 9 Embedding (ms)",
+      "Count": 1,
+      "Min": 8047.0,
+      "Max": 8047.0,
+      "Mean": 8047.0,
+      "p50 (Median)": 8047.0,
+      "p90": 8047.0,
+      "p95": 8047.0
+    }
+  ],
+  "documents": [
+    {
+      "Filename": "P2(CIMS)(27112023.pdf",
+      "Document Type": "MEDICAL_REPORT",
+      "Page Count": 7,
+      "Total Time (s)": 219.015,
+      "Total Time (ms)": 219015,
+      "OCR Time (ms)": 95530,
+      "VLM Time (ms)": 95514,
+      "Stage 1 Validating (ms)": 82686,
+      "Stage 2 Uploading (ms)": 32,
+      "Stage 3 OCR (ms)": 95530,
+      "Stage 4 Parsing (ms)": 46,
+      "Stage 5 Graph Ext (ms)": 5453,
+      "Stage 6 Field Ext (ms)": 30,
+      "Stage 7 Analyzing (ms)": 15,
+      "Stage 8 Summary (ms)": 27140,
+      "Stage 9 Embedding (ms)": 8047,
+      "CER": "Not available",
+      "WER": "Not available",
+      "Lab Concordance": "Not available",
+      "Med Fidelity": "Not available",
+      "Summary Language": "english",
+      "Summary Chars": 664,
+      "Status": "COMPLETED"
+    }
+  ]
+}

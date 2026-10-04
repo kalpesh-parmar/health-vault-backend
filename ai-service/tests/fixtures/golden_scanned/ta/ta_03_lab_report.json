@@ -1,0 +1,45 @@
+{
+  "docId": "ta_03_lab_report",
+  "language": "ta",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "அப்பல்லோ டயக்னாஸ்டிக்ஸ் மையம்\nஅங்கீகரிக்கப்பட்ட ரத்த பரிசோதனை கூடம் | தியாகராய நகர், சென்னை\nடாக்டர் எம். நடராஜன்\nM.D. (பத்தாலஜி), ஆய்வக இயக்குனர்\nநோயாளி பெயர்: திருமதி வனிதா மோகன்    |    வயது: 41 வயது    |    பாலினம்: பெண்\nதேதி / Date: 25/03/2026\nரத்த பரிசோதனை அறிக்கை (Blood Sugar & CBC Panel)\nபரிசோதனை பெயர் (Test) | கண்டறியப்பட்ட அளவு (Result) | அலகு (Unit) | சாதாரண வரம்பு (Ref Range)\nஹீமோகுளோபின் (Hemoglobin) | 12.6 | g/dL | 12.0 - 15.0\nவெள்ளை அணுக்கள் (WBC Count) | 7,100 | cells/cu.mm | 4,000 - 11,000\nவெறும் வயிற்று சர்க்கரை (FBS) | 116 | mg/dL | 70 - 100\nஉணவுக்குப் பின் சர்க்கரை (PPBS) | 162 | mg/dL | < 140\nகிளைகேட்டட் ஹீமோகுளோபின் (HbA1c) | 6.8 | % | < 5.7\nரத்த தட்டணுக்கள் (Platelets) | 2,50,000 | /cu.mm | 1,50,000 - 4,50,000",
+  "patientInfo": {
+    "name": "திருமதி வனிதா மோகன்",
+    "age": 41,
+    "gender": "F",
+    "doctorName": "டாக்டர் எம். நடராஜன்",
+    "date": "2026-03-25"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Hemoglobin",
+      "value": 12.6,
+      "unit": "g/dL",
+      "referenceRange": "12.0 - 15.0"
+    },
+    {
+      "testName": "Fasting Blood Sugar",
+      "value": 116,
+      "unit": "mg/dL",
+      "referenceRange": "70 - 100"
+    },
+    {
+      "testName": "Post Prandial Sugar",
+      "value": 162,
+      "unit": "mg/dL",
+      "referenceRange": "< 140"
+    },
+    {
+      "testName": "HbA1c",
+      "value": 6.8,
+      "unit": "%",
+      "referenceRange": "< 5.7"
+    }
+  ]
+}

@@ -73,11 +73,11 @@ class _VisionSpy:
     def status(self) -> dict:
         return {"engine": "chat-completions"}
 
-    async def extract_pdf(self, pdf_bytes, *, max_pages) -> dict:
+    async def extract_pdf(self, pdf_bytes, *, max_pages=25, **kwargs) -> dict:
         self.pdf_calls += 1
         raise AssertionError("text PDF must never reach the vision engine")
 
-    async def extract_image(self, image_bytes, *, filename, mime_type, max_pages) -> dict:
+    async def extract_image(self, image_bytes, *, filename="", mime_type=None, max_pages=1, **kwargs) -> dict:
         raise AssertionError("not expected for a PDF")
 
 

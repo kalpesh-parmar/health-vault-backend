@@ -33,6 +33,30 @@ services:
       - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/health_vault
       - NODE_ENV=production
       - LOG_LEVEL=INFO
+      - WORKER_MODE=standalone
+      - AI_MODEL=qwen3-vl:latest
+      - AI_BASE_URL=http://host.docker.internal:11434/v1
+      - STORAGE_PROVIDER=s3
+      - PATIENT_DOCUMENTS_BUCKET=patient-documents
+      - AWS_REGION=us-east-1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_service_worker
+    command: python -m app.workers.worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/health_vault
+      - NODE_ENV=production
+      - LOG_LEVEL=INFO
+      - WORKER_MODE=standalone
       - AI_MODEL=qwen3-vl:latest
       - AI_BASE_URL=http://host.docker.internal:11434/v1
       - STORAGE_PROVIDER=s3

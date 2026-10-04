@@ -150,13 +150,19 @@ async function buildStructuredReportPayload({
 
   // 3. Extract lab tests / findings
   const tests =
-    Array.isArray(structured.tests) && structured.tests.length > 0
-      ? structured.tests
-      : Array.isArray(structured.labResults) && structured.labResults.length > 0
-        ? structured.labResults
+    Array.isArray(structured.labResults) && structured.labResults.length > 0
+      ? structured.labResults
+      : Array.isArray(structured.tests) && structured.tests.length > 0
+        ? structured.tests
         : [];
 
-  const rawDocType = String(activeDoc.documentType || structured.documentType || "").toUpperCase();
+  const rawDocType = String(
+    activeDoc.documentType ||
+      structured.documentInfo?.documentType ||
+      structured.documentType ||
+      "",
+  ).toUpperCase();
+
   const isPrescription =
     rawDocType === "PRESCRIPTION" ||
     rawDocType === "PRESCERIPTION" ||
@@ -164,12 +170,18 @@ async function buildStructuredReportPayload({
       structured.medications.length > 0 &&
       tests.length === 0);
 
+  const isQuotation =
+    rawDocType === "QUOTATION" ||
+    rawDocType.includes("QUOTATION") ||
+    rawDocType.includes("ESTIMATE");
+
   const isLabReport =
     !isPrescription &&
+    !isQuotation &&
     (tests.length > 0 ||
       rawDocType === "LAB_REPORT" ||
       rawDocType.includes("LAB") ||
-      rawDocType.includes("REPORT"));
+      (rawDocType.includes("REPORT") && !rawDocType.includes("MEDICAL_DOCUMENT")));
 
   const isOtherMedicalDoc = !isPrescription && !isLabReport;
 
@@ -309,20 +321,31 @@ async function buildStructuredReportPayload({
   // 6. Patient details
   const dateOnlyStr =
     toDbDateOnlyString(activeDoc.reportDate) ||
+    toDbDateOnlyString(structured.documentInfo?.documentDate) ||
     toDbDateOnlyString(structured.reportDate) ||
     toDbDateOnlyString(activeDoc.createdAt) ||
     toDbDateOnlyString(new Date());
 
+  const providerInfo = structured.providerInfo || {};
+  const primaryProvider =
+    providerInfo.primary ||
+    (Array.isArray(providerInfo.providers) && providerInfo.providers.length === 1
+      ? providerInfo.providers[0]
+      : null);
+
   const resolvedDoctor =
     activeDoc.doctorName ||
+    primaryProvider?.name ||
     structured.doctorName ||
     structured.doctorInfo?.name ||
     structured.doctor?.name ||
     patientInfo.doctorName ||
     null;
 
+  const facilityInfo = structured.facilityInfo || {};
   const resolvedHospital =
     activeDoc.hospitalName ||
+    facilityInfo.name ||
     structured.hospitalName ||
     structured.hospitalInfo?.name ||
     structured.hospital?.name ||
@@ -331,7 +354,7 @@ async function buildStructuredReportPayload({
     null;
 
   const patientDetails = {
-    name: patientName || "Patient",
+    name: patientName || patientInfo.fullName || patientInfo.name || "Patient",
     age: patientInfo.age || activeDoc.patientAge || structured.patientAge || null,
     gender: patientInfo.gender || activeDoc.patientGender || structured.patientGender || null,
     uhid: patientInfo.uhid || patientInfo.id || patientInfo.patientId || activeDoc.uhid || null,
@@ -353,7 +376,9 @@ async function buildStructuredReportPayload({
         ? "PRESCRIPTION"
         : isLabReport
           ? "LAB_REPORT"
-          : rawDocType || "OTHER_MEDICAL_DOCUMENT",
+          : isQuotation
+            ? "QUOTATION"
+            : rawDocType || "OTHER_MEDICAL_DOCUMENT",
       reportDate: dateOnlyStr,
       hospitalName: resolvedHospital,
       doctorName: resolvedDoctor,
@@ -361,6 +386,7 @@ async function buildStructuredReportPayload({
       patientDetails,
       isLabReport,
       isPrescription,
+      isQuotation,
       isOtherMedicalDoc,
       abnormalResults,
       normalResults,
@@ -371,6 +397,22 @@ async function buildStructuredReportPayload({
       s3Key: activeDoc.s3Key || null,
       fileKey: activeDoc.s3Key || activeDoc.fileKey || null,
       fileUrl: activeDoc.fileUrl || null,
+      // Canonical 14-section projections
+      documentInfo: structured.documentInfo || null,
+      patientInfo: structured.patientInfo || null,
+      providerInfo: structured.providerInfo || null,
+      facilityInfo: structured.facilityInfo || null,
+      diagnosis: structured.diagnosis || [],
+      symptoms: structured.symptoms || [],
+      vitals: structured.vitals || [],
+      labResults: structured.labResults || [],
+      medications: structured.medications || [],
+      procedures: structured.procedures || [],
+      treatments: structured.treatments || [],
+      treatmentPlan: structured.treatmentPlan || null,
+      financialSummary: structured.financialSummary || null,
+      additionalInformation: structured.additionalInformation || null,
+      structuredExtractedData: structured,
     },
     suggestedQuestions,
     options: [],

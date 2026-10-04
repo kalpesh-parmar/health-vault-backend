@@ -52,3 +52,11 @@ desktop.ini
 *.njsproj
 *.sln
 *.swp
+
+# Real patient scan fixtures & private ground-truth (PHI Protection)
+tests/fixtures/golden_scanned/en/
+tests/fixtures/golden_scanned/gu/gu_01*
+tests/fixtures/golden_docs/60300505154.pdf
+
+# Temporary debug images
+debug_page_*.jpg

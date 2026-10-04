@@ -52,10 +52,13 @@ class DocumentQueueService {
         nextJobPayload = this.inMemoryQueue.shift();
       } else {
         // 2. Poll next queued job from PostgreSQL (atomic claim via FOR UPDATE SKIP LOCKED)
+        // Skip DB polling when Python pipeline is active (Python owns background processing)
         try {
-          const claimedDbJob = await documentProcessingJobRepository.claimNextQueuedJob();
-          if (claimedDbJob) {
-            nextJobPayload = this._hydratePayloadFromDb(claimedDbJob);
+          if (!env.usePythonPipeline) {
+            const claimedDbJob = await documentProcessingJobRepository.claimNextQueuedJob();
+            if (claimedDbJob) {
+              nextJobPayload = this._hydratePayloadFromDb(claimedDbJob);
+            }
           }
         } catch (dbErr) {
           // In test environments or during DB reconnects, avoid tight loop

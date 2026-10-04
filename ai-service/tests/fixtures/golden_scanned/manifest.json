@@ -1,0 +1,147 @@
+{
+  "en_01_clinical_record.jpg": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/en/en_01_clinical_record.jpg",
+    "sha256": "407b30c4ae5b98a5dd1ac43892fa23a3ace3cc5150d93958c2d7f2c12a3e033a",
+    "size_bytes": 314003
+  },
+  "gu_01_quotation.pdf": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/gu/gu_01_quotation.pdf",
+    "sha256": "0f9a8b27b872940fdde22250af56afc62925d7bc6a59b834b2bc49879826f34a",
+    "size_bytes": 109599
+  },
+  "en_02_clinical_record.jpg": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/en/en_02_clinical_record.jpg",
+    "sha256": "055f3c870605a857b16145d66f8ecf97832e1d226b94243d115c1dac84b11447",
+    "size_bytes": 318284
+  },
+  "en_04_clinical_record.jpg": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/en/en_04_clinical_record.jpg",
+    "sha256": "ac0940707a136bede4c83e72c3d454788d1a724aa74bf7c082a49c46438d0ec2",
+    "size_bytes": 421543
+  },
+  "en_05_clinical_record.jpg": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/en/en_05_clinical_record.jpg",
+    "sha256": "2a3bbb7f93bcca24bec45e491b89221a3a5e6df0171fac32afc46271af8e743e",
+    "size_bytes": 395252
+  },
+  "en_03_clinical_record.jpg": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/en/en_03_clinical_record.jpg",
+    "sha256": "b5f89dcc9b0fc0f9dde3b52783aef5890107652a9fcd607234cc55f48c777e19",
+    "size_bytes": 327843
+  },
+  "ablation_rot_0deg.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ablation/ablation_rot_0deg.png",
+    "sha256": "4552db2d7652a22f8a68b51f74e1a42dff50265c3b04084195f58d2f66de9abc",
+    "size_bytes": 4971032
+  },
+  "ablation_rot_15deg.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ablation/ablation_rot_15deg.png",
+    "sha256": "49fda92a696856e3e31a7fe1c994ee74cb2265d2cc10d0b0c39d7397fb1879a6",
+    "size_bytes": 5066449
+  },
+  "ablation_rot_45deg.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ablation/ablation_rot_45deg.png",
+    "sha256": "8e34a74ca41511575376c039ac62f24f20fe36661f4b918fc185d810d448fea7",
+    "size_bytes": 5013810
+  },
+  "ablation_rot_5deg.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ablation/ablation_rot_5deg.png",
+    "sha256": "0a842935505c7b209d92c6d17e65f055a2e2b3d5a7e85042f1a49fa61c7cd72b",
+    "size_bytes": 4940029
+  },
+  "gu_02_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/gu/gu_02_prescription.png",
+    "sha256": "da8168207ebcb59e0c1928e25a63438c57e3814afe63e1c581cfa6b4bd215ae2",
+    "size_bytes": 4989412
+  },
+  "gu_03_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/gu/gu_03_prescription.png",
+    "sha256": "72041466d8e1ccf0b77cc5868aa24ea6800c57a784375228edccf3a7ad4c00d2",
+    "size_bytes": 4977919
+  },
+  "gu_04_lab_report.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/gu/gu_04_lab_report.png",
+    "sha256": "31ccbe43fea36e0aac2abff625099a7fe9c3c689c05f07ea6a7be679ef189668",
+    "size_bytes": 4815045
+  },
+  "gu_05_lab_table.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/gu/gu_05_lab_table.png",
+    "sha256": "4699c01094deada3620dd7439623c29f348361d67e04526b026cf23115c153ed",
+    "size_bytes": 4836637
+  },
+  "hi_01_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/hi/hi_01_prescription.png",
+    "sha256": "1a73e1f16beda4946727f50fdb4a8d2d46afbd1e36dec324e8ebd1aa388b8451",
+    "size_bytes": 4971265
+  },
+  "hi_02_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/hi/hi_02_prescription.png",
+    "sha256": "33a5b3bb70283edc5280e27fb9d03cfa0d8bf7b129355ef9e16696d8f4906373",
+    "size_bytes": 4962623
+  },
+  "hi_03_lab_report.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/hi/hi_03_lab_report.png",
+    "sha256": "65e70fc5fda1ac5c64cb479d25bb3c5db2ace4db316596a1e2beec2869834e28",
+    "size_bytes": 4797478
+  },
+  "hi_04_lab_table.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/hi/hi_04_lab_table.png",
+    "sha256": "119256d04cdcacdf5d937827bc900788d94b5da4fc002d7084bc3cbec631b53d",
+    "size_bytes": 4802092
+  },
+  "hi_05_discharge.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/hi/hi_05_discharge.png",
+    "sha256": "3bd9d257323fe434a9ea16b966bbfe7e0e9025ad8018df923efcbf2c57f997b6",
+    "size_bytes": 5005731
+  },
+  "mr_01_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/mr/mr_01_prescription.png",
+    "sha256": "9b0bc15947a5cf5b8265383b5ab71aea43a5396591d90f266c544e8ccc5bd0fe",
+    "size_bytes": 4974812
+  },
+  "mr_02_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/mr/mr_02_prescription.png",
+    "sha256": "770b93dbfb602131d30c62a79ce7aba37a0208de657faa57409f9fc588f018e5",
+    "size_bytes": 4952006
+  },
+  "mr_03_lab_report.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/mr/mr_03_lab_report.png",
+    "sha256": "e2c2cc613bdab51124c602438fd8574cc62e7f579bacabd1fc3cdf8b7db43dd6",
+    "size_bytes": 4803692
+  },
+  "mr_04_lab_table.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/mr/mr_04_lab_table.png",
+    "sha256": "2fa945d4d62258ff25558e9ba431daf71c40b59afa822a361a5a14cb06329f48",
+    "size_bytes": 4781391
+  },
+  "mr_05_consultation.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/mr/mr_05_consultation.png",
+    "sha256": "bfa597aefed69cdb8982ed51fcb54cb71fd4859e79d72973d78bf6bc889c5c3b",
+    "size_bytes": 4997842
+  },
+  "ta_01_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ta/ta_01_prescription.png",
+    "sha256": "9671c99eb1e48ccf604827acfccdac93ddaa712a9d79fe2c192db9d4a50b829e",
+    "size_bytes": 5032938
+  },
+  "ta_02_prescription.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ta/ta_02_prescription.png",
+    "sha256": "dfa172e236cf651746a237bf790d8154e29a540925bb35bdd75c4fd1097ae9be",
+    "size_bytes": 4980239
+  },
+  "ta_03_lab_report.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ta/ta_03_lab_report.png",
+    "sha256": "219bd8466c4a20afb4f966126b85b6b3d5b58233c4c9a8d1dbe22cabecb3ee38",
+    "size_bytes": 4851067
+  },
+  "ta_04_lab_table.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ta/ta_04_lab_table.png",
+    "sha256": "63850dfc36d84aee051655b7385b1883f53e6fed173975f46cb0f6f46f7d54be",
+    "size_bytes": 4831434
+  },
+  "ta_05_lab_report.png": {
+    "path": "health-vault-backend/ai-service/tests/fixtures/golden_scanned/ta/ta_05_lab_report.png",
+    "sha256": "5192effeb66f416b6592ed418fab9327907aeb25016b8c44aafd8e1e658650d0",
+    "size_bytes": 5057768
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "documentType": "LAB_REPORT",
+  "patientInfo": {
+    "name": "Rajesh Patel",
+    "age": 52,
+    "gender": "MALE"
+  },
+  "abnormalFlags": {
+    "Fasting Blood Sugar": {
+      "val": "185",
+      "flag": "HIGH"
+    },
+    "HbA1c": {
+      "val": "8.2",
+      "flag": "HIGH"
+    },
+    "Serum Creatinine": {
+      "val": "1.8",
+      "flag": "HIGH"
+    },
+    "eGFR": {
+      "val": "42",
+      "flag": "LOW"
+    }
+  }
+}

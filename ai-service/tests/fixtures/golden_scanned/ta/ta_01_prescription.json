@@ -1,0 +1,45 @@
+{
+  "docId": "ta_01_prescription",
+  "language": "ta",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "காவேரி மருத்துவமனை மற்றும் ஆராய்ச்சி மையம்\n15, அண்ணா சாலை, சென்னை | தொலைபேசி: 044-24567890\nடாக்டர் எஸ். சுப்பிரமணியன்\nM.D. (பொது மருத்துவம்), தலைமை மருத்துவர்\nநோயாளி பெயர்: திரு. கே. ரங்கநாதன்    |    வயது: 48 வயது    |    பாலினம்: ஆண்\nதேதி / Date: 22/03/2026\nடைப் 2 நீரிழிவு நோய் மற்றும் ரத்தக் கொதிப்பு (Diabetes & Hypertension)\n1. Tab. Glycomet (மெட்பார்மின்) 500 mg - காலை, இரவு உணவுக்கு பின் 1 மாத்திரை (1-0-1) (30 நாட்கள்)\n2. Tab. Cilacar (சிலாகார்) 10 mg - காலை உணவுக்கு பின் 1 மாத்திரை (1-0-0) (30 நாட்கள்)\n3. Tab. Pan 40 (பான் 40) - காலை வெறும் வயிற்றில் 1 மாத்திரை (1-0-0) (15 நாட்கள்)\n4. Tab. Neurobion Forte - இரவு உணவுக்கு பின் 1 மாத்திரை (0-0-1) (30 நாட்கள்)\nஉணவில் உப்பு மற்றும் இனிப்பை முழுமையாக குறைக்கவும். தினமும் 30 நிமிடம் நடைப்பயிற்சி செய்யவும்.\nரத்த சர்க்கரை அளவை தவறாமல் பரிசோதிக்கவும். அடுத்த மருத்துவ ஆலோசனை: 1 மாதம் கழித்து.",
+  "patientInfo": {
+    "name": "திரு. கே. ரங்கநாதன்",
+    "age": 48,
+    "gender": "M",
+    "doctorName": "டாக்டர் எஸ். சுப்பிரமணியன்",
+    "date": "2026-03-22"
+  },
+  "medications": [
+    {
+      "name": "Glycomet",
+      "dosage": "500 mg",
+      "frequency": "1-0-1",
+      "duration": "30 days"
+    },
+    {
+      "name": "Cilacar",
+      "dosage": "10 mg",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Pan 40",
+      "dosage": "40 mg",
+      "frequency": "1-0-0",
+      "duration": "15 days"
+    },
+    {
+      "name": "Neurobion Forte",
+      "dosage": "1 tab",
+      "frequency": "0-0-1",
+      "duration": "30 days"
+    }
+  ],
+  "labResults": []
+}

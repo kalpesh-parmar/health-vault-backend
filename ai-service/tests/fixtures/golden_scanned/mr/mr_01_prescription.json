@@ -1,0 +1,45 @@
+{
+  "docId": "mr_01_prescription",
+  "language": "mr",
+  "docType": "prescription",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "सह्याद्री सुपर स्पेशालिटी रुग्णालय\nकर्वे रोड, डेक्कन जिमखाना, पुणे | फोन: ०२०-६७२१५०००\nडॉ. प्रकाश जोशी\nएम.डी. (हृदयरोगतज्ज्ञ), फेलो अमेरिकन कॉलेज\nरुग्णाचे नाव: श्री. सुरेश कुलकर्णी    |    वय: ५२ वर्षे    |    लिंग: पुरुष\nदिनांक: १८/०३/२०२६\nउच्च रक्तदाब आणि इसिमिक हृदयविकार (Hypertension & IHD)\n१. Tab. Amlodipine (अम्लोडिपाइन) 5 mg - दररोज सकाळी १ गोळी नाश्त्यानंतर (१-०-०) (३० दिवस)\n२. Tab. Atorvastatin (अ‍ॅटोर्वास्टॅटिन) 10 mg - रात्री झोपताना १ गोळी (०-०-१) (३० दिवस)\n३. Tab. Ecosprin (इकोस्प्रिन) 75 mg - दुपारी जेवणानंतर १ गोळी (०-१-०) (३० दिवस)\n४. Tab. Metoprolol XL 25 mg - सकाळी १ गोळी नाश्त्यानंतर (१-०-०) (३० दिवस)\nआहारात मिठाचे प्रमाण कमी ठेवा. तेलकट व तिखट पदार्थ टाळा. दररोज सकाळी ३० मिनिटे चाला.\nछातीत दुखणे किंवा श्वास घेण्यास त्रास झाल्यास तात्काळ संपर्क साधा. पुढील तपासणी: १ महिन्याने.",
+  "patientInfo": {
+    "name": "श्री. सुरेश कुलकर्णी",
+    "age": 52,
+    "gender": "M",
+    "doctorName": "डॉ. प्रकाश जोशी",
+    "date": "2026-03-18"
+  },
+  "medications": [
+    {
+      "name": "Amlodipine",
+      "dosage": "5 mg",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Atorvastatin",
+      "dosage": "10 mg",
+      "frequency": "0-0-1",
+      "duration": "30 days"
+    },
+    {
+      "name": "Ecosprin",
+      "dosage": "75 mg",
+      "frequency": "0-1-0",
+      "duration": "30 days"
+    },
+    {
+      "name": "Metoprolol XL",
+      "dosage": "25 mg",
+      "frequency": "1-0-0",
+      "duration": "30 days"
+    }
+  ],
+  "labResults": []
+}

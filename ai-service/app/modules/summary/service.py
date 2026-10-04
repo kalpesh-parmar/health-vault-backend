@@ -48,8 +48,8 @@ class SummaryService:
             if isinstance(result, Exception):
                 errors.append(str(result))
                 logger.warning(
-                    "summary_chunk_failed_using_text_fallback",
-                    extra={"model": self.model, "error": str(result)[:300]},
+                    "summary_chunk_failed",
+                    extra={"model": self.model, "error": str(result)[:300], "error_type": type(result).__name__},
                 )
                 continue
             partials.append(result)
@@ -83,7 +83,7 @@ class SummaryService:
         except Exception as exc:
             logger.warning(
                 "summary_merge_failed_using_partial_summary",
-                extra={"model": self.model, "error": str(exc)[:300]},
+                extra={"model": self.model, "error": str(exc)[:300], "error_type": type(exc).__name__},
             )
             final = merge_partial_summaries(partials, mode=mode, document_type=document_type)
             errors.append(str(exc))
@@ -99,12 +99,13 @@ class SummaryService:
 
     async def _summarize_chunk(self, text: str, *, mode: str, document_type: str, merge: bool = False) -> dict:
         prompt = build_prompt(text, mode=mode, document_type=document_type, merge=merge)
+        token_cap = min(max(self.num_predict, 1024), 2048) if mode == "concise" else min(max(self.num_predict * 2, 2048), 4096)
         raw = await self.llm.chat(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             format_json=True,
-            num_predict=self.num_predict if mode == "concise" else self.num_predict * 2,
+            num_predict=token_cap,
         )
         return parse_summary(raw, mode=mode, document_type=document_type)
 
@@ -123,14 +124,19 @@ def parse_summary(raw: str, *, mode: str, document_type: str) -> dict:
     try:
         parsed = parse_json_object(raw)
         if isinstance(parsed, dict):
+            summary_content = parsed.get("summary") or parsed.get("keyFindings") or parsed.get("findings")
+            meds_content = parsed.get("medications") or parsed.get("prescriptions")
+            tests_content = parsed.get("tests") or parsed.get("labResults") or parsed.get("investigations")
+            warnings_content = parsed.get("warnings") or parsed.get("abnormalResults") or parsed.get("alerts")
+            follow_content = parsed.get("follow_up") or parsed.get("followUps") or parsed.get("recommendations")
             return {
                 "type": parsed.get("type") or document_type,
                 "mode": mode,
-                "summary": as_list(parsed.get("summary")),
-                "medications": as_list(parsed.get("medications")),
-                "tests": as_list(parsed.get("tests")),
-                "warnings": as_list(parsed.get("warnings")),
-                "follow_up": as_list(parsed.get("follow_up")),
+                "summary": as_list(summary_content),
+                "medications": as_list(meds_content),
+                "tests": as_list(tests_content),
+                "warnings": as_list(warnings_content),
+                "follow_up": as_list(follow_content),
             }
     except Exception as exc:
         raise LLMModelError(f"Configured AI model returned invalid summary JSON: {exc}") from exc

@@ -15,6 +15,7 @@ from app.api.v1.routes import (
     translation,
     validation,
     voice,
+    internal_documents
 )
 from app.core.errors import install_exception_handlers
 from app.core.lifecycle import lifespan
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(voice.router, prefix="/v1")
     app.include_router(translation.router, prefix="/api/v1")
     app.include_router(language.router, prefix="/api/v1")
+    app.include_router(internal_documents.router)
     return app
 
 

@@ -1,0 +1,2 @@
+Filename,Document Type,Page Count,Total Time (s),Total Time (ms),OCR Time (ms),VLM Time (ms),Stage 1 Validating (ms),Stage 2 Uploading (ms),Stage 3 OCR (ms),Stage 4 Parsing (ms),Stage 5 Graph Ext (ms),Stage 6 Field Ext (ms),Stage 7 Analyzing (ms),Stage 8 Summary (ms),Stage 9 Embedding (ms),CER,WER,Lab Concordance,Med Fidelity,Summary Language,Summary Chars,Status
+P2(CIMS)(27112023.pdf,MEDICAL_REPORT,7,219.015,219015,95530,95514,82686,32,95530,46,5453,30,15,27140,8047,Not available,Not available,Not available,Not available,english,664,COMPLETED

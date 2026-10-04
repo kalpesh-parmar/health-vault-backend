@@ -1,0 +1,45 @@
+{
+  "docId": "hi_03_lab_report",
+  "language": "hi",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "मेट्रो डायग्नोस्टिक्स एवं पैथोलॉजी लैब\nसत्यापित एनएबीएल मान्यता प्राप्त प्रयोगशाला | रिंग रोड, कानपुर\nडॉ. अरुण मेहरोत्रा\nएम.डी. (पैथोलॉजी), मुख्य पैथोलॉजिस्ट\nरोगी का नाम: श्री विजय प्रताप सिंह    |    आयु: 50 वर्ष    |    लिंग: पुरुष\nदिनांक: 16/03/2026\nरक्त परीक्षण रिपोर्ट - सीबीसी (Complete Blood Count)\nपरीक्षण का नाम (Test) | परिणाम (Result) | इकाई (Unit) | संदर्भ सीमा (Reference)\nहीमोग्लोबिन (Hemoglobin) | 13.8 | g/dL | 13.0 - 17.0\nकुल ल्यूकोसाइट गणना (TLC) | 7,400 | /cu.mm | 4,000 - 11,000\nप्लेटलेट्स गणना (Platelets) | 2,45,000 | /cu.mm | 1,50,000 - 4,50,000\nआरबीसी गणना (RBC Count) | 4.8 | mil/cu.mm | 4.5 - 5.5\nपैक्ड सेल वॉल्यूम (PCV) | 42.0 | % | 40.0 - 50.0\nई.एस.आर. (ESR) | 12 | mm/hr | 0 - 15",
+  "patientInfo": {
+    "name": "श्री विजय प्रताप सिंह",
+    "age": 50,
+    "gender": "M",
+    "doctorName": "डॉ. अरुण मेहरोत्रा",
+    "date": "2026-03-16"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Hemoglobin",
+      "value": 13.8,
+      "unit": "g/dL",
+      "referenceRange": "13.0 - 17.0"
+    },
+    {
+      "testName": "TLC",
+      "value": 7400,
+      "unit": "/cu.mm",
+      "referenceRange": "4000 - 11000"
+    },
+    {
+      "testName": "Platelets",
+      "value": 245000,
+      "unit": "/cu.mm",
+      "referenceRange": "150000 - 450000"
+    },
+    {
+      "testName": "ESR",
+      "value": 12,
+      "unit": "mm/hr",
+      "referenceRange": "0 - 15"
+    }
+  ]
+}

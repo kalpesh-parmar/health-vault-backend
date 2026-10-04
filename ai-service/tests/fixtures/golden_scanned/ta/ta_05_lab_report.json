@@ -1,0 +1,33 @@
+{
+  "docId": "ta_05_lab_report",
+  "language": "ta",
+  "docType": "discharge",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "சென்னை அரசு பொது மருத்துவமனை\nவெளியேற்ற சுருக்க அறிக்கை (Discharge Summary Sheet)\nடாக்டர் ஆர். பாலசந்தர்\nM.D., பொது மருத்துவ பேராசிரியர்\nநோயாளி பெயர்: திரு. ஆறுமுகம்    |    வயது: 53 வயது    |    பாலினம்: ஆண்\nதேதி / Date: 27/03/2026\nகடுமையான இரைப்பை குடல் அழற்சி (Acute Gastroenteritis)\nசேர்க்கை தேதி: 20/03/2026 | வெளியேற்ற தேதி: 27/03/2026\nநோயாளியின் நிலையும் மருத்துவ பரிசோதனையும்:\nநோயாளி கடுமையான வாந்தி, வயிற்றுப்போக்கு மற்றும் உடல் வறட்சியுடன் அவசர பிரிவில் அனுமதிக்கப்பட்டார்.\nரத்த அழுத்தம்: 95/65 mmHg, நாடித் துடிப்பு: 92/நிமிடம்.\nவழங்கப்பட்ட சிகிச்சை விவரங்கள்:\nஉடனடி நரம்பு வழி திரவம் (IV Normal Saline, Ringer Lactate) மற்றும் ஆன்டிபயாடிக் சிகிச்சை வழங்கப்பட்டது.\nசிகிச்சைக்குப் பின் நோயாளியின் உடல்நிலை நல்ல முன்னேற்றம் அடைந்து சீராக உள்ளது.\nவீட்டிற்கு செல்லும் போது பின்பற்ற வேண்டிய அறிவுரைகள்:\n1. நன்கு காய்ச்சிய ஆறிய குடிநீரை மட்டும் பருகவும்.\n2. Tab. Ofloxacin 200 mg - காலை, இரவு உணவுக்கு பின் 5 நாட்கள்.\n3. Tab. Pantoprazole 40 mg - காலை வெறும் வயிற்றில் 7 நாட்கள்.",
+  "patientInfo": {
+    "name": "திரு. ஆறுமுகம்",
+    "age": 53,
+    "gender": "M",
+    "doctorName": "டாக்டர் ஆர். பாலசந்தர்",
+    "date": "2026-03-27"
+  },
+  "medications": [
+    {
+      "name": "Ofloxacin",
+      "dosage": "200 mg",
+      "frequency": "1-0-1",
+      "duration": "5 days"
+    },
+    {
+      "name": "Pantoprazole",
+      "dosage": "40 mg",
+      "frequency": "1-0-0",
+      "duration": "7 days"
+    }
+  ],
+  "labResults": []
+}

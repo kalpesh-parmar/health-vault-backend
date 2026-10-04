@@ -1,0 +1,45 @@
+{
+  "docId": "hi_04_lab_table",
+  "language": "hi",
+  "docType": "lab_report",
+  "status": "synthetic_directional_only",
+  "provenance": "generated_source_text",
+  "verified_by": "generator_v1",
+  "seen_in_v6_tuning": false,
+  "split": "synthetic",
+  "groundTruthText": "मेट्रो डायग्नोस्टिक्स एवं पैथोलॉजी लैब\nलिपिड प्रोफाइल परीक्षण रिपोर्ट | जांच संदर्भ: LP-90214\nडॉ. अरुण मेहरोत्रा\nएम.डी. (पैथोलॉजी)\nरोगी का नाम: श्री मोहन लाल शर्मा    |    आयु: 58 वर्ष    |    लिंग: पुरुष\nदिनांक: 17/03/2026\nलिपिड प्रोफाइल परीक्षण (Lipid Profile Panel)\nजांच विवरण (Test Name) | प्राप्त मान (Result) | इकाई (Unit) | सामान्य सीमा (Ref Range)\nकुल कोलेस्ट्रॉल (Total Cholesterol) | 188 | mg/dL | < 200\nट्राइग्लिसराइड्स (Triglycerides) | 142 | mg/dL | < 150\nएचडीएल कोलेस्ट्रॉल (HDL Good) | 46 | mg/dL | > 40\nएलडीएल कोलेस्ट्रॉल (LDL Bad) | 114 | mg/dL | < 100\nवीएलडीएल कोलेस्ट्रॉल (VLDL) | 28 | mg/dL | < 30",
+  "patientInfo": {
+    "name": "श्री मोहन लाल शर्मा",
+    "age": 58,
+    "gender": "M",
+    "doctorName": "डॉ. अरुण मेहरोत्रा",
+    "date": "2026-03-17"
+  },
+  "medications": [],
+  "labResults": [
+    {
+      "testName": "Total Cholesterol",
+      "value": 188,
+      "unit": "mg/dL",
+      "referenceRange": "< 200"
+    },
+    {
+      "testName": "Triglycerides",
+      "value": 142,
+      "unit": "mg/dL",
+      "referenceRange": "< 150"
+    },
+    {
+      "testName": "HDL",
+      "value": 46,
+      "unit": "mg/dL",
+      "referenceRange": "> 40"
+    },
+    {
+      "testName": "LDL",
+      "value": 114,
+      "unit": "mg/dL",
+      "referenceRange": "< 100"
+    }
+  ]
+}

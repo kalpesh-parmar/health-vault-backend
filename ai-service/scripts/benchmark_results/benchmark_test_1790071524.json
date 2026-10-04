@@ -1,0 +1,217 @@
+{
+  "document": "5069200904.pdf",
+  "total_time_sec": 41.171,
+  "stages_passed": 14,
+  "structured_data": {
+    "patientInfo": {
+      "age": "70 Years",
+      "name": "Manjulaben Ranoliya",
+      "gender": "Female",
+      "dob": null,
+      "phone": null
+    },
+    "doctorInfo": {
+      "name": null,
+      "specialty": null
+    },
+    "hospitalInfo": {
+      "name": "Green Cross Genetics Lab PVT. LTD.",
+      "address": "4,Dwarkadhis Market -1, Sardar Baug, Junagadh, Gujarat 362001"
+    },
+    "diagnosis": ["Provisional Diagnosis of Diabetes"],
+    "medications": [],
+    "labResults": [
+      {
+        "testName": "Hemoglobin (Photometric)",
+        "value": 11.2,
+        "unit": "gm%",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "hemoglobin_photometric",
+        "rawValue": "11.20",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "RBC Count",
+        "value": 3.76,
+        "unit": "Mill/c.mm",
+        "referenceRange": "4.0 - 5.9 Mill/c.mm",
+        "flag": "LOW",
+        "canonicalKey": "rbc_count",
+        "rawValue": "3.76",
+        "isAbnormal": true,
+        "isCritical": false
+      },
+      {
+        "testName": "WBC Count",
+        "value": 7300.0,
+        "unit": "/c.mm",
+        "referenceRange": "4000.0 - 11000.0 /c.mm",
+        "flag": "NORMAL",
+        "canonicalKey": "wbc_count",
+        "rawValue": "7300",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "Platelet Count",
+        "value": 370000.0,
+        "unit": "cells/mcL",
+        "referenceRange": "150000.0 - 450000.0 cells/mcL",
+        "flag": "NORMAL",
+        "canonicalKey": "platelet_count",
+        "rawValue": "370000",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "Hematocrit/PCV (Measured)",
+        "value": 34.4,
+        "unit": "%",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "hematocrit_pcv_measured",
+        "rawValue": "34.40",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "MCV",
+        "value": 91.4,
+        "unit": "fL",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "mcv",
+        "rawValue": "91.40",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "MCH",
+        "value": 29.8,
+        "unit": "pg",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "mch",
+        "rawValue": "29.80",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "MCHC",
+        "value": 32.6,
+        "unit": "g/dL",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "mchc",
+        "rawValue": "32.60",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "RDW-CV",
+        "value": 11.5,
+        "unit": "%",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "rdw_cv",
+        "rawValue": "11.50",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "Random Blood Sugar",
+        "value": 271.0,
+        "unit": "mg/dL",
+        "referenceRange": "70.0 - 140.0 mg/dL",
+        "flag": "HIGH",
+        "canonicalKey": "random_blood_glucose",
+        "rawValue": "271",
+        "isAbnormal": true,
+        "isCritical": false
+      },
+      {
+        "testName": "HbA1c",
+        "value": 9.0,
+        "unit": "%",
+        "referenceRange": "4.0 - 5.6 %",
+        "flag": "HIGH",
+        "canonicalKey": "hba1c",
+        "rawValue": "9.0",
+        "isAbnormal": true,
+        "isCritical": false
+      },
+      {
+        "testName": "Mean Plasma Glucose",
+        "value": 212.2,
+        "unit": "mg%",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "mean_plasma_glucose",
+        "rawValue": "212.20",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "Prothrombin Time (PT)",
+        "value": 18.5,
+        "unit": "Seconds",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "prothrombin_time_pt",
+        "rawValue": "18.5",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "Activated Partial Thromboplastin Time (APTT)",
+        "value": 32.2,
+        "unit": "Seconds",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "activated_partial_thromboplastin_time_aptt",
+        "rawValue": "32.2",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "T3",
+        "value": 1.41,
+        "unit": "ng/mL",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "t3",
+        "rawValue": "1.41",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "T4",
+        "value": 9.64,
+        "unit": "\u00b5g/dL",
+        "referenceRange": "See lab reference",
+        "flag": "NORMAL",
+        "canonicalKey": "t4",
+        "rawValue": "9.640",
+        "isAbnormal": false,
+        "isCritical": false
+      },
+      {
+        "testName": "TSH",
+        "value": 1.2,
+        "unit": "micro IU/mL",
+        "referenceRange": "0.4 - 4.0 micro IU/mL",
+        "flag": "NORMAL",
+        "canonicalKey": "tsh",
+        "rawValue": "1.200",
+        "isAbnormal": false,
+        "isCritical": false
+      }
+    ],
+    "vitals": [],
+    "marginalNotes": [
+      "Note: Recommended test is Prothrombin Time (PT) and Activated Partial Thromboplastin time (APTT)"
+    ]
+  }
+}
