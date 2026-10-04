@@ -241,6 +241,29 @@ components:
           format: uuid
           example: 123e4567-e89b-12d3-a456-426614174000
 
+    BatchCreateMedicationRequest:
+      type: array
+      items:
+        $ref: "#/components/schemas/CreateMedicationRequest"
+      example:
+        - medicationName: Paracetamol 500mg
+          medicationType: TABLET
+          frequency: TWICE_DAILY
+          startDate: "2026-10-02"
+          medicationSchedule:
+            MORNING: "08:00:00"
+            NIGHT: "20:00:00"
+          foodFrequency: AFTER_FOOD
+          totalQuantity: 10
+        - medicationName: Amoxicillin 250mg
+          medicationType: CAPSULE
+          frequency: ONCE_DAILY
+          startDate: "2026-10-02"
+          medicationSchedule:
+            MORNING: "09:00:00"
+          foodFrequency: AFTER_FOOD
+          totalQuantity: 7
+
     UpdateMedicationRequest:
       type: object
 
@@ -484,7 +507,10 @@ paths:
       tags:
         - Medication
 
-      summary: Create medication
+      summary: Create single medication or batch array of medications
+
+      description: >
+        Creates a single medication or a batch of medications at once. Generates reminders and dosage schedule occurrences for all created medications.
 
       security:
         - bearerAuth: []
@@ -495,11 +521,47 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateMedicationRequest"
+              oneOf:
+                - $ref: "#/components/schemas/CreateMedicationRequest"
+                - $ref: "#/components/schemas/BatchCreateMedicationRequest"
 
       responses:
         "201":
-          description: Medication created successfully
+          description: Medication(s) created successfully
+
+        "400":
+          description: Bad request
+
+        "401":
+          description: Unauthorized
+
+        "404":
+          description: Patient not found
+
+  /medications/batch-create:
+    post:
+      tags:
+        - Medication
+
+      summary: Create batch array of medications
+
+      description: >
+        Creates multiple medications in a single request and generates reminder schedules for all of them.
+
+      security:
+        - bearerAuth: []
+
+      requestBody:
+        required: true
+
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchCreateMedicationRequest"
+
+      responses:
+        "201":
+          description: Medications batch created successfully
 
         "400":
           description: Bad request

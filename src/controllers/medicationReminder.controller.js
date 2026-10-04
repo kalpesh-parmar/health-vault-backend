@@ -6,10 +6,19 @@ const medicationReminderService = require("../services/medicationReminder.servic
 //create
 async function createReminder(req, res) {
   const result = await medicationReminderService.createReminder(req.auth.userId, req.body);
+  const message = Array.isArray(result)
+    ? messageConstants.MEDICATIONS_BATCH_CREATED
+    : messageConstants.MEDICATION_REMINDER_CREATED;
+  return successResponse(res, result, message, StatusCodes.CREATED);
+}
+
+//create batch
+async function createBatchReminders(req, res) {
+  const result = await medicationReminderService.createBatchReminders(req.auth.userId, req.body);
   return successResponse(
     res,
     result,
-    messageConstants.MEDICATION_REMINDER_CREATED,
+    messageConstants.MEDICATIONS_BATCH_CREATED,
     StatusCodes.CREATED,
   );
 }
@@ -61,6 +70,7 @@ async function getMedicationSummary(req, res) {
 
 module.exports = {
   createReminder,
+  createBatchReminders,
   getAllReminders,
   deleteReminder,
   getAllOccurrences,

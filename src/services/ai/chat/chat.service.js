@@ -11,7 +11,6 @@ const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
 const patientRepository = require("../../../repositories/patientRepository");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
-
 const aiClient = require("../clients/aiClient.service");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
 const { normalizeLanguage } = require("../../../utils/commonUtils");
@@ -38,7 +37,6 @@ const {
   NO_SUMMARY_AVAILABLE_I18N,
   PREDEFINED_QUESTIONS_I18N,
 } = require("../../../constants/chatReplies");
-
 const { chatFastPath } = require("./chatFastPath.service");
 
 // Debug logger

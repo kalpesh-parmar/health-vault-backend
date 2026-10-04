@@ -7,17 +7,14 @@ const medicationReminderOccurrenceRepository = require("../repositories/medicati
 const { generateReminderOccurrences } = require("../utils/reminderOccurrenceGenerator");
 const {
   validateSchema,
-  createReminderSchema,
+  createReminderOrBatchSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 } = require("../validations");
 class MedicationReminderService {
-  //create
-  async createReminder(userId, data) {
-    // VALIDATE REQUEST
-    const validData = await validateSchema(createReminderSchema, data);
+  async _createSingleReminderForMedicationId(userId, medicationId) {
     // VALIDATE MEDICATION OWNERSHIP
-    const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
+    const medication = await this.validateMedicationOwnership(medicationId, userId);
 
     // CHECK EXISTING REMINDER (IDEMPOTENCY)
     const existingReminder = await medicationReminderRepository.findByMedicationId(medication.id);
@@ -31,8 +28,6 @@ class MedicationReminderService {
       medicationId: medication.id,
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
       dosePerIntake: medication.dosePerIntake,
-      // routineBase: medication.frequency,
-      // medicationTime: medication.medicationTime,
     });
 
     // GENERATE OCCURRENCES (with skipPastOccurrences: true)
@@ -44,22 +39,87 @@ class MedicationReminderService {
     if (occurrences.length > 0) {
       await medicationReminderOccurrenceRepository.bulkCreate(occurrences);
 
-      // Recalculate end date and refill reminder time based on the actual generated occurrences
+      // Recalculate end date based on the actual generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      // const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(medication.id, {
         endDate: recalculatedEndDate,
       });
-
-      // const finalRefillTime = refillTime(recalculatedEndDate);
-      // await medicationReminderRepository.updateById(reminder.id, {
-      //   refillReminderTime: finalRefillTime,
-      // });
-      // reminder.refillReminderTime = finalRefillTime;
     }
 
     return reminder;
   }
+
+  // extract medication IDs helper
+  _extractMedicationIds(data) {
+    if (typeof data === "string") {
+      return { ids: [data], isBatch: false };
+    }
+    if (Array.isArray(data)) {
+      const ids = data.map((item) => (typeof item === "string" ? item : item.medicationId));
+      return { ids, isBatch: true };
+    }
+    if (data && typeof data === "object") {
+      if (Array.isArray(data.medicationIds)) {
+        return { ids: data.medicationIds, isBatch: true };
+      }
+      if (Array.isArray(data.medications)) {
+        const ids = data.medications.map((item) =>
+          typeof item === "string" ? item : item.medicationId,
+        );
+        return { ids, isBatch: true };
+      }
+      if (Array.isArray(data.items)) {
+        const ids = data.items.map((item) => (typeof item === "string" ? item : item.medicationId));
+        return { ids, isBatch: true };
+      }
+      if (data.medicationId) {
+        return { ids: [data.medicationId], isBatch: false };
+      }
+    }
+    return { ids: [], isBatch: false };
+  }
+
+  //create
+  async createReminder(userId, data) {
+    // VALIDATE REQUEST
+    const validData = await validateSchema(createReminderOrBatchSchema, data);
+    const { ids, isBatch } = this._extractMedicationIds(validData);
+
+    if (ids.length === 0) {
+      throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
+    }
+
+    const reminders = [];
+    for (const medId of ids) {
+      const reminder = await this._createSingleReminderForMedicationId(userId, medId);
+      reminders.push(reminder);
+    }
+
+    if (!isBatch && reminders.length === 1) {
+      return reminders[0];
+    }
+
+    return reminders;
+  }
+
+  //create batch
+  async createBatchReminders(userId, data) {
+    const validData = await validateSchema(createReminderOrBatchSchema, data);
+    const { ids } = this._extractMedicationIds(validData);
+
+    if (ids.length === 0) {
+      throw new NotFoundException(errorConstants.MEDICATION_NOT_FOUND);
+    }
+
+    const reminders = [];
+    for (const medId of ids) {
+      const reminder = await this._createSingleReminderForMedicationId(userId, medId);
+      reminders.push(reminder);
+    }
+
+    return reminders;
+  }
+
   //get all reminders
   async getAllReminders(userId) {
     return medicationReminderRepository.findAll(userId);

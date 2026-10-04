@@ -603,6 +603,12 @@ function normalizeCreateMedicationInput(payload = {}) {
   if (input.instructions && !input.notes) {
     input.notes = String(input.instructions).slice(0, 1000);
   }
+  if (!input.prescribedBy && input.prescribed_by) {
+    input.prescribedBy = input.prescribed_by;
+  }
+  if (input.refillAlert === undefined && input.refill_alert !== undefined) {
+    input.refillAlert = !!input.refill_alert;
+  }
   if (input.dosePerIntake !== undefined && input.dosePerIntake !== null) {
     const parsed =
       typeof input.dosePerIntake === "number"
@@ -721,7 +727,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     input.totalQuantity === null ||
     isNaN(Number(input.totalQuantity))
   ) {
-    input.totalQuantity = 10;
+    input.totalQuantity = 30;
   } else {
     input.totalQuantity = Math.max(0, Math.round(Number(input.totalQuantity)));
   }
@@ -739,13 +745,13 @@ function normalizeCreateMedicationInput(payload = {}) {
     input.startDate = todayStr;
   } else {
     const sDate = new Date(input.startDate);
-    sDate.setHours(0, 0, 0, 0);
-    if (isNaN(sDate.getTime()) || sDate < today) {
+    if (isNaN(sDate.getTime())) {
       input.startDate = todayStr;
     }
   }
   if (!input.foodFrequency) {
-    input.foodFrequency = "AFTER_FOOD";
+    input.foodFrequency =
+      input.foodContext || input.food_context || input.food_frequency || "AFTER_FOOD";
   }
 
   if (input.resolution) {

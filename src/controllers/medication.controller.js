@@ -3,11 +3,27 @@ const { messageConstants } = require("../constants/messageConstants");
 const { successResponse, paginatedSuccessResponse } = require("../helpers/generalResponse");
 const medicationService = require("../services/medication.service");
 
-//create medication
+//create medication (supports single or batch array)
 async function createMedication(req, res) {
   const result = await medicationService.createMedication(req.auth.userId, req.body);
+  const isBatch = Array.isArray(result) || (result && result.created !== undefined);
+  const msg = isBatch
+    ? messageConstants.MEDICATIONS_BATCH_CREATED
+    : messageConstants.MEDICATION_CREATED;
 
-  return successResponse(res, result, messageConstants.MEDICATION_CREATED, StatusCodes.CREATED);
+  return successResponse(res, result, msg, StatusCodes.CREATED);
+}
+
+// batch create medications
+async function batchCreateMedications(req, res) {
+  const result = await medicationService.createMedication(req.auth.userId, req.body);
+
+  return successResponse(
+    res,
+    result,
+    messageConstants.MEDICATIONS_BATCH_CREATED,
+    StatusCodes.CREATED,
+  );
 }
 
 //updated medication
@@ -86,6 +102,7 @@ async function batchDeleteMedications(req, res) {
 
 module.exports = {
   createMedication,
+  batchCreateMedications,
   updateMedication,
   deleteMedication,
   batchDeleteMedications,
