@@ -1485,6 +1485,7 @@ class OcrStageHandler:
                     total_p = doc.page_count
                     pages_data_dict: dict[int, dict[str, Any]] = {}
                     all_raw_page_texts: list[str] = []
+                    raw_text_dict: dict[int, str] = {}
                     for index in range(total_p):
                         try:
                             t_raw = doc.load_page(index).get_text("text") or ""
