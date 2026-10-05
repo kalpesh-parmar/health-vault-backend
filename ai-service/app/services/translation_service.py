@@ -20,39 +20,38 @@ def mask_text(text: str) -> tuple[str, list[str]]:
     patterns = [
         ("email", r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'),
         ("phone", r'\+?\d{1,4}[-.\s]?\d{3,5}[-.\s]?\d{3,5}(?:[-.\s]?\d{1,4})?'),
-        ("date", r'\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b'),
+        ("date_named", r'(?i)\b\d{1,2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*-\d{2,4}\b'),
+        ("date_slash", r'\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b'),
+        ("range", r'(?i)\b\d+(?:\.\d+)?\s*(?:-|to)\s*\d+(?:\.\d+)?(?:\s*(?:%|(?:mg\/dL|g\/dL|µg\/dL|ug\/dL|mcg\/dL|mg\/L|mmol\/L|µmol\/L|umol\/L|uIU\/mL|mU\/L|IU\/mL|pg\/mL|ng\/mL|fL|pg|mg|ml|gm|mcg|iu)\b))?'),
+        ("number_unit", r'(?i)\b\d+(?:\.\d+)?\s*(?:%|(?:mg\/dL|g\/dL|µg\/dL|ug\/dL|mcg\/dL|mg\/L|mmol\/L|µmol\/L|umol\/L|uIU\/mL|mU\/L|IU\/mL|pg\/mL|ng\/mL|fL|pg|mg|ml|gm|mcg|iu|mm\/hr|sec|seconds|min|minutes|hrs|hours|days|tablets|capsules|pills)\b)'),
+        ("bp", r'(?i)\b\d{2,3}\/\d{2,3}(?:\s*mmHg)?\b'),
         ("blood", r'(?<![A-Za-z])(?:AB|A|B|O)[+-]'),
-        ("emoji", r'[\u2600-\u27BF\U00010000-\U0010ffff]+'),
-        ("markdown_list", r'(?m)^[\s]*(?:#{1,6}|-|\*|•)\s+'),
-        ("markdown_bold", r'\*\*'),
-        ("medical_terms", r'(?i)\b(Hemoglobin|HbA1c|WBC|RBC|Platelets|Creatinine|LDL|HDL|TSH|Vitamin\s*D|Cholesterol|Bilirubin|Urea|Glucose)\b'),
+        ("medical_terms", r'(?i)\b(?:HbA1c|TSH|PT\/INR|INR|Hb|Hemoglobin|WBC|RBC|Platelet\s+Count|Platelets|Creatinine|LDL|HDL|VLDL|Cholesterol|Triglycerides|Bilirubin|Urea|BUN|Glucose|FBS|PPBS|RBS|SGOT|AST|SGPT|ALT|Alkaline\s+Phosphatase|ALP|Total\s+Protein|Albumin|Globulin|Calcium|Sodium|Potassium|Chloride|Uric\s+Acid|ESR|CRP|Vitamin\s+D|Vitamin\s+B12|Ferritin|Iron|TIBC|PSA|FT3|FT4|Troponin|D-Dimer|Metformin|Atorvastatin|Telmisartan|Amlodipine|Paracetamol|Azithromycin|Amoxicillin)\b'),
+        ("number_standalone", r'\b\d+(?:\.\d+)?\b'),
     ]
     
-    masked_text = text
     matches = []
     for name, pat in patterns:
-        for match in re.finditer(pat, masked_text):
+        for match in re.finditer(pat, text):
             matches.append((match.start(), match.end(), match.group(0)))
     
-    # Sort matches by start index descending to prevent indexing shifts
-    matches.sort(key=lambda x: x[0], reverse=True)
+    # Sort matches by start index ascending, length descending
+    matches.sort(key=lambda x: (x[0], -(x[1] - x[0])))
     
     # Deduplicate overlapping matches
     clean_matches = []
-    last_start = len(text) + 1
+    last_end = -1
     for start, end, val in matches:
-        if end <= last_start:
+        if start >= last_end:
             clean_matches.append((start, end, val))
-            last_start = start
+            last_end = end
             
-    clean_matches.reverse()  # forward order
-    
     final_text = ""
     curr_idx = 0
-    for start, end, val in clean_matches:
+    for i, (start, end, val) in enumerate(clean_matches):
         final_text += text[curr_idx:start]
-        mask_str = f"[#{len(masks)}#]"
-        final_text += mask_str
+        placeholder = f"⟦{i + 1}⟧"
+        final_text += placeholder
         masks.append(val)
         curr_idx = end
     final_text += text[curr_idx:]
@@ -61,19 +60,40 @@ def mask_text(text: str) -> tuple[str, list[str]]:
 
 
 def unmask_text(masked_text: str, masks: list[str]) -> str:
-    def replace_match(match):
+    def replace_match(match: re.Match) -> str:
         try:
-            idx = int(match.group(1))
+            idx = int(match.group(1)) - 1
             if 0 <= idx < len(masks):
                 return masks[idx]
         except Exception:
             pass
-        return "" 
+        return ""
     
-    # Matches the new [#0#] mask pattern safely without risking language-specific translation issues
-    pattern = r'\[\s*#\s*(\d+)\s*#\s*\]'
-    unmasked = re.sub(pattern, replace_match, masked_text, flags=re.IGNORECASE)
+    pattern = r'⟦\s*(\d+)\s*⟧'
+    unmasked = re.sub(pattern, replace_match, masked_text)
     return unmasked
+
+
+def validate_placeholder_integrity(translated_text: str, expected_count: int) -> bool:
+    if not translated_text:
+        return expected_count == 0
+    found = re.findall(r'⟦\s*(\d+)\s*⟧', translated_text)
+    if len(found) != expected_count:
+        return False
+    for i in range(1, expected_count + 1):
+        pattern = rf'⟦\s*{i}\s*⟧'
+        if len(re.findall(pattern, translated_text)) != 1:
+            return False
+    return True
+
+
+def split_sentences_clean(text: str) -> list[str]:
+    if not text:
+        return []
+    protected = re.sub(r'\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|Tab|Cap|Inj|vs|e\.g|i\.e)\.', r'\1⟦DOT⟧', text, flags=re.IGNORECASE)
+    parts = re.split(r'(?<=[.!?;\n])\s+', protected)
+    return [p.replace("⟦DOT⟧", ".").strip() for p in parts if p.strip()]
+
 
 
 class TranslationService:

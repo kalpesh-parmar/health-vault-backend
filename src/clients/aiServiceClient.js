@@ -65,6 +65,17 @@ class AiServiceClient {
     );
   }
 
+  async checkTranslationHealth() {
+    try {
+      const response = await this.client.get(this.endpoints.translate + "/health", {
+        timeout: 3000,
+      });
+      return response.data;
+    } catch {
+      return { is_warm: false, status: "unavailable" };
+    }
+  }
+
   async detectLanguage({ text }) {
     return this.postWithRetry(
       this.endpoints.detectLanguage,

@@ -15,8 +15,21 @@ class TranslationRequest(BaseModel):
     tgt_lang: str
 
 
+@router.get("/health")
+async def translation_health(request: Request) -> dict:
+    container = request.app.state.container
+    translation = getattr(container, "translation", None)
+    is_warm = bool(translation and getattr(translation, "is_warm", False))
+    return {
+        "status": "healthy" if is_warm else "warming_up",
+        "is_warm": is_warm,
+        "engine": "indictrans2",
+    }
+
+
 @router.post("")
 async def translate_text(payload: TranslationRequest, request: Request) -> dict:
+
     logger.info("translation_request_received", extra={
         "src_lang": payload.src_lang,
         "tgt_lang": payload.tgt_lang,

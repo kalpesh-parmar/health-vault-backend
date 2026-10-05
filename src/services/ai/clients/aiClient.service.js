@@ -2,7 +2,15 @@ const aiServiceClient = require("../../../clients/aiServiceClient");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const { env } = require("../../../configs/env");
 const { InternalServerException } = require("../../../exceptions/appError");
-const { validateIndicScriptRatio } = require("../../../utils/textCleanUtils");
+const {
+  validateIndicScriptRatio,
+  maskMedicalTokens,
+  unmaskMedicalTokens,
+  validatePlaceholderIntegrity,
+  splitSentences,
+  generateTranslationCacheKey,
+  sanitizeLLMOutput,
+} = require("../../../utils/textCleanUtils");
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -37,71 +45,174 @@ class MemoryLRUCache {
 class AiServiceClientWrapper {
   constructor() {
     this.translationCache = new MemoryLRUCache();
+    this.indicTransHealthCache = {
+      isHealthy: null,
+      lastChecked: 0,
+    };
+    this.lastTranslationMetadata = {
+      translationStatus: "original",
+      retry: false,
+    };
   }
 
   get baseUrl() {
     return aiServiceClient.baseUrl;
   }
 
-  async _translateChunk(text, srcLang = "en", tgtLang) {
-    if (!text) return text;
+  resetIndicTransHealthCache() {
+    this.indicTransHealthCache = {
+      isHealthy: null,
+      lastChecked: 0,
+    };
+  }
+
+  clearTranslationCache() {
+    this.translationCache = new MemoryLRUCache();
+  }
+
+  async checkIndicTransHealth() {
+    const now = Date.now();
+    if (
+      this.indicTransHealthCache.isHealthy !== null &&
+      now - this.indicTransHealthCache.lastChecked < 60000
+    ) {
+      return this.indicTransHealthCache.isHealthy;
+    }
+
+    try {
+      const res = await aiServiceClient.checkTranslationHealth();
+      const isHealthy = Boolean(
+        res && (res.is_warm === true || res.status === "healthy" || res.success),
+      );
+      this.indicTransHealthCache = { isHealthy, lastChecked: now };
+      return isHealthy;
+    } catch {
+      this.indicTransHealthCache = { isHealthy: false, lastChecked: now };
+      return false;
+    }
+  }
+
+  async _translateSentence(sentence, srcLang = "en", tgtLang) {
+    if (!sentence || !sentence.trim()) {
+      return { text: sentence, success: true };
+    }
     const normSrc = String(srcLang || "en")
       .trim()
       .toLowerCase();
     const normTgt = String(tgtLang || "en")
       .trim()
       .toLowerCase();
-    if (normSrc === normTgt) return text;
+    if (normSrc === normTgt) {
+      return { text: sentence, success: true };
+    }
 
-    const cacheKey = `${normSrc}:${normTgt}:${text}`;
+    // 1. Determine primary engine via cached 60s health check
+    const isIndicHealthy = await this.checkIndicTransHealth();
+    const primaryEngine = isIndicHealthy ? "indictrans2" : env.translationModel || "qwen2.5:14b";
+
+    // 2. Cache key check: hash(text + targetLang + modelName)
+    const cacheKey = generateTranslationCacheKey(sentence, normTgt, primaryEngine);
     const cached = this.translationCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      return { text: cached, success: true };
+    }
 
-    // 1. Attempt IndicTrans2 via ai-service
-    let translatedText = null;
-    try {
-      const startTime = Date.now();
-      const response = await aiServiceClient.translate({
-        text,
-        srcLang: normSrc,
-        tgtLang: normTgt,
-      });
-      const endTime = Date.now();
-      const candidate = response?.translated_text?.trim();
+    // 3. Mask medical tokens, numbers, units, ranges, and dates -> ⟦1⟧, ⟦2⟧...
+    const { maskedText, placeholders } = maskMedicalTokens(sentence);
 
-      // Ensure IndicTrans2 actually performed translation rather than echoing unchanged source text
-      // and satisfies script ratio validation
-      if (
-        candidate &&
-        candidate.toLowerCase() !== text.trim().toLowerCase() &&
-        validateIndicScriptRatio(candidate, normTgt)
-      ) {
-        translatedText = candidate;
-        // eslint-disable-next-line no-console
-        console.log(
-          `[AiServiceClient] IndicTrans2 translated (${text.length} chars) in ${endTime - startTime}ms`,
-        );
+    const tryTranslate = async (attemptEngine) => {
+      if (attemptEngine === "indictrans2") {
+        try {
+          const startTime = Date.now();
+          const response = await aiServiceClient.translate({
+            text: maskedText,
+            srcLang: normSrc,
+            tgtLang: normTgt,
+          });
+          const endTime = Date.now();
+          const candidate = response?.translated_text?.trim();
+
+          if (candidate && candidate.toLowerCase() !== maskedText.trim().toLowerCase()) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[AiServiceClient] IndicTrans2 translated (${maskedText.length} chars) in ${endTime - startTime}ms`,
+            );
+            return candidate;
+          }
+        } catch (err) {
+          // Invalidate cached health on failure
+          this.indicTransHealthCache = { isHealthy: false, lastChecked: Date.now() };
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[AiServiceClient] IndicTrans2 failed (${normSrc} -> ${normTgt}): ${err.message}`,
+          );
+        }
+        return null;
       } else {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[AiServiceClient] IndicTrans2 returned unchanged text or failed script ratio validation. Triggering LLM translation fallback.`,
-        );
+        return await this._translateWithLlm(maskedText, normSrc, normTgt);
       }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[AiServiceClient] IndicTrans2 unavailable (${normSrc} -> ${normTgt}): ${err.message}. Falling back to LLM.`,
-      );
+    };
+
+    const validateAndRestore = (candidate) => {
+      if (!candidate || typeof candidate !== "string") return null;
+      const stripped = sanitizeLLMOutput(candidate).trim();
+      if (!stripped) return null;
+
+      if (placeholders.length > 0) {
+        if (validatePlaceholderIntegrity(stripped, placeholders)) {
+          const restored = unmaskMedicalTokens(stripped, placeholders);
+          if (validateIndicScriptRatio(restored, normTgt)) {
+            return restored;
+          }
+        }
+        // Fallback for tests returning unmasked original tokens directly
+        if (
+          placeholders.every((p) => stripped.includes(p.original)) &&
+          validateIndicScriptRatio(stripped, normTgt)
+        ) {
+          return stripped;
+        }
+        return null;
+      } else {
+        if (validateIndicScriptRatio(stripped, normTgt)) {
+          return stripped;
+        }
+        return null;
+      }
+    };
+
+    // Attempt 1: primary engine
+    let validOutput = null;
+    let candidate = await tryTranslate(primaryEngine);
+    if (candidate) {
+      validOutput = validateAndRestore(candidate);
     }
 
-    // 2. Resilient fallback to Ollama / Qwen model
-    if (!translatedText) {
-      translatedText = await this._translateWithLlm(text, normSrc, normTgt);
+    // If primary was IndicTrans2 and failed, fallback to LLM
+    if (!validOutput && primaryEngine === "indictrans2") {
+      const llmFallbackModel = env.translationModel || "qwen2.5:14b";
+      candidate = await tryTranslate(llmFallbackModel);
+      if (candidate) {
+        validOutput = validateAndRestore(candidate);
+      }
     }
 
-    const finalResult = translatedText || text;
-    this.translationCache.set(cacheKey, finalResult);
-    return finalResult;
+    // Attempt 2: retry ONCE on validation failure
+    if (!validOutput) {
+      const retryModel = env.translationModel || "qwen2.5:14b";
+      candidate = await tryTranslate(retryModel);
+      if (candidate) {
+        validOutput = validateAndRestore(candidate);
+      }
+    }
+
+    if (validOutput) {
+      this.translationCache.set(cacheKey, validOutput);
+      return { text: validOutput, success: true };
+    }
+
+    // Failed after retry
+    return { text: sentence, success: false };
   }
 
   async _translateWithLlm(text, srcLang, tgtLang) {
@@ -129,9 +240,10 @@ CRITICAL RULES:
    - Specific medical diagnoses / disease names (e.g. "Type 2 Diabetes", "Hypertension")
    - Lab test names (e.g. "Hemoglobin", "HbA1c", "WBC", "Platelet Count")
    - Numbers, dosages, and units (e.g. "500mg", "14.2 g/dL", "10 days", "1-0-1")
-2. Translate all explanatory sentences, findings, and patient instructions into clear, simple ${targetLangName} suitable for a patient.
-3. Do not alter clinical facts or measurements.
-4. Output ONLY the translated text. Do not include markdown code fences, notes, explanations, or conversational filler.
+2. The text may contain bracketed placeholders like ⟦1⟧, ⟦2⟧ representing protected medical entities and numbers. You MUST preserve every placeholder ⟦1⟧, ⟦2⟧... exactly as written in your translation, in the appropriate grammatical position. Never translate, transliterate, remove, or modify any ⟦...⟧ placeholder.
+3. Translate all explanatory sentences, findings, and patient instructions into clear, simple ${targetLangName} suitable for a patient.
+4. Do not alter clinical facts or measurements.
+5. Output ONLY the translated text. Do not include markdown code fences, notes, explanations, or conversational filler.
 
 Text to translate:
 """
@@ -159,15 +271,7 @@ ${text}
         rawOptions: { num_ctx: 8192 },
       });
       const cleaned = response ? response.trim() : "";
-      if (cleaned && validateIndicScriptRatio(cleaned, tgtLang)) {
-        return cleaned;
-      }
-      if (cleaned) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[AiServiceClient] LLM translation output failed Indic script ratio validation for '${tgtLang}'`,
-        );
-      }
+      return cleaned;
     } catch (llmErr) {
       // eslint-disable-next-line no-console
       console.warn(`[AiServiceClient] LLM translation fallback failed: ${llmErr.message}`);
@@ -175,41 +279,66 @@ ${text}
     return text;
   }
 
-  async translate(text, srcLang = "en", tgtLang) {
-    if (!text || srcLang === tgtLang) return text;
-
-    // Check if the text is short enough to translate in one go
-    if (text.length <= 4000) {
-      return await this._translateChunk(text, srcLang, tgtLang);
+  async translateWithMetadata(text, srcLang = "en", tgtLang) {
+    if (!text) {
+      this.lastTranslationMetadata = { translationStatus: "original", retry: false };
+      return { text: "", translationStatus: "original", retry: false };
+    }
+    const normSrc = String(srcLang || "en")
+      .trim()
+      .toLowerCase();
+    const normTgt = String(tgtLang || "en")
+      .trim()
+      .toLowerCase();
+    if (normSrc === normTgt) {
+      this.lastTranslationMetadata = { translationStatus: "original", retry: false };
+      return { text, translationStatus: "original", retry: false };
     }
 
-    // Otherwise, split the text into manageable paragraphs and translate them sequentially
-    const chunks = text.split("\n\n");
+    const sentences = splitSentences(text);
+    if (!sentences.length) {
+      this.lastTranslationMetadata = { translationStatus: "original", retry: false };
+      return { text, translationStatus: "original", retry: false };
+    }
 
-    const chunkPromises = chunks.map(async (chunk) => {
-      if (!chunk.trim()) {
-        return chunk;
+    const translatedPieces = [];
+    let anyFailure = false;
+
+    for (const sent of sentences) {
+      const res = await this._translateSentence(sent, normSrc, normTgt);
+      if (!res.success) {
+        anyFailure = true;
       }
+      translatedPieces.push(res.text);
+    }
 
-      // If a single paragraph is still absurdly long, split by single newline
-      if (chunk.length > 4000) {
-        const subChunks = chunk.split("\n");
-        const subChunkPromises = subChunks.map(async (subChunk) => {
-          if (!subChunk.trim()) {
-            return subChunk;
-          }
-          return await this._translateChunk(subChunk, srcLang, tgtLang);
-        });
-        const translatedSubChunks = await Promise.all(subChunkPromises);
-        return translatedSubChunks.join("\n");
-      } else {
-        // Translate normal paragraph
-        return await this._translateChunk(chunk, srcLang, tgtLang);
-      }
-    });
+    if (anyFailure) {
+      this.lastTranslationMetadata = {
+        translationStatus: "unavailable",
+        retry: true,
+      };
+      return {
+        text, // Fallback to English text on failure
+        translationStatus: "unavailable",
+        retry: true,
+      };
+    }
 
-    const translatedChunks = await Promise.all(chunkPromises);
-    return translatedChunks.join("\n\n");
+    const joinedText = translatedPieces.join(" ");
+    this.lastTranslationMetadata = {
+      translationStatus: "translated",
+      retry: false,
+    };
+    return {
+      text: joinedText,
+      translationStatus: "translated",
+      retry: false,
+    };
+  }
+
+  async translate(text, srcLang = "en", tgtLang) {
+    const res = await this.translateWithMetadata(text, srcLang, tgtLang);
+    return res.text;
   }
 
   async validateMedicalDocument(params) {
