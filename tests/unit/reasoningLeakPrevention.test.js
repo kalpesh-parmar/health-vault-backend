@@ -1,4 +1,4 @@
-const { stripThinking } = require("../../src/utils/textCleanUtils");
+const { stripThinking, validateIndicScriptRatio } = require("../../src/utils/textCleanUtils");
 const { ollamaClient } = require("../../src/clients/ollamaClient");
 
 describe("Phase 1 Contract - Reasoning Leak Prevention & Sanitization", () => {
@@ -45,25 +45,30 @@ describe("Phase 1 Contract - Reasoning Leak Prevention & Sanitization", () => {
     });
   });
 
-  describe("Translation output script validation (Gujarati >= 50% script check)", () => {
-    function validateGujaratiScript(text) {
-      if (!text || typeof text !== "string") return false;
-      const gujaratiChars = (text.match(/[\u0A80-\u0AFF]/g) || []).length;
-      const latinLetters = (text.match(/[a-zA-Z]/g) || []).length;
-      const totalLetters = gujaratiChars + latinLetters;
-      if (totalLetters === 0) return false;
-      return gujaratiChars / totalLetters >= 0.5;
-    }
-
+  describe("Translation output script validation (Gujarati & Hindi >= 50% script check)", () => {
     test("validates valid Gujarati text with English entities", () => {
       const validGujarati = "દર્દીનો Hemoglobin રિપોર્ટ સામાન્ય છે. Metformin 500mg ચાલુ રાખવી.";
-      expect(validateGujaratiScript(validGujarati)).toBe(true);
+      expect(validateIndicScriptRatio(validGujarati, "gujarati")).toBe(true);
+      expect(validateIndicScriptRatio(validGujarati, "gu")).toBe(true);
+    });
+
+    test("validates valid Hindi text with English entities", () => {
+      const validHindi = "मरीज की Hemoglobin रिपोर्ट सामान्य है। Metformin 500mg जारी रखें।";
+      expect(validateIndicScriptRatio(validHindi, "hindi")).toBe(true);
+      expect(validateIndicScriptRatio(validHindi, "hi")).toBe(true);
     });
 
     test("rejects leaked English reasoning trace masquerading as translation", () => {
       const leakedReasoning =
         "Okay, let's tackle this translation request. The user provided: Medical laboratory report summary.";
-      expect(validateGujaratiScript(leakedReasoning)).toBe(false);
+      expect(validateIndicScriptRatio(leakedReasoning, "gujarati")).toBe(false);
+      expect(validateIndicScriptRatio(leakedReasoning, "hindi")).toBe(false);
+    });
+
+    test("permits English text when target language is English", () => {
+      const englishText = "Patient has normal Hemoglobin levels.";
+      expect(validateIndicScriptRatio(englishText, "english")).toBe(true);
+      expect(validateIndicScriptRatio(englishText, "en")).toBe(true);
     });
   });
 });

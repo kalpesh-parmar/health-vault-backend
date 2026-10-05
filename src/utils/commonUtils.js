@@ -104,6 +104,8 @@ function isValidClinicalSummary(text, _patientName) {
   return true;
 }
 
+const { validateIndicScriptRatio } = require("./textCleanUtils");
+
 module.exports = {
   addMinutes,
   generateNumericPatientCode,
@@ -114,4 +116,5 @@ module.exports = {
   normalizeLanguage,
   stripReasoningTags,
   isValidClinicalSummary,
+  validateIndicScriptRatio,
 };

@@ -2,6 +2,7 @@ const aiServiceClient = require("../../../clients/aiServiceClient");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const { env } = require("../../../configs/env");
 const { InternalServerException } = require("../../../exceptions/appError");
+const { validateIndicScriptRatio } = require("../../../utils/textCleanUtils");
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -69,7 +70,12 @@ class AiServiceClientWrapper {
       const candidate = response?.translated_text?.trim();
 
       // Ensure IndicTrans2 actually performed translation rather than echoing unchanged source text
-      if (candidate && candidate.toLowerCase() !== text.trim().toLowerCase()) {
+      // and satisfies script ratio validation
+      if (
+        candidate &&
+        candidate.toLowerCase() !== text.trim().toLowerCase() &&
+        validateIndicScriptRatio(candidate, normTgt)
+      ) {
         translatedText = candidate;
         // eslint-disable-next-line no-console
         console.log(
@@ -78,7 +84,7 @@ class AiServiceClientWrapper {
       } else {
         // eslint-disable-next-line no-console
         console.log(
-          `[AiServiceClient] IndicTrans2 returned unchanged text or was un-warmed. Triggering LLM translation fallback.`,
+          `[AiServiceClient] IndicTrans2 returned unchanged text or failed script ratio validation. Triggering LLM translation fallback.`,
         );
       }
     } catch (err) {
@@ -133,7 +139,19 @@ ${text}
 """
 /no_think`;
 
-      const model = env.aiModel || "qwen3-vl:latest";
+      const ALLOWED_TRANSLATION_MODELS = ["qwen2.5:14b", "qwen2.5:7b", "gemma4:e4b", "medgemma:4b"];
+      let model = env.translationModel || "qwen2.5:14b";
+      if (typeof model === "string" && model.includes(":cloud")) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[AiServiceClient] Cloud model '${model}' rejected for translation. Falling back to 'qwen2.5:14b'.`,
+        );
+        model = "qwen2.5:14b";
+      }
+      if (!ALLOWED_TRANSLATION_MODELS.includes(model)) {
+        model = "qwen2.5:14b";
+      }
+
       const response = await ollamaClient.generate(prompt, model, {
         temperature: 0.1,
         maxTokens: 1024,
@@ -141,8 +159,14 @@ ${text}
         rawOptions: { num_ctx: 8192 },
       });
       const cleaned = response ? response.trim() : "";
-      if (cleaned) {
+      if (cleaned && validateIndicScriptRatio(cleaned, tgtLang)) {
         return cleaned;
+      }
+      if (cleaned) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[AiServiceClient] LLM translation output failed Indic script ratio validation for '${tgtLang}'`,
+        );
       }
     } catch (llmErr) {
       // eslint-disable-next-line no-console

@@ -144,7 +144,18 @@ class SummaryStageHandler:
                     target_language=canonical_lang,
                 )
                 if translated and translated.strip():
-                    summary_preferred = strip_think_tokens(translated)
+                    cleaned_trans = strip_think_tokens(translated)
+                    from app.modules.ocr.fallback_validator import FallbackOutputValidator
+                    val = FallbackOutputValidator()
+                    is_valid_script, ratio, _ = val.validate_target_script(cleaned_trans, canonical_lang)
+                    if is_valid_script and ratio >= 0.5:
+                        summary_preferred = cleaned_trans
+                    else:
+                        logger.warning(
+                            "Translation to %s rejected due to insufficient script ratio (%.2f < 0.5)",
+                            canonical_lang,
+                            ratio,
+                        )
             except Exception as e:
                 logger.warning("Translation to %s failed: %s", canonical_lang, e)
 

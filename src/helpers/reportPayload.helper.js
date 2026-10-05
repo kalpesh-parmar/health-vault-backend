@@ -6,6 +6,7 @@ const {
   normalizeLanguage,
   stripReasoningTags,
   isValidClinicalSummary,
+  validateIndicScriptRatio,
 } = require("../utils/commonUtils");
 const { toDbDateOnlyString } = require("../utils/dateUtils");
 const aiClient = require("../services/ai/clients/aiClient.service");
@@ -301,7 +302,11 @@ async function buildStructuredReportPayload({
         try {
           const translated = await aiClient.translate(docSummary, "english", normLang);
           const cleanTrans = stripReasoningTags(translated).trim();
-          if (cleanTrans && isValidClinicalSummary(cleanTrans, patientName)) {
+          if (
+            cleanTrans &&
+            isValidClinicalSummary(cleanTrans, patientName) &&
+            validateIndicScriptRatio(cleanTrans, normLang)
+          ) {
             docSummary = cleanTrans;
             translationStatus = "translated";
 

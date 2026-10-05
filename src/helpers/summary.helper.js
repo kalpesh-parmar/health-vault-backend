@@ -7,6 +7,7 @@
 const { ollamaClient: defaultOllamaClient } = require("../clients/ollamaClient");
 const defaultAiClient = require("../services/ai/clients/aiClient.service");
 const { env } = require("../configs/env");
+const { validateIndicScriptRatio } = require("../utils/textCleanUtils");
 
 const SUPPORTED_LANGUAGES = ["english", "gujarati", "hindi", "marathi", "tamil"];
 
@@ -269,6 +270,12 @@ async function synthesizeClinicalSummary({
       summaryPreferredLanguage = (
         typeof respPref === "string" ? respPref : respPref?.response || respPref?.text || ""
       ).trim();
+      if (
+        summaryPreferredLanguage &&
+        !validateIndicScriptRatio(summaryPreferredLanguage, targetLang)
+      ) {
+        summaryPreferredLanguage = "";
+      }
     } catch {
       // Graceful fallback to translation if direct multi-generation failed
       if (!summaryEnglish) {
@@ -300,10 +307,15 @@ async function synthesizeClinicalSummary({
       }
     }
 
-    // Secondary fallback: if direct generation produced empty string, attempt translation of English
+    // Secondary fallback: if direct generation produced empty string or failed script check, attempt translation of English
     if (!summaryPreferredLanguage && summaryEnglish) {
       try {
-        summaryPreferredLanguage = await aiClient.translate(summaryEnglish, "english", targetLang);
+        const transResult = await aiClient.translate(summaryEnglish, "english", targetLang);
+        if (validateIndicScriptRatio(transResult, targetLang)) {
+          summaryPreferredLanguage = transResult;
+        } else {
+          summaryPreferredLanguage = summaryEnglish;
+        }
       } catch {
         summaryPreferredLanguage = summaryEnglish;
       }
