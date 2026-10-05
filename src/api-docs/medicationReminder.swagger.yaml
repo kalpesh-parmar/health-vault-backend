@@ -329,58 +329,6 @@ paths:
         "404":
           description: Medication not found
 
-  /medication-reminders/batch-create:
-    post:
-      tags:
-        - Medication Reminder
-
-      summary: Batch create medication reminders
-
-      security:
-        - bearerAuth: []
-
-      requestBody:
-        required: true
-
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateReminderOrBatchRequest"
-            examples:
-              ArrayOfMedicationUUIDs:
-                summary: Array of Medication UUID strings
-                value:
-                  - "123e4567-e89b-12d3-a456-426614174000"
-                  - "123e4567-e89b-12d3-a456-426614174001"
-              ArrayOfMedicationObjects:
-                summary: Array of Medication Objects
-                value:
-                  - medicationId: "123e4567-e89b-12d3-a456-426614174000"
-                  - medicationId: "123e4567-e89b-12d3-a456-426614174001"
-              WrappedMedicationIdsObject:
-                summary: Object with medicationIds array
-                value:
-                  medicationIds:
-                    - "123e4567-e89b-12d3-a456-426614174000"
-                    - "123e4567-e89b-12d3-a456-426614174001"
-              SingleMedicationObject:
-                summary: Single Medication Object
-                value:
-                  medicationId: "123e4567-e89b-12d3-a456-426614174000"
-
-      responses:
-        "201":
-          description: Medications batch created successfully
-
-        "400":
-          description: Validation error
-
-        "401":
-          description: Unauthorized
-
-        "404":
-          description: Medication not found
-
   /medication-reminders:
     get:
       tags:

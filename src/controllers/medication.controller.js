@@ -14,18 +14,6 @@ async function createMedication(req, res) {
   return successResponse(res, result, msg, StatusCodes.CREATED);
 }
 
-// batch create medications
-async function batchCreateMedications(req, res) {
-  const result = await medicationService.createMedication(req.auth.userId, req.body);
-
-  return successResponse(
-    res,
-    result,
-    messageConstants.MEDICATIONS_BATCH_CREATED,
-    StatusCodes.CREATED,
-  );
-}
-
 //updated medication
 async function updateMedication(req, res) {
   const result = await medicationService.updateMedication(req.params.id, req.auth.userId, req.body);
@@ -102,7 +90,6 @@ async function batchDeleteMedications(req, res) {
 
 module.exports = {
   createMedication,
-  batchCreateMedications,
   updateMedication,
   deleteMedication,
   batchDeleteMedications,

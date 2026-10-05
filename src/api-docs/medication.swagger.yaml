@@ -538,40 +538,6 @@ paths:
         "404":
           description: Patient not found
 
-  /medications/batch-create:
-    post:
-      tags:
-        - Medication
-
-      summary: Create batch array of medications
-
-      description: >
-        Creates multiple medications in a single request and generates reminder schedules for all of them.
-
-      security:
-        - bearerAuth: []
-
-      requestBody:
-        required: true
-
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BatchCreateMedicationRequest"
-
-      responses:
-        "201":
-          description: Medications batch created successfully
-
-        "400":
-          description: Bad request
-
-        "401":
-          description: Unauthorized
-
-        "404":
-          description: Patient not found
-
   /medications/{id}:
     get:
       tags:

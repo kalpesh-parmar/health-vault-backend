@@ -24,6 +24,7 @@ describe("Post-Onboarding Add New Medicine Response Alignment (Option A)", () =>
     // Mock user as having completed onboarding
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: "user_test_123",
+      preferredLanguage: "english",
       onboardingCompleted: true,
     });
 
@@ -87,6 +88,7 @@ describe("Post-Onboarding Add New Medicine Response Alignment (Option A)", () =>
   test("should fetch medicines from chat_messages metadata when payload carries no medicines in post-onboarding", async () => {
     jest.spyOn(patientRepository, "findById").mockResolvedValue({
       id: "user_test_123",
+      preferredLanguage: "english",
       onboardingCompleted: true,
     });
 

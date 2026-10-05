@@ -538,7 +538,7 @@ class MedicationService {
   }
 
   // Canonical Helper: map, validate, and bulk save multiple medications supporting KEEP_NEW, KEEP_EXISTING, REPLACE, and EDIT
-  async bulkCreate(userId, payloadList = [], _options = {}) {
+  async bulkCreate(userId, payloadList = [], options = {}) {
     const patient = await patientRepository.findById(userId);
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
@@ -547,6 +547,19 @@ class MedicationService {
     const created = [];
     const updated = [];
     const kept = [];
+
+    let activeMedications = [];
+    if (!options.skipDuplicateCheck && userId) {
+      try {
+        activeMedications = await medicationRepository.findAll(userId);
+      } catch (err) {
+        console.warn(
+          "[MedicationService] Active medications DB query failed in bulkCreate duplicate check:",
+          err.message,
+        );
+        activeMedications = [];
+      }
+    }
 
     for (const rawItem of payloadList) {
       if (!rawItem) continue;
@@ -566,11 +579,39 @@ class MedicationService {
       }
 
       const normalized = normalizeCreateMedicationInput(medData);
-      const res = normalized.resolution || "KEEP_NEW";
+      const res = normalized.resolution || medData.resolution || "KEEP_NEW";
 
       if (res === "KEEP_EXISTING") {
         kept.push(medData);
         continue;
+      }
+
+      if (!options.skipDuplicateCheck) {
+        const targetId =
+          normalized.replaceMedicationId ||
+          medData.replaceMedicationId ||
+          medData.targetMedicationId ||
+          medData.duplicateInfo?.matchedMedication?.id ||
+          medData.matchedMedicationId;
+
+        const dupCheck = findMedicationDuplicates(
+          activeMedications,
+          normalized.medicationName || normalized.name,
+          res === "REPLACE" || res === "EDIT" ? targetId : null,
+        );
+
+        if (dupCheck.hasDuplicate) {
+          if (res === "KEEP_EXISTING") {
+            kept.push(dupCheck.matchedMedication || medData);
+            continue;
+          } else if (res === "REPLACE") {
+            // Handled in REPLACE block below
+          } else if (res === "EDIT") {
+            // Handled in EDIT block below
+          } else {
+            throwDuplicateConflict(dupCheck);
+          }
+        }
       }
 
       if (res === "REPLACE") {
@@ -584,6 +625,7 @@ class MedicationService {
         if (targetId) {
           try {
             await this.deleteMedication(targetId, userId);
+            activeMedications = activeMedications.filter((m) => String(m.id) !== String(targetId));
           } catch (delErr) {
             console.warn(
               `[MedicationService] Soft-delete warning for replaced med ${targetId}:`,
@@ -599,6 +641,7 @@ class MedicationService {
           });
           if (med && med.id) {
             created.push(med);
+            activeMedications.push(med);
             try {
               await medicationReminderService.createReminder(userId, { medicationId: med.id });
             } catch (rErr) {
@@ -609,6 +652,9 @@ class MedicationService {
             }
           }
         } catch (cErr) {
+          if (cErr.name === "ConflictException" || cErr.statusCode === 409) {
+            throw cErr;
+          }
           console.error("[MedicationService] Error creating replaced medication:", cErr.message);
         }
         continue;
@@ -643,6 +689,7 @@ class MedicationService {
               });
               if (med && med.id) {
                 created.push(med);
+                activeMedications.push(med);
                 try {
                   await medicationReminderService.createReminder(userId, { medicationId: med.id });
                 } catch (rErr) {
@@ -653,6 +700,9 @@ class MedicationService {
                 }
               }
             } catch (fbErr) {
+              if (fbErr.name === "ConflictException" || fbErr.statusCode === 409) {
+                throw fbErr;
+              }
               console.error("[MedicationService] Fallback create failed:", fbErr.message);
             }
           }
@@ -664,6 +714,7 @@ class MedicationService {
             });
             if (med && med.id) {
               created.push(med);
+              activeMedications.push(med);
               try {
                 await medicationReminderService.createReminder(userId, { medicationId: med.id });
               } catch (rErr) {
@@ -674,6 +725,9 @@ class MedicationService {
               }
             }
           } catch (cErr) {
+            if (cErr.name === "ConflictException" || cErr.statusCode === 409) {
+              throw cErr;
+            }
             console.error("[MedicationService] Error creating medication:", cErr.message);
           }
         }
@@ -688,6 +742,7 @@ class MedicationService {
         });
         if (med && med.id) {
           created.push(med);
+          activeMedications.push(med);
           try {
             await medicationReminderService.createReminder(userId, { medicationId: med.id });
           } catch (rErr) {
@@ -698,6 +753,9 @@ class MedicationService {
           }
         }
       } catch (cErr) {
+        if (cErr.name === "ConflictException" || cErr.statusCode === 409) {
+          throw cErr;
+        }
         console.error("[MedicationService] Error creating new medication:", cErr.message);
       }
     }

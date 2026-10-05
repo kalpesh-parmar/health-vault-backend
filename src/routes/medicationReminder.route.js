@@ -13,14 +13,6 @@ router.post(
   medicationReminderController.createReminder,
 );
 
-// BATCH CREATE
-router.post(
-  "/batch-create",
-  verifyToken,
-  validateRequest({ body: createReminderOrBatchSchema }),
-  medicationReminderController.createBatchReminders,
-);
-
 // GET ALL MAIN REMINDERS
 router.get("/", verifyToken, medicationReminderController.getAllReminders);
 

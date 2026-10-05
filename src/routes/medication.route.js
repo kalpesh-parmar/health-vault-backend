@@ -16,14 +16,6 @@ router.post(
   medicationController.createMedication,
 );
 
-// batch create
-router.post(
-  "/batch-create",
-  verifyToken,
-  validateRequest({ body: createMedicationOrBatchSchema }),
-  medicationController.batchCreateMedications,
-);
-
 // list of all data
 router.get("/list", verifyToken, medicationController.getMedicationList);
 
