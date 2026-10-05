@@ -31,11 +31,11 @@ SUPPORTED_TRANSLATION_LANGUAGES = {
 
 
 def strip_think_tokens(text: str) -> str:
-    """Strips <think>...</think> reasoning traces and unclosed <think> tags (HF-1 compliance)."""
+    """Strips <think>, <thinking>, <reasoning> reasoning traces and unclosed think tags (HF-1 compliance)."""
     if not text:
         return ""
-    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<think>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*?</(?:think|thinking|reasoning)>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
 
 

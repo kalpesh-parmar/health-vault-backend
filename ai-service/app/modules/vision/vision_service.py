@@ -340,7 +340,8 @@ class VisionModelService:
                 pages = _normalize_pages([{"page": 1, "text": parsed["text"], "confidence": parsed.get("confidence", 0.95)}])
 
         if not pages and raw and len(raw.strip()) > 0:
-            cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            cleaned = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*?</(?:think|thinking|reasoning)>", "", raw, flags=re.IGNORECASE)
+            cleaned = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*$", "", cleaned, flags=re.IGNORECASE).strip()
             cleaned = _JSON_FENCE.sub("", cleaned).strip()
             if cleaned:
                 pages = _normalize_pages([{"page": 1, "text": cleaned, "confidence": 0.95}])
@@ -426,7 +427,8 @@ class VisionModelService:
                             pages = _normalize_pages([{"page": page_number, "text": parsed["text"], "confidence": parsed.get("confidence", 0.95)}])
 
                     if not pages and raw and len(raw.strip()) > 0:
-                        fallback_text = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL)
+                        fallback_text = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*?</(?:think|thinking|reasoning)>", "", raw or "", flags=re.IGNORECASE)
+                        fallback_text = re.sub(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*$", "", fallback_text, flags=re.IGNORECASE).strip()
                         fallback_text = _JSON_FENCE.sub("", fallback_text).strip()
                         if fallback_text:
                             logger.info("ai_page_recovered_as_plain_text", extra={"model": self.model, "page": page_number, "chars": len(fallback_text)})
@@ -742,7 +744,10 @@ def _normalize_pages(raw_pages: list[Any]) -> list[dict[str, Any]]:
     for index, page in enumerate(raw_pages):
         if not isinstance(page, dict):
             continue
-        text = clean_ocr_text(str(page.get("text") or ""))
+        raw_text = str(page.get("text") or "")
+        from app.services.pipeline.summary_stage import strip_think_tokens
+        stripped_text = strip_think_tokens(raw_text)
+        text = clean_ocr_text(stripped_text)
         confidence = page.get("confidence")
         pages.append(
             {

@@ -23,6 +23,19 @@ def test_strip_think_tokens():
     cleaned_unclosed = strip_think_tokens(unclosed)
     assert cleaned_unclosed == "Summary starts."
 
+    # <thinking> and <reasoning> tags
+    thinking_text = "<thinking>Some deep thoughts</thinking>Clean output."
+    assert strip_think_tokens(thinking_text) == "Clean output."
+
+    reasoning_text = "<reasoning>Detailed medical deduction</reasoning>Clean result."
+    assert strip_think_tokens(reasoning_text) == "Clean result."
+
+    unclosed_thinking = "Prefix. <thinking>Unfinished"
+    assert strip_think_tokens(unclosed_thinking) == "Prefix."
+
+    unclosed_reasoning = "Prefix. <reasoning>Unfinished"
+    assert strip_think_tokens(unclosed_reasoning) == "Prefix."
+
 
 def test_extract_key_bullet_points():
     structured = {

@@ -538,8 +538,12 @@ class OcrStageHandler:
             return []
 
         raw_crop_text = (res.get("text") or "").strip()
-        if not raw_crop_text:
+        from app.services.pipeline.summary_stage import strip_think_tokens
+        has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_crop_text, flags=re.IGNORECASE))
+        clean_crop_text = strip_think_tokens(raw_crop_text)
+        if not clean_crop_text or has_unclosed_think:
             return []
+        raw_crop_text = clean_crop_text
 
         from app.modules.ocr.fallback_validator import FallbackOutputValidator
         val = FallbackOutputValidator()
@@ -574,11 +578,31 @@ class OcrStageHandler:
         expected_script: str | None = None,
     ) -> tuple[str, float, list[dict[str, Any]], str, str]:
         """Process Vision model output and cleanly merge non-Latin lines with English Paddle lines."""
+        from app.services.pipeline.summary_stage import strip_think_tokens
         from app.modules.ocr.script_detector import detect_scripts_in_text
         from app.modules.ocr.fallback_validator import FallbackOutputValidator
 
         raw_vision_text = (res.get("text") or "").strip()
         finish_reason = res.get("finish_reason")
+
+        has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_vision_text, flags=re.IGNORECASE))
+        clean_vision_text = strip_think_tokens(raw_vision_text)
+
+        if has_unclosed_think or not clean_vision_text:
+            reason = "UNCLOSED_THINK_BLOCK" if has_unclosed_think else "EMPTY_AFTER_THINK_STRIP"
+            logger.warning("VLM fallback output rejected by reasoning guard: %s", reason)
+            if paddle_res and paddle_res.get("lines"):
+                retained_lines = [
+                    dict(l) for l in paddle_res["lines"]
+                    if float(l.get("confidence") or 0.0) >= 0.70 and not self._is_pseudo_latin_noise(l)
+                ]
+                if retained_lines:
+                    page_text = "\n".join(l["text"] for l in retained_lines)
+                    conf = round(sum(float(l.get("confidence") or 0.0) for l in retained_lines) / len(retained_lines), 4)
+                    return page_text, conf, retained_lines, "paddleocr_partial", "FALLBACK_PARTIAL"
+            return "", 0.0, [], "none", f"FAILED: {reason}"
+
+        raw_vision_text = clean_vision_text
         vision_conf = float(res.get("confidence") or 0.95) if raw_vision_text else 0.0
 
         # Validate VLM output against degenerate loops, empty responses, script collapse
@@ -1239,9 +1263,15 @@ class OcrStageHandler:
                         mime_type=mime,
                         max_pages=1,
                     )
-                    # Multi-Engine / Multi-Prompt Retry: empty output indicates prompt refusal or model stall
-                    if not (res.get("text") or "").strip():
-                        logger.info("Page %d VLM returned empty response; attempting direct transcription retry", page_num)
+                    # Multi-Engine / Multi-Prompt Retry: empty output or unclosed think indicates prompt refusal, model stall, or think leak
+                    from app.services.pipeline.summary_stage import strip_think_tokens
+                    raw_text = (res.get("text") or "").strip()
+                    has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_text, flags=re.IGNORECASE))
+                    cleaned_check = strip_think_tokens(raw_text)
+
+                    if not raw_text or has_unclosed_think or not cleaned_check:
+                        retry_reason = "unclosed think block" if has_unclosed_think else "empty response"
+                        logger.info("Page %d VLM returned %s; attempting direct transcription retry", page_num, retry_reason)
                         try:
                             retry_res = await self.vision.extract_image(
                                 img_bytes,
@@ -1250,7 +1280,13 @@ class OcrStageHandler:
                                 max_pages=1,
                                 prompt="Extract and transcribe all printed and handwritten text in this medical document exactly as written line by line.",
                             )
-                            if (retry_res.get("text") or "").strip():
+                            retry_text = (retry_res.get("text") or "").strip()
+                            retry_unclosed = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", retry_text, flags=re.IGNORECASE))
+                            retry_cleaned = strip_think_tokens(retry_text)
+                            if retry_text and not retry_unclosed and retry_cleaned:
+                                res = retry_res
+                            else:
+                                logger.warning("Page %d VLM retry also returned unclosed think or empty output", page_num)
                                 res = retry_res
                         except Exception as retry_err:
                             logger.warning("Page %d VLM retry failed: %s", page_num, retry_err)

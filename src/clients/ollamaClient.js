@@ -65,7 +65,7 @@ class OllamaClient {
     }
 
     let text = typeof primaryText === "string" ? stripThinking(primaryText) : "";
-    const fallbackToThinking = options.fallbackToThinking ?? true;
+    const fallbackToThinking = options.fallbackToThinking ?? false;
 
     if (
       !text.trim() &&
@@ -79,23 +79,14 @@ class OllamaClient {
           `Falling back to 'thinking' field (length: ${thinkingText.length}).`,
       );
       const thinkingStripped = stripThinking(thinkingText);
-      text = thinkingStripped.trim() ? thinkingStripped : thinkingText;
+      text = thinkingStripped.trim();
     }
 
-    if (!text.trim() && typeof primaryText === "string" && primaryText.trim()) {
-      const match = primaryText.match(/\{[\s\S]*\}/);
-      if (match) {
-        text = match[0];
-      } else {
-        text = primaryText;
-      }
-    }
-
-    if (typeof text !== "string" || !text.trim()) {
+    if (options.throwOnEmpty && (!text || !text.trim())) {
       throw new Error(`Invalid response format from Ollama ${apiType}`);
     }
 
-    let cleaned = text.trim();
+    let cleaned = typeof text === "string" ? text.trim() : "";
     if (options.stripMarkdown !== false) {
       cleaned = cleaned
         .replace(/```(?:json)?\s*/gi, "")
@@ -261,7 +252,8 @@ class OllamaClient {
               const msg = parsed.message || {};
               let chunkText = msg.content || "";
 
-              if (!chunkText && msg.thinking) {
+              const allowThinkingStream = options.fallbackToThinking === true;
+              if (!chunkText && msg.thinking && allowThinkingStream) {
                 chunkText = msg.thinking;
               }
 

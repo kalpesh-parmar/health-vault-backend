@@ -82,7 +82,10 @@ function normalizeLanguage(lang) {
 
 function stripReasoningTags(text) {
   if (!text || typeof text !== "string") return "";
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  return text
+    .replace(/<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*?<\/(?:think|thinking|reasoning)>/gi, "")
+    .replace(/<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*$/gi, "")
+    .trim();
 }
 
 function isValidClinicalSummary(text, _patientName) {

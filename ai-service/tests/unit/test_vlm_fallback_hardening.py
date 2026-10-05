@@ -147,3 +147,40 @@ async def test_ollama_payload_suppresses_reasoning():
     assert captured_payload.get("think") is False
     assert captured_payload["options"]["num_predict"] == 512
     assert captured_payload["options"]["num_ctx"] == 2048
+
+
+def test_apply_vision_result_rejects_unclosed_think_block():
+    stage = OcrStageHandler(
+        s3_client=None,
+        lifecycle=None,
+        vision_service=None,
+        paddle_engine=None,
+        quality_gate=None,
+    )
+    res = {
+        "text": "Header text\n<think>Model began thinking and never finished",
+        "confidence": 0.9,
+    }
+    page_text, conf, lines, engine, status = stage._apply_vision_result(res, paddle_res=None, fallback_reason="UNREAD_NON_LATIN_SCRIPT")
+    assert status == "FAILED: UNCLOSED_THINK_BLOCK"
+    assert page_text == ""
+    assert lines == []
+
+
+def test_apply_vision_result_strips_closed_think_block():
+    stage = OcrStageHandler(
+        s3_client=None,
+        lifecycle=None,
+        vision_service=None,
+        paddle_engine=None,
+        quality_gate=None,
+    )
+    res = {
+        "text": "<think>Analyzing Gujarati script</think>\nદર્દીનું હિમોગ્લોબિન સામાન્ય છે.",
+        "confidence": 0.95,
+    }
+    page_text, conf, lines, engine, status = stage._apply_vision_result(res, paddle_res=None, fallback_reason="UNREAD_NON_LATIN_SCRIPT", expected_script="gujarati")
+    assert "<think>" not in page_text
+    assert "Analyzing Gujarati script" not in page_text
+    assert "દર્દીનું હિમોગ્લોબિન" in page_text
+    assert status == "FALLBACK"

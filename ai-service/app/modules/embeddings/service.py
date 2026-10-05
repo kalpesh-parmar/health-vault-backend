@@ -11,14 +11,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-THINK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+THINK_PATTERN = re.compile(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*?</(?:think|thinking|reasoning)>", re.IGNORECASE)
+UNCLOSED_THINK_PATTERN = re.compile(r"<(?:think|thinking|reasoning)\b[^>]*>[\s\S]*$", re.IGNORECASE)
 
 
 def strip_thinking(text: str) -> str:
-    """Remove <think>...</think> reasoning traces from text before embedding."""
+    """Remove think/thinking/reasoning traces from text before embedding."""
     if not text:
         return ""
     cleaned = THINK_PATTERN.sub("", text)
+    cleaned = UNCLOSED_THINK_PATTERN.sub("", cleaned)
     return cleaned.strip()
 
 
