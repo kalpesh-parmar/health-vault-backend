@@ -26,14 +26,51 @@ METHOD_ONLY_EXACT = {
 
 
 class SpatialRowBuilder:
-    """Commit 2B: Deterministic spatial table row builder.
+    """Commit 2B/2C: Deterministic spatial table row builder.
     Clusters word bounding boxes by y-band using median word height tolerance,
     assigns columns by x using table header x-coordinates as column anchors,
-    and maps differential parameters (% and absolute) to the same analyte.
+    maps differential parameters (% and absolute) to the same analyte,
+    preserves exact printed value_raw fidelity, normalizes micro units ('µ'),
+    separates method from testName, and extracts patient/report header metadata.
     """
 
     def __init__(self, y_tolerance_ratio: float = 0.55) -> None:
         self.y_tolerance_ratio = y_tolerance_ratio
+
+    @staticmethod
+    def normalize_unit(unit_str: str) -> str:
+        """Normalise unit characters: U+00B5/U+03BC to 'µ', preserving µg/dL."""
+        if not unit_str:
+            return ""
+        # Normalise unicode micro/mu variants
+        normalized = unit_str.replace("\u03bc", "µ").replace("\u00b5", "µ")
+        # Handle replacement character \ufffd or 'micro '
+        normalized = re.sub(r"^[\ufffd]\s*g/dL", "µg/dL", normalized)
+        normalized = re.sub(r"^micro\s*g/dL", "µg/dL", normalized, flags=re.I)
+        normalized = re.sub(r"^micro\s+IU/mL", "µIU/mL", normalized, flags=re.I)
+        return normalized.strip()
+
+    @staticmethod
+    def is_method_only_row(text: str) -> bool:
+        """Check if a visual row consists solely of assay/method metadata."""
+        if not text:
+            return False
+        cleaned = text.strip().lower()
+        if cleaned in METHOD_ONLY_EXACT:
+            return True
+        if cleaned.startswith("method:") or cleaned.startswith("interpretation:"):
+            return True
+        method_tokens = (
+            "god pod",
+            "clia",
+            "photo optical",
+            "calculation",
+            "clotting based assay",
+            "chemiluminescence immunoassay",
+            "hplc",
+            "photometric",
+        )
+        return any(cleaned == m or cleaned.startswith(m + " ") for m in method_tokens)
 
     def clean_words(self, raw_words: list[Any]) -> list[dict[str, Any]]:
         """Normalize word input and strip UUIDs, bracketed IDs, and watermarks."""
@@ -65,7 +102,7 @@ class SpatialRowBuilder:
             # Strip watermarks and IDs
             if UUID_RE.search(txt) or BRACKETED_ID_RE.search(txt):
                 continue
-            if "Years-Female" in txt or "Ranoliya" in txt:
+            if "Years-Female" in txt or re.search(r"Ranoliya-\d+", txt):
                 continue
 
             cleaned.append(item)
@@ -105,6 +142,76 @@ class SpatialRowBuilder:
 
         clusters.sort(key=lambda cl: cl[0]["y0"])
         return clusters
+
+    def extract_header_metadata(self, raw_words: list[Any]) -> dict[str, Any]:
+        """Extract patient demographics and report metadata from header words."""
+        cleaned_words = self.clean_words(raw_words)
+        header_words = [w for w in cleaned_words if w["y0"] < 250.0]
+        clusters = self.cluster_words_to_rows(header_words)
+        lines = [" ".join(w["word"] for w in row) for row in clusters]
+        full_header = "\n".join(lines)
+
+        patient_name = None
+        patient_age = None
+        patient_gender = None
+        patient_age_sex = None
+        doctor_name = None
+        sample_date = None
+        report_date = None
+        hospital_name = None
+        case_id = None
+
+        for line in lines:
+            if any(term in line.lower() for term in ("lab", "hospital", "clinic", "genetics", "pathology")):
+                hospital_name = line.strip()
+                break
+
+        m_name = re.search(r"Name\s*:\s*([^:\n]+?)(?=\s*Sex/Age|\s*Age|\s*Gender|\n|$)", full_header, re.I)
+        if m_name:
+            patient_name = m_name.group(1).strip()
+
+        m_sex_age = re.search(r"Sex/Age\s*:\s*([^\n:]+?)(?=\s*BirthDay|\s*Case|\n|$)", full_header, re.I)
+        if m_sex_age:
+            patient_age_sex = m_sex_age.group(1).strip()
+            parts = [p.strip() for p in patient_age_sex.split("/")]
+            for p in parts:
+                if any(g in p.lower() for g in ("female", "f")):
+                    patient_gender = "Female"
+                elif any(g in p.lower() for g in ("male", "m")):
+                    patient_gender = "Male"
+                m_age = re.search(r"(\d+)\s*(?:years|yr|y)?", p, re.I)
+                if m_age:
+                    patient_age = int(m_age.group(1))
+
+        m_case = re.search(r"Case\s*ID\s*:\s*([0-9a-zA-Z]+)", full_header, re.I)
+        if m_case:
+            case_id = m_case.group(1).strip()
+
+        m_doc = re.search(r"Ref\.\s*By\s*:\s*([^\n:]+?)(?=\s*Pt\.|\s*Bill\.|\s*Date|\n|$)", full_header, re.I)
+        if m_doc:
+            doctor_name = m_doc.group(1).strip()
+
+        m_sample_date = re.search(r"Sample\s*Date(?:\s*and\s*Time)?\s*:\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4})", full_header, re.I)
+        if m_sample_date:
+            sample_date = m_sample_date.group(1).strip()
+
+        m_report_date = re.search(r"Report\s*Date(?:\s*and\s*Time)?\s*:\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4})", full_header, re.I)
+        if m_report_date:
+            report_date = m_report_date.group(1).strip()
+        elif sample_date:
+            report_date = sample_date
+
+        return {
+            "patient_name": patient_name,
+            "patient_age": patient_age,
+            "patient_gender": patient_gender,
+            "patient_age_sex": patient_age_sex,
+            "doctor_name": doctor_name,
+            "sample_date": sample_date,
+            "report_date": report_date,
+            "hospital_name": hospital_name,
+            "case_id": case_id,
+        }
 
     def extract_parameters_from_words(
         self, raw_words: list[Any], page_number: int = 1
@@ -199,13 +306,13 @@ class SpatialRowBuilder:
                         if 200.0 <= x < 250.0:
                             val_pct = (val_pct + " " + txt).strip()
                         elif 250.0 <= x < 280.0:
-                            unit_pct = txt
+                            unit_pct = self.normalize_unit(txt)
                         elif 280.0 <= x < 390.0:
                             range_pct = (range_pct + " " + txt).strip()
                         elif 390.0 <= x < 435.0:
                             val_abs = (val_abs + " " + txt).strip()
                         elif 435.0 <= x < 470.0:
-                            unit_abs = txt
+                            unit_abs = self.normalize_unit(txt)
                         elif x >= 470.0:
                             range_abs = (range_abs + " " + txt).strip()
 
@@ -257,12 +364,7 @@ class SpatialRowBuilder:
                     is_differential = False
 
             # Skip method-only rows
-            cleaned_row_txt = row_text.strip().lower()
-            if cleaned_row_txt in METHOD_ONLY_EXACT:
-                continue
-            if cleaned_row_txt.startswith("method:") or cleaned_row_txt.startswith(
-                "interpretation:"
-            ):
+            if self.is_method_only_row(row_text):
                 continue
 
             # Standard row extraction by column x anchors
@@ -298,7 +400,7 @@ class SpatialRowBuilder:
 
             test_name = " ".join(name_words).strip()
             val_str = " ".join(result_words).strip()
-            unit_str = " ".join(unit_words).strip()
+            unit_str = self.normalize_unit(" ".join(unit_words).strip())
             range_str = " ".join(range_words).strip()
             flag_str = " ".join(flag_words).strip()
 
@@ -316,31 +418,36 @@ class SpatialRowBuilder:
             if not is_valid_result:
                 continue
 
-            if not test_name or test_name.lower() in METHOD_ONLY_EXACT:
+            if not test_name or self.is_method_only_row(test_name):
                 continue
 
             # Separate method from testName
             method = None
             m_method = re.search(
-                r"\((photometric|measured|clia|hplc|calculation)\)",
+                r"\((photometric|measured|clia|hplc|calculation|photo optical)\)",
                 test_name,
                 re.I,
             )
             if m_method:
-                method = m_method.group(1)
+                m_str = m_method.group(1)
+                method = m_str.upper() if m_str.lower() in ("clia", "hplc") else m_str.title()
                 test_name = re.sub(
-                    r"\s*\((photometric|measured|clia|hplc|calculation)\)",
+                    r"\s*\((photometric|measured|clia|hplc|calculation|photo optical)\)",
                     "",
                     test_name,
                     flags=re.I,
                 ).strip()
-            elif re.search(r"\b(HPLC|CLIA|Photometric)\b", test_name):
-                m2 = re.search(r"\b(HPLC|CLIA|Photometric)\b", test_name)
+            elif re.search(r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", test_name, re.I):
+                m2 = re.search(r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", test_name, re.I)
                 if m2:
-                    method = m2.group(1)
+                    m_str = m2.group(1)
+                    method = m_str.upper() if m_str.lower() in ("clia", "hplc") else m_str.title()
                     test_name = re.sub(
-                        r"\b(HPLC|CLIA|Photometric)\b", "", test_name
+                        r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", "", test_name, flags=re.I
                     ).strip()
+
+            # Keep value_raw exactly as printed
+            value_raw = val_str
 
             num_val = None
             try:
@@ -351,7 +458,7 @@ class SpatialRowBuilder:
             parameters.append(
                 {
                     "testName": test_name,
-                    "value_raw": val_str,
+                    "value_raw": value_raw,
                     "value": num_val,
                     "unit": unit_str,
                     "referenceRange": range_str,

@@ -227,10 +227,38 @@ class LabEvaluator:
         results = []
         for item in lab_items:
             test_name = item.get("testName") or item.get("name") or item.get("parameter") or ""
+            method = item.get("method")
+            if not method:
+                m_method = re.search(
+                    r"\((photometric|measured|clia|hplc|calculation|photo optical)\)",
+                    test_name,
+                    re.I,
+                )
+                if m_method:
+                    m_str = m_method.group(1)
+                    method = m_str.upper() if m_str.lower() in ("clia", "hplc") else m_str.title()
+                    test_name = re.sub(
+                        r"\s*\((photometric|measured|clia|hplc|calculation|photo optical)\)",
+                        "",
+                        test_name,
+                        flags=re.I,
+                    ).strip()
+                elif re.search(r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", test_name, re.I):
+                    m2 = re.search(r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", test_name, re.I)
+                    if m2:
+                        m_str = m2.group(1)
+                        method = m_str.upper() if m_str.lower() in ("clia", "hplc") else m_str.title()
+                        test_name = re.sub(
+                            r"\b(HPLC|CLIA|Photometric|Photo Optical)\b", "", test_name, flags=re.I
+                        ).strip()
+
             val = item.get("value")
             unit = item.get("unit")
             eval_res = cls.evaluate_result(test_name, val, unit=unit)
             # preserve extra fields from item
-            merged = {**item, **eval_res}
+            merged = {**item, **eval_res, "testName": test_name}
+            if method:
+                merged["method"] = method
             results.append(merged)
         return results
+

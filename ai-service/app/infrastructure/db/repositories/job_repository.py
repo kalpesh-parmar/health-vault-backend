@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 import json
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -223,8 +224,45 @@ class JobRepository:
             raw_text = raw_ocr_data.get("fullText")
 
         summary_english = None
+        report_date: date | None = None
+        doctor_name: str | None = None
+        hospital_name: str | None = None
+
         if extracted_structured_data and isinstance(extracted_structured_data, dict):
             summary_english = extracted_structured_data.get("summaryEnglish")
+
+            raw_date = (
+                extracted_structured_data.get("reportDate")
+                or extracted_structured_data.get("report_date")
+                or (extracted_structured_data.get("documentInfo") or {}).get("documentDate")
+                or (extracted_structured_data.get("documentInfo") or {}).get("reportDate")
+            )
+            if raw_date:
+                if isinstance(raw_date, date) and not isinstance(raw_date, datetime):
+                    report_date = raw_date
+                elif isinstance(raw_date, datetime):
+                    report_date = raw_date.date()
+                elif isinstance(raw_date, str):
+                    clean_date_str = raw_date.strip()
+                    for fmt in ("%d-%b-%Y", "%d-%B-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+                        try:
+                            report_date = datetime.strptime(clean_date_str, fmt).date()
+                            break
+                        except ValueError:
+                            pass
+
+            doctor_name = (
+                extracted_structured_data.get("doctorName")
+                or extracted_structured_data.get("doctor_name")
+                or (extracted_structured_data.get("providerInfo") or {}).get("referringDoctor")
+                or ((extracted_structured_data.get("providerInfo") or {}).get("primary") or {}).get("name")
+            )
+
+            hospital_name = (
+                extracted_structured_data.get("hospitalName")
+                or extracted_structured_data.get("hospital_name")
+                or (extracted_structured_data.get("facilityInfo") or {}).get("name")
+            )
 
         query = text(
             """
@@ -233,6 +271,9 @@ class JobRepository:
                 structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
                 ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
                 summary_english = COALESCE(:summary_english, summary_english),
+                report_date = COALESCE(:report_date, report_date),
+                doctor_name = COALESCE(:doctor_name, doctor_name),
+                hospital_name = COALESCE(:hospital_name, hospital_name),
                 updated_at = NOW()
             WHERE id = :document_id
             """
@@ -242,10 +283,14 @@ class JobRepository:
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
             "raw_text": raw_text,
             "summary_english": summary_english,
+            "report_date": report_date,
+            "doctor_name": doctor_name,
+            "hospital_name": hospital_name,
         }
         async for session in self.db.session():
             await session.execute(query, params)
             await session.commit()
+
 
     async def fail_job(
         self,
