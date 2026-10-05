@@ -224,6 +224,14 @@ class OcrStageHandler:
             return any(0x0B80 <= ord(c) <= 0x0BFF for c in text)
         return True
 
+    @staticmethod
+    def extract_spatial_parameters(doc: Any) -> list[dict[str, Any]]:
+        """Extract lab test parameters from spatial words across document pages."""
+        from app.services.pipeline.spatial_row_builder import SpatialRowBuilder
+        builder = SpatialRowBuilder()
+        return builder.extract_parameters_from_doc(doc)
+
+
     # ─────────────────────────────────────────────────────────────────────────
     # STAGE 1: VALIDATING
     # ─────────────────────────────────────────────────────────────────────────
