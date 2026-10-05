@@ -40,9 +40,12 @@ const {
   getLocalizedText,
 } = require("../../../helpers/onboarding.helper");
 
+const chatSessionRepository = require("../../../repositories/chatSessionRepository");
 const {
   OnboardingStep,
   REQUIRED_PROFILE_FIELDS,
+  VALID_ONBOARDING_STEPS,
+  STEP_PROGRESSION_RANK,
   isProfileComplete,
   getMissingRequiredStep,
   getNextRequiredOrOptionalStep,
@@ -2017,7 +2020,8 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "POST_ONBOARDING": {
       if (
         msg === "ADD_MORE_MEDICINES" ||
-        (typeof msg === "string" && msg.toLowerCase().includes("add more medicines"))
+        (typeof msg === "string" &&
+          (msg.toLowerCase().includes("add more medicines") || msg.includes('"addNew"')))
       ) {
         state.isOnboardingCompleted = false;
         state.activeMedicine = null;
@@ -2046,8 +2050,156 @@ async function updateStateFromMessage(state, message, userId = null) {
 // Note: getNextStep is imported from ./onboarding/onboardingStateMachine
 // createResponse and getLocalizedResponse are imported from ./onboarding/stepResponseBuilder
 
-async function saveOnboardingState(userId, state) {
-  if (!userId) return;
+/**
+ * Resolves the authoritative onboarding state and step for a user.
+ * Priorities:
+ * 1. PostgreSQL DB state in user_onboarding (if valid and contains currentStep).
+ * 2. Chat history recovery (inspects recent assistant messages from chat_messages metadata.action).
+ *    - Validates recovered step against VALID_ONBOARDING_STEPS.
+ *    - Persists recovered state to PostgreSQL DB.
+ * 3. Initial onboarding state (starts at ASK_LANGUAGE only if no state and no recoverable history exist).
+ *
+ * @param {string} userId - User UUID
+ * @param {object} [options] - Options like client/tx, chatSessionId
+ * @returns {Promise<object>} Resolved onboarding state object wrapper { state, source, record }
+ */
+async function resolveOnboardingState(userId, options = {}) {
+  const client = options.client || db;
+
+  if (!userId) {
+    return {
+      state: { currentStep: "ASK_LANGUAGE" },
+      source: "initial",
+      record: null,
+    };
+  }
+
+  // 1. Load onboarding state from PostgreSQL (PRIMARY SOURCE OF TRUTH)
+  let onboardingRecord = null;
+  try {
+    onboardingRecord = await userOnboardingRepository.findByUserId(userId, client);
+  } catch (dbErr) {
+    console.warn(`[OnboardingState] Error fetching DB state for user ${userId}:`, dbErr.message);
+  }
+
+  const dbState = onboardingRecord?.data || null;
+
+  if (dbState && dbState.currentStep && VALID_ONBOARDING_STEPS.has(dbState.currentStep)) {
+    return {
+      state: dbState,
+      source: "db",
+      record: onboardingRecord,
+    };
+  }
+
+  // 2. Chat history recovery (SECONDARY RECOVERY SOURCE)
+  let recoveredStep = null;
+  let chatSessionId = dbState?.chatSessionId || options.chatSessionId || null;
+
+  if (!chatSessionId && userId) {
+    try {
+      if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+        const canonical = await chatService.getOrCreateCanonicalSession({ userId }, client);
+        chatSessionId = canonical?.id || null;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (chatSessionId) {
+    try {
+      const result = await chatSessionRepository.listMessages({
+        sessionId: chatSessionId,
+        userId,
+        limit: 100,
+        direction: "after",
+      });
+      const messages = result?.items || [];
+      const assistantMsgs = [...messages]
+        .filter((m) => m.role === "assistant" && m.metadata?.action)
+        .reverse();
+
+      for (const msg of assistantMsgs) {
+        const action = msg.metadata?.action;
+        if (action && VALID_ONBOARDING_STEPS.has(action)) {
+          recoveredStep = action;
+          break;
+        }
+      }
+    } catch (histErr) {
+      console.warn(
+        `[OnboardingStateRecovery] Error loading chat history for user ${userId}:`,
+        histErr.message,
+      );
+    }
+  }
+
+  if (recoveredStep) {
+    const recoveredState = {
+      ...(dbState || {}),
+      currentStep: recoveredStep,
+      chatSessionId,
+      preferredLanguage: dbState?.preferredLanguage || "english",
+    };
+
+    let savedRecord = null;
+    try {
+      savedRecord = await saveOnboardingState(userId, recoveredState, client);
+      console.log(
+        `[OnboardingStateRecovery] userId=${userId} source=chat_history recoveredStep=${recoveredStep} statePersisted=true`,
+      );
+    } catch (saveErr) {
+      console.error(
+        `[OnboardingStateRecovery] Failed to persist recovered state for user ${userId}:`,
+        saveErr.message,
+      );
+    }
+
+    return {
+      state: recoveredState,
+      source: "chat_history",
+      record: savedRecord || onboardingRecord,
+    };
+  }
+
+  // 3. Initial onboarding state (Only selected for genuinely new onboarding sessions with no history)
+  const newState = {
+    currentStep: "ASK_LANGUAGE",
+    preferredLanguage: null,
+    flowMode: null,
+    isOnboardingCompleted: false,
+    uploadedMedicalDocument: false,
+    documentUploaded: false,
+    documentConfirmed: false,
+    documentId: null,
+    documentText: "",
+    documentExtracted: false,
+    bloodGroupSkipped: false,
+    allergiesSkipped: false,
+    foundMedicines: [],
+    medicinesFlowStarted: false,
+    medicinesConfirmed: false,
+    medicinesToAdd: [],
+    currentMedicineIndex: 0,
+    medicinesSavedToDb: false,
+    existingUserData: {},
+    chatSessionId,
+  };
+
+  console.log(
+    `[OnboardingState] userId=${userId} previousStep=NONE nextStep=ASK_LANGUAGE statePersisted=initial`,
+  );
+  return {
+    state: newState,
+    source: "initial",
+    record: null,
+  };
+}
+
+async function saveOnboardingState(userId, state, dbTx = null) {
+  if (!userId || !state) return null;
+  const client = dbTx || db;
 
   const updateData = {};
 
@@ -2083,7 +2235,7 @@ async function saveOnboardingState(userId, state) {
       }
 
       if (updateData.firstName !== undefined || updateData.lastName !== undefined) {
-        const existingPatient = await patientRepository.findById(userId);
+        const existingPatient = await patientRepository.findById(userId, client);
         if (existingPatient) {
           const mergedFirstName =
             updateData.firstName !== undefined ? updateData.firstName : existingPatient.firstName;
@@ -2099,7 +2251,7 @@ async function saveOnboardingState(userId, state) {
       let dbAllergies = [];
       if (userId) {
         try {
-          const currentPatient = await patientRepository.findById(userId);
+          const currentPatient = await patientRepository.findById(userId, client);
           dbAllergies = Array.isArray(currentPatient?.allergies) ? currentPatient.allergies : [];
         } catch (dbErr) {
           console.warn("[saveOnboardingData] Failed to fetch existing allergies:", dbErr.message);
@@ -2118,70 +2270,106 @@ async function saveOnboardingState(userId, state) {
   }
 
   if (Object.keys(updateData).length > 0) {
-    await patientRepository.updateById(userId, updateData);
+    await patientRepository.updateById(userId, updateData, client);
   }
 
   // Persist onboarding state to database for resumption on app reopen
-  const existingRecord = await userOnboardingRepository.findByUserId(userId);
+  const existingRecord = await userOnboardingRepository.findByUserId(userId, client);
+  const existingData = existingRecord?.data || {};
+
+  const prevStep = existingData?.currentStep || null;
+  const newStep = state.currentStep || null;
+  const prevRank = STEP_PROGRESSION_RANK[prevStep] || 0;
+  const newRank = STEP_PROGRESSION_RANK[newStep] || 0;
+
+  // Concurrency check: prevent stale state from regressing a further advanced step
+  if (
+    existingRecord &&
+    prevRank > newRank &&
+    !existingRecord.isCompleted &&
+    newStep !== "ASK_LANGUAGE"
+  ) {
+    console.warn(
+      `[OnboardingState] Stale state update ignored for userId=${userId}: current DB step=${prevStep} (rank ${prevRank}) > candidate step=${newStep} (rank ${newRank})`,
+    );
+    return existingRecord;
+  }
+
   const stateToSave = {
-    preferredLanguage: state.preferredLanguage,
-    flowMode: state.flowMode,
-    currentStep: state.currentStep,
-    documentUploaded: state.documentUploaded,
-    documentConfirmed: state.documentConfirmed,
-    documentOwnershipConfirmed: state.documentOwnershipConfirmed,
-    documentExtracted: state.documentExtracted,
-    isOnboardingCompleted: state.isOnboardingCompleted,
-    existingUserData: state.existingUserData,
-    bloodGroupSkipped: state.bloodGroupSkipped ?? false,
-    allergiesSkipped: state.allergiesSkipped ?? false,
-    hasSkipped: state.hasSkipped || false,
-    completionMessageSent: state.completionMessageSent || false,
-    pendingProfileConflict: state.pendingProfileConflict || false,
-    uploadedMedicalDocument: state.uploadedMedicalDocument,
-    medicinesToAdd: state.medicinesToAdd,
-    foundMedicines: state.foundMedicines,
-    medicinesFlowStarted: state.medicinesFlowStarted,
-    medicinesConfirmed: state.medicinesConfirmed,
-    currentMedicineIndex: state.currentMedicineIndex,
-    medicinesSkipped: state.medicinesSkipped,
-    medicinesSavedToDb: state.medicinesSavedToDb,
-    hasSocialData: state.hasSocialData,
-    socialData: state.socialData,
-    hasLoginData: state.hasLoginData,
-    loginData: state.loginData,
-    profileConfirmed: state.profileConfirmed,
-    selectedProfileSource: state.selectedProfileSource || null,
-    useSocialData: state.useSocialData || false,
-    useDocumentData: state.useDocumentData || false,
-    profileManuallyEdited: state.profileManuallyEdited || false,
-    documentText: state.documentText,
-    documentData: state.documentData,
-    loginProvider: state.loginProvider,
-    documentId: state.documentId || null,
-    loadedDocumentId: state.loadedDocumentId || null,
-    chatSessionId: state.chatSessionId || null,
-    documentAttachedToChat: state.documentAttachedToChat || false,
-    activeMedicine: state.activeMedicine || null,
-    confirmMode: state.confirmMode || null,
-    pendingQueue: state.pendingQueue || [],
-    validMedsToBulkCreate: state.validMedsToBulkCreate || [],
-    medicationFlowDone: state.medicationFlowDone || false,
+    ...existingData,
+    preferredLanguage: state.preferredLanguage || existingData.preferredLanguage || null,
+    flowMode: state.flowMode || existingData.flowMode || null,
+    currentStep: state.currentStep || existingData.currentStep || null,
+    documentUploaded: state.documentUploaded ?? existingData.documentUploaded ?? false,
+    documentConfirmed: state.documentConfirmed ?? existingData.documentConfirmed ?? false,
+    documentOwnershipConfirmed:
+      state.documentOwnershipConfirmed ?? existingData.documentOwnershipConfirmed ?? null,
+    documentExtracted: state.documentExtracted ?? existingData.documentExtracted ?? false,
+    isOnboardingCompleted:
+      state.isOnboardingCompleted ?? existingData.isOnboardingCompleted ?? false,
+    existingUserData: {
+      ...(existingData.existingUserData || {}),
+      ...(state.existingUserData || {}),
+    },
+    bloodGroupSkipped: state.bloodGroupSkipped ?? existingData.bloodGroupSkipped ?? false,
+    allergiesSkipped: state.allergiesSkipped ?? existingData.allergiesSkipped ?? false,
+    hasSkipped: state.hasSkipped ?? existingData.hasSkipped ?? false,
+    completionMessageSent:
+      state.completionMessageSent ?? existingData.completionMessageSent ?? false,
+    pendingProfileConflict:
+      state.pendingProfileConflict ?? existingData.pendingProfileConflict ?? false,
+    uploadedMedicalDocument:
+      state.uploadedMedicalDocument ?? existingData.uploadedMedicalDocument ?? false,
+    medicinesToAdd: state.medicinesToAdd || existingData.medicinesToAdd || [],
+    foundMedicines: state.foundMedicines || existingData.foundMedicines || [],
+    medicinesFlowStarted: state.medicinesFlowStarted ?? existingData.medicinesFlowStarted ?? false,
+    medicinesConfirmed: state.medicinesConfirmed ?? existingData.medicinesConfirmed ?? false,
+    currentMedicineIndex: state.currentMedicineIndex ?? existingData.currentMedicineIndex ?? 0,
+    medicinesSkipped: state.medicinesSkipped ?? existingData.medicinesSkipped ?? false,
+    medicinesSavedToDb: state.medicinesSavedToDb ?? existingData.medicinesSavedToDb ?? false,
+    hasSocialData: state.hasSocialData ?? existingData.hasSocialData ?? false,
+    socialData: state.socialData || existingData.socialData || null,
+    hasLoginData: state.hasLoginData ?? existingData.hasLoginData ?? false,
+    loginData: state.loginData || existingData.loginData || null,
+    profileConfirmed: state.profileConfirmed ?? existingData.profileConfirmed ?? false,
+    selectedProfileSource:
+      state.selectedProfileSource || existingData.selectedProfileSource || null,
+    useSocialData: state.useSocialData ?? existingData.useSocialData ?? false,
+    useDocumentData: state.useDocumentData ?? existingData.useDocumentData ?? false,
+    profileManuallyEdited:
+      state.profileManuallyEdited ?? existingData.profileManuallyEdited ?? false,
+    documentText: state.documentText || existingData.documentText || "",
+    documentData: state.documentData || existingData.documentData || null,
+    loginProvider: state.loginProvider || existingData.loginProvider || null,
+    documentId: state.documentId || existingData.documentId || null,
+    loadedDocumentId: state.loadedDocumentId || existingData.loadedDocumentId || null,
+    chatSessionId: state.chatSessionId || existingData.chatSessionId || null,
+    documentAttachedToChat:
+      state.documentAttachedToChat ?? existingData.documentAttachedToChat ?? false,
+    activeMedicine: state.activeMedicine || existingData.activeMedicine || null,
+    confirmMode: state.confirmMode || existingData.confirmMode || null,
+    pendingQueue: state.pendingQueue || existingData.pendingQueue || [],
+    validMedsToBulkCreate: state.validMedsToBulkCreate || existingData.validMedsToBulkCreate || [],
+    medicationFlowDone: state.medicationFlowDone ?? existingData.medicationFlowDone ?? false,
   };
 
-  if (existingRecord) {
-    await userOnboardingRepository.updateByUserId(userId, {
+  const isCompleted = Boolean(state.isOnboardingCompleted);
+  const stepRank = STEP_PROGRESSION_RANK[state.currentStep] || 1;
+
+  const persistedRecord = await userOnboardingRepository.upsertByUserId(
+    userId,
+    {
       data: stateToSave,
-      isCompleted: state.isOnboardingCompleted,
-    });
-  } else {
-    await userOnboardingRepository.create({
-      userId,
-      data: stateToSave,
-      isCompleted: state.isOnboardingCompleted,
-      step: 1,
-    });
-  }
+      isCompleted,
+      step: stepRank,
+    },
+    client,
+  );
+
+  console.log(
+    `[OnboardingState] userId=${userId} previousStep=${prevStep || "NONE"} nextStep=${state.currentStep} statePersisted=true`,
+  );
+  return persistedRecord;
 }
 
 class OnboardingService {
@@ -2595,8 +2783,21 @@ class OnboardingService {
 
     // Initialize state.currentStep if not present
     if (!state.currentStep) {
-      state.currentStep = computeCurrentStep(state);
+      if (userId) {
+        const { state: resolved } = await resolveOnboardingState(userId, {
+          chatSessionId: sessionId,
+        });
+        if (resolved?.currentStep) {
+          state.currentStep = resolved.currentStep;
+          state = { ...resolved, ...state };
+        } else {
+          state.currentStep = computeCurrentStep(state);
+        }
+      } else {
+        state.currentStep = computeCurrentStep(state);
+      }
     }
+
     // Apply alias map for backward compatibility
     if (
       state.currentStep === "CONFIRM_DOCUMENT_DETAILS" ||
@@ -2614,9 +2815,15 @@ class OnboardingService {
         !state.bloodGroupSkipped) ||
       ((!Array.isArray(data.allergies) || data.allergies.length === 0) && !state.allergiesSkipped);
     if (state.isOnboardingCompleted && state.medicationFlowDone && !hasUnansweredOptional) {
+      const isAddMorePayload =
+        typeof msg === "string" &&
+        (msg === "ADD_MORE_MEDICINES" ||
+          msg.toLowerCase().includes("add more medicines") ||
+          msg.includes('"addNew"') ||
+          msg.includes('"ADD_MEDICINE"') ||
+          msg.includes('"action":"ADD"'));
       if (
-        msg === "ADD_MORE_MEDICINES" ||
-        msg.toLowerCase().includes("add more medicines") ||
+        isAddMorePayload ||
         msg === "ASK_REPORT" ||
         msg === "ASK_ABOUT_REPORT" ||
         state.currentStep === "ASK_REPORT"
@@ -3123,6 +3330,18 @@ class OnboardingService {
       fieldsLength: response.fields?.length,
     });
 
+    if (userId) {
+      try {
+        await saveOnboardingState(userId, state);
+      } catch (saveErr) {
+        console.error(
+          `[OnboardingState] Failed to persist onboarding state for userId=${userId}:`,
+          saveErr.message,
+        );
+        throw saveErr;
+      }
+    }
+
     return {
       ...response,
       createdAt: assistantMsgCreatedAt,
@@ -3147,6 +3366,9 @@ module.exports = {
   OnboardingService,
   onboardingService,
   saveOnboardingState,
+  resolveOnboardingState,
+  VALID_ONBOARDING_STEPS,
+  STEP_PROGRESSION_RANK,
   splitName,
   normalizeDOB,
   normalizeFlowModeLocally,

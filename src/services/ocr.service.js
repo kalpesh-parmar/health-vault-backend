@@ -18,6 +18,7 @@ const {
   onboardingService,
   canSkipOnboarding,
   saveOnboardingState,
+  resolveOnboardingState,
 } = require("./ai/chat/onboarding.service");
 const { getNextRequiredOrOptionalStep } = require("./ai/chat/onboarding/onboardingStateMachine");
 const { ocrService } = require("./ai/ocr/ocr.service");
@@ -261,10 +262,9 @@ class V1Service {
       } = normalizedInput;
       console.log("[MEDICINES]===", normalizedInput.message);
 
-      // Fetch user profile and existing onboarding state
+      // Fetch user profile and existing onboarding state using unified state resolver
       const patient = await patientRepository.findById(userId);
-      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-      const dbState = onboardingRecord?.data || {};
+      const { state: dbState } = await resolveOnboardingState(userId, { chatSessionId: sessionId });
       if (patient) {
         if (!dbState.existingUserData) dbState.existingUserData = {};
         if (patient.bloodGroup && !dbState.existingUserData.bloodGroup) {
@@ -335,9 +335,47 @@ class V1Service {
             )
           : {};
 
+      let isAddMedicineMsg = false;
+      if (message || actionType === "ADD_MEDICINE") {
+        try {
+          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
+          if (
+            parsedMsg &&
+            (parsedMsg.key === "ADD" ||
+              parsedMsg.value === "ADD" ||
+              parsedMsg.action === "ADD" ||
+              parsedMsg.actionType === "ADD_MEDICINE" ||
+              parsedMsg.addNew === true)
+          ) {
+            isAddMedicineMsg = true;
+          }
+        } catch {
+          // Ignore JSON parse error
+        }
+
+        const msgStr = String(message || "")
+          .trim()
+          .toUpperCase();
+        const actStr = String(actionType || "")
+          .trim()
+          .toUpperCase();
+
+        if (
+          actStr === "ADD_MEDICINE" ||
+          msgStr === "ADD" ||
+          msgStr === "ADD_NEW" ||
+          msgStr.includes("ADD ANOTHER MEDICINE") ||
+          msgStr.includes("ADD MEDICINE") ||
+          msgStr.includes("ADD NEW")
+        ) {
+          isAddMedicineMsg = true;
+        }
+      }
+
       const isAddingMedicine =
         actionType === "ADD_MEDICINE" ||
         actionType === "SAVE_AND_REVIEW" ||
+        isAddMedicineMsg ||
         cleanedInputState.currentStep === "ADD_MEDICINE" ||
         cleanedInputState.currentStep === "REVIEW_MEDICINES_LIST";
 
@@ -418,51 +456,31 @@ class V1Service {
         }
       }
 
-      let isAddMedicineMsg = false;
-      if (message || actionType === "ADD_MEDICINE") {
+      const parsedMsgObj = (() => {
         try {
-          const parsedMsg = typeof message === "string" ? JSON.parse(message) : message;
-          if (
-            parsedMsg &&
-            (parsedMsg.key === "ADD" ||
-              parsedMsg.value === "ADD" ||
-              parsedMsg.action === "ADD" ||
-              parsedMsg.actionType === "ADD_MEDICINE" ||
-              parsedMsg.addNew === true)
-          ) {
-            isAddMedicineMsg = true;
-          }
+          return typeof message === "string" ? JSON.parse(message) : message;
         } catch {
-          // Ignore JSON parse error
+          return null;
         }
-
-        const msgStr = String(message || "")
-          .trim()
-          .toUpperCase();
-        const actStr = String(actionType || "")
-          .trim()
-          .toUpperCase();
-
-        if (
-          actStr === "ADD_MEDICINE" ||
-          msgStr === "ADD" ||
-          msgStr === "ADD_NEW" ||
-          msgStr.includes("ADD ANOTHER MEDICINE") ||
-          msgStr.includes("ADD MEDICINE") ||
-          msgStr.includes("ADD NEW")
-        ) {
-          isAddMedicineMsg = true;
-        }
-      }
+      })();
 
       const hasMedicineActionData = Boolean(
-        actionData &&
-        typeof actionData === "object" &&
-        (actionData.name ||
-          actionData.medicationName ||
-          actionData.medicine ||
-          actionData.dose ||
-          actionData.frequency),
+        (actionData &&
+          typeof actionData === "object" &&
+          (actionData.name ||
+            actionData.medicationName ||
+            actionData.medicine ||
+            actionData.medicines ||
+            actionData.dose ||
+            actionData.frequency)) ||
+        (parsedMsgObj &&
+          typeof parsedMsgObj === "object" &&
+          (parsedMsgObj.name ||
+            parsedMsgObj.medicationName ||
+            parsedMsgObj.medicine ||
+            parsedMsgObj.medicines ||
+            parsedMsgObj.dose ||
+            parsedMsgObj.frequency)),
       );
 
       let currentOnboardingStep = effectiveState?.currentStep || null;
@@ -537,7 +555,34 @@ class V1Service {
           });
         }
 
-        if (isAddMedicineMsg && !hasMedicineActionData && !isActiveOnboardingStep) {
+        let historyMedsForAdd = null;
+        if (isAddMedicineMsg && !hasMedicineActionData && effectiveSessionId) {
+          try {
+            const recentMsgs = await chatSessionRepository.listMessages(effectiveSessionId);
+            if (Array.isArray(recentMsgs)) {
+              for (const m of recentMsgs) {
+                if (
+                  m?.metadata &&
+                  Array.isArray(m.metadata.medicines) &&
+                  m.metadata.medicines.length > 0
+                ) {
+                  historyMedsForAdd = m.metadata.medicines;
+                  break;
+                }
+              }
+            }
+          } catch (hErr) {
+            console.warn(
+              "[UnifiedChat] Failed to check recent message metadata for ADD_MEDICINE:",
+              hErr.message,
+            );
+          }
+        }
+        const hasEffectiveMedicineData =
+          hasMedicineActionData ||
+          (Array.isArray(historyMedsForAdd) && historyMedsForAdd.length > 0);
+
+        if (isAddMedicineMsg && !hasEffectiveMedicineData && !isActiveOnboardingStep) {
           let activeSessionId = effectiveSessionId;
           if (!activeSessionId && userId) {
             try {
@@ -793,6 +838,8 @@ class V1Service {
               ? body.medicines
               : null;
 
+        let isAddNewMsg = actionType === "ADD_MEDICINE";
+
         // Parse message if sent as structured object
         if (!medsToProcess && typeof message === "object" && message !== null) {
           if (Array.isArray(message.medicines) && message.medicines.length > 0) {
@@ -803,6 +850,9 @@ class V1Service {
             medsToProcess = message.selected.map((sItem) =>
               typeof sItem === "object" ? sItem : { id: sItem, selected: true },
             );
+          }
+          if (message.addNew) {
+            isAddNewMsg = true;
           }
         }
 
@@ -830,8 +880,35 @@ class V1Service {
                 typeof sItem === "object" ? sItem : { id: sItem, selected: true },
               );
             }
+            if (parsedMsg?.addNew) {
+              isAddNewMsg = true;
+            }
           } catch {
             // Ignore parse errors
+          }
+        }
+
+        // Post-onboarding metadata fallback: if medsToProcess is still empty, check chat history metadata
+        if ((!medsToProcess || medsToProcess.length === 0) && effectiveSessionId) {
+          try {
+            const recentMsgs = await chatSessionRepository.listMessages(effectiveSessionId);
+            if (Array.isArray(recentMsgs)) {
+              for (const m of recentMsgs) {
+                if (
+                  m?.metadata &&
+                  Array.isArray(m.metadata.medicines) &&
+                  m.metadata.medicines.length > 0
+                ) {
+                  medsToProcess = m.metadata.medicines;
+                  break;
+                }
+              }
+            }
+          } catch (msgHistErr) {
+            console.warn(
+              "[UnifiedChat] Failed to recover medicines from chat metadata:",
+              msgHistErr.message,
+            );
           }
         }
 
@@ -881,8 +958,11 @@ class V1Service {
 
         const isConfirmAction =
           actionType === "CONFIRM_MEDICINES" ||
+          actionType === "ADD_MEDICINE" ||
+          isAddNewMsg ||
           String(message || "").toUpperCase() === "CONFIRM" ||
-          String(message || "").toUpperCase() === "CONFIRM_SELECTED";
+          String(message || "").toUpperCase() === "CONFIRM_SELECTED" ||
+          (Array.isArray(medsToProcess) && medsToProcess.length > 0);
 
         if (isConfirmAction && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
           // Pre-resolve document medications if missing medicationName
@@ -954,12 +1034,22 @@ class V1Service {
           }
 
           const bulkResult = await medicationService.bulkCreate(userId, medsToProcess);
-          createdMeds = bulkResult?.created || bulkResult || [];
+          const rawCreated = bulkResult?.created || bulkResult || [];
+          createdMeds = rawCreated.map((m) => ({
+            ...m,
+            name: m.name || m.medicationName,
+            medicationName: m.medicationName || m.name,
+          }));
         } else if (isConfirmAction && hasMedicineActionData) {
           const bulkResult = await medicationService.bulkCreate(userId, [
             normalizeCreateMedicationInput(actionData),
           ]);
-          createdMeds = bulkResult?.created || bulkResult || [];
+          const rawCreated = bulkResult?.created || bulkResult || [];
+          createdMeds = rawCreated.map((m) => ({
+            ...m,
+            name: m.name || m.medicationName,
+            medicationName: m.medicationName || m.name,
+          }));
         }
         const createdMed = createdMeds[0] || null;
 
@@ -1195,7 +1285,8 @@ class V1Service {
 
         return buildUnifiedResponse({
           mode: "ACTION",
-          actionType: "CONFIRM_MEDICINES",
+          actionType:
+            isAddNewMsg || actionType === "ADD_MEDICINE" ? "ADD_MEDICINE" : "CONFIRM_MEDICINES",
           reply: replyText,
           sessionId: activeSessionId,
           medication: createdMed,
@@ -1752,8 +1843,8 @@ class V1Service {
       throw new UnauthorizedException("Unauthorized access");
     }
 
-    const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-    let resumableState = onboardingRecord?.data || null;
+    const { state: resolvedState } = await resolveOnboardingState(userId);
+    let resumableState = resolvedState || null;
 
     let patient = null;
     try {

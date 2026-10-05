@@ -2,11 +2,22 @@ const ocrService = require("../../src/services/ocr.service");
 const patientRepository = require("../../src/repositories/patientRepository");
 const userOnboardingRepository = require("../../src/repositories/userOnboardingRepository");
 const chatSessionRepository = require("../../src/repositories/chatSessionRepository");
+const medicationService = require("../../src/services/medication.service");
 const { chatService } = require("../../src/services/ai/chat/chat.service");
 
 describe("Post-Onboarding Add New Medicine Response Alignment (Option A)", () => {
   beforeEach(() => {
     jest.restoreAllMocks();
+    jest.spyOn(chatSessionRepository, "appendMessage").mockResolvedValue({ id: "msg_mock_123" });
+    jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue({});
+    jest.spyOn(userOnboardingRepository, "upsertByUserId").mockResolvedValue({});
+    jest.spyOn(patientRepository, "updateById").mockResolvedValue({});
+    jest
+      .spyOn(chatService, "getOrCreateCanonicalSession")
+      .mockResolvedValue({ id: "session_test_123" });
+    jest
+      .spyOn(medicationService, "bulkCreate")
+      .mockImplementation(async (userId, meds) => meds || []);
   });
 
   test("should return medicines array when user passes addNew: true and medicines in post-onboarding", async () => {

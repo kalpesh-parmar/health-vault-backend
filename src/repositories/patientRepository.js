@@ -129,8 +129,9 @@ class PatientRepository {
     };
   }
 
-  async updateById(id, data) {
-    const result = await db
+  async updateById(id, data, client = db) {
+    const target = client || db;
+    const result = await target
       .update(patient)
       .set({
         ...data,

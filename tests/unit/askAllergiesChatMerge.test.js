@@ -2,11 +2,13 @@ const { onboardingService } = require("../../src/services/ai/chat/onboarding.ser
 const patientRepository = require("../../src/repositories/patientRepository");
 const authProviderRepository = require("../../src/repositories/authProviderRepository");
 const userOnboardingRepository = require("../../src/repositories/userOnboardingRepository");
+const chatSessionRepository = require("../../src/repositories/chatSessionRepository");
 const { chatService } = require("../../src/services/ai/chat/chat.service");
 
 jest.mock("../../src/repositories/patientRepository");
 jest.mock("../../src/repositories/authProviderRepository");
 jest.mock("../../src/repositories/userOnboardingRepository");
+jest.mock("../../src/repositories/chatSessionRepository");
 jest.mock("../../src/services/ai/chat/chat.service");
 
 describe("ASK_ALLERGIES Chat Answer & Merge Tests", () => {
@@ -15,8 +17,10 @@ describe("ASK_ALLERGIES Chat Answer & Merge Tests", () => {
     authProviderRepository.findByUserId.mockResolvedValue(null);
     userOnboardingRepository.findByUserId.mockResolvedValue(null);
     userOnboardingRepository.updateByUserId.mockResolvedValue(null);
+    userOnboardingRepository.upsertByUserId.mockResolvedValue(null);
     userOnboardingRepository.create.mockResolvedValue(null);
-    chatService.appendChatMessage.mockResolvedValue({ id: "msg-123", createdAt: new Date() });
+    chatSessionRepository.listMessages.mockResolvedValue([]);
+    chatSessionRepository.appendMessage.mockResolvedValue({ id: "msg-123", createdAt: new Date() });
     chatService.sendMessage.mockResolvedValue({
       answer: "Symptoms of diabetes include increased thirst and frequent urination.",
       suggestedQuestions: ["How is diabetes diagnosed?"],
@@ -86,18 +90,25 @@ describe("ASK_ALLERGIES Chat Answer & Merge Tests", () => {
       lastName: "Chauhan",
       dateOfBirth: "1995-05-15",
       gender: "female",
+      preferredLanguage: "english",
       allergies: ["Aspirin", "Penicillin", "Dust"],
     });
-    userOnboardingRepository.findByUserId.mockResolvedValue({
-      userId,
-      data: {
-        chatSessionId: "session-999",
-        currentStep: "MEDICINE_OPTIONS",
-        allergiesSkipped: true,
-        existingUserData: {
-          allergies: ["Aspirin", "Penicillin", "Dust"],
-        },
-      },
+    userOnboardingRepository.findByUserId.mockImplementation(async (uId) => {
+      if (uId === userId) {
+        return {
+          userId,
+          data: {
+            chatSessionId: "session-999",
+            currentStep: "MEDICINE_OPTIONS",
+            preferredLanguage: "english",
+            allergiesSkipped: true,
+            existingUserData: {
+              allergies: ["Aspirin", "Penicillin", "Dust"],
+            },
+          },
+        };
+      }
+      return null;
     });
     patientRepository.updateById.mockResolvedValue({ id: userId });
 
