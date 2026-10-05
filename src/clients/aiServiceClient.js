@@ -61,7 +61,7 @@ class AiServiceClient {
         src_lang: srcLang,
         tgt_lang: tgtLang,
       },
-      { timeout: 30000, retries: 2 },
+      { timeout: 120000, retries: 0 },
     );
   }
 
@@ -153,17 +153,13 @@ class AiServiceClient {
   }
 
   async dispatchDocumentProcessing(payload) {
-    return this.postWithRetry(
-      this.endpoints.processDocument,
-      payload,
-      {
-        headers: {
-          "X-Internal-Service-Key": env.internalServiceKey,
-        },
-        timeout: 15000,
-        retries: 2,
+    return this.postWithRetry(this.endpoints.processDocument, payload, {
+      headers: {
+        "X-Internal-Service-Key": env.internalServiceKey,
       },
-    );
+      timeout: 15000,
+      retries: 2,
+    });
   }
 }
 

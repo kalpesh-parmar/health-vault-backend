@@ -342,7 +342,7 @@ class OcrService {
     }
 
     console.log(
-      `[OcrService] Processing ${base64Images.length} page(s) sequentially (batch size 1) with ${env.aiModel}...`,
+      `ocessing ${base64Images.length} page(s) sequentially (batch size 1) with ${env.aiModel}...`,
     );
 
     const pageTexts = await processInBatches(base64Images, 1, async (base64Image) => {
@@ -869,7 +869,7 @@ Return STRICT JSON only:
                   maxTokens: 8192,
                   format: "json",
                   keep_alive: -1,
-                  rawOptions: { num_ctx: 8192 },
+                  rawOptions: { num_ctx: 16384, num_predict: 8192 },
                   think: false,
                   fallbackToThinking: true,
                 },
@@ -1043,13 +1043,12 @@ Return STRICT JSON only:
 
       const jsonResponseText = await ollamaClient.generate(promptToUse, structuringModel, {
         temperature: 0,
-        maxTokens: 4096,
+        maxTokens: 8192, //4096,
         format: "json",
         keep_alive: -1,
-        rawOptions: { num_ctx: 8192 },
+        rawOptions: { num_ctx: 16384 }, //8192
         think: false,
       });
-
       const parsedCandidate = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
       if (parsedCandidate && parsedCandidate.status !== "FAILED") {
         rawParsedCandidate = parsedCandidate;
@@ -1110,12 +1109,10 @@ Return STRICT JSON only:
     let rawCandidateDocType = rawParsedCandidate.documentType || rawParsedCandidate.reportType;
 
     const rawCandidateText = (rawParsedCandidate.rawText || "").toLowerCase();
-    const candidateMeds = rawParsedCandidate.medications || [];
-    const candidateLab =
-      rawParsedCandidate.testResults ||
-      rawParsedCandidate.labTests ||
-      rawParsedCandidate.tests ||
-      [];
+    const candidateMeds = asArray(rawParsedCandidate.medications);
+    const candidateLab = asArray(
+      rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
+    );
 
     if (
       !rawCandidateDocType ||
@@ -1135,7 +1132,9 @@ Return STRICT JSON only:
 
     const analyzedDocType = normalizeDocumentType(rawCandidateDocType);
 
-    const formattedMeds = (rawParsedCandidate.medications || []).map((m) => {
+    const rawMeds = asArray(rawParsedCandidate.medications);
+    const formattedMeds = rawMeds.map((rawMed) => {
+      const m = typeof rawMed === "string" ? { name: rawMed.trim() } : rawMed || {};
       const qty = m.quantity || m.qty || null;
       const duration = m.duration || null;
       const instructions =
@@ -1279,12 +1278,12 @@ Return STRICT JSON only:
           bloodGroup: normalizeBloodGroup(
             rawParsedCandidate.bloodGroup || rawParsedCandidate.patient?.bloodGroup,
           ),
-          allergies: Array.isArray(rawParsedCandidate.allergies)
-            ? rawParsedCandidate.allergies
-            : [],
-          medicalConditions: Array.isArray(rawParsedCandidate.medicalConditions)
-            ? rawParsedCandidate.medicalConditions
-            : [],
+          allergies: asArray(rawParsedCandidate.allergies)
+            .map((a) => (typeof a === "string" ? a : String(a?.name || a?.value || "")))
+            .filter(Boolean),
+          medicalConditions: asArray(rawParsedCandidate.medicalConditions)
+            .map((c) => (typeof c === "string" ? c : String(c?.name || c?.value || "")))
+            .filter(Boolean),
           address: rawParsedCandidate.address || rawParsedCandidate.patient?.address || null,
         },
         hospitalInfo: {
@@ -1301,18 +1300,18 @@ Return STRICT JSON only:
             ? [rawParsedCandidate.diagnosis]
             : [],
         medications: formattedMeds,
-        labResults: (
-          rawParsedCandidate.testResults ||
-          rawParsedCandidate.labTests ||
-          rawParsedCandidate.tests ||
-          []
-        ).map((t) => ({
-          name: t.testName || t.name || null,
-          value: t.value || null,
-          unit: t.unit || null,
-          normalRange: t.referenceRange || t.normalRange || null,
-          isAbnormal: t.status === "ABNORMAL",
-        })),
+        labResults: asArray(
+          rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
+        ).map((rawTest) => {
+          const t = typeof rawTest === "string" ? { testName: rawTest.trim() } : rawTest || {};
+          return {
+            name: t.testName || t.name || null,
+            value: t.value || null,
+            unit: t.unit || null,
+            normalRange: t.referenceRange || t.normalRange || null,
+            isAbnormal: t.status === "ABNORMAL",
+          };
+        }),
         summary: finalSummaryValue,
       },
     };
@@ -1819,6 +1818,7 @@ Return STRICT JSON only:
   }
 
   async processAndStoreSynchronously({ file, userId }) {
+    const pipelineStartTime = Date.now();
     console.log(`[OcrService] [START] processAndStoreSynchronously for user: ${userId}`);
 
     // Fetch preferred language from onboarding state
@@ -1838,12 +1838,11 @@ Return STRICT JSON only:
     }
 
     // 0. Upload file and validate it as a medical document.
-    // `uploadFileService.uploadFile` already runs AI validation for PATIENT_DOCUMENT,
-    // so this avoids duplicate classifier logic and keeps v1/ocr/extract aligned with the document OCR pipeline.
     const tUploadStart = Date.now();
     const uploadResult = await uploadFileService.uploadFile(file, "PATIENT_DOCUMENT", userId);
+    const uploadDurationMs = Date.now() - tUploadStart;
     console.log(
-      `[OcrService] [UPLOAD] Duration: ${Date.now() - tUploadStart}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
+      `[OcrService] [UPLOAD] Duration: ${uploadDurationMs}ms. key=${uploadResult.data.fileKey}. Starting OCR...`,
     );
 
     const fileKey = uploadResult.data.fileKey;
@@ -1853,6 +1852,7 @@ Return STRICT JSON only:
     const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
     let ocrResult;
     let structuredData;
+    let extractDurationMs = 0;
 
     if (env.useExternalOcrService) {
       const extResult = await this.extractViaExternalService(file, preferredLanguage);
@@ -1877,13 +1877,15 @@ Return STRICT JSON only:
         // 3. Extract structured medical data
         const tExtractStart = Date.now();
         structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+        extractDurationMs = Date.now() - tExtractStart;
         console.log(
-          `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete. Generating Gujarati summary...`,
+          `[OcrService] [EXTRACT] Duration: ${extractDurationMs}ms. Structured extraction complete. Generating summary...`,
         );
       }
     }
+    const ocrDurationMs = Date.now() - tOcrStart;
 
-    // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+    // 4. Generate summaries in English and preferred language
     const tSummaryStart = Date.now();
     let summaryEnglish = "";
     let summaryPreferredLanguage = "";
@@ -1902,7 +1904,6 @@ Return STRICT JSON only:
       summaryLanguage = summaryResult.summaryLanguage;
       keyPoints = summaryResult.keyPoints;
     } else {
-      // Remote service handles structuring and translation inside structuredData
       summaryEnglish = structuredData.summaryEnglish || structuredData.remarks || "";
       summaryPreferredLanguage =
         structuredData.summaryInPreferredLanguage ||
@@ -1916,6 +1917,7 @@ Return STRICT JSON only:
         summaryLanguage,
       );
     }
+    const summaryDurationMs = Date.now() - tSummaryStart;
     console.log(
       `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. English summary generated and ${preferredLanguage} summary generated. Key points extracted: ${keyPoints.length}. Saving to database...`,
     );
@@ -1957,11 +1959,13 @@ Return STRICT JSON only:
         summaryInPreferredLanguage: summaryPreferredLanguage,
       })
       .returning();
+    const dbDurationMs = Date.now() - tDbStart;
     console.log(
-      `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. ID=${documentRow.id}. Indexing in RAG...`,
+      `[OcrService] [DATABASE] Duration: ${dbDurationMs}ms. ID=${documentRow.id}. Indexing in RAG...`,
     );
 
-    //remove await so that time reduce and embedding performs in bachground
+    // 6. Index Document in RAG
+    const tRagStart = Date.now();
     await embeddingService.embedAndPersist({
       documentId: documentRow.id,
       userId,
@@ -1980,8 +1984,22 @@ Return STRICT JSON only:
         medications: (structuredData.medications || []).map((m) => JSON.stringify(m)),
       },
     });
+    const ragDurationMs = Date.now() - tRagStart;
 
-    console.log(`[OcrService] RAG indexing completed.`);
+    const totalDurationMs = Date.now() - pipelineStartTime;
+    structuredData.processingTimingsMs = {
+      uploadDurationMs,
+      ocrDurationMs,
+      extractDurationMs,
+      summaryDurationMs,
+      dbDurationMs,
+      ragDurationMs,
+      totalDurationMs,
+    };
+
+    console.log(
+      `[OcrService] [TIMING] processAndStoreSynchronously complete in ${totalDurationMs}ms (Upload: ${uploadDurationMs}ms, OCR: ${ocrDurationMs}ms, Extract: ${extractDurationMs}ms, Summary: ${summaryDurationMs}ms, DB: ${dbDurationMs}ms, RAG: ${ragDurationMs}ms)`,
+    );
 
     return {
       document: documentRow,
@@ -1991,6 +2009,7 @@ Return STRICT JSON only:
   }
 
   async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+    const pipelineStartTime = Date.now();
     console.log(
       `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
     );
@@ -2017,6 +2036,7 @@ Return STRICT JSON only:
       const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
       let ocrResult;
       let structuredData;
+      let extractDurationMs = 0;
 
       if (env.useExternalOcrService) {
         const extResult = await this.extractViaExternalService(file, preferredLanguage);
@@ -2038,12 +2058,15 @@ Return STRICT JSON only:
           // 3. Extract structured medical data
           const tExtractStart = Date.now();
           structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
+          extractDurationMs = Date.now() - tExtractStart;
           console.log(
-            `[OcrService] [EXTRACT] Duration: ${Date.now() - tExtractStart}ms. Structured extraction complete.`,
+            `[OcrService] [EXTRACT] Duration: ${extractDurationMs}ms. Structured extraction complete.`,
           );
         }
       }
-      // 4. Generate summaries in English and preferred language (prevent duplicate calls if English)
+      const ocrDurationMs = Date.now() - tOcrStart;
+
+      // 4. Generate summaries in English and preferred language
       const tSummaryStart = Date.now();
       let summaryEnglish = "";
       let summaryPreferredLanguage = "";
@@ -2075,8 +2098,9 @@ Return STRICT JSON only:
           summaryLanguage,
         );
       }
+      const summaryDurationMs = Date.now() - tSummaryStart;
       console.log(
-        `[OcrService] [SUMMARY] Duration: ${Date.now() - tSummaryStart}ms. Summaries generated. Key points: ${keyPoints.length}.`,
+        `[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated. Key points: ${keyPoints.length}.`,
       );
 
       // Ensure data contains both summaries, key points, & normalized documentType
@@ -2112,11 +2136,13 @@ Return STRICT JSON only:
           updatedAt: new Date(),
         })
         .where(eq(document.id, documentId));
+      const dbDurationMs = Date.now() - tDbStart;
       console.log(
-        `[OcrService] [DATABASE] Duration: ${Date.now() - tDbStart}ms. Document ${documentId} updated. Indexing in RAG...`,
+        `[OcrService] [DATABASE] Duration: ${dbDurationMs}ms. Document ${documentId} updated. Indexing in RAG...`,
       );
 
       // 6. Index Document in RAG
+      const tRagStart = Date.now();
       await embeddingService.embedAndPersist({
         documentId,
         userId,
@@ -2136,13 +2162,28 @@ Return STRICT JSON only:
           testResults: structuredData.testResults || [],
         },
       });
+      const ragDurationMs = Date.now() - tRagStart;
 
+      const totalDurationMs = Date.now() - pipelineStartTime;
+      structuredData.processingTimingsMs = {
+        ocrDurationMs,
+        extractDurationMs,
+        summaryDurationMs,
+        dbDurationMs,
+        ragDurationMs,
+        totalDurationMs,
+      };
+
+      console.log(
+        `[OcrService] [TIMING] Document ${documentId} complete in ${totalDurationMs}ms (OCR: ${ocrDurationMs}ms, Extract: ${extractDurationMs}ms, Summary: ${summaryDurationMs}ms, DB: ${dbDurationMs}ms, RAG: ${ragDurationMs}ms)`,
+      );
       console.log(
         `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
       );
     } catch (err) {
+      const totalFailedDurationMs = Date.now() - pipelineStartTime;
       console.error(
-        `[OcrService] [ERROR] processAndStoreAsynchronously failed for document ${documentId}:`,
+        `[OcrService] [ERROR] processAndStoreAsynchronously failed after ${totalFailedDurationMs}ms for document ${documentId}:`,
         err,
       );
       try {

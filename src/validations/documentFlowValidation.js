@@ -128,6 +128,16 @@ const sendChatMessageSchema = z
     question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
     preferredLanguage: z.string().optional(),
+    page: z
+      .union([z.number().int().positive(), z.string()])
+      .optional()
+      .nullable()
+      .transform((val) => (val ? Number(val) : undefined)),
+    limit: z
+      .union([z.number().int().positive(), z.string()])
+      .optional()
+      .nullable()
+      .transform((val) => (val ? Number(val) : undefined)),
     stream: z
       .preprocess(
         (val) => (val === "true" ? true : val === "false" ? false : val),
@@ -171,6 +181,16 @@ const unifiedChatSchema = z.object({
   fromScreen: z.string().optional().nullable(),
   medicines: z.array(z.any()).optional().nullable(),
   preferredLanguage: z.string().optional().nullable(),
+  page: z
+    .union([z.number().int().positive(), z.string()])
+    .optional()
+    .nullable()
+    .transform((val) => (val ? Number(val) : undefined)),
+  limit: z
+    .union([z.number().int().positive(), z.string()])
+    .optional()
+    .nullable()
+    .transform((val) => (val ? Number(val) : undefined)),
   stream: z
     .union([z.boolean(), z.enum(["true", "false"])])
     .optional()
@@ -190,11 +210,18 @@ module.exports = {
 };
 */
 
+const idParamSchema = z
+  .object({
+    id: z.string().uuid(),
+  })
+  .strict();
+
 module.exports = {
   addDocumentSchema,
   batchFileKeySchema,
   createChatSessionSchema,
   fileKeySchema,
+  idParamSchema,
   runOcrSchema,
   sendChatMessageSchema,
   sessionListQuerySchema,

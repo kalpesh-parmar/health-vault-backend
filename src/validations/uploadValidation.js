@@ -61,10 +61,7 @@ const rawDocumentMulter = multer({
   limits: {
     fileSize: MAX_FILE_SIZES.PATIENT_DOCUMENT,
   },
-}).fields([
-  { name: "files" },
-  { name: "file", maxCount: 1 },
-]);
+}).fields([{ name: "files" }, { name: "file", maxCount: 1 }]);
 
 function profileUploadMulter(req, res, next) {
   rawProfileMulter(req, res, (err) => {
@@ -72,19 +69,26 @@ function profileUploadMulter(req, res, next) {
       if (handleUploadAbort(req, res, err, "ProfileUpload")) {
         return;
       }
+
       if (err.code === "LIMIT_FILE_SIZE") {
-        return next(
+        next(
           new InvalidRequestException(
             `File size exceeds the limit of ${MAX_FILE_SIZES.PATIENT_PROFILE / (1024 * 1024)} MB`,
           ),
         );
+        return;
       }
+
       if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
-        return next(new InvalidRequestException("PATIENT_PROFILE allows only one picture."));
+        next(new InvalidRequestException("PATIENT_PROFILE allows only one picture."));
+        return;
       }
-      return next(new InvalidRequestException(err.message || "File upload error"));
+
+      next(new InvalidRequestException(err.message || "File upload error"));
+      return;
     }
-    return next();
+
+    next();
   });
 }
 
@@ -101,21 +105,27 @@ function handleUploadAbort(req, res, err, uploadName = "Upload") {
     return false;
   }
 
-  console.warn(`[${uploadName}] Client aborted upload connection: ${err?.message || "Request aborted"}`);
+  console.warn(
+    `[${uploadName}] Client aborted upload connection: ${err?.message || "Request aborted"}`,
+  );
 
   if (req.files && Array.isArray(req.files)) {
     for (const file of req.files) {
       if (file.path && fs.existsSync(file.path)) {
         try {
           fs.unlinkSync(file.path);
-        } catch (_) {}
+        } catch {
+          // intentionally ignored
+        }
       }
     }
   }
   if (req.file?.path && fs.existsSync(req.file.path)) {
     try {
       fs.unlinkSync(req.file.path);
-    } catch (_) {}
+    } catch {
+      // intentionally ignored
+    }
   }
 
   if (res.headersSent || res.writableEnded || req.destroyed || req.socket?.destroyed) {
@@ -137,36 +147,43 @@ function documentUploadMulter(req, res, next) {
       if (handleUploadAbort(req, res, err, "DocumentUpload")) {
         return;
       }
+
       console.error("Error: document upload multer: ", err);
+
       if (err.code === "LIMIT_FILE_SIZE") {
-        return next(
+        next(
           new InvalidRequestException(
-            `File size exceeds the limit of ${MAX_FILE_SIZES.PATIENT_DOCUMENT / (1024 * 1024)} MB per file`,
+            `File size exceeds the limit of ${
+              MAX_FILE_SIZES.PATIENT_DOCUMENT / (1024 * 1024)
+            } MB per file`,
           ),
         );
+        return;
       }
+
       if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
-        return next(
+        next(
           new InvalidRequestException(
             errorConstants.MAXIMUM_FIVE_DOCUMENT_FILES_ALLOWED(env.maxFilesPerUpload || 20),
           ),
         );
+        return;
       }
-      return next(new InvalidRequestException(err.message || "File upload error"));
+
+      next(new InvalidRequestException(err.message || "File upload error"));
+      return;
     }
 
     if (req.files && !Array.isArray(req.files)) {
-      const filesArray = [
-        ...(req.files.files || []),
-        ...(req.files.file || []),
-      ];
+      const filesArray = [...(req.files.files || []), ...(req.files.file || [])];
+
       req.files = filesArray;
       req.file = filesArray[0] || null;
     } else if (req.file && (!req.files || req.files.length === 0)) {
       req.files = [req.file];
     }
 
-    return next();
+    next();
   });
 }
 
@@ -233,9 +250,7 @@ async function validateDocumentUpload(req, _res, next) {
 
       const preValidation = await validatePreUploadDocument(file);
       if (!preValidation.isValid) {
-        throw new InvalidRequestException(
-          `${preValidation.title}: ${preValidation.message}`,
-        );
+        throw new InvalidRequestException(`${preValidation.title}: ${preValidation.message}`);
       }
     }
     return next();
@@ -266,22 +281,28 @@ function documentRetryUploadMulter(req, res, next) {
       if (handleUploadAbort(req, res, err, "DocumentRetryUpload")) {
         return;
       }
+
       if (err.code === "LIMIT_FILE_SIZE") {
-        return next(
+        next(
           new InvalidRequestException(
-            `File size exceeds the limit of ${MAX_FILE_SIZES.PATIENT_DOCUMENT / (1024 * 1024)} MB per file`,
+            `File size exceeds the limit of ${
+              MAX_FILE_SIZES.PATIENT_DOCUMENT / (1024 * 1024)
+            } MB per file`,
           ),
         );
+        return;
       }
 
       if (err.code === "LIMIT_UNEXPECTED_FILE") {
-        return next(new InvalidRequestException("Only one document file is allowed."));
+        next(new InvalidRequestException("Only one document file is allowed."));
+        return;
       }
 
-      return next(new InvalidRequestException(err.message || "File upload error"));
+      next(new InvalidRequestException(err.message || "File upload error"));
+      return;
     }
 
-    return next();
+    next();
   });
 }
 
@@ -329,7 +350,11 @@ async function validateDocumentRetry(req, _res, next) {
     return next();
   } catch (error) {
     if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlink(req.file.path, () => {});
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        // ignore cleanup error
+      }
     }
     return next(error);
   }

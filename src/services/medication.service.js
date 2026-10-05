@@ -2,6 +2,7 @@ const { errorConstants } = require("../constants/errorConstants");
 const { NotFoundException } = require("../exceptions/appError");
 const medicationRepository = require("../repositories/medicationRepository");
 const patientRepository = require("../repositories/patientRepository");
+// const medicationReminderService = require("./medicationReminder.service");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const {
@@ -11,6 +12,7 @@ const {
   refillMedicationSchema,
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
+  batchDeleteMedicationSchema,
   validateSchema,
 } = require("../validations");
 const { calculateMedicationValues } = require("../utils/medicationCalculation");
@@ -32,13 +34,8 @@ const {
 class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload, options = {}) {
-    /*
-    // PREVIOUS SHORTHAND NORMALIZATION BACKUP OPTION:
     const normalizedInput = normalizeCreateMedicationInput(payload);
     const validData = await validateSchema(createMedicationSchema, normalizedInput);
-    */
-
-    const validData = await validateSchema(createMedicationSchema, payload);
     const patient = await patientRepository.findById(userId);
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
@@ -70,8 +67,9 @@ class MedicationService {
         }
       }
     }
-    const { resolution, replaceMedicationId, ...medicationPayload } = validData;
+    const { resolution, replaceMedicationId, refillAlert, ...medicationPayload } = validData;
     console.log("resolution", resolution);
+    console.log("refillAlert", refillAlert);
     console.log("replaceMedicationId", replaceMedicationId);
 
     const { endDate, dailyConsumption, unit, startDate } =
@@ -86,6 +84,24 @@ class MedicationService {
       startDate,
     });
     return medication;
+  }
+  // SAVE MEDICATION WITH REMINDER (SHARED ORCHESTRATOR HELPER)
+  async saveMedicationWithReminder(userId, payload, options = {}) {
+    const medication = await this.createMedication(userId, payload, options);
+    let reminder = null;
+    if (medication && medication.id) {
+      try {
+        reminder = await medicationReminderService.createReminder(userId, {
+          medicationId: medication.id,
+        });
+      } catch (err) {
+        console.error(
+          `[MedicationService] Failed to create reminder for medication ${medication.id}:`,
+          err.message,
+        );
+      }
+    }
+    return { medication, reminder };
   }
 
   // UPDATE MEDICATION
@@ -232,9 +248,30 @@ class MedicationService {
     return existingMedication;
   }
 
-  // GET MEDICATION LIST
-  async getMedicationList(userId) {
-    return medicationRepository.findAll(userId);
+  // GET MEDICATION LIST (PAGINATED ARRAY)
+  async getMedicationList(userId, payload = {}) {
+    const pageNumber = Math.max(1, Number(payload.page || payload.pageNumber || 1));
+    const pageLimit = Math.max(1, Number(payload.limit || payload.pageLimit || 20));
+
+    const records = await medicationRepository.findAll(userId);
+    const safeRecords = Array.isArray(records) ? records : [];
+    const totalRecords = safeRecords.length;
+    const totalPages = Math.max(1, Math.ceil(totalRecords / pageLimit));
+    const safePageNumber = Math.min(pageNumber, totalPages);
+    const startIndex = (safePageNumber - 1) * pageLimit;
+    const data = safeRecords.slice(startIndex, startIndex + pageLimit);
+
+    return {
+      data,
+      page: {
+        pageLimit,
+        pageNumber: safePageNumber,
+        totalPages,
+        totalRecords,
+        hasNextPage: safePageNumber < totalPages,
+        hasPrevPage: safePageNumber > 1,
+      },
+    };
   }
 
   // FILTER LIST
@@ -282,6 +319,36 @@ class MedicationService {
     }
 
     return true;
+  }
+
+  // BATCH DELETE MEDICATIONS
+  async batchDeleteMedications(userId, payload) {
+    const { ids } = await validateSchema(batchDeleteMedicationSchema, payload);
+    const patient = await patientRepository.findById(userId);
+    if (!patient) {
+      throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const deletedIds = [];
+    const notFoundIds = [];
+
+    for (const id of ids) {
+      try {
+        await this.deleteMedication(id, userId);
+        deletedIds.push(id);
+      } catch (err) {
+        console.log(err);
+
+        notFoundIds.push(id);
+      }
+    }
+
+    return {
+      deletedCount: deletedIds.length,
+      deletedIds,
+      notFoundIds,
+      totalRequested: ids.length,
+    };
   }
 
   // REFILL MEDICATION
@@ -363,6 +430,7 @@ class MedicationService {
 
   // Onboarding Helper: get times and food frequency defaults
   applyDefaults(frequency) {
+    const dbFreq = this._mapFrequencyToDb(frequency);
     const defaultSchedules = {
       ONCE: { Morning: "08:00:00" },
       TWICE: { Morning: "08:00:00", Night: "20:00:00" },
@@ -370,9 +438,11 @@ class MedicationService {
       "Once Daily": { Morning: "08:00:00" },
       "Twice Daily": { Morning: "08:00:00", Night: "20:00:00" },
       "Three Times Daily": { Morning: "08:00:00", Noon: "14:00:00", Night: "20:00:00" },
+      "As Needed": { Morning: "08:00:00" },
     };
 
-    const schedule = defaultSchedules[frequency] || { Morning: "08:00:00" };
+    const schedule = defaultSchedules[dbFreq] ||
+      defaultSchedules[frequency] || { Morning: "08:00:00" };
 
     return {
       medicationSchedule: schedule,
@@ -386,27 +456,42 @@ class MedicationService {
   }
 
   _mapFrequencyToDb(frequency) {
+    if (!frequency || typeof frequency !== "string") return "Once Daily";
+    const upper = frequency.trim().toUpperCase().replace(/\s+/g, "_");
     const map = {
       ONCE: "Once Daily",
+      ONCE_DAILY: "Once Daily",
       TWICE: "Twice Daily",
+      TWICE_DAILY: "Twice Daily",
       THRICE: "Three Times Daily",
-      "Once Daily": "Once Daily",
-      "Twice Daily": "Twice Daily",
-      "Three Times Daily": "Three Times Daily",
+      THREE_TIMES_DAILY: "Three Times Daily",
+      AS_NEEDED: "As Needed",
+      "ONCE DAILY": "Once Daily",
+      "TWICE DAILY": "Twice Daily",
+      "THREE TIMES DAILY": "Three Times Daily",
+      "AS NEEDED": "As Needed",
     };
-    return map[frequency] || "Once Daily";
+    if (map[frequency]) return map[frequency];
+    if (map[upper]) return map[upper];
+    if (upper.includes("THREE") || upper.includes("THRICE") || upper.includes("TID"))
+      return "Three Times Daily";
+    if (upper.includes("TWICE") || upper.includes("BID") || upper.includes("BD"))
+      return "Twice Daily";
+    if (upper.includes("ONCE") || upper.includes("QD") || upper.includes("OD")) return "Once Daily";
+    if (upper.includes("NEED")) return "As Needed";
+    return "Once Daily";
   }
 
   _getFrequencyCount(frequency) {
+    if (!frequency || typeof frequency !== "string") return 1;
+    const dbFreq = this._mapFrequencyToDb(frequency);
     const map = {
-      ONCE: 1,
-      TWICE: 2,
-      THRICE: 3,
       "Once Daily": 1,
       "Twice Daily": 2,
       "Three Times Daily": 3,
+      "As Needed": 1,
     };
-    return map[frequency] || 1;
+    return map[dbFreq] || 1;
   }
 
   // Onboarding Helper: map fields and save single medication

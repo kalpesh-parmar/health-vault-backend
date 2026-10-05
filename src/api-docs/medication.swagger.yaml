@@ -435,9 +435,19 @@ components:
               label:
                 type: string
                 example: Keep existing medication schedule
-              description:
-                type: string
-                example: Refill current active medication schedule
+    BatchDeleteMedicationRequest:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          example:
+            - "123e4567-e89b-12d3-a456-426614174000"
+            - "987fc53b-140b-486b-8588-e24a49c259bb"
 
 paths:
   /medications/check-duplicate:
@@ -713,3 +723,29 @@ paths:
 
         "404":
           description: User not found
+
+  /medications/batch:
+    delete:
+      tags:
+        - Medication
+      summary: Batch delete multiple medications
+      description: >
+        Soft-deletes multiple medications belonging to the authenticated user by their UUIDs,
+        along with their associated reminders and occurrences.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDeleteMedicationRequest"
+      responses:
+        "200":
+          description: Medications batch deleted successfully
+        "400":
+          description: Invalid request / input validation error
+        "401":
+          description: Unauthorized
+        "404":
+          description: Patient not found

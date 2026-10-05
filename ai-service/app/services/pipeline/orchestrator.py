@@ -118,7 +118,6 @@ class PipelineOrchestrator:
             # 1. STAGE: VALIDATING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_VALIDATING not in completed_stages:
-                print("\n\n [KP] ******************** VALIDATING ******************** \n\n")   
                 # If we don't have file yet, stream probe from S3 or download
                 temp_path = await self.ocr_handler.verify_upload(
                     bucket=bucket, key=s3_key, expected_sha256=expected_sha256
@@ -159,7 +158,6 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             # 2. STAGE: UPLOADING
             # ─────────────────────────────────────────────────────────────────
-            print("\n\n [KP] ******************** UPLOADING ******************** \n\n")
             if STAGE_UPLOADING not in completed_stages:
                 if not temp_path or not temp_path.exists():
                     temp_path = await self.ocr_handler.verify_upload(
@@ -203,7 +201,6 @@ class PipelineOrchestrator:
             # 3. STAGE: OCR_RUNNING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_OCR_RUNNING not in completed_stages:
-                print("\n\n [KP] ******************** OCR_RUNNING ******************** \n\n")   
                 if not temp_path or not temp_path.exists():
                     temp_path = await self.ocr_handler.verify_upload(
                         bucket=bucket, key=s3_key, expected_sha256=expected_sha256
@@ -255,7 +252,6 @@ class PipelineOrchestrator:
             # 4. STAGE: PARSING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_PARSING not in completed_stages:
-                print("\n\n [KP] ******************** PARSING ******************** \n\n")
                 layout_data = self.layout_handler.parse_layout(raw_ocr_data or {})
 
                 completed_stages.append(STAGE_PARSING)
@@ -292,7 +288,6 @@ class PipelineOrchestrator:
             # 5. STAGE: GRAPH_EXTRACTION
             # ─────────────────────────────────────────────────────────────────
             if STAGE_GRAPH_EXTRACTION not in completed_stages:
-                print("\n\n [KP] ******************** GRAPH_EXTRACTION ******************** \n\n")
                 if not temp_path or not temp_path.exists():
                     temp_path = await self.ocr_handler.verify_upload(
                         bucket=bucket, key=s3_key, expected_sha256=expected_sha256
@@ -335,7 +330,6 @@ class PipelineOrchestrator:
             # 6. STAGE: FIELD_EXTRACTION
             # ─────────────────────────────────────────────────────────────────
             if STAGE_FIELD_EXTRACTION not in completed_stages:
-                print("\n\n [KP] ******************** FIELD_EXTRACTION ******************** \n\n")
                 extracted_structured_data = await self.clinical_handler.extract_fields(
                     raw_ocr_data=raw_ocr_data or {},
                     layout_data=layout_data,
@@ -412,7 +406,6 @@ class PipelineOrchestrator:
             # 7. STAGE: ANALYZING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_ANALYZING not in completed_stages:
-                print("\n\n [KP] ******************** ANALYZING ******************** \n\n")
                 analysis_data = self.analysis_handler.analyze(
                     structured_data=extracted_structured_data or {}
                 )
@@ -447,7 +440,6 @@ class PipelineOrchestrator:
             # 8. STAGE: SUMMARIZING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_SUMMARIZING not in completed_stages:
-                print("\n\n [KP] ******************** SUMMARIZING ******************** \n\n")
                 full_text = (raw_ocr_data or {}).get("fullText", "")
                 summary_data = await self.summary_handler.generate_summary(
                     raw_text=full_text,
@@ -485,7 +477,6 @@ class PipelineOrchestrator:
             # 9. STAGE: EMBEDDING
             # ─────────────────────────────────────────────────────────────────
             if STAGE_EMBEDDING not in completed_stages:
-                print("\n\n [KP] ******************** EMBEDDING ******************** \n\n")
                 full_text = (raw_ocr_data or {}).get("fullText", "")
                 embedding_data = await self.embedding_handler.generate_embeddings(
                     full_text=full_text,
@@ -510,7 +501,6 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             # TERMINAL COMPLETION
             # ─────────────────────────────────────────────────────────────────
-            print("\n\n [KP] ******************** COMPLETE ******************** \n\n")
             await self.repo.complete_job(
                 job_id=job_id,
                 message="Document processing completed successfully",

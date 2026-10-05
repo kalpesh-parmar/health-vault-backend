@@ -96,10 +96,9 @@ async function getLocalizedResponse(step, state) {
         !!state.documentData;
 
       const { hasMismatch, fields, sourceComparison } = getProfileMismatches(state);
-      const mode = hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
+      const mode = useDoc && hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
 
-      const isManual = sourceComparison === "MANUAL_VS_LOGIN" || !useDoc;
-      const compareData = isManual ? state.existingUserData || {} : state.documentData || {};
+      const compareData = useDoc ? state.documentData || {} : state.existingUserData || {};
 
       const loginFirstName = state.socialData?.firstName || state.loginData?.firstName?.value || "";
       const loginLastName = state.socialData?.lastName || state.loginData?.lastName?.value || "";
@@ -184,18 +183,7 @@ async function getLocalizedResponse(step, state) {
         );
       }
 
-      if (isManual) {
-        const manualDetailsText = await getLocalizedText(
-          "onboarding.manual",
-          "Entered Details",
-          state.preferredLanguage,
-        );
-        if (compareName) {
-          documentSummary = `${compareName} (${manualDetailsText})`;
-        } else {
-          documentSummary = manualDetailsText;
-        }
-      } else {
+      if (useDoc) {
         if (compareName) {
           documentSummary = await getLocalizedText(
             "onboarding.source.documentSummary",
@@ -211,6 +199,8 @@ async function getLocalizedResponse(step, state) {
             { provider: useDocText },
           );
         }
+      } else {
+        documentSummary = null;
       }
 
       const displayKeys = [
@@ -234,8 +224,13 @@ async function getLocalizedResponse(step, state) {
           let loginVal = mismatchField
             ? mismatchField.loginValue
             : (typeof loginField === "object" ? loginField.value : loginField) || null;
-          let docVal = mismatchField ? mismatchField.documentValue : compareData[k] || null;
-          if (k === "phoneNumber" && docVal === null) {
+          let docVal = useDoc
+            ? mismatchField
+              ? mismatchField.documentValue
+              : compareData[k] || null
+            : null;
+
+          if (useDoc && k === "phoneNumber" && docVal === null) {
             docVal = compareData.mobile || compareData.phoneNumber || null;
           }
 
@@ -302,7 +297,12 @@ async function getLocalizedResponse(step, state) {
         loginSummary,
         documentSummary,
         loginProvider: state.loginProvider || "email",
-        sourceComparison: sourceComparison || (useDoc ? "DOCUMENT_VS_LOGIN" : "MANUAL_VS_LOGIN"),
+        sourceComparison:
+          sourceComparison ||
+          (useDoc
+            ? "DOCUMENT_VS_LOGIN"
+            : state.selectedProfileSource ||
+              (state.hasSocialData || state.socialData ? "SOCIAL" : "LOGIN")),
       };
 
       if (mode === "CONFLICT") {
@@ -401,7 +401,31 @@ async function getLocalizedResponse(step, state) {
         ),
       };
 
-    case "ASK_DOB":
+    case "ASK_DOB": {
+      if (state.dobRejectedReason === "DOB_MUST_BE_PAST") {
+        return {
+          action: "ASK_DOB",
+          isRejected: true,
+          rejectionReason: "DOB_MUST_BE_PAST",
+          message: await getLocalizedText(
+            "onboarding.dobRejected.mustBePast",
+            "Date of birth must be in the past. Please select your actual birth date.",
+            state.preferredLanguage,
+          ),
+        };
+      }
+      if (state.dobRejectedReason === "DOB_AGE_LIMIT") {
+        return {
+          action: "ASK_DOB",
+          isRejected: true,
+          rejectionReason: "DOB_AGE_LIMIT",
+          message: await getLocalizedText(
+            "onboarding.dobRejected.maxAgeExceeded",
+            "Please enter a valid date of birth (age cannot exceed 120 years).",
+            state.preferredLanguage,
+          ),
+        };
+      }
       return {
         action: "ASK_DOB",
         message: await getLocalizedText(
@@ -410,6 +434,7 @@ async function getLocalizedResponse(step, state) {
           state.preferredLanguage,
         ),
       };
+    }
 
     case "ASK_GENDER":
       return {
@@ -540,7 +565,11 @@ async function getLocalizedResponse(step, state) {
             value: "SKIP",
           },
         ],
+        // Full list for the review UI (FE manages checkbox state)
         medicines: state.medicinesToAdd || [],
+        // Issue 1 Fix: Pre-filtered list of medicines the user has NOT deselected.
+        // FE should use this field when rendering confirmed cards at MEDICINE_OPTIONS.
+        confirmedMedicines: (state.medicinesToAdd || []).filter((m) => m.selected !== false),
       };
 
     case "EDIT_MEDICINE":
@@ -576,12 +605,15 @@ async function getLocalizedResponse(step, state) {
             state.preferredLanguage,
           );
       const totalBuffered = Array.isArray(state.medicinesToAdd) ? state.medicinesToAdd.length : 0;
+      const medicinesForForm = state.isFreshAddMedicine ? [] : state.medicinesToAdd || [];
+      state.isFreshAddMedicine = false;
+
       return {
         action: med ? "EDIT_MEDICINE" : "ADD_MEDICINE",
         renderType: "MEDICINE_FORM",
         message,
         medicine: med || emptyMedTemplate,
-        medicines: state.medicinesToAdd || [],
+        medicines: medicinesForForm,
         totalBuffered,
       };
     }

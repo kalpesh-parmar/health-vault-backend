@@ -32,6 +32,8 @@
   "onboarding.askFirstName.message": "What is your first name?",
   "onboarding.askLastName.message": "What is your last name?",
   "onboarding.askDob.message": "What is your date of birth?",
+  "onboarding.dobRejected.mustBePast": "Date of birth must be in the past. Please select your actual birth date.",
+  "onboarding.dobRejected.maxAgeExceeded": "Please enter a valid date of birth (age cannot exceed 120 years).",
   "onboarding.askGender.message": "What is your gender?",
   "onboarding.askBloodGroup.message": "What is your blood group? You can skip this question.",
   "onboarding.askAllergies.message": "Do you have any known allergies?",

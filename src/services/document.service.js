@@ -712,7 +712,6 @@ class DocumentService {
       const fileKeys = list.map(() => newFileKey());
 
       sseConnectionService.registerBatch(batchId, fileKeys);
-      console.log("[KP] fileKeys :", fileKeys);
       if (env.usePythonPipeline) {
         const jobs = await Promise.all(
           list.map(async (file, index) => {

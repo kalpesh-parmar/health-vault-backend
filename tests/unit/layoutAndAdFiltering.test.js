@@ -4,6 +4,8 @@ const prompts = require("../../src/services/ai/prompts");
 
 describe("Phase 4: Preprocessing, Layout Analysis & Ad-Region Filtering Unit Tests", () => {
   describe("1. Image Preprocessing (Sharp)", () => {
+    // Sharp native image processing can be slow on first run
+    jest.setTimeout(30000);
     test("Preprocesses valid image: normalizes, sharpens, resizes to max 1600px, and converts to JPEG", async () => {
       // Create a test 2000x1200 raw image
       const inputBuffer = await sharp({

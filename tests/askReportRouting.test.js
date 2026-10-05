@@ -6,7 +6,14 @@ const patientRepository = require("../src/repositories/patientRepository");
 const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
 const { ollamaClient } = require("../src/clients/ollamaClient");
 
+jest.mock("../src/services/ai/clients/aiClient.service", () => ({
+  aiClientService: {
+    translate: jest.fn().mockImplementation((text) => Promise.resolve(text)),
+  },
+}));
+
 describe("Phase 12: Ask About My Report Routing & Data Fidelity Tests", () => {
+  jest.setTimeout(30000);
   const mockDoc = {
     id: "doc-valjibhai-123",
     userId: "user-valji",
@@ -95,6 +102,7 @@ describe("Phase 12: Ask About My Report Routing & Data Fidelity Tests", () => {
       currentStep: "MEDICINE_OPTIONS",
       userId: "user-valji",
       documentId: "doc-valjibhai-123",
+      documentRecord: mockDoc,
       isOnboardingCompleted: false,
     };
 
@@ -120,6 +128,7 @@ describe("Phase 12: Ask About My Report Routing & Data Fidelity Tests", () => {
       currentStep: "MEDICINE_OPTIONS",
       userId: "user-valji",
       documentId: "doc-valjibhai-123",
+      documentRecord: mockDoc,
       isOnboardingCompleted: false,
     };
 
@@ -144,6 +153,7 @@ describe("Phase 12: Ask About My Report Routing & Data Fidelity Tests", () => {
       currentStep: "ASK_REPORT",
       userId: "user-valji",
       documentId: "doc-valjibhai-123",
+      documentRecord: mockDoc,
       isOnboardingCompleted: false,
     };
 

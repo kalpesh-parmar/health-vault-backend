@@ -313,7 +313,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   const rawTiming = med.timing || med.when || med.timeOfDay || "";
   const rawInstructions = med.instructions || med.notes || "";
   const rawDuration = med.duration || "";
-  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 0;
+  const rawQty = med.quantity || med.qty || med.totalQuantity || med.total_quantity || 1;
 
   const needsReview = {
     name: false,
@@ -520,7 +520,7 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
   };
 
   // 7. Stable client_med_id for OCR
-  const clientMedId = med.client_med_id || med.clientMedId || `doc_med_${index}`;
+  const clientMedId = med.client_med_id || med.clientMedId || med.id || `doc_med_${index + 1}`;
 
   const row = {
     bestTaken: [foodFrequency],
@@ -592,10 +592,28 @@ function normalizeMedicine(med, index, patientCode = "P-TEMP", defaults = {}) {
 function normalizeCreateMedicationInput(payload = {}) {
   const input = { ...payload };
 
-  if (input.name && !input.medicationName) {
-    input.medicationName = input.name;
+  const medicationName =
+    input.medicationName || input.name || input.medicineName || "Medical Document Medicine";
+  input.medicationName = medicationName;
+
+  let medicationType = String(
+    input.medicationType || input.type || input.medicineType || "TABLET",
+  ).toUpperCase();
+  const validTypes = [
+    medictationType.TABLET,
+    medictationType.CAPSULE,
+    medictationType.SYRUP,
+    medictationType.INJECTION,
+    medictationType.DROPS,
+    medictationType.SPRAY,
+    medictationType.INHALER,
+  ];
+  if (!validTypes.includes(medicationType)) {
+    if (medicationType.includes("SHOT")) medicationType = medictationType.SYRUP;
+    else if (medicationType.includes("DROP")) medicationType = medictationType.DROPS;
+    else medicationType = medictationType.TABLET;
   }
-  if (input.type && !input.medicationType) {
+  if (!input.medicationType && input.type) {
     input.medicationType = String(input.type).toUpperCase();
   } else if (!input.medicationType) {
     const derived = deriveTypeFromName(input.medicationName || input.name || "");
@@ -631,6 +649,7 @@ function normalizeCreateMedicationInput(payload = {}) {
       FREQUENCY_TO_DB_MAP[underscored] ||
       frequencyType.ONCE_DAILY;
   }
+
   function formatHHMMSS(t) {
     if (!t || typeof t !== "string") return "09:00:00";
     const parts = t.trim().split(":");
@@ -640,41 +659,64 @@ function normalizeCreateMedicationInput(payload = {}) {
     return `${hh}:${mm}:${ss}`;
   }
 
+  let medicationSchedule = input.medicationSchedule;
   const hasValidScheduleKeys =
-    input.medicationSchedule &&
-    typeof input.medicationSchedule === "object" &&
-    (input.medicationSchedule.Morning ||
-      input.medicationSchedule.morning ||
-      input.medicationSchedule.Noon ||
-      input.medicationSchedule.noon ||
-      input.medicationSchedule.Night ||
-      input.medicationSchedule.night ||
-      input.medicationSchedule.Custom ||
-      input.medicationSchedule.custom);
+    medicationSchedule &&
+    typeof medicationSchedule === "object" &&
+    !Array.isArray(medicationSchedule) &&
+    (medicationSchedule.Morning ||
+      medicationSchedule.morning ||
+      medicationSchedule.Noon ||
+      medicationSchedule.noon ||
+      medicationSchedule.Night ||
+      medicationSchedule.night ||
+      medicationSchedule.Custom ||
+      medicationSchedule.custom);
 
-  if (!hasValidScheduleKeys) {
+  if (hasValidScheduleKeys) {
+    const formattedSched = {};
+    if (medicationSchedule.Morning || medicationSchedule.morning) {
+      formattedSched.Morning = formatHHMMSS(
+        medicationSchedule.Morning || medicationSchedule.morning,
+      );
+    }
+    if (medicationSchedule.Noon || medicationSchedule.noon) {
+      formattedSched.Noon = formatHHMMSS(medicationSchedule.Noon || medicationSchedule.noon);
+    }
+    if (medicationSchedule.Night || medicationSchedule.night) {
+      formattedSched.Night = formatHHMMSS(medicationSchedule.Night || medicationSchedule.night);
+    }
+    if (medicationSchedule.Custom || medicationSchedule.custom) {
+      const c = medicationSchedule.Custom || medicationSchedule.custom;
+      formattedSched.Custom = Array.isArray(c) ? c.map(formatHHMMSS) : [formatHHMMSS(c)];
+    }
+    medicationSchedule = formattedSched;
+  } else {
     const rawTimes =
-      Array.isArray(input.medicationSchedule?.times) && input.medicationSchedule.times.length > 0
-        ? input.medicationSchedule.times
-        : Array.isArray(input.medicationSchedule?.reminderTimes) &&
-            input.medicationSchedule.reminderTimes.length > 0
-          ? input.medicationSchedule.reminderTimes
-          : Array.isArray(input.reminderTimes) && input.reminderTimes.length > 0
-            ? input.reminderTimes
-            : null;
+      Array.isArray(medicationSchedule) && medicationSchedule.length > 0
+        ? medicationSchedule
+        : Array.isArray(medicationSchedule?.times) && medicationSchedule.times.length > 0
+          ? medicationSchedule.times
+          : Array.isArray(medicationSchedule?.reminderTimes) &&
+              medicationSchedule.reminderTimes.length > 0
+            ? medicationSchedule.reminderTimes
+            : Array.isArray(input.reminderTimes) && input.reminderTimes.length > 0
+              ? input.reminderTimes
+              : Array.isArray(input.times) && input.times.length > 0
+                ? input.times
+                : Array.isArray(input.medicationTime) && input.medicationTime.length > 0
+                  ? input.medicationTime
+                  : null;
 
     if (Array.isArray(rawTimes) && rawTimes.length > 0) {
       const newSched = {};
       rawTimes.forEach((t) => {
         const timeStr = formatHHMMSS(t);
         const hour = parseInt(timeStr.split(":")[0], 10);
-        if (hour < 12 && !newSched.Morning) {
-          newSched.Morning = timeStr;
-        } else if (hour >= 12 && hour < 17 && !newSched.Noon) {
-          newSched.Noon = timeStr;
-        } else if (hour >= 17 && !newSched.Night) {
-          newSched.Night = timeStr;
-        } else {
+        if (hour < 12 && !newSched.Morning) newSched.Morning = timeStr;
+        else if (hour >= 12 && hour < 17 && !newSched.Noon) newSched.Noon = timeStr;
+        else if (hour >= 17 && !newSched.Night) newSched.Night = timeStr;
+        else {
           if (!newSched.Custom) newSched.Custom = [];
           newSched.Custom.push(timeStr);
         }
@@ -690,7 +732,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     ) {
       input.medicationSchedule = { Morning: "09:00:00", Noon: "14:00:00", Night: "21:00:00" };
     } else {
-      input.medicationSchedule = { Morning: "09:00:00" };
+      medicationSchedule = { Morning: "09:00:00" };
     }
   }
   if (
@@ -765,6 +807,7 @@ function normalizeCreateMedicationInput(payload = {}) {
     "notes",
     "resolution",
     "replaceMedicationId",
+    "refillAlert",
   ];
 
   const cleaned = {};

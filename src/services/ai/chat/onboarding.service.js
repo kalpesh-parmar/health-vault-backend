@@ -40,6 +40,7 @@ const {
 const {
   OnboardingStep,
   REQUIRED_PROFILE_FIELDS,
+  validateDateOfBirth,
   isProfileComplete,
   getMissingRequiredStep,
   getNextRequiredOrOptionalStep,
@@ -58,13 +59,25 @@ const {
 
 function deduplicateMedicines(meds) {
   if (!Array.isArray(meds)) return [];
-  const seen = new Set();
+  const seenKeys = new Set();
+  const seenNames = new Set();
   const result = [];
   for (const m of meds) {
-    if (!m) continue;
+    if (!m || typeof m !== "object") continue;
+    const name = (m.name || m.medicationName || m.medication_name || "").trim();
+    const normName = name.toLowerCase();
     const key = m.client_med_id || m.clientMedId || m.id;
-    if (key && seen.has(key)) continue;
-    if (key) seen.add(key);
+
+    if (!name && !key) continue;
+
+    if (key) {
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+    }
+    if (normName) {
+      if (seenNames.has(normName)) continue;
+      seenNames.add(normName);
+    }
     result.push(m);
   }
   return result;
@@ -317,6 +330,9 @@ User Input: "${text}"`,
       text.length < 50 &&
       !["skip", "no", "none"].includes(text.toLowerCase())
     ) {
+      if (["bloodGroup", "allergies", "gender"].includes(fieldType)) {
+        return null;
+      }
       console.warn(
         `[OnboardingService] AI explicitly returned null for ${fieldType}. Falling back to raw user input: "${text}"`,
       );
@@ -1014,11 +1030,13 @@ async function updateStateFromMessage(state, message, userId = null) {
         dobVal = rawVal.trim();
       }
 
-      const dob = normalizeDOB(dobVal);
-      if (dob) {
+      const dobValidation = validateDateOfBirth(dobVal);
+      if (dobValidation.isValid) {
+        const dob = dobValidation.normalizedDob;
         state.existingUserData.dateOfBirth = dob;
         if (!state.loginData) state.loginData = {};
         state.loginData.dateOfBirth = { value: dob, verified: false, provenance: "manual" };
+        delete state.dobRejectedReason;
 
         if (userId) {
           try {
@@ -1030,8 +1048,12 @@ async function updateStateFromMessage(state, message, userId = null) {
             );
           }
         }
+        state.currentStep = getNextRequiredOrOptionalStep(state);
+      } else {
+        // Explicit rejection: do not commit invalid date, stay on ASK_DOB and store rejection reason
+        state.dobRejectedReason = dobValidation.reason || "DOB_MUST_BE_PAST";
+        state.currentStep = "ASK_DOB";
       }
-      state.currentStep = getNextRequiredOrOptionalStep(state);
       break;
     }
 
@@ -1387,7 +1409,12 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       const isConfirm =
         val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
-      const isAdd = val === "ADD" || val === "ADD_NEW" || payload.addNew;
+      const isAdd =
+        val === "ADD" ||
+        val === "ADD_NEW" ||
+        val === "ADD_MORE_MEDICINES" ||
+        val.includes("ADD_MORE") ||
+        payload.addNew;
       const isSkip = val === "SKIP" || val === "SKIP_ALL" || payload.skipAll;
 
       // Handle duplicate conflict resolution payloads if provided
@@ -1429,9 +1456,15 @@ async function updateStateFromMessage(state, message, userId = null) {
 
       if (isConfirm) {
         state.medicinesConfirmed = true;
+        // Issue 3 Fix: Only fall back to "all" when NO explicit payload.selected is provided
+        // AND no medicine in the list has an explicit selected:false mark.
+        // Previously this fallback would select ALL medicines, including those the user unchecked.
         const selectedIds =
           payload.selected ||
-          (state.medicinesToAdd || []).map((m) => m.id || m.client_med_id).filter(Boolean);
+          (state.medicinesToAdd || [])
+            .filter((m) => m.selected !== false)
+            .map((m) => m.id || m.client_med_id)
+            .filter(Boolean);
 
         // Optionally update medicines if FE sends updated list in payload
         if (Array.isArray(payload.medicines)) {
@@ -1539,7 +1572,7 @@ async function updateStateFromMessage(state, message, userId = null) {
                 } catch (err) {
                   console.error(
                     `[OnboardingService] Failed to create reminder for bulk medicine ${created.id}:`,
-                    err,
+                    err.message,
                   );
                 }
               }
@@ -1556,6 +1589,8 @@ async function updateStateFromMessage(state, message, userId = null) {
       } else if (isAdd) {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
+        state.isFreshAddMedicine = false;
+        state.openedFromMedicineOptions = false;
       } else if (isSkip) {
         state.medicationFlowDone = true;
         state.medicinesConfirmed = true;
@@ -1578,12 +1613,21 @@ async function updateStateFromMessage(state, message, userId = null) {
       }
 
       if (payload.action === "DRAFT_SYNC" || payload.isSilent === true) {
+        state.isFreshAddMedicine = false;
         if (Array.isArray(payload.medicinesToAdd)) {
           state.medicinesToAdd = deduplicateMedicines(payload.medicinesToAdd);
         } else if (Array.isArray(payload.medicines)) {
           state.medicinesToAdd = deduplicateMedicines(payload.medicines);
         }
-        state.currentStep = "ADD_MEDICINE";
+        const medSteps = [
+          "ADD_MEDICINE",
+          "EDIT_MEDICINE",
+          "REVIEW_MEDICINES_LIST",
+          "MEDICINE_OPTIONS",
+        ];
+        if (!state.currentStep || medSteps.includes(state.currentStep)) {
+          state.currentStep = "ADD_MEDICINE";
+        }
         state.activeMedicine = null;
         state.currentMedicineIndex = undefined;
         break;
@@ -1605,7 +1649,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       if (isCancel) {
         state.activeMedicine = null;
         state.currentMedicineIndex = undefined;
-        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m.isSaved === true);
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m && m.isSaved === true);
         state.currentStep = "MEDICINE_OPTIONS";
         state.cancellationNotice = true;
         break;
@@ -1758,7 +1802,53 @@ async function updateStateFromMessage(state, message, userId = null) {
 
         if (isAddAndContinue) {
           state.currentStep = "ADD_MEDICINE";
-        } else {
+          state.isFreshAddMedicine = false;
+        } else if (isSaveAndReview) {
+          state.currentStep = "REVIEW_MEDICINES_LIST";
+        }
+        //  else if (isSaveMedicines) {
+        //   const unsavedMeds = (state.medicinesToAdd || []).filter(
+        //     (m) =>
+        //       m.selected !== false &&
+        //       !m.isSaved &&
+        //       m.resolution !== "KEEP_EXISTING" &&
+        //       m.resolution !== "REMOVE_NEW",
+        //   );
+        //   if (unsavedMeds.length > 0 && userId) {
+        //     const bulkCreated = (await medicationService.bulkCreate(userId, unsavedMeds)) || [];
+
+        //     for (let i = 0; i < unsavedMeds.length; i++) {
+        //       const created = bulkCreated[i];
+        //       const unsaved = unsavedMeds[i];
+        //       const matchIdx = state.medicinesToAdd.findIndex(
+        //         (m) =>
+        //           (m.client_med_id && m.client_med_id === unsaved.client_med_id) ||
+        //           (m.id && m.id === unsaved.id),
+        //       );
+        //       if (matchIdx >= 0 && created) {
+        //         state.medicinesToAdd[matchIdx].isSaved = true;
+        //         state.medicinesToAdd[matchIdx].dbId = created.id;
+        //         try {
+        //           await medicationReminderService.createReminder(userId, {
+        //             medicationId: created.id,
+        //           });
+        //         } catch (err) {
+        //           console.error(
+        //             `[OnboardingService] Failed to create reminder for medicine ${created.id}:`,
+        //             err.message,
+        //           );
+        //         }
+        //       }
+        //     }
+        //   }
+        //   state.medicinesToAdd = (state.medicinesToAdd || []).filter(
+        //     (m) => m.selected !== false || m.isSaved === true,
+        //   );
+        //   state.medicinesConfirmed = true;
+        //   state.medicationFlowDone = true;
+        //   state.currentStep = "MEDICINE_OPTIONS";
+        // }
+        else {
           state.currentStep = "REVIEW_MEDICINES_LIST";
         }
       }
@@ -1799,8 +1889,10 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.currentStep = "ADD_MEDICINE";
         state.currentMedicineIndex = undefined;
         state.activeMedicine = null;
-        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m.isSaved === true);
+        state.medicinesToAdd = (state.medicinesToAdd || []).filter((m) => m && m.isSaved === true);
         state.cancellationNotice = false;
+        state.isFreshAddMedicine = true;
+        state.openedFromMedicineOptions = true;
       } else if (key === "DASHBOARD") {
         state.medicationFlowDone = true;
         state.isOnboardingCompleted = true;
@@ -1886,7 +1978,7 @@ async function saveOnboardingState(userId, state) {
     }
     if (state.existingUserData.bloodGroup)
       updateData.bloodGroup = state.existingUserData.bloodGroup;
-    if (Array.isArray(state.existingUserData.allergies))
+    if (Array.isArray(state.existingUserData.allergies) && state.allergiesSkipped === true)
       updateData.allergies = state.existingUserData.allergies;
   }
 
@@ -2000,6 +2092,10 @@ class OnboardingService {
     if (state.activeMedicine === undefined) state.activeMedicine = null;
     if (
       state.activeMedicine &&
+      // Issue 6 Fix: Only auto-promote activeMedicine into medicinesToAdd if the user
+      // explicitly confirmed it (isConfirmed:true). Draft/partial medicines (e.g. from
+      // DRAFT_SYNC or a cancelled ADD_MEDICINE form) must NOT be silently inserted.
+      state.activeMedicine.isConfirmed === true &&
       (state.activeMedicine.name || state.activeMedicine.medicationName)
     ) {
       const activeId = state.activeMedicine.id || state.activeMedicine.client_med_id;
@@ -2829,7 +2925,24 @@ class OnboardingService {
       state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
       state.isOnboardingCompleted = true;
     }
-    await saveOnboardingState(userId, state);
+    if (
+      userId &&
+      (nextStep === "REVIEW_MEDICINES_LIST" || state.currentStep === "REVIEW_MEDICINES_LIST") &&
+      Array.isArray(state.medicinesToAdd) &&
+      state.medicinesToAdd.length > 0
+    ) {
+      try {
+        state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+          userId,
+          state.medicinesToAdd,
+        );
+      } catch (dupErr) {
+        console.warn(
+          "[OnboardingService] Duplicate check warning in onboarding step response:",
+          dupErr.message,
+        );
+      }
+    }
 
     const response = await createResponse(nextStep, state);
 
@@ -2915,6 +3028,7 @@ module.exports = {
   saveOnboardingState,
   splitName,
   normalizeDOB,
+  validateDateOfBirth,
   normalizeFlowModeLocally,
   normalizeGenderLocally,
   isValidGender,

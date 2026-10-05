@@ -102,17 +102,19 @@ class AiServiceClientWrapper {
     if (!text || !text.trim()) return text;
     try {
       const targetLangName =
-        tgtLang === "gu" || tgtLang === "gujarati"
-          ? "Gujarati"
-          : tgtLang === "hi" || tgtLang === "hindi"
-            ? "Hindi"
-            : tgtLang === "mr" || tgtLang === "marathi"
-              ? "Marathi"
-              : tgtLang === "ta" || tgtLang === "tamil"
-                ? "Tamil"
-                : tgtLang;
+        tgtLang === "en" || tgtLang === "english"
+          ? "English"
+          : tgtLang === "gu" || tgtLang === "gujarati"
+            ? "Gujarati"
+            : tgtLang === "hi" || tgtLang === "hindi"
+              ? "Hindi"
+              : tgtLang === "mr" || tgtLang === "marathi"
+                ? "Marathi"
+                : tgtLang === "ta" || tgtLang === "tamil"
+                  ? "Tamil"
+                  : tgtLang;
 
-      const prompt = `You are an expert medical translator for a healthcare application. Translate the following medical report/prescription summary into natural, fluent ${targetLangName}.
+      const prompt = `You are an expert medical translator for a healthcare application. Translate the following user query or medical text into natural, fluent ${targetLangName}.
 CRITICAL RULES:
 1. Preserve medical entities in English characters or standard medical representation:
    - Doctor names (e.g. "Dr. Patel")

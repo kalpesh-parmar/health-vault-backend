@@ -1,9 +1,10 @@
-const { eq, and, sql, gte, lte, asc, desc, or } = require("drizzle-orm");
+const { eq, and, sql, gte, lte, asc, desc, or, lt } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medicationReminderOccurrence } = require("../models/medicationReminderOccurrence");
 const { medicationReminder } = require("../models/medicationReminder");
 const { medication } = require("../models/medication");
 const { reminderOccurrenceStatus } = require("../enums/reminderOccurrenceStatus");
+const { normalizeToDateOnly } = require("../utils/dateUtils");
 class MedicationReminderOccurrenceRepository {
   async bulkCreate(payload) {
     return db.insert(medicationReminderOccurrence).values(payload).returning();
@@ -97,6 +98,36 @@ class MedicationReminderOccurrenceRepository {
 
           // only today's date
           sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = CURRENT_DATE`,
+        ),
+      )
+      .orderBy(asc(medicationReminderOccurrence.actualMedicationTime));
+  }
+
+  async findOccurrencesByDate(userId, targetDate) {
+    const dateStr = normalizeToDateOnly(targetDate) || targetDate;
+    return db
+      .select({
+        id: medicationReminderOccurrence.id,
+        reminderId: medicationReminderOccurrence.reminderId,
+        medicationId: medicationReminderOccurrence.medicationId,
+        status: medicationReminderOccurrence.status,
+        actualMedicationTime: medicationReminderOccurrence.actualMedicationTime,
+        completedAt: medicationReminderOccurrence.completedAt,
+        medicationName: medication.medicationName,
+        medicationType: medication.medicationType,
+        isOverdue: medicationReminderOccurrence.isOverdue,
+      })
+      .from(medicationReminderOccurrence)
+      .innerJoin(
+        medicationReminder,
+        eq(medicationReminder.id, medicationReminderOccurrence.reminderId),
+      )
+      .innerJoin(medication, eq(medication.id, medicationReminder.medicationId))
+      .where(
+        and(
+          eq(medicationReminder.patientId, userId),
+          eq(medicationReminderOccurrence.softDelete, false),
+          sql`DATE(${medicationReminderOccurrence.actualMedicationTime}) = ${dateStr}`,
         ),
       )
       .orderBy(asc(medicationReminderOccurrence.actualMedicationTime));
@@ -356,6 +387,27 @@ class MedicationReminderOccurrenceRepository {
       );
 
     return result[0]?.count || 0;
+  }
+
+  async markPendingOccurrencesOverdue() {
+    const now = new Date();
+    const result = await db
+      .update(medicationReminderOccurrence)
+      .set({
+        isOverdue: true,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(medicationReminderOccurrence.status, reminderOccurrenceStatus.PENDING),
+          eq(medicationReminderOccurrence.isOverdue, false),
+          eq(medicationReminderOccurrence.softDelete, false),
+          lt(medicationReminderOccurrence.actualMedicationTime, now),
+        ),
+      )
+      .returning({ id: medicationReminderOccurrence.id });
+
+    return result.length;
   }
 }
 

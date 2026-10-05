@@ -32,6 +32,8 @@
   "onboarding.askFirstName.message": "உங்கள் முதல் பெயர் என்ன?",
   "onboarding.askLastName.message": "உங்கள் கடைசி பெயர் என்ன?",
   "onboarding.askDob.message": "உங்கள் பிறந்த தேதி என்ன?",
+  "onboarding.dobRejected.mustBePast": "பிறந்த தேதி கடந்த கால தேதியாக இருக்க வேண்டும். தயவுசெய்து உங்கள் உண்மையான பிறந்த தேதியைத் தேர்ந்தெடுக்கவும்.",
+  "onboarding.dobRejected.maxAgeExceeded": "சரியான பிறந்த தேதியை உள்ளிடவும் (வயது 120 ஆண்டுகளுக்கு மேல் இருக்கக்கூடாது).",
   "onboarding.askGender.message": "உங்கள் பாலினம் என்ன?",
   "onboarding.askBloodGroup.message": "உங்கள் இரத்த வகை என்ன? இந்த கேள்வியை நீங்கள் தவிர்க்கலாம்.",
   "onboarding.askAllergies.message": "உங்களுக்கு ஏதேனும் ஒவ்வாமை (அலர்ஜி) இருக்கிறதா?",

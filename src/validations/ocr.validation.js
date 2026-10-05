@@ -1,5 +1,58 @@
 const { z } = require("zod");
 
+const sanitizeStringArray = (val) => {
+  if (val == null) return [];
+  if (Array.isArray(val)) return val.map((v) => String(v || "").trim()).filter(Boolean);
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.toLowerCase() === "none" || trimmed.toLowerCase() === "n/a") return [];
+    return trimmed
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const sanitizeMedicationsArray = (val) => {
+  if (val == null) return [];
+  if (Array.isArray(val)) {
+    return val.map((item) => {
+      if (typeof item === "string") {
+        return { name: item.trim() };
+      }
+      return item && typeof item === "object" ? item : { name: String(item) };
+    });
+  }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.toLowerCase() === "none" || trimmed.toLowerCase() === "n/a") return [];
+    return trimmed
+      .split(/[,;\n]+/)
+      .map((s) => ({ name: s.trim() }))
+      .filter((m) => Boolean(m.name));
+  }
+  return [];
+};
+
+const sanitizeTestResultsArray = (val) => {
+  if (val == null) return [];
+  if (Array.isArray(val)) {
+    return val.map((item) => {
+      if (typeof item === "string") {
+        return { testName: item.trim() };
+      }
+      return item && typeof item === "object" ? item : {};
+    });
+  }
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.toLowerCase() === "none" || trimmed.toLowerCase() === "n/a") return [];
+    return [{ testName: trimmed }];
+  }
+  return [];
+};
+
 const TestResultSchema = z
   .object({
     testName: z.string().nullable().default(null),
@@ -41,14 +94,14 @@ const MedicalExtractionSchema = z
     doctorName: z.string().nullable().default(null),
     hospitalName: z.string().nullable().default(null),
     diagnosis: z.string().nullable().or(z.array(z.string())).default(null),
-    medications: z.array(MedicationSchema).default([]),
-    testResults: z.array(TestResultSchema).default([]),
+    medications: z.preprocess(sanitizeMedicationsArray, z.array(MedicationSchema)).default([]),
+    testResults: z.preprocess(sanitizeTestResultsArray, z.array(TestResultSchema)).default([]),
     remarks: z.string().nullable().default(null),
     email: z.string().nullable().default(null),
     phoneNumber: z.string().nullable().default(null),
     bloodGroup: z.string().nullable().default(null),
-    allergies: z.array(z.string()).default([]),
-    medicalConditions: z.array(z.string()).default([]),
+    allergies: z.preprocess(sanitizeStringArray, z.array(z.string())).default([]),
+    medicalConditions: z.preprocess(sanitizeStringArray, z.array(z.string())).default([]),
     address: z.string().nullable().default(null),
     isMedicalDocument: z.boolean().optional(),
     reason: z.string().nullable().optional(),
@@ -57,8 +110,8 @@ const MedicalExtractionSchema = z
     summaryInPreferredLanguage: z.string().nullable().default(null),
     summary: z.string().nullable().default(null),
     summaryLanguage: z.string().nullable().default(null),
-    keyPoints: z.array(z.string()).default([]),
-    detectedLanguages: z.array(z.string()).default(["english"]),
+    keyPoints: z.preprocess(sanitizeStringArray, z.array(z.string())).default([]),
+    detectedLanguages: z.preprocess(sanitizeStringArray, z.array(z.string())).default(["english"]),
   })
   .passthrough();
 

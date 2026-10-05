@@ -13,4 +13,7 @@ uploads/
 tests/scratch/
 debug_page_*.jpg
 ai-service/debug_page_*.jpg
-*60300505154*
+*60300505154*
+#GSD
+.agent/
+.planning/

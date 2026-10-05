@@ -262,6 +262,7 @@ class V1Service {
         displayLabel,
         preferredLanguage,
       } = normalizedInput;
+      console.log("[MEDICINES]===", normalizedInput.message);
 
       // Fetch user profile and existing onboarding state
       const patient = await patientRepository.findById(userId);
@@ -626,12 +627,26 @@ class V1Service {
             }
           }
 
-          const reviewMeds =
+          let reviewMeds =
             Array.isArray(actionData?.medicines) && actionData.medicines.length > 0
               ? actionData.medicines
               : actionData?.medicine
                 ? [actionData.medicine]
                 : effectiveState?.medicinesToAdd || [];
+
+          if (userId && Array.isArray(reviewMeds) && reviewMeds.length > 0) {
+            try {
+              reviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                reviewMeds,
+              );
+            } catch (dupErr) {
+              console.warn(
+                "[UnifiedChat] Duplicate check warning in SAVE_AND_REVIEW:",
+                dupErr.message,
+              );
+            }
+          }
 
           if (!isActiveOnboardingStep) {
             const userLang =
@@ -714,7 +729,21 @@ class V1Service {
           stateToUpdate.medicinesConfirmed = false;
           stateToUpdate.medicinesSavedToDb = false;
           stateToUpdate.medicationFlowDone = false;
-          stateToUpdate.medicinesToAdd = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+          let cleanedReviewMeds = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+          if (userId && Array.isArray(cleanedReviewMeds) && cleanedReviewMeds.length > 0) {
+            try {
+              cleanedReviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                cleanedReviewMeds,
+              );
+            } catch (dupErr) {
+              console.warn(
+                "[UnifiedChat] Duplicate check warning in pre-onboarding SAVE_AND_REVIEW:",
+                dupErr.message,
+              );
+            }
+          }
+          stateToUpdate.medicinesToAdd = cleanedReviewMeds;
 
           const onboardingResult = await onboardingService.chat(
             message || actionData || "",
@@ -914,13 +943,32 @@ class V1Service {
             medsToProcess[i] = normalizeCreateMedicationInput(medData);
           }
 
-          const bulkResult = await medicationService.bulkCreate(userId, medsToProcess);
-          createdMeds = bulkResult?.created || bulkResult || [];
+          const unsavedMeds = effectiveState?.medicinesSavedToDb
+            ? []
+            : medsToProcess.filter(
+                (m) =>
+                  m &&
+                  !m.isSaved &&
+                  !m.dbId &&
+                  m.resolution !== "KEEP_EXISTING" &&
+                  m.resolution !== "REMOVE_NEW",
+              );
+
+          if (unsavedMeds.length > 0) {
+            const bulkResult = await medicationService.bulkCreate(userId, unsavedMeds);
+            createdMeds = bulkResult?.created || bulkResult || [];
+          } else {
+            createdMeds = [];
+          }
         } else if (isConfirmAction && hasMedicineActionData) {
-          const bulkResult = await medicationService.bulkCreate(userId, [
-            normalizeCreateMedicationInput(actionData),
-          ]);
-          createdMeds = bulkResult?.created || bulkResult || [];
+          if (!effectiveState?.medicinesSavedToDb && !actionData?.isSaved && !actionData?.dbId) {
+            const bulkResult = await medicationService.bulkCreate(userId, [
+              normalizeCreateMedicationInput(actionData),
+            ]);
+            createdMeds = bulkResult?.created || bulkResult || [];
+          } else {
+            createdMeds = [];
+          }
         }
         const createdMed = createdMeds[0] || null;
 
@@ -1477,9 +1525,13 @@ class V1Service {
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
           document: onboardingResult?.document || null,
+          isRejected: onboardingResult?.isRejected || false,
+          rejectionReason: onboardingResult?.rejectionReason || null,
         });
         responsePayload.state = onboardingResult?.state || state;
         responsePayload.mode = onboardingResult?.mode || responsePayload.mode;
+        responsePayload.isRejected = onboardingResult?.isRejected || false;
+        responsePayload.rejectionReason = onboardingResult?.rejectionReason || null;
         responsePayload.loginProvider =
           onboardingResult?.loginProvider || responsePayload.loginProvider || null;
         responsePayload.sourceComparison =
@@ -1725,13 +1777,32 @@ class V1Service {
 
     let messages = [];
     if (chatSessionId) {
-      const result = await chatSessionRepository.listMessages({
-        sessionId: chatSessionId,
-        userId,
-        limit: 100,
-        direction: "after",
-      });
-      messages = (result.items || []).filter((m) => {
+      let cursor = null;
+      let hasMore = true;
+      const seenCursors = new Set();
+      const allRawMessages = [];
+
+      while (hasMore) {
+        const result = await chatSessionRepository.listMessages({
+          sessionId: chatSessionId,
+          userId,
+          limit: 100,
+          direction: "after",
+          cursor,
+        });
+
+        const items = result?.items || [];
+        allRawMessages.push(...items);
+
+        if (result?.nextCursor && !seenCursors.has(result.nextCursor)) {
+          seenCursors.add(result.nextCursor);
+          cursor = result.nextCursor;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      messages = allRawMessages.filter((m) => {
         if (m.role === "assistant") {
           const action = m.metadata?.action;
           const text = (m.content || "").toLowerCase();

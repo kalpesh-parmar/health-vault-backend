@@ -1,4 +1,4 @@
-const { and, asc, count, desc, eq, ilike, or, sql } = require("drizzle-orm");
+const { and, asc, count, desc, eq, ilike, inArray, or, sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { medication } = require("../models/medication");
 
@@ -214,6 +214,22 @@ class MedicationRepository {
       .where(and(eq(medication.id, id), eq(medication.softDelete, false)))
       .returning();
     return result[0] || null;
+  }
+
+  async softDeleteByIds(ids = [], userId = null) {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const conditions = [inArray(medication.id, ids), eq(medication.softDelete, false)];
+    if (userId) {
+      conditions.push(eq(medication.userId, String(userId)));
+    }
+    return db
+      .update(medication)
+      .set({
+        softDelete: true,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning();
   }
 }
 

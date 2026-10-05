@@ -34,8 +34,13 @@ async function getMedicationById(req, res) {
 //get mediaction list
 async function getMedicationList(req, res) {
   const userId = req.auth.userId;
-  const result = await medicationService.getMedicationList(userId);
-  return successResponse(res, result, messageConstants.MEDICATION_LIST_FETCHED);
+  const result = await medicationService.getMedicationList(userId, req.query);
+  return paginatedSuccessResponse(
+    res,
+    result.data,
+    result.page,
+    messageConstants.MEDICATION_LIST_FETCHED,
+  );
 }
 
 //filtered list
@@ -72,10 +77,18 @@ async function checkDuplicateMedication(req, res) {
   return successResponse(res, result, messageConstants.MEDICATION_DUPLICATE_CHECKED);
 }
 
+// batch delete medications
+async function batchDeleteMedications(req, res) {
+  const result = await medicationService.batchDeleteMedications(req.auth.userId, req.body);
+
+  return successResponse(res, result, messageConstants.MEDICATIONS_BATCH_DELETED);
+}
+
 module.exports = {
   createMedication,
   updateMedication,
   deleteMedication,
+  batchDeleteMedications,
   getMedicationById,
   getMedicationList,
   listMedications,

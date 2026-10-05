@@ -6,6 +6,7 @@ const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
+const { normalizeMedicine } = require("./medicineNormalize.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -24,6 +25,8 @@ function normalizeUnifiedChatInput(body = {}) {
     displayLabel = null,
     preferredLanguage,
     fromScreen = null,
+    page = null,
+    limit = null,
   } = body || {};
 
   const normalizedMessage =
@@ -36,6 +39,9 @@ function normalizeUnifiedChatInput(body = {}) {
           ? JSON.stringify(question)
           : String(question).trim()
         : "";
+
+  const parsedPage = page ? Number(page) : actionData?.page ? Number(actionData.page) : null;
+  const parsedLimit = limit ? Number(limit) : actionData?.limit ? Number(actionData.limit) : null;
 
   return {
     actionType: actionType ? String(actionType).trim().toUpperCase() : null,
@@ -52,6 +58,8 @@ function normalizeUnifiedChatInput(body = {}) {
         ? normalizeLanguage(state.preferredLanguage)
         : null,
     fromScreen: fromScreen || (state && state.fromScreen) || null,
+    page: parsedPage && Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : null,
+    limit: parsedLimit && Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
   };
 }
 
@@ -82,11 +90,15 @@ function buildUnifiedResponse({
   documentSummary = null,
   loginProvider = null,
   sourceComparison = null,
+  isRejected = false,
+  rejectionReason = null,
 }) {
   return {
     mode,
     actionType,
     reply,
+    isRejected,
+    rejectionReason,
     title,
     subtitle,
     fields,
@@ -229,6 +241,10 @@ async function executeAddDocumentAction({
   chatService,
   chatSessionRepository,
   ocrStatusEnum,
+  // Issue 5 Fix: Optional array of medicine IDs the user confirmed during onboarding review.
+  // When provided, only medicines matching these IDs get selected:true in the returned list.
+  // When null/undefined (default), falls back to marking all extracted medicines as selected:true
+  // — preserving existing behavior for all current callers that don't pass this param.
 }) {
   let filesList = [];
   if (Array.isArray(actionData?.files) && actionData.files.length > 0) {
@@ -494,19 +510,36 @@ async function executeAddDocumentAction({
   }
 
   if (Array.isArray(rawMeds) && rawMeds.length > 0) {
-    const rawList = rawMeds.map((m, idx) => ({
-      id: m.id || m.client_med_id || `extracted_med_${idx + 1}`,
-      name: m.name || m.medicationName || "Unknown Medicine",
-      medicationName: m.name || m.medicationName || "Unknown Medicine",
-      medicationType: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-      type: String(m.type || m.medicationType || "TABLET").toUpperCase(),
-      dosePerIntake: m.dosage ? parseFloat(m.dosage) || 1 : 1,
-      frequency: m.frequency || "ONCE",
-      duration: m.duration || null,
-      instructions: m.instructions || m.timing || null,
-      selected: true,
-      isSaved: false,
-    }));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const rawList = rawMeds.map((m, idx) => {
+      const { row, onboardingMed } = normalizeMedicine(m, idx, "P-TEMP", {
+        startDate: todayStr,
+      });
+      return {
+        id: m.id || m.client_med_id || onboardingMed.id,
+        client_med_id: m.client_med_id || onboardingMed.client_med_id,
+        name: onboardingMed.name,
+        medicationName: onboardingMed.name,
+        medicationType: onboardingMed.type,
+        type: onboardingMed.type,
+        dosePerIntake: row.dosePerIntake || 1,
+        frequency: onboardingMed.frequency,
+        duration: onboardingMed.duration,
+        instructions: m.instructions || m.timing || row.notes || null,
+        notes: row.notes || null,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        foodFrequency: row.foodFrequency,
+        medicationSchedule: onboardingMed.medicationSchedule,
+        totalQuantity: row.totalQuantity,
+        unit: row.unit,
+        dailyConsumption: row.dailyConsumption,
+        prescribedBy: row.prescribedBy || null,
+        refillAlert: row.refillAlert || false,
+        selected: true,
+        isSaved: false,
+      };
+    });
 
     if (userId) {
       extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList);
@@ -559,7 +592,7 @@ async function executeAddDocumentAction({
   }
 
   if (completedCount === 0 && (docResult?.document || docResult?.job)) {
-    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 1);
+    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
   }
   if (totalUploads === 0) {
     totalUploads = Math.max(batchDocumentsName.length, 1);
@@ -572,6 +605,102 @@ async function executeAddDocumentAction({
     rejected: rejectedCount,
   };
 
+  const documentsBatchList = [];
+  const documentsStatusList = [];
+  let mainDocumentSummaryText = null;
+
+  if (docsList.length > 0) {
+    for (let i = 0; i < docsList.length; i++) {
+      const d = docsList[i];
+      if (!d) continue;
+      const struct = d.extractedStructuredData || d.structuredExtractedData || {};
+      const docSum =
+        struct.summary ||
+        struct.summaryInPreferredLanguage ||
+        d.summary ||
+        d.summaryEnglish ||
+        d.summaryGujarati ||
+        d.remarks ||
+        (d.error ? `Failed: ${d.error}` : null);
+
+      if (docSum && !mainDocumentSummaryText) {
+        mainDocumentSummaryText = docSum;
+      }
+
+      const st = String(d.ocrStatus || d.status || d.stageStatus || "COMPLETED").toUpperCase();
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: d.id || d.s3Key || null,
+        fileName: d.fileName || batchDocumentsName[i] || "document",
+        status: st,
+        ocrStatus: d.ocrStatus || d.status || "COMPLETED",
+        summary: docSum || null,
+        error: d.error || null,
+      });
+    }
+  } else if (jobsList.length > 0) {
+    for (let i = 0; i < jobsList.length; i++) {
+      const j = jobsList[i];
+      if (!j) continue;
+      const struct = j.extractedStructuredData || {};
+      const jobSum =
+        struct.summary || j.summary || j.remarks || (j.error ? `Failed: ${j.error}` : null);
+
+      if (jobSum && !mainDocumentSummaryText) {
+        mainDocumentSummaryText = jobSum;
+      }
+
+      const st = String(j.status || j.ocrStatus || j.stageStatus || "PENDING").toUpperCase();
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: j.jobId || j.s3Key || j.id || null,
+        fileName: j.fileName || batchDocumentsName[i] || "document",
+        status: st,
+        ocrStatus: j.ocrStatus || j.status || "PENDING",
+        summary: jobSum || null,
+        error: j.error || null,
+      });
+    }
+  } else if (filesList.length > 0) {
+    filesList.forEach((f, i) => {
+      const fn = f.fileName || batchDocumentsName[i] || "document";
+      const st = failedCount > 0 ? "FAILED" : "COMPLETED";
+      documentsStatusList.push(st);
+      documentsBatchList.push({
+        id: f.fileKey || null,
+        fileName: fn,
+        status: st,
+        ocrStatus: st,
+        summary: null,
+      });
+    });
+  }
+
+  const primaryDocumentStatus =
+    documentsStatusList[0] || (failedCount > 0 ? "FAILED" : "COMPLETED");
+
+  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
+    const prefLang = preferredLanguage.toLowerCase();
+    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
+    for (const docItem of docs) {
+      if (!docItem) continue;
+      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
+      if (struct && typeof struct === "object") {
+        if (struct.summaryInPreferredLanguage) {
+          struct.summary = struct.summaryInPreferredLanguage;
+        } else if (struct.summary) {
+          try {
+            const translated = await aiClient.translate(struct.summary, "english", prefLang);
+            if (translated) {
+              struct.summary = translated;
+            }
+          } catch (err) {
+            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
+          }
+        }
+      }
+    }
+  }
   replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
     successfulCount: completedCount,
     totalCount: totalUploads,
@@ -608,6 +737,7 @@ async function executeAddDocumentAction({
         documentId: docResult?.document?.id,
         documentSummary,
         documentsName: batchDocumentsName,
+        medicines: extractedMedicines || [],
       },
     });
   }
@@ -625,6 +755,8 @@ async function executeAddDocumentAction({
             documentId: createdDocId,
             flowMode: "UPLOAD",
             documentUploaded: true,
+            uploadedMedicalDocument: true,
+            documentAttachedToChat: true,
             documentConfirmed: true,
           };
           await userOnboardingRepository.updateByUserId(userId, { data: updatedData });
@@ -659,34 +791,28 @@ async function executeAddDocumentAction({
         ]
       : [];
 
-  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
-    const prefLang = normalizeLanguage(preferredLanguage);
-    const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
-    for (const docItem of docs) {
-      if (!docItem) continue;
-      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
-      if (struct && typeof struct === "object") {
-        if (struct.summariesByLanguage && struct.summariesByLanguage[prefLang]) {
-          struct.summary = struct.summariesByLanguage[prefLang];
-          struct.summaryInPreferredLanguage = struct.summariesByLanguage[prefLang];
-        } else if (struct.summaryInPreferredLanguage) {
-          struct.summary = struct.summaryInPreferredLanguage;
-        } else if (struct.summary || struct.summaryEnglish) {
-          try {
-            const baseSummary = struct.summary || struct.summaryEnglish;
-            const translated = await aiClient.translate(baseSummary, "english", prefLang);
-            if (translated) {
-              struct.summary = translated;
-              struct.summaryInPreferredLanguage = translated;
-              if (!struct.summariesByLanguage) struct.summariesByLanguage = {};
-              struct.summariesByLanguage[prefLang] = translated;
-            }
-          } catch (err) {
-            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
-          }
-        }
-      }
-    }
+  if (activeSessionId) {
+    await chatSessionRepository.appendMessage({
+      sessionId: activeSessionId,
+      userId,
+      role: "assistant",
+      content: replyText,
+      metadata: {
+        mode: "ACTION",
+        actionType: returnedActionType,
+        documentId: docResult?.document?.id,
+        document: docResult?.document,
+        documentSummary,
+        documentsName: batchDocumentsName,
+        documentsStatus: documentsStatusList,
+        documentStatus: primaryDocumentStatus,
+        summary: mainDocumentSummaryText || docResult?.document?.summary || null,
+        documents: documentsBatchList,
+        medicines: extractedMedicines,
+        suggestedAction,
+        options,
+      },
+    });
   }
 
   return buildUnifiedResponse({
@@ -694,6 +820,11 @@ async function executeAddDocumentAction({
     actionType: returnedActionType,
     reply: replyText,
     documentSummary,
+    documentsName: batchDocumentsName,
+    documentsStatus: documentsStatusList,
+    documentStatus: primaryDocumentStatus,
+    summary: mainDocumentSummaryText || docResult?.document?.summary || null,
+    documents: documentsBatchList,
     sessionId: activeSessionId,
     document: docResult.document,
     medicines: extractedMedicines,

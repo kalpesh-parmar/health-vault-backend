@@ -32,6 +32,8 @@
   "onboarding.askFirstName.message": "તમારું પ્રથમ નામ શું છે?",
   "onboarding.askLastName.message": "તમારું અંતિમ નામ શું છે?",
   "onboarding.askDob.message": "તમારી જન્મ તારીખ શું છે?",
+  "onboarding.dobRejected.mustBePast": "જન્મ તારીખ ભૂતકાળની હોવી જોઈએ. કૃપા કરીને તમારી સાચી જન્મ તારીખ પસંદ કરો.",
+  "onboarding.dobRejected.maxAgeExceeded": "કૃપા કરીને માન્ય જન્મ તારીખ દાખલ કરો (ઉંમર ૧૨૦ વર્ષથી વધુ ન હોઈ શકે).",
   "onboarding.askGender.message": "તમારી જાતિ શું છે?",
   "onboarding.askBloodGroup.message": "તમારું બ્લડ ગ્રુપ શું છે? તમે આ પ્રશ્ન છોડી શકો છો.",
   "onboarding.askAllergies.message": "શું તમને કોઈ જાણીતી એલર્જી છે?",

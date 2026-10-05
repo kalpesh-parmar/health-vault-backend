@@ -39,6 +39,58 @@ const OnboardingStep = {
 const REQUIRED_PROFILE_FIELDS = ["firstName", "lastName", "dateOfBirth", "gender"];
 
 /**
+ * Canonical Date of Birth Validator
+ *
+ * Note on Timezone (Asia/Kolkata):
+ * Asia/Kolkata (IST, UTC+05:30) is the canonical platform reference timezone
+ * for the Health Vault system and user base (all 5 supported Indic and Indian English languages).
+ * Standardizing calendar date evaluations to Asia/Kolkata ensures that date boundaries
+ * (determining "today" vs "yesterday" vs "future") are evaluated deterministically regardless
+ * of whether the server node is running in UTC, US-East, or Europe, preventing midnight offset
+ * race conditions where a patient selecting their birth date is rejected due to UTC lag.
+ *
+ * @param {string|Date} dobInput - Input date string or Date object
+ * @param {string} [timezone="Asia/Kolkata"] - Canonical timezone identifier
+ * @returns {{ isValid: boolean, reason: string|null, normalizedDob: string|null }}
+ */
+function validateDateOfBirth(dobInput, timezone = "Asia/Kolkata") {
+  if (!dobInput) return { isValid: false, reason: "DOB_REQUIRED", normalizedDob: null };
+
+  const rawStr =
+    typeof dobInput === "string"
+      ? dobInput
+      : dobInput instanceof Date
+        ? dobInput.toISOString().split("T")[0]
+        : String(dobInput);
+
+  const normDob = normalizeDOB(rawStr);
+  if (!normDob || !/^\d{4}-\d{2}-\d{2}$/.test(normDob)) {
+    return { isValid: false, reason: "DOB_INVALID_FORMAT", normalizedDob: null };
+  }
+
+  const [yearStr] = normDob.split("-");
+  const birthYear = parseInt(yearStr, 10);
+
+  // Determine current calendar date in canonical timezone (en-CA produces YYYY-MM-DD format)
+  const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
+  const [currentYearStr] = todayStr.split("-");
+  const currentYear = parseInt(currentYearStr, 10);
+
+  // Strictly reject future dates and today's date (date-only string comparison)
+  if (normDob >= todayStr) {
+    return { isValid: false, reason: "DOB_MUST_BE_PAST", normalizedDob: normDob };
+  }
+
+  // Reject age > 120 or negative
+  const approximateAge = currentYear - birthYear;
+  if (approximateAge < 0 || approximateAge > 120) {
+    return { isValid: false, reason: "DOB_AGE_LIMIT", normalizedDob: normDob };
+  }
+
+  return { isValid: true, reason: null, normalizedDob: normDob };
+}
+
+/**
  * Validates whether the patient profile contains all mandatory fields and valid values.
  * @param {object} patient - Patient profile object
  * @returns {boolean} True if complete and valid
@@ -64,17 +116,8 @@ function isProfileComplete(patient) {
         ? patient.dateOfBirth.toISOString().split("T")[0]
         : String(patient.dateOfBirth);
 
-  const normDob = normalizeDOB(dobStr);
-  if (!normDob) return false;
-
-  const dobDate = new Date(normDob);
-  if (isNaN(dobDate.getTime())) return false;
-
-  const today = new Date();
-  if (dobDate > today) return false;
-
-  const ageYears = (today.getTime() - dobDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-  if (ageYears < 0 || ageYears > 120) return false;
+  const valDob = validateDateOfBirth(dobStr);
+  if (!valDob.isValid) return false;
 
   const normGender = normalizeGenderLocally(String(patient.gender));
   if (!normGender || !isValidGender(normGender)) {
@@ -145,12 +188,8 @@ function getMissingRequiredStep(state) {
     if (field === "firstName" && !isValidFirstName(String(val))) return "ASK_FIRST_NAME";
     if (field === "lastName" && !isValidLastName(String(val))) return "ASK_LAST_NAME";
     if (field === "dateOfBirth") {
-      const normDob = normalizeDOB(String(val));
-      if (!normDob) return "ASK_DOB";
-      const dobDate = new Date(normDob);
-      if (isNaN(dobDate.getTime()) || dobDate > new Date()) return "ASK_DOB";
-      const ageYears = (new Date().getTime() - dobDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      if (ageYears < 0 || ageYears > 120) return "ASK_DOB";
+      const valDob = validateDateOfBirth(String(val));
+      if (!valDob.isValid) return "ASK_DOB";
     }
     if (field === "gender") {
       const normGen = normalizeGenderLocally(String(val));
@@ -194,11 +233,6 @@ function getNextRequiredOrOptionalStep(state) {
 
   // Medication Flow
   if (!state.medicationFlowDone) {
-    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
-      state.medicationFlowStarted = true;
-      return "MEDICINE_OPTIONS";
-    }
-
     const hasExtractedMedicines =
       (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
       (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
@@ -213,6 +247,11 @@ function getNextRequiredOrOptionalStep(state) {
         state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);
       }
       return "REVIEW_MEDICINES_LIST";
+    }
+
+    if (state.currentStep === "MEDICINE_OPTIONS" || state.cancellationNotice) {
+      state.medicationFlowStarted = true;
+      return "MEDICINE_OPTIONS";
     }
 
     state.medicationFlowStarted = true;
@@ -595,6 +634,7 @@ function getNextStep(state) {
 module.exports = {
   OnboardingStep,
   REQUIRED_PROFILE_FIELDS,
+  validateDateOfBirth,
   isProfileComplete,
   getMissingRequiredStep,
   getNextRequiredOrOptionalStep,
