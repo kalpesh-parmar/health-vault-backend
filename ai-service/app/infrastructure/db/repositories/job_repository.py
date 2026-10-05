@@ -222,12 +222,17 @@ class JobRepository:
         if raw_ocr_data and isinstance(raw_ocr_data, dict):
             raw_text = raw_ocr_data.get("fullText")
 
+        summary_english = None
+        if extracted_structured_data and isinstance(extracted_structured_data, dict):
+            summary_english = extracted_structured_data.get("summaryEnglish")
+
         query = text(
             """
             UPDATE documents
             SET ocr_status = 'completed',
                 structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
                 ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
+                summary_english = COALESCE(:summary_english, summary_english),
                 updated_at = NOW()
             WHERE id = :document_id
             """
@@ -236,6 +241,7 @@ class JobRepository:
             "document_id": document_id,
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
             "raw_text": raw_text,
+            "summary_english": summary_english,
         }
         async for session in self.db.session():
             await session.execute(query, params)

@@ -10,6 +10,8 @@ const {
 const { toDbDateOnlyString } = require("../utils/dateUtils");
 const aiClient = require("../services/ai/clients/aiClient.service");
 
+const PIPELINE_VERSION = "1.0.0";
+
 const REPORT_QUESTIONS_I18N = {
   english: [
     "What does my report mean?",
@@ -238,17 +240,19 @@ async function buildStructuredReportPayload({
   // 5. Narrative summary resolution with on-demand localization
   let docSummary = "";
   const summariesByLang = structured.summariesByLanguage || {};
+  const cachedVersion = structured.summaryPipelineVersion || structured.pipelineVersion;
+  const isCacheValid = cachedVersion === PIPELINE_VERSION;
 
-  // Check language specific cached summary
-  if (normLang !== "english" && summariesByLang[normLang]) {
+  // Check language specific cached summary (only if version matches)
+  if (isCacheValid && normLang !== "english" && summariesByLang[normLang]) {
     const candidate = stripReasoningTags(summariesByLang[normLang]).trim();
     if (isValidClinicalSummary(candidate, patientName)) {
       docSummary = candidate;
     }
   }
 
-  // Check structured summaryInPreferredLanguage if not English
-  if (!docSummary && normLang !== "english") {
+  // Check structured summaryInPreferredLanguage if not English (only if version matches)
+  if (isCacheValid && !docSummary && normLang !== "english") {
     const candidate = stripReasoningTags(
       structured.summaryInPreferredLanguage || activeDoc.summaryInPreferredLanguage || "",
     ).trim();
@@ -266,9 +270,17 @@ async function buildStructuredReportPayload({
       "",
   ).trim();
 
+  let translationStatus = "original";
+
   if (!docSummary) {
     docSummary = englishCandidate;
   }
+
+  // Stub guard: if empty, short (<80 chars), or generic stub narrative, do not translate
+  const isStubEnglish =
+    !englishCandidate ||
+    englishCandidate.length < 80 ||
+    englishCandidate === "Medical laboratory report summary.";
 
   // If still empty, provide clean default narrative
   if (!docSummary) {
@@ -282,39 +294,53 @@ async function buildStructuredReportPayload({
   }
 
   // On-demand translation if user requested a non-English language and summary is in English
-  if (normLang !== "english" && docSummary) {
-    const isLatinOnly = !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(docSummary);
-    if (isLatinOnly) {
-      try {
-        const translated = await aiClient.translate(docSummary, "english", normLang);
-        const cleanTrans = stripReasoningTags(translated).trim();
-        if (cleanTrans && isValidClinicalSummary(cleanTrans, patientName)) {
-          docSummary = cleanTrans;
+  if (normLang !== "english") {
+    if (docSummary && !isCacheValid && !isStubEnglish) {
+      const isLatinOnly = !/[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(docSummary);
+      if (isLatinOnly) {
+        try {
+          const translated = await aiClient.translate(docSummary, "english", normLang);
+          const cleanTrans = stripReasoningTags(translated).trim();
+          if (cleanTrans && isValidClinicalSummary(cleanTrans, patientName)) {
+            docSummary = cleanTrans;
+            translationStatus = "translated";
 
-          // Update cached summaries asynchronously
-          try {
-            if (!structured.summariesByLanguage) structured.summariesByLanguage = {};
-            structured.summariesByLanguage[normLang] = cleanTrans;
-            structured.summaryInPreferredLanguage = cleanTrans;
-            if (activeDoc.id) {
-              await db
-                .update(document)
-                .set({
-                  structuredExtractedData: structured,
-                  summaryInPreferredLanguage: cleanTrans,
-                })
-                .where(eq(document.id, activeDoc.id));
+            // Update cached summaries asynchronously
+            try {
+              if (!structured.summariesByLanguage) structured.summariesByLanguage = {};
+              structured.summariesByLanguage[normLang] = cleanTrans;
+              structured.summaryInPreferredLanguage = cleanTrans;
+              structured.summaryPipelineVersion = PIPELINE_VERSION;
+              if (activeDoc.id) {
+                await db
+                  .update(document)
+                  .set({
+                    structuredExtractedData: structured,
+                    summaryInPreferredLanguage: cleanTrans,
+                  })
+                  .where(eq(document.id, activeDoc.id));
+              }
+            } catch (cacheErr) {
+              console.warn(
+                "[reportPayload.helper] Failed to cache translated summary:",
+                cacheErr.message,
+              );
             }
-          } catch (cacheErr) {
-            console.warn(
-              "[reportPayload.helper] Failed to cache translated summary:",
-              cacheErr.message,
-            );
+          } else {
+            translationStatus = "failed";
           }
+        } catch (transErr) {
+          console.warn("[reportPayload.helper] On-demand translation failed:", transErr.message);
+          translationStatus = "failed";
         }
-      } catch (transErr) {
-        console.warn("[reportPayload.helper] On-demand translation failed:", transErr.message);
+      } else {
+        translationStatus = "cached";
       }
+    } else if (isStubEnglish) {
+      translationStatus = "summary_unavailable";
+    } else if (docSummary && isCacheValid) {
+      const hasIndicChars = /[\u0A80-\u0AFF\u0900-\u097F\u0B80-\u0BFF]/.test(docSummary);
+      translationStatus = hasIndicChars ? "cached" : "original";
     }
   }
 
@@ -383,6 +409,7 @@ async function buildStructuredReportPayload({
       hospitalName: resolvedHospital,
       doctorName: resolvedDoctor,
       summary: docSummary,
+      translationStatus,
       patientDetails,
       isLabReport,
       isPrescription,
@@ -423,4 +450,5 @@ module.exports = {
   buildStructuredReportPayload,
   REPORT_QUESTIONS_I18N,
   GENERAL_DOC_QUESTIONS_I18N,
+  PIPELINE_VERSION,
 };

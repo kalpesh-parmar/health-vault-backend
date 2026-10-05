@@ -446,6 +446,15 @@ class PipelineOrchestrator:
                     structured_data=extracted_structured_data or {},
                     preferred_language=preferred_language,
                 )
+                if extracted_structured_data is not None and isinstance(summary_data, dict):
+                    extracted_structured_data.update({
+                        "summaryEnglish": summary_data.get("summaryEnglish"),
+                        "summaryInPreferredLanguage": summary_data.get("summaryInPreferredLanguage"),
+                        "summaryLanguage": summary_data.get("summaryLanguage"),
+                        "preferredLanguage": summary_data.get("preferredLanguage"),
+                        "keyPoints": summary_data.get("keyPoints"),
+                        "dosagePreserved": summary_data.get("dosagePreserved"),
+                    })
 
                 completed_stages.append(STAGE_SUMMARIZING)
                 current_pct = ensure_monotonic_progress(
@@ -461,6 +470,7 @@ class PipelineOrchestrator:
                     stage_data=summary_data,
                     completed_stages=completed_stages,
                     checkpoint_data=checkpoint_data,
+                    extracted_structured_data=extracted_structured_data,
                 )
                 await self.lifecycle.report_progress(
                     job_id=job_id,
@@ -472,6 +482,19 @@ class PipelineOrchestrator:
                     completed_stages=completed_stages,
                     checkpoint_data=checkpoint_data,
                 )
+            elif extracted_structured_data and "summaryEnglish" not in extracted_structured_data:
+                summary_data = await self.checkpoint.load_stage_artifact(
+                    checkpoint_data, STAGE_SUMMARIZING
+                )
+                if isinstance(summary_data, dict):
+                    extracted_structured_data.update({
+                        "summaryEnglish": summary_data.get("summaryEnglish"),
+                        "summaryInPreferredLanguage": summary_data.get("summaryInPreferredLanguage"),
+                        "summaryLanguage": summary_data.get("summaryLanguage"),
+                        "preferredLanguage": summary_data.get("preferredLanguage"),
+                        "keyPoints": summary_data.get("keyPoints"),
+                        "dosagePreserved": summary_data.get("dosagePreserved"),
+                    })
 
             # ─────────────────────────────────────────────────────────────────
             # 9. STAGE: EMBEDDING
