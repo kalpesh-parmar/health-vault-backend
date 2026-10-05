@@ -502,7 +502,7 @@ paths:
         "401":
           description: Unauthorized
 
-  /medications/create:
+  /medications/batch-create:
     post:
       tags:
         - Medication
@@ -510,7 +510,7 @@ paths:
       summary: Create single medication or batch array of medications
 
       description: >
-        Creates a single medication or a batch of medications at once. Generates reminders and dosage schedule occurrences for all created medications.
+        Creates a single medication or a batch of medications in a single request and generates associated reminders and occurrences.
 
       security:
         - bearerAuth: []

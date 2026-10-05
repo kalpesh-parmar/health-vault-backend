@@ -8,12 +8,12 @@ const router = express.Router();
 // check duplicate
 router.post("/check-duplicate", verifyToken, medicationController.checkDuplicateMedication);
 
-// create (supports single item or array batch)
+// batch create (supports single item or array batch)
 router.post(
-  "/create",
+  "/batch-create",
   verifyToken,
   validateRequest({ body: createMedicationOrBatchSchema }),
-  medicationController.createMedication,
+  medicationController.batchCreateMedications,
 );
 
 // list of all data

@@ -5,7 +5,7 @@ const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
 const { createReminderOrBatchSchema } = require("../validations");
 
-// CREATE
+// CREATE (supports single item or batch array)
 router.post(
   "/create",
   verifyToken,
