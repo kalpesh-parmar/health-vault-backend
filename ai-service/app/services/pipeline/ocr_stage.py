@@ -1442,20 +1442,28 @@ class OcrStageHandler:
                 with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                     total_p = doc.page_count
                     pages_data_dict: dict[int, dict[str, Any]] = {}
-                    raw_text_dict: dict[int, str] = {}
+                    all_raw_page_texts: list[str] = []
+                    for index in range(total_p):
+                        try:
+                            t_raw = doc.load_page(index).get_text("text") or ""
+                        except Exception as page_read_err:
+                            logger.warning("Failed to read direct text on page %d: %s", index + 1, page_read_err)
+                            t_raw = ""
+                        all_raw_page_texts.append(t_raw)
+                        raw_text_dict[index + 1] = t_raw
 
                     # Evaluate every page individually with validate_page_direct_text
                     for index in range(total_p):
                         page_num = index + 1
                         t_direct = time.perf_counter()
-                        try:
-                            raw_text = doc.load_page(index).get_text("text") or ""
-                        except Exception as page_read_err:
-                            logger.warning("Failed to read direct text on page %d: %s", page_num, page_read_err)
-                            raw_text = ""
-                        raw_text_dict[page_num] = raw_text
+                        raw_text = all_raw_page_texts[index]
 
-                        val_res = validate_page_direct_text(doc, page_number=page_num, text=raw_text)
+                        val_res = validate_page_direct_text(
+                            doc,
+                            page_number=page_num,
+                            text=raw_text,
+                            doc_page_texts=all_raw_page_texts,
+                        )
                         direct_ms = round((time.perf_counter() - t_direct) * 1000, 2)
                         if val_res.is_valid_direct_text and len(val_res.text.strip()) >= self.min_direct_text_chars:
                             lines = [

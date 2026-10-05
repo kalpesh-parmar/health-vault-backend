@@ -3,6 +3,7 @@ from __future__ import annotations
 """Direct PDF text extraction via PyMuPDF with per-page text sanitization and garble gating."""
 
 import asyncio
+from collections import Counter
 import logging
 import re
 import time
@@ -32,7 +33,7 @@ _TRAILING_BLANK_LINES = re.compile(r"\n\s*\n+")
 # Detection patterns for font corruption and garble
 _CID_PATTERN = re.compile(r"\(cid:\d+\)")
 _UNICODE_REPLACEMENT_CHAR = "\ufffd"
-_CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxyz]{4,}", re.IGNORECASE)
+_CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{4,}", re.IGNORECASE)
 
 # Legacy 8-bit Indic font families mapping Devanagari/Indic glyphs to Latin ASCII code points
 LEGACY_INDIC_FONT_PATTERNS = [
@@ -68,11 +69,20 @@ MEDICAL_WHITELIST = frozenset({
     "od", "bd", "tid", "qid", "hs", "bbf", "pc", "ac", "po", "iv", "im", "sc",
     # Additional common clinical acronyms
     "cbc", "lft", "kft", "rft", "tft", "hiv", "hbsag", "hcv", "vdrl",
+    # Thyroid & Hormones
+    "triiodothyronine", "thyroxine", "thyroid",
+    # Chemistry & Methodologies
+    "chemistry", "biochemistry", "immunoassay", "chemiluminescence", "clia", "photometric",
+    "photometry", "hplc", "chromatography", "electrophoresis", "elisa", "turbidimetry",
+    "nephelometry", "spectrophotometry", "calculation",
+    # Units & Common Report Terms
+    "iu/ml", "miu/ml", "uiu/ml", "µg/dl", "µg/ml", "months", "birthday",
 })
 
 # Words with valid 4+ consonant clusters in standard English
 _ENGLISH_CONSONANT_EXEMPTIONS = frozenset({
     "lengths", "strengths", "angst", "catchphrase", "watchstrap", "birthplace", "archdruid",
+    "chemistry", "biochemistry", "birthday",
 })
 
 # High-frequency English medical and report vocabulary for lexical validity check
@@ -249,13 +259,85 @@ def detect_phonotactic_garble(text: str) -> tuple[bool, float, list[str]]:
     return is_flagged, metric, anomalous_tokens
 
 
+_UUID_TOKEN_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_BRACKETED_ID_RE = re.compile(r"\[[^\]\n]*(?:Years|Female|Male|\d{6,})[^\]\n]*\]?", re.IGNORECASE)
+_BRACKETED_CASE_RE = re.compile(r"\[\d+-[^\]\n]+\]?")
+_BRACKETED_UNCLOSED_RE = re.compile(r"\[\d+-[^\n]*")
+
+
+def remove_watermark_and_id_tokens(
+    text: str,
+    doc_page_texts: list[str] | None = None,
+) -> str:
+    """Removes watermark, background stamps, and case-ID tracking tokens from direct text.
+
+    1. Removes UUID-like tokens (e.g. a3ec807f-1a85-4d6e-883a-c7b6a7762a7a)
+    2. Removes bracketed [case-name-age-sex] patterns (e.g. [5069200904-Manjulaben Ranoliya-70 Years-Female])
+    3. Removes tokens repeated > 20 times on a page (excluding dictionary/medical tokens)
+    4. Removes tokens repeated across >= 3 pages if doc_page_texts is provided
+    """
+    if not text:
+        return text
+
+    cleaned = text
+    # 1. UUID-like tokens
+    cleaned = _UUID_TOKEN_RE.sub("", cleaned)
+
+    # 2. Bracketed metadata and case patterns
+    cleaned = _BRACKETED_ID_RE.sub("", cleaned)
+    cleaned = _BRACKETED_CASE_RE.sub("", cleaned)
+    cleaned = _BRACKETED_UNCLOSED_RE.sub("", cleaned)
+
+    # 3. Frequency-based watermark removal: tokens repeated > 20 times on this page
+    words = re.findall(r"\S+", cleaned)
+    token_counts = Counter(words)
+    for token, count in token_counts.items():
+        if count > 20 and len(token) >= 4:
+            token_clean = token.strip(".,;:()[]{}%/-").lower()
+            if (
+                token_clean
+                and token_clean not in _COMMON_LEXICON
+                and token_clean not in MEDICAL_WHITELIST
+                and not token.isdigit()
+            ):
+                escaped = re.escape(token)
+                cleaned = re.sub(rf"(?:(?<=\s)|^){escaped}(?=(?:\s|$))", "", cleaned)
+
+    # 4. Multi-page watermark repetition: tokens appearing across >= 3 pages
+    if doc_page_texts and len(doc_page_texts) >= 3:
+        page_sets = [set(re.findall(r"\S+", pt)) for pt in doc_page_texts]
+        multi_page_counts: Counter[str] = Counter()
+        for s in page_sets:
+            for t in s:
+                multi_page_counts[t] += 1
+        for token, p_count in multi_page_counts.items():
+            if p_count >= 3 and len(token) >= 5:
+                token_clean = token.strip(".,;:()[]{}%/-").lower()
+                if (
+                    token_clean
+                    and token_clean not in _COMMON_LEXICON
+                    and token_clean not in MEDICAL_WHITELIST
+                    and not token.isdigit()
+                    and any(c.isdigit() or c in "-_[]" for c in token)
+                ):
+                    escaped = re.escape(token)
+                    cleaned = re.sub(rf"(?:(?<=\s)|^){escaped}(?=(?:\s|$))", "", cleaned)
+
+    cleaned = _WHITESPACE_RUN.sub(" ", cleaned)
+    cleaned = _TRAILING_BLANK_LINES.sub("\n\n", cleaned)
+    return cleaned.strip()
+
+
 def validate_page_direct_text(
     doc: Any,
     page_number: int,
     text: str,
+    doc_page_texts: list[str] | None = None,
 ) -> PageTextValidationResult:
     """Run all text sanitization gates on a single page in strict priority order."""
-    cleaned = _clean_page_text(text)
+    # Commit 2A: Remove watermark / ID tokens before running validation gates
+    unwatermarked = remove_watermark_and_id_tokens(text, doc_page_texts=doc_page_texts)
+    cleaned = _clean_page_text(unwatermarked)
 
     # 1. Minimum informative length check
     if len(cleaned.strip()) < MIN_INFORMATIVE_CHARS_PER_PAGE:
@@ -410,14 +492,24 @@ def _extract_from_doc(
     full_text_parts: list[str] = []
 
     page_limit = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
+    # Pre-extract all raw text pages to support multi-page watermark analysis
+    all_raw_page_texts: list[str] = []
+    for index in range(page_limit):
+        try:
+            raw_t = doc.load_page(index).get_text("text") or ""
+        except Exception:
+            raw_t = ""
+        all_raw_page_texts.append(raw_t)
+
     for index in range(page_limit):
         page_number = index + 1
-        try:
-            raw = doc.load_page(index).get_text("text") or ""
-        except Exception:
-            logger.exception("pdf_text_page_failed", extra={"page": page_number})
-            raw = ""
-        val_res = validate_page_direct_text(doc, page_number, raw)
+        raw = all_raw_page_texts[index]
+        val_res = validate_page_direct_text(
+            doc,
+            page_number=page_number,
+            text=raw,
+            doc_page_texts=all_raw_page_texts,
+        )
         pages.append(
             DirectPdfPage(
                 page_number=page_number,
