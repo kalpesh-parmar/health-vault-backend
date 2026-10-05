@@ -88,7 +88,7 @@ def _compute_stage_summary(pages_data: list[dict[str, Any]]) -> dict[str, dict[s
     return summary
 
 
-def _render_single_pdf_page(doc_bytes: bytes, page_idx: int) -> tuple[bytes, str]:
+def _render_single_pdf_page(doc_bytes: bytes, page_idx: int, dpi: int = 150) -> tuple[bytes, str]:
     """Thread-safe rendering of a single PDF page to image bytes."""
     t0 = time.perf_counter()
     with fitz.open(stream=doc_bytes, filetype="pdf") as pdoc:
@@ -107,7 +107,7 @@ def _render_single_pdf_page(doc_bytes: bytes, page_idx: int) -> tuple[bytes, str
                 })
             except Exception:
                 pass
-        pix = page.get_pixmap(dpi=150, alpha=False)
+        pix = page.get_pixmap(dpi=dpi, alpha=False)
         w, h = pix.width, pix.height
         try:
             out_bytes = pix.tobytes("jpeg", jpg_quality=88)
@@ -118,13 +118,14 @@ def _render_single_pdf_page(doc_bytes: bytes, page_idx: int) -> tuple[bytes, str
     dur_ms = (time.perf_counter() - t0) * 1000
     is_full_page_single = (len(images_info) == 1)
     logger.info(
-        "[TIMING_EVIDENCE] render_cost_page_%d: rect=%s, embedded_images_count=%d, is_single_full_page=%s, embedded_dims=%s, dpi=150, scale=%.2f, final_pixels=%dx%d (%.2f MP), out_bytes=%d, render_ms=%.2fms",
+        "[TIMING_EVIDENCE] render_cost_page_%d: rect=%s, embedded_images_count=%d, is_single_full_page=%s, embedded_dims=%s, dpi=%d, scale=%.2f, final_pixels=%dx%d (%.2f MP), out_bytes=%d, render_ms=%.2fms",
         page_idx + 1,
         rect,
         len(images_info),
         is_full_page_single,
         [(img["width"], img["height"], img["size_bytes"]) for img in images_info],
-        150 / 72.0,
+        dpi,
+        dpi / 72.0,
         w,
         h,
         (w * h) / 1000000.0,
@@ -202,16 +203,49 @@ class OcrStageHandler:
         self.min_direct_text_chars = min_direct_text_chars
         self.cache = cache
 
+    def _determine_scanned_render_params(self) -> tuple[int, int]:
+        """Determine concurrency and DPI for scanned page rendering based on available system memory.
+        Sequential rendering (concurrency 1) and DPI 100-120 when free RAM < 1.5 GB.
+        """
+        try:
+            import psutil
+            free_ram_gb = psutil.virtual_memory().available / (1024 ** 3)
+        except Exception:
+            free_ram_gb = 4.0
+
+        if free_ram_gb < 1.5:
+            logger.warning(
+                "Low memory detected (free_ram=%.2f GB < 1.5 GB). Setting scanned page concurrency=1 and dpi=110",
+                free_ram_gb,
+            )
+            return 1, 110
+
+        concurrency = int(getattr(self.settings, "paddle_max_workers", 4))
+        concurrency = max(1, min(concurrency, 8))
+        return concurrency, 150
+
     async def _extract_paddle_safe(self, img_bytes: bytes, lang: str | None = None) -> dict[str, Any]:
-        """Invoke paddle engine async extraction safely handling older/test mocks that do not accept lang keyword."""
+        """Invoke paddle engine async extraction safely handling older/test mocks that do not accept lang keyword and OOMs."""
         if not self.paddle:
             return {}
         try:
             return await self.paddle.async_extract_text_from_bytes(img_bytes, lang=lang)
         except TypeError as te:
             if "unexpected keyword argument 'lang'" in str(te) or ("unexpected keyword argument" in str(te) and "lang" in str(te)):
-                return await self.paddle.async_extract_text_from_bytes(img_bytes)
+                try:
+                    return await self.paddle.async_extract_text_from_bytes(img_bytes)
+                except (MemoryError, Exception) as exc2:
+                    if isinstance(exc2, MemoryError) or "out of memory" in str(exc2).lower() or "oom" in str(exc2).lower():
+                        logger.error("PaddleOCR out-of-memory (OOM) error: %s. Degrading gracefully to fallback.", exc2)
+                        return {"text": "", "lines": [], "confidence": 0.0, "error": "paddle_oom", "oom": True}
+                    raise
             raise
+        except (MemoryError, Exception) as exc:
+            if isinstance(exc, MemoryError) or "out of memory" in str(exc).lower() or "oom" in str(exc).lower():
+                logger.error("PaddleOCR out-of-memory (OOM) error: %s. Degrading gracefully to fallback.", exc)
+                return {"text": "", "lines": [], "confidence": 0.0, "error": "paddle_oom", "oom": True}
+            raise
+
 
     @staticmethod
     def _has_target_script_chars(text: str, lang: str) -> bool:
@@ -1574,13 +1608,13 @@ class OcrStageHandler:
                     # Mixed / Scanned PDF: Rasterize remaining pages needing OCR
                     scanned_page_nums = [p for p in range(1, total_p + 1) if p not in pages_data_dict]
                     if scanned_page_nums:
-                        concurrency = int(getattr(self.settings, "paddle_max_workers", 4))
-                        concurrency = max(1, min(concurrency, 8))
+                        concurrency, target_dpi = self._determine_scanned_render_params()
                         semaphore = asyncio.Semaphore(concurrency)
                         logger.info(
-                            "Routing %d scanned / corrupted pages to raster OCR with concurrency=%d",
+                            "Routing %d scanned / corrupted pages to raster OCR with concurrency=%d, dpi=%d",
                             len(scanned_page_nums),
                             concurrency,
+                            target_dpi,
                         )
 
                         async def process_scanned_page(page_num: int) -> dict[str, Any]:
@@ -1588,7 +1622,7 @@ class OcrStageHandler:
                             try:
                                 with ocr_timer("render_ms", page=page_num, format="pdf"):
                                     img_bytes, mime = await asyncio.to_thread(
-                                        _render_single_pdf_page, file_bytes, page_num - 1
+                                        _render_single_pdf_page, file_bytes, page_num - 1, target_dpi
                                     )
                                 render_ms = round((time.perf_counter() - t_render) * 1000, 2)
                             except Exception as render_err:

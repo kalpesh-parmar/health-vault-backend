@@ -522,15 +522,50 @@ class PipelineOrchestrator:
                 )
 
             # ─────────────────────────────────────────────────────────────────
-            # TERMINAL COMPLETION
             # ─────────────────────────────────────────────────────────────────
+            # TERMINAL COMPLETION (With Page Guard for Partial Extraction)
+            # ─────────────────────────────────────────────────────────────────
+            partial_pages: list[int] = []
+            if raw_ocr_data and isinstance(raw_ocr_data, dict):
+                pages = raw_ocr_data.get("pages") or []
+                lab_results = (extracted_structured_data or {}).get("labResults") or []
+
+                for p in pages:
+                    p_num = p.get("page")
+                    if p_num is None:
+                        continue
+                    p_text = p.get("text") or ""
+                    has_digits = bool(re.search(r"\d", p_text))
+                    p_param_count = sum(1 for item in lab_results if item.get("page") == p_num)
+
+                    if has_digits and p_param_count == 0:
+                        partial_pages.append(p_num)
+
+            is_partial = len(partial_pages) > 0
+            if is_partial:
+                completion_status = "PARTIAL"
+                completion_message = (
+                    f"Document processed with partial extraction (pages {partial_pages} "
+                    f"had numeric content but 0 parameters)"
+                )
+                logger.warning("Job %s marked PARTIAL: %s", job_id, completion_message)
+                if extracted_structured_data is not None:
+                    extracted_structured_data["status"] = "partial"
+                    extracted_structured_data["partialPages"] = partial_pages
+                    extracted_structured_data["partial_pages"] = partial_pages
+                    extracted_structured_data["warning"] = completion_message
+            else:
+                completion_status = "COMPLETED"
+                completion_message = "Document processing completed successfully"
+
             await self.repo.complete_job(
                 job_id=job_id,
-                message="Document processing completed successfully",
+                message=completion_message,
                 completed_stages=completed_stages,
                 checkpoint_data=checkpoint_data,
                 raw_ocr_data=raw_ocr_data,
                 extracted_structured_data=extracted_structured_data,
+                status=completion_status,
             )
             if document_id:
                 try:
@@ -550,14 +585,14 @@ class PipelineOrchestrator:
                 job_id=job_id,
                 file_key=file_key,
                 stage=STAGE_EMBEDDING,
-                stage_status=STATUS_COMPLETED,
+                stage_status=STATUS_COMPLETED if not is_partial else "PARTIAL",
                 previous_percentage=100,
-                message="Document processing complete",
+                message=completion_message,
                 completed_stages=completed_stages,
                 checkpoint_data=checkpoint_data,
                 document_id=document_id,
             )
-            logger.info("Job %s completed successfully (100%%).", job_id)
+            logger.info("Job %s finished with status %s (100%%).", job_id, completion_status)
 
         except NonMedicalDocumentException as nme:
             logger.warning("Job %s rejected: Non-medical document: %s", job_id, nme)

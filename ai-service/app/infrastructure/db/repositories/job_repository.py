@@ -181,13 +181,14 @@ class JobRepository:
         checkpoint_data: dict[str, Any],
         raw_ocr_data: dict[str, Any] | None = None,
         extracted_structured_data: dict[str, Any] | None = None,
+        status: str = "COMPLETED",
     ) -> None:
         query = text(
             """
             UPDATE document_processing_jobs
-            SET status = 'COMPLETED',
+            SET status = :status,
                 stage = 'EMBEDDING',
-                stage_status = 'COMPLETED',
+                stage_status = :status,
                 percentage = 100,
                 message = :message,
                 completed_stages = :completed_stages,
@@ -203,6 +204,7 @@ class JobRepository:
         )
         params = {
             "job_id": job_id,
+            "status": status,
             "message": message,
             "completed_stages": completed_stages,
             "checkpoint_data": json.dumps(checkpoint_data),
@@ -227,9 +229,12 @@ class JobRepository:
         report_date: date | None = None
         doctor_name: str | None = None
         hospital_name: str | None = None
+        doc_ocr_status = "completed"
 
         if extracted_structured_data and isinstance(extracted_structured_data, dict):
             summary_english = extracted_structured_data.get("summaryEnglish")
+            if extracted_structured_data.get("status") == "partial":
+                doc_ocr_status = "partial"
 
             raw_date = (
                 extracted_structured_data.get("reportDate")
@@ -267,7 +272,7 @@ class JobRepository:
         query = text(
             """
             UPDATE documents
-            SET ocr_status = 'completed',
+            SET ocr_status = :doc_ocr_status,
                 structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
                 ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
                 summary_english = COALESCE(:summary_english, summary_english),
@@ -280,6 +285,7 @@ class JobRepository:
         )
         params = {
             "document_id": document_id,
+            "doc_ocr_status": doc_ocr_status,
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
             "raw_text": raw_text,
             "summary_english": summary_english,
