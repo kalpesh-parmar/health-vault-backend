@@ -52,16 +52,16 @@ def test_fixture_words_dump_exists_and_anonymized():
     assert len(data["page_2"]) > 100
 
 
-@pytest.mark.xfail(reason="Phase 2 Extraction Engine pending: spatial clustering yields >= 31 parameters")
 def test_spatial_clustering_extracts_31_parameters():
     """Phase 2 requirement: Extraction from spatial words yields >= 31 lab test rows."""
     from app.services.pipeline.ocr_stage import OcrStageHandler
-    # In Phase 0.5, spatial word-clustering pipeline is not yet implemented in ocr_stage.py
-    extracted_params = []
+    import fitz
+    fixture_pdf = Path(__file__).resolve().parent.parent / "fixtures" / "golden_docs" / "real_6page_digital.pdf"
+    doc = fitz.open(fixture_pdf)
+    extracted_params = OcrStageHandler.extract_spatial_parameters(doc)
     assert len(extracted_params) >= 31, f"Expected at least 31 rows, got {len(extracted_params)}"
 
 
-@pytest.mark.xfail(reason="Phase 2 Extraction Engine pending: method names separated from testName")
 def test_method_separated_from_test_name():
     """Phase 2 requirement: method strings like HPLC, Photo Optical, Photometric are separate attributes."""
     from app.services.pipeline.lab_evaluator import LabEvaluator
@@ -88,10 +88,14 @@ def test_mean_and_calculated_values_are_info():
     assert res["flag"] == "info"
 
 
-@pytest.mark.xfail(reason="Phase 4 Patient Card pending: report date DD-MMM-YYYY and doctor name extracted")
 def test_patient_metadata_extraction():
-    """Phase 4 requirement: Report date 17-Jun-2025, Age 70, Female, Dr. HARDIK SUVAGIYA."""
-    parsed = {}
+    """Phase 2 requirement: Report date 17-Jun-2025, Age 70, Female, Dr. HARDIK SUVAGIYA."""
+    from app.services.pipeline.spatial_row_builder import SpatialRowBuilder
+    with open(FIXTURE_WORDS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    builder = SpatialRowBuilder()
+    parsed = builder.extract_header_metadata(data["page_1"])
     assert parsed.get("report_date") == "17-Jun-2025"
     assert parsed.get("doctor_name") == "Dr. HARDIK SUVAGIYA"
+
 
