@@ -25,15 +25,66 @@ function log(level, traceId, event, fields = {}) {
   else console.log(line);
 }
 
-// Never log raw document bytes, base64 payloads, or API keys.
-const REDACT_KEYS = new Set(["buffer", "base64", "imageB64", "apiKey", "authorization"]);
+// Never log raw document bytes, base64 payloads, API keys, patient names, or raw OCR text.
+const REDACT_KEYS = new Set([
+  "buffer",
+  "base64",
+  "imageB64",
+  "apiKey",
+  "authorization",
+  "token",
+  "secret",
+  "patientName",
+  "patient_name",
+  "name",
+  "fullName",
+  "firstName",
+  "lastName",
+  "middleName",
+  "phone",
+  "phoneNumber",
+  "mobile",
+  "email",
+  "caseId",
+  "uhid",
+  "mrn",
+  "doctorName",
+  "doctor_name",
+  "referringDoctor",
+  "rawText",
+  "raw_text",
+  "fullText",
+  "ocrText",
+  "ocr_text",
+  "extractedText",
+]);
+
 function redact(fields) {
+  if (!fields || typeof fields !== "object") return fields;
+  if (Array.isArray(fields)) {
+    return fields.map((item) => (typeof item === "object" ? redact(item) : item));
+  }
   const out = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (REDACT_KEYS.has(key)) {
+    const lowerKey = key.toLowerCase();
+    if (
+      REDACT_KEYS.has(key) ||
+      REDACT_KEYS.has(lowerKey) ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("token")
+    ) {
       out[key] = "[redacted]";
-    } else if (typeof value === "string" && value.length > 500) {
-      out[key] = `${value.slice(0, 500)}…[+${value.length - 500} chars]`;
+    } else if (typeof value === "string") {
+      if (lowerKey.includes("text") && value.length > 80) {
+        out[key] = `[redacted text: ${value.length} chars]`;
+      } else if (value.length > 500) {
+        out[key] = `${value.slice(0, 500)}…[+${value.length - 500} chars]`;
+      } else {
+        out[key] = value;
+      }
+    } else if (value && typeof value === "object") {
+      out[key] = redact(value);
     } else {
       out[key] = value;
     }
@@ -92,4 +143,4 @@ function withTimeout(promise, ms, label = "operation") {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-module.exports = { ocrLogger, createTrace, withRetry, withTimeout };
+module.exports = { ocrLogger, createTrace, withRetry, withTimeout, redact };

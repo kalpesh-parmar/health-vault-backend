@@ -252,7 +252,7 @@ class ClinicalStageHandler:
                     line_provenance_map[t] = item.get("provenance", "primary_ocr")
                     line_conf_map[t] = float(item.get("confidence") or 0.95)
 
-        # Check if document is a Dental Quotation (e.g. Manjuben Ranoliya)
+        # Check if document is a Dental Quotation (e.g. Dental clinic quotation)
         is_dental_quotation = (
             ("QUOTATION" in text_upper or "ESTIMATED QUOTATION" in text_upper)
             and any(k in text_upper for k in ("DENTE", "IMPLANT", "TEETH", "DENTAL", "ALL ON 6"))
