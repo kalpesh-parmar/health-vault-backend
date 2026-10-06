@@ -17,12 +17,25 @@ CLINICAL_REFERENCE_RANGES: dict[str, tuple[float, float, float | None, float | N
     "hdl_cholesterol": (40.0, 60.0, 25.0, None, "mg/dL"),
     "ldl_cholesterol": (0.0, 100.0, None, 190.0, "mg/dL"),
 
-    # Complete Blood Count (CBC)
+    # CBC & Differential
     "hemoglobin": (12.0, 17.5, 7.0, 20.0, "g/dL"),
     "wbc_count": (4000.0, 11000.0, 2000.0, 30000.0, "cells/mcL"),
     "platelet_count": (150000.0, 450000.0, 50000.0, 1000000.0, "cells/mcL"),
     "rbc_count": (4.0, 5.9, 2.0, 7.0, "M/mcL"),
     "hematocrit": (36.0, 50.0, 20.0, 60.0, "%"),
+    "mcv": (80.0, 100.0, None, None, "fL"),
+    "mch": (27.0, 33.0, None, None, "pg"),
+    "mchc": (32.0, 36.0, None, None, "g/dL"),
+    "rdw_cv": (11.5, 14.5, None, None, "%"),
+    "lymphocyte": (20.0, 40.0, None, None, "%"),
+    "neutrophil": (40.0, 75.0, None, None, "%"),
+    "eosinophil": (1.0, 6.0, None, None, "%"),
+    "monocyte": (2.0, 10.0, None, None, "%"),
+    "basophil": (0.0, 2.0, None, None, "%"),
+
+    # Coagulation
+    "prothrombin_time": (11.0, 15.0, None, None, "sec"),
+    "aptt": (25.0, 38.0, None, None, "sec"),
 
     # Renal Panel
     "creatinine": (0.6, 1.2, None, 5.0, "mg/dL"),
@@ -43,6 +56,8 @@ CLINICAL_REFERENCE_RANGES: dict[str, tuple[float, float, float | None, float | N
 
     # Thyroid Panel
     "tsh": (0.4, 4.0, 0.05, 20.0, "mIU/L"),
+    "total_t3": (0.8, 2.0, None, None, "ng/mL"),
+    "total_t4": (5.0, 12.0, None, None, "ug/dL"),
     "free_t3": (2.0, 4.4, None, None, "pg/mL"),
     "free_t4": (0.8, 1.8, None, None, "ng/dL"),
 
@@ -56,6 +71,7 @@ CLINICAL_REFERENCE_RANGES: dict[str, tuple[float, float, float | None, float | N
 
 # Test name normalization mapping
 TEST_NAME_ALIASES: dict[str, str] = {
+    # Glycemic
     "fbs": "fasting_blood_glucose",
     "fasting blood sugar": "fasting_blood_glucose",
     "fasting blood glucose": "fasting_blood_glucose",
@@ -67,8 +83,12 @@ TEST_NAME_ALIASES: dict[str, str] = {
     "rbs": "random_blood_glucose",
     "blood sugar": "random_blood_glucose",
     "glucose": "random_blood_glucose",
+    "glucose pp": "postprandial_blood_glucose",
     "hba1c": "hba1c",
     "glycated hemoglobin": "hba1c",
+    "glycosylated hemoglobin": "hba1c",
+
+    # Lipid Panel
     "cholesterol": "total_cholesterol",
     "total cholesterol": "total_cholesterol",
     "serum cholesterol": "total_cholesterol",
@@ -78,6 +98,8 @@ TEST_NAME_ALIASES: dict[str, str] = {
     "hdl cholesterol": "hdl_cholesterol",
     "ldl": "ldl_cholesterol",
     "ldl cholesterol": "ldl_cholesterol",
+
+    # CBC & Differential
     "hb": "hemoglobin",
     "hgb": "hemoglobin",
     "hemoglobin": "hemoglobin",
@@ -91,16 +113,52 @@ TEST_NAME_ALIASES: dict[str, str] = {
     "platelet count": "platelet_count",
     "rbc": "rbc_count",
     "rbc count": "rbc_count",
+    "red blood cells": "rbc_count",
     "hematocrit": "hematocrit",
     "pcv": "hematocrit",
+    "packed cell volume": "hematocrit",
+    "mcv": "mcv",
+    "mean corpuscular volume": "mcv",
+    "mch": "mch",
+    "mean corpuscular hemoglobin": "mch",
+    "mchc": "mchc",
+    "mean corpuscular hemoglobin concentration": "mchc",
+    "rdw": "rdw_cv",
+    "rdw cv": "rdw_cv",
+    "red cell distribution width": "rdw_cv",
+    "lymphocyte": "lymphocyte",
+    "lymphocytes": "lymphocyte",
+    "neutrophil": "neutrophil",
+    "neutrophils": "neutrophil",
+    "monocyte": "monocyte",
+    "monocytes": "monocyte",
+    "eosinophil": "eosinophil",
+    "eosinophils": "eosinophil",
+    "basophil": "basophil",
+    "basophils": "basophil",
+
+    # Coagulation
+    "pt": "prothrombin_time",
+    "prothrombin time": "prothrombin_time",
+    "prothrombin time pt": "prothrombin_time",
+    "aptt": "aptt",
+    "activated partial thromboplastin time": "aptt",
+    "ptt": "aptt",
+    "inr": "inr",
+    "international normalized ratio": "inr",
+
+    # Renal Panel
     "creatinine": "creatinine",
     "serum creatinine": "creatinine",
     "bun": "blood_urea_nitrogen",
     "blood urea nitrogen": "blood_urea_nitrogen",
     "urea": "blood_urea_nitrogen",
     "uric acid": "uric_acid",
+
+    # LFT
     "total bilirubin": "bilirubin_total",
     "bilirubin total": "bilirubin_total",
+    "bilirubin": "bilirubin_total",
     "sgot": "sgot_ast",
     "ast": "sgot_ast",
     "sgpt": "sgpt_alt",
@@ -108,16 +166,28 @@ TEST_NAME_ALIASES: dict[str, str] = {
     "alkaline phosphatase": "alkaline_phosphatase",
     "alp": "alkaline_phosphatase",
     "albumin": "serum_albumin",
+
+    # Electrolytes
     "potassium": "serum_potassium",
     "serum potassium": "serum_potassium",
     "sodium": "serum_sodium",
     "serum sodium": "serum_sodium",
     "calcium": "serum_calcium",
+
+    # Thyroid Panel
     "tsh": "tsh",
+    "t3": "total_t3",
+    "triiodothyronine": "total_t3",
+    "total t3": "total_t3",
+    "t4": "total_t4",
+    "thyroxine": "total_t4",
+    "total t4": "total_t4",
     "free t3": "free_t3",
     "ft3": "free_t3",
     "free t4": "free_t4",
     "ft4": "free_t4",
+
+    # Vitals
     "systolic": "blood_pressure_systolic",
     "systolic bp": "blood_pressure_systolic",
     "diastolic": "blood_pressure_diastolic",
@@ -315,59 +385,252 @@ class LabEvaluator:
         unit: str | None = None,
         custom_low: float | None = None,
         custom_high: float | None = None,
+        reference_range: str | None = None,
+        lab_flag: str | None = None,
     ) -> dict[str, Any]:
         canonical_key = normalize_test_key(test_name)
-        num_val = parse_numeric_value(value)
+        raw_val_str = str(value) if value is not None else ""
 
-        # Standard bounds
-        standard_spec = CLINICAL_REFERENCE_RANGES.get(canonical_key)
-        if standard_spec:
-            low, high, crit_low, crit_high, default_unit = standard_spec
-            ref_unit = unit or default_unit
+        # 1. Informational tests (calculated/mean/ratio values)
+        info_keywords = (
+            "mean plasma glucose",
+            "mean blood glucose",
+            "pt mean",
+            "aptt mean",
+            "aptt control",
+            "pt control",
+            "aptt ratio",
+            "isi",
+            "international sensitivity index",
+        )
+        norm_name = (test_name or "").lower()
+        is_informational = any(k in norm_name for k in info_keywords) or (
+            canonical_key in (
+                "mean_plasma_glucose",
+                "pt_mean",
+                "aptt_mean",
+                "aptt_control",
+                "pt_control",
+                "aptt_ratio",
+                "isi",
+            )
+        )
+
+        # 2. Parse numeric value (including time-duration string e.g. "02 Min 15 Sec")
+        time_seconds = LabRangeParser.parse_time_value_to_seconds(value) if isinstance(value, str) else None
+        if time_seconds is not None:
+            num_val = time_seconds
         else:
-            low = custom_low if custom_low is not None else 0.0
-            high = custom_high if custom_high is not None else 0.0
-            crit_low = None
-            crit_high = None
-            ref_unit = unit or ""
+            num_val = parse_numeric_value(value)
 
-        # Overrides if custom range provided
-        if custom_low is not None:
-            low = custom_low
-        if custom_high is not None:
-            high = custom_high
+        # 3. Unit Warning for HbA1c in mg/dL
+        unit_warning = False
+        unit_warning_message = None
+        if canonical_key == "hba1c" and unit and "mg" in unit.lower():
+            unit_warning = True
+            unit_warning_message = "HbA1c is normally reported in %"
 
-        flag = "NORMAL"
+        # 4. Reference range and status resolution
+        range_source = None
+        range_low = None
+        range_high = None
+        ref_str = reference_range or ""
+        reference_raw = reference_range or ""
+
+        if is_informational:
+            computed_status = "info"
+            range_source = None
+            if not ref_str:
+                ref_str = f"{unit}".strip() if unit else ""
+        elif reference_range:
+            parsed = LabRangeParser.parse_range(reference_range)
+            if parsed["status"] == "parsed":
+                range_source = "printed"
+                op = parsed["operator"]
+                if op == "tiered":
+                    matched_tier = None
+                    if num_val is not None:
+                        for tier in parsed["tiers"]:
+                            t_op = tier.get("operator")
+                            t_low = tier.get("low")
+                            t_high = tier.get("high")
+                            if t_op == "<" and t_high is not None and num_val < t_high:
+                                matched_tier = tier["tier"]
+                                break
+                            elif t_op == "<=" and t_high is not None and num_val <= t_high:
+                                matched_tier = tier["tier"]
+                                break
+                            elif t_op == ">" and t_low is not None and num_val > t_low:
+                                matched_tier = tier["tier"]
+                                break
+                            elif t_op == ">=" and t_low is not None and num_val >= t_low:
+                                matched_tier = tier["tier"]
+                                break
+                            elif t_op == "-" and t_low is not None and t_high is not None and t_low <= num_val <= t_high:
+                                matched_tier = tier["tier"]
+                                break
+                    computed_status = matched_tier or "normal"
+                elif op in ("<", "<="):
+                    range_high = parsed["high"]
+                    if num_val is not None and range_high is not None:
+                        is_normal = (num_val < range_high) if op == "<" else (num_val <= range_high)
+                        computed_status = "normal" if is_normal else "high"
+                    else:
+                        computed_status = "no_range"
+                elif op in (">", ">="):
+                    range_low = parsed["low"]
+                    if num_val is not None and range_low is not None:
+                        is_normal = (num_val > range_low) if op == ">" else (num_val >= range_low)
+                        computed_status = "normal" if is_normal else "low"
+                    else:
+                        computed_status = "no_range"
+                elif op == "-":
+                    range_low = parsed["low"]
+                    range_high = parsed["high"]
+                    if num_val is not None and range_low is not None and range_high is not None:
+                        if num_val < range_low:
+                            computed_status = "low"
+                        elif num_val > range_high:
+                            computed_status = "high"
+                        else:
+                            computed_status = "normal"
+                    else:
+                        computed_status = "no_range"
+            else:
+                computed_status = "no_range"
+                range_source = None
+        elif custom_low is not None or custom_high is not None:
+            range_low = custom_low
+            range_high = custom_high
+            if num_val is not None:
+                if range_low is not None and num_val < range_low:
+                    computed_status = "low"
+                elif range_high is not None and num_val > range_high:
+                    computed_status = "high"
+                else:
+                    computed_status = "normal"
+            else:
+                computed_status = "no_range"
+            ref_str = f"{range_low} - {range_high} {unit or ''}".strip()
+        elif canonical_key in CLINICAL_REFERENCE_RANGES:
+            g_low, g_high, _, _, g_unit = CLINICAL_REFERENCE_RANGES[canonical_key]
+            range_source = "generic"
+            range_low = g_low
+            range_high = g_high
+            if canonical_key == "hba1c" and num_val is not None:
+                if num_val < 5.7:
+                    computed_status = "normal"
+                elif 5.7 <= num_val < 6.5:
+                    computed_status = "prediabetic"
+                else:
+                    computed_status = "diabetic"
+            elif num_val is not None:
+                if num_val < g_low:
+                    computed_status = "low"
+                elif num_val > g_high:
+                    computed_status = "high"
+                else:
+                    computed_status = "normal"
+            else:
+                computed_status = "no_range"
+            ref_str = f"{g_low} - {g_high} {g_unit} (generic reference)"
+        else:
+            computed_status = "no_range"
+            range_source = None
+            ref_str = "See lab reference"
+
+        # 5. Severity computation
+        severity = None
+        if not is_informational and computed_status in ("low", "high") and num_val is not None:
+            if computed_status == "high" and range_high is not None and range_high > 0:
+                diff = num_val - range_high
+                pct = diff / range_high
+                if pct <= 0.05:
+                    severity = "borderline"
+                elif pct <= 0.20:
+                    severity = "mild"
+                else:
+                    severity = "significant"
+            elif computed_status == "low" and range_low is not None and range_low > 0:
+                diff = range_low - num_val
+                pct = diff / range_low
+                if pct <= 0.05:
+                    severity = "borderline"
+                elif pct <= 0.20:
+                    severity = "mild"
+                else:
+                    severity = "significant"
+
+        # 6. Printed lab flag and conflict check
+        flag_conflict = False
+        clean_lab_flag = None
+        if lab_flag:
+            lf = str(lab_flag).strip().upper()
+            if lf in ("L", "LOW"):
+                clean_lab_flag = "L"
+            elif lf in ("H", "HIGH"):
+                clean_lab_flag = "H"
+
+        if clean_lab_flag is not None:
+            if clean_lab_flag == "L" and computed_status != "low":
+                flag_conflict = True
+            elif clean_lab_flag == "H" and computed_status != "high":
+                flag_conflict = True
+
+        # 7. Status, Flag, isAbnormal, isCritical
+        status = computed_status
+        if status == "diabetic":
+            flag = "diabetic"
+            is_abnormal = True
+        elif status == "prediabetic":
+            flag = "prediabetic"
+            is_abnormal = True
+        elif status == "info":
+            flag = "info"
+            is_abnormal = False
+        elif status == "low":
+            flag = "LOW"
+            is_abnormal = True
+        elif status == "high":
+            flag = "HIGH"
+            is_abnormal = True
+        elif status == "normal":
+            flag = "NORMAL"
+            is_abnormal = False
+        else:
+            flag = "NO_RANGE"
+            is_abnormal = False
+
         is_critical = False
-        is_abnormal = False
-
-        if num_val is not None and (low > 0.0 or high > 0.0 or standard_spec):
-            # Check Critical first
+        if canonical_key in CLINICAL_REFERENCE_RANGES and num_val is not None:
+            _, _, crit_low, crit_high, _ = CLINICAL_REFERENCE_RANGES[canonical_key]
             if crit_low is not None and num_val <= crit_low:
-                flag = "CRITICAL"
                 is_critical = True
+                flag = "CRITICAL"
                 is_abnormal = True
             elif crit_high is not None and num_val >= crit_high:
-                flag = "CRITICAL"
                 is_critical = True
+                flag = "CRITICAL"
                 is_abnormal = True
-            elif low > 0.0 and num_val < low:
-                flag = "LOW"
-                is_abnormal = True
-            elif high > 0.0 and num_val > high:
-                flag = "HIGH"
-                is_abnormal = True
-
-        ref_str = f"{low} - {high} {ref_unit}".strip() if (low > 0.0 or high > 0.0) else "See lab reference"
 
         return {
             "testName": test_name.strip() if test_name else "Unknown Test",
             "canonicalKey": canonical_key,
             "value": num_val if num_val is not None else value,
-            "rawValue": str(value) if value is not None else "",
-            "unit": ref_unit,
+            "rawValue": raw_val_str,
+            "unit": unit or "",
             "referenceRange": ref_str,
+            "reference_raw": reference_raw,
             "flag": flag,
+            "status": status,
+            "computed_status": computed_status,
+            "lab_flag": clean_lab_flag,
+            "flag_conflict": flag_conflict,
+            "severity": severity,
+            "range_source": range_source,
+            "is_informational": is_informational,
+            "unit_warning": unit_warning,
+            "unit_warning_message": unit_warning_message,
             "isAbnormal": is_abnormal,
             "isCritical": is_critical,
         }
@@ -404,8 +667,20 @@ class LabEvaluator:
 
             val = item.get("value")
             unit = item.get("unit")
-            eval_res = cls.evaluate_result(test_name, val, unit=unit)
-            # preserve extra fields from item
+            ref_range = (
+                item.get("referenceRange")
+                or item.get("reference_range")
+                or item.get("reference")
+                or item.get("reference_raw")
+            )
+            lab_flag = item.get("flag") or item.get("lab_flag")
+            eval_res = cls.evaluate_result(
+                test_name,
+                val,
+                unit=unit,
+                reference_range=ref_range,
+                lab_flag=lab_flag,
+            )
             merged = {**item, **eval_res, "testName": test_name}
             if method:
                 merged["method"] = method
