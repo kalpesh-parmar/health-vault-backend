@@ -198,8 +198,14 @@ class ClinicalStageHandler:
         if raw_labs:
             evaluated_labs = LabEvaluator.evaluate_all(raw_labs)
             structured["labResults"] = evaluated_labs
+            structured["groupedLabResults"] = LabEvaluator.group_by_sections(evaluated_labs)
+            structured["sections"] = structured["groupedLabResults"]
+            structured["pipelineVersion"] = "1.1.0"
         else:
             structured["labResults"] = []
+            structured["groupedLabResults"] = []
+            structured["sections"] = []
+            structured["pipelineVersion"] = "1.1.0"
 
         # 7. Ensure fallback provenance and verification fields on all clinical entities
         for med in structured.get("medications", []):

@@ -706,3 +706,184 @@ class LabEvaluator:
             results.append(merged)
         return results
 
+    @classmethod
+    def group_by_sections(cls, evaluated_labs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Groups flat evaluated lab parameters into standard report sections and merges differential pairs."""
+        cbc_items: list[dict[str, Any]] = []
+        diff_raw: list[dict[str, Any]] = []
+        bleeding_clotting_items: list[dict[str, Any]] = []
+        biochemistry_items: list[dict[str, Any]] = []
+        hba1c_items: list[dict[str, Any]] = []
+        coagulation_items: list[dict[str, Any]] = []
+        thyroid_items: list[dict[str, Any]] = []
+        other_items: list[dict[str, Any]] = []
+
+        for item in evaluated_labs:
+            name = (item.get("testName") or item.get("name") or "").strip()
+            name_lower = name.lower()
+            key = (item.get("canonicalKey") or "").lower()
+
+            # Differential analytes
+            if any(
+                d in name_lower
+                for d in ("polymorph", "neutrophil", "lymphocyte", "eosinophil", "monocyte", "basophil")
+            ):
+                diff_raw.append(item)
+            # Bleeding / Clotting Time
+            elif any(k in name_lower for k in ("bleeding time", "clotting time")):
+                bleeding_clotting_items.append(item)
+            # HbA1c and Mean Plasma Glucose
+            elif any(k in name_lower or k in key for k in ("hba1c", "glycated hemoglobin", "mean plasma glucose")):
+                hba1c_items.append(item)
+            # Coagulation
+            elif any(k in name_lower or k in key for k in ("pt", "prothrombin", "aptt", "inr", "isi")):
+                coagulation_items.append(item)
+            # Thyroid
+            elif any(k in name_lower or k in key for k in ("t3", "t4", "tsh", "thyroid")):
+                thyroid_items.append(item)
+            # CBC
+            elif any(
+                k in name_lower or k in key
+                for k in (
+                    "hemoglobin", "haemoglobin", "rbc", "wbc", "platelet", "hematocrit", "pcv",
+                    "mcv", "mch", "mchc", "rdw"
+                )
+            ):
+                cbc_items.append(item)
+            # Biochemistry
+            elif any(
+                k in name_lower or k in key
+                for k in (
+                    "glucose", "sugar", "creatinine", "urea", "bun", "uric", "bilirubin", "sgot", "sgpt",
+                    "ast", "alt", "alkaline", "alp", "albumin", "electrolyte", "sodium", "potassium", "calcium"
+                )
+            ):
+                biochemistry_items.append(item)
+            else:
+                other_items.append(item)
+
+        # Merge differential pairs
+        diff_merged_map: dict[str, dict[str, Any]] = {}
+        diff_order = ["Polymorphs", "Lymphocyte", "Eosinophils", "Monocytes", "Basophils"]
+        for base in diff_order:
+            diff_merged_map[base] = {
+                "name": base,
+                "percent": None,
+                "absolute": None,
+                "status": "normal",
+                "severity": None,
+            }
+
+        for item in diff_raw:
+            t_name = item.get("testName") or item.get("name") or ""
+            t_lower = t_name.lower()
+            matched_base = None
+            for base in diff_order:
+                if base.lower()[:5] in t_lower:
+                    matched_base = base
+                    break
+            if not matched_base:
+                matched_base = t_name
+
+            if matched_base not in diff_merged_map:
+                diff_merged_map[matched_base] = {
+                    "name": matched_base,
+                    "percent": None,
+                    "absolute": None,
+                    "status": "normal",
+                    "severity": None,
+                }
+
+            is_abs = "absolute" in t_lower or "/c" in (item.get("unit") or "") or "cumm" in (item.get("unit") or "")
+            if is_abs:
+                diff_merged_map[matched_base]["absolute"] = item
+            else:
+                diff_merged_map[matched_base]["percent"] = item
+
+        diff_items: list[dict[str, Any]] = []
+        for base in diff_order:
+            if base in diff_merged_map:
+                entry = diff_merged_map[base]
+                p_item = entry.get("percent") or {}
+                a_item = entry.get("absolute") or {}
+                statuses = [p_item.get("status"), a_item.get("status")]
+                severities = [p_item.get("severity"), a_item.get("severity")]
+
+                if "borderline" in severities and not any(s in ("mild", "significant") for s in severities):
+                    entry["severity"] = "borderline"
+                    entry["status"] = "high" if "high" in statuses else ("low" if "low" in statuses else "normal")
+                elif any(s in ("mild", "significant") for s in severities):
+                    entry["severity"] = "significant" if "significant" in severities else "mild"
+                    entry["status"] = "high" if "high" in statuses else ("low" if "low" in statuses else "abnormal")
+                elif "normal" in statuses:
+                    entry["status"] = "normal"
+                    entry["severity"] = None
+                elif "no_range" in statuses:
+                    entry["status"] = "no_range"
+                    entry["severity"] = None
+                diff_items.append(entry)
+
+        def compute_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+            c = {"abnormal": 0, "borderline": 0, "normal": 0, "no_range": 0, "info": 0}
+            for it in items:
+                st = it.get("status")
+                sev = it.get("severity")
+                if st == "info" or it.get("is_informational"):
+                    c["info"] += 1
+                elif st == "no_range":
+                    c["no_range"] += 1
+                elif sev == "borderline":
+                    c["borderline"] += 1
+                elif st in ("low", "high", "diabetic", "prediabetic", "abnormal"):
+                    c["abnormal"] += 1
+                elif st == "normal":
+                    c["normal"] += 1
+                else:
+                    c["normal"] += 1
+            return c
+
+        sections = [
+            {
+                "sectionName": "Complete Blood Count",
+                "items": cbc_items,
+                "counts": compute_counts(cbc_items),
+            },
+            {
+                "sectionName": "Differential",
+                "items": diff_items,
+                "counts": compute_counts(diff_items),
+            },
+            {
+                "sectionName": "Bleeding/Clotting Time",
+                "items": bleeding_clotting_items,
+                "counts": compute_counts(bleeding_clotting_items),
+            },
+            {
+                "sectionName": "Biochemistry",
+                "items": biochemistry_items,
+                "counts": compute_counts(biochemistry_items),
+            },
+            {
+                "sectionName": "HbA1c",
+                "items": hba1c_items,
+                "counts": compute_counts(hba1c_items),
+            },
+            {
+                "sectionName": "Coagulation",
+                "items": coagulation_items,
+                "counts": compute_counts(coagulation_items),
+            },
+            {
+                "sectionName": "Thyroid",
+                "items": thyroid_items,
+                "counts": compute_counts(thyroid_items),
+            },
+        ]
+        if other_items:
+            sections.append({
+                "sectionName": "Other",
+                "items": other_items,
+                "counts": compute_counts(other_items),
+            })
+        return sections
+

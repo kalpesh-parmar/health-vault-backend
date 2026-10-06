@@ -11,7 +11,7 @@ const {
 const { toDbDateOnlyString } = require("../utils/dateUtils");
 const aiClient = require("../services/ai/clients/aiClient.service");
 
-const PIPELINE_VERSION = "1.0.0";
+const PIPELINE_VERSION = "1.1.0";
 
 const REPORT_QUESTIONS_I18N = {
   english: [
@@ -438,6 +438,8 @@ async function buildStructuredReportPayload({
       symptoms: structured.symptoms || [],
       vitals: structured.vitals || [],
       labResults: structured.labResults || [],
+      groupedLabResults: structured.groupedLabResults || structured.sections || [],
+      sections: structured.sections || structured.groupedLabResults || [],
       medications: structured.medications || [],
       procedures: structured.procedures || [],
       treatments: structured.treatments || [],

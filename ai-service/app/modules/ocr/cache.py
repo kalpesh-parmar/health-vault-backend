@@ -11,10 +11,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+OCR_CACHE_PIPELINE_VERSION = "v1.1"
+
 
 def compute_ocr_cache_key(
     image_bytes: bytes,
-    pipeline_version: str = "v1.0",
+    pipeline_version: str = OCR_CACHE_PIPELINE_VERSION,
     engine_config_hash: str = "",
 ) -> str:
     """Computes a deterministic SHA-256 digest over image payload, pipeline version,
@@ -46,7 +48,7 @@ class OcrResultCache:
         self,
         max_entries: int = 500,
         ttl_seconds: float = 86400.0,
-        pipeline_version: str = "v1.0",
+        pipeline_version: str = OCR_CACHE_PIPELINE_VERSION,
     ) -> None:
         self.max_entries = max(1, max_entries)
         self.ttl_seconds = ttl_seconds

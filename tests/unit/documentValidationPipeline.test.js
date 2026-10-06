@@ -4,7 +4,7 @@ const {
   validatePreUploadDocument,
   validationCache,
 } = require("../../src/services/documentPreValidation.service");
-const { MedGemmaQueue, medgemmaQueue } = require("../../src/services/queue/medgemmaQueue.service");
+const { MedGemmaQueue } = require("../../src/services/queue/medgemmaQueue.service");
 const documentController = require("../../src/controllers/document.controller");
 
 // Mock pdf-parse and sharp so structural syntax checks pass in unit test environment
@@ -12,7 +12,7 @@ jest.mock("pdf-parse", () =>
   jest.fn(async () => ({
     text: "dummy pdf text",
     numpages: 1,
-  }))
+  })),
 );
 
 jest.mock("sharp", () =>
@@ -23,7 +23,7 @@ jest.mock("sharp", () =>
         toBuffer: async () => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
       }),
     }),
-  }))
+  })),
 );
 
 describe("Document Validation Pipeline", () => {
@@ -161,14 +161,12 @@ describe("Document Validation Pipeline", () => {
 
   describe("4. SHA-256 Result Cache", () => {
     it("skips LLM call on second identical file and returns cacheHit = true", async () => {
-      const validateSpy = jest
-        .spyOn(aiServiceClient, "validateMedicalDocument")
-        .mockResolvedValue({
-          isMedical: true,
-          confidence: 0.96,
-          documentType: "LAB_REPORT",
-          reason: "Complete Blood Count Lab Report",
-        });
+      const validateSpy = jest.spyOn(aiServiceClient, "validateMedicalDocument").mockResolvedValue({
+        isMedical: true,
+        confidence: 0.96,
+        documentType: "LAB_REPORT",
+        reason: "Complete Blood Count Lab Report",
+      });
 
       const file1 = {
         originalname: "cbc-report.pdf",
