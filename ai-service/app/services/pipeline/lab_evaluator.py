@@ -155,6 +155,156 @@ def parse_numeric_value(raw_val: Any) -> float | None:
     return None
 
 
+class LabRangeParser:
+    """Parses printed clinical laboratory reference ranges, tiered texts, and time durations."""
+
+    @staticmethod
+    def parse_time_value_to_seconds(raw_val: Any) -> float | None:
+        if raw_val is None or not isinstance(raw_val, str):
+            return None
+        s = raw_val.strip()
+        if not re.search(r"\b(?:min|sec|m|s)\b", s, re.I):
+            return None
+
+        m_min = re.search(r"(\d+(?:\.\d+)?)\s*(?:min|m)\b", s, re.I)
+        m_sec = re.search(r"(\d+(?:\.\d+)?)\s*(?:sec|s)\b", s, re.I)
+        if not m_min and not m_sec:
+            return None
+        mins = float(m_min.group(1)) if m_min else 0.0
+        secs = float(m_sec.group(1)) if m_sec else 0.0
+        return mins * 60.0 + secs
+
+    @staticmethod
+    def parse_range(range_str: str | None) -> dict[str, Any]:
+        default_res = {
+            "low": None,
+            "high": None,
+            "operator": None,
+            "tiers": [],
+            "raw_text": range_str if range_str is not None else "",
+            "status": "no_range",
+            "is_time": False,
+        }
+        if not range_str or not isinstance(range_str, str):
+            return default_res
+
+        raw = range_str.strip()
+        if not raw:
+            return default_res
+
+        # 1. Tiered ranges (e.g. "< 5.7 : Normal / 5.7 - 6.4 : Prediabetic / >= 6.5 : Diabetic")
+        if "/" in raw and ":" in raw:
+            chunks = [c.strip() for c in raw.split("/") if c.strip()]
+            tiers = []
+            for chunk in chunks:
+                if ":" in chunk:
+                    expr, label = chunk.split(":", 1)
+                    tier_label = label.strip().lower()
+                    expr = expr.strip()
+                    m_op = re.match(r"^(<=?|>=?)\s*([\d,]+(?:\.\d+)?)", expr)
+                    m_hyphen = re.match(r"^([\d,]+(?:\.\d+)?)\s*(?:-|to)\s*([\d,]+(?:\.\d+)?)", expr, re.I)
+                    if m_op:
+                        op = m_op.group(1)
+                        val = float(m_op.group(2).replace(",", ""))
+                        if "<" in op:
+                            tiers.append({"tier": tier_label, "low": None, "high": val, "operator": op})
+                        else:
+                            tiers.append({"tier": tier_label, "low": val, "high": None, "operator": op})
+                    elif m_hyphen:
+                        l_val = float(m_hyphen.group(1).replace(",", ""))
+                        h_val = float(m_hyphen.group(2).replace(",", ""))
+                        tiers.append({"tier": tier_label, "low": l_val, "high": h_val, "operator": "-"})
+            if tiers:
+                return {
+                    "low": None,
+                    "high": None,
+                    "operator": "tiered",
+                    "tiers": tiers,
+                    "raw_text": raw,
+                    "status": "parsed",
+                    "is_time": False,
+                }
+
+        # 2. Time-duration ranges (e.g. "Up To 7 min.", "Up to 9 min.")
+        m_up_to = re.search(r"up\s*to\s*(\d+(?:\.\d+)?)\s*(min|m|sec|s)(?:\.|\b)", raw, re.I)
+        if m_up_to:
+            val = float(m_up_to.group(1))
+            unit_part = m_up_to.group(2).lower()
+            if "min" in unit_part or unit_part == "m":
+                high_secs = val * 60.0
+                m_extra_sec = re.search(r"(\d+(?:\.\d+)?)\s*(?:sec|s)(?:\.|\b)", raw[m_up_to.end():], re.I)
+                if m_extra_sec:
+                    high_secs += float(m_extra_sec.group(1))
+            else:
+                high_secs = val
+            return {
+                "low": None,
+                "high": high_secs,
+                "operator": "<=",
+                "tiers": [],
+                "raw_text": raw,
+                "status": "parsed",
+                "is_time": True,
+            }
+
+        # 3. Single operator with optional explanatory colon (e.g. "> 200 : Provisional Diagnosis of Diabetes")
+        expr_part = raw
+        if ":" in raw:
+            expr_part = raw.split(":", 1)[0].strip()
+
+        m_single = re.match(r"^(<=?|>=?)\s*([\d,]+(?:\.\d+)?)", expr_part)
+        if m_single:
+            op = m_single.group(1)
+            val = float(m_single.group(2).replace(",", ""))
+            if "<" in op:
+                return {
+                    "low": None,
+                    "high": val,
+                    "operator": op,
+                    "tiers": [],
+                    "raw_text": raw,
+                    "status": "parsed",
+                    "is_time": False,
+                }
+            else:
+                return {
+                    "low": val,
+                    "high": None,
+                    "operator": op,
+                    "tiers": [],
+                    "raw_text": raw,
+                    "status": "parsed",
+                    "is_time": False,
+                }
+
+        # 4. Standard hyphen/to range (e.g. "12 - 15", "3.8-4.8", "150000-410000", "13.87-18.27", "150,000 - 450,000", "13.87 - 18.27 Sec")
+        m_range = re.search(r"^\s*([\d,]+(?:\.\d+)?)\s*(?:-|to)\s*([\d,]+(?:\.\d+)?)", raw, re.I)
+        if m_range:
+            low_val = float(m_range.group(1).replace(",", ""))
+            high_val = float(m_range.group(2).replace(",", ""))
+            is_time = bool(re.search(r"\b(?:sec|s|min|m)\b", raw, re.I))
+            return {
+                "low": low_val,
+                "high": high_val,
+                "operator": "-",
+                "tiers": [],
+                "raw_text": raw,
+                "status": "parsed",
+                "is_time": is_time,
+            }
+
+        # 5. Bare number or unparseable text
+        return {
+            "low": None,
+            "high": None,
+            "operator": None,
+            "tiers": [],
+            "raw_text": raw,
+            "status": "no_range",
+            "is_time": False,
+        }
+
+
 class LabEvaluator:
     """Evaluates medical laboratory results and vital signs against clinical reference ranges."""
 
