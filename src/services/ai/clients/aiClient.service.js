@@ -302,23 +302,24 @@ ${text}
     }
 
     const translatedPieces = [];
-    let anyFailure = false;
+    let failedCount = 0;
 
     for (const sent of sentences) {
       const res = await this._translateSentence(sent, normSrc, normTgt);
       if (!res.success) {
-        anyFailure = true;
+        failedCount++;
       }
       translatedPieces.push(res.text);
     }
 
-    if (anyFailure) {
+    const failureRate = sentences.length > 0 ? failedCount / sentences.length : 0;
+    if (failureRate > 0.3) {
       this.lastTranslationMetadata = {
         translationStatus: "unavailable",
         retry: true,
       };
       return {
-        text, // Fallback to English text on failure
+        text, // Fallback to full English text when > 30% sentences fail
         translationStatus: "unavailable",
         retry: true,
       };

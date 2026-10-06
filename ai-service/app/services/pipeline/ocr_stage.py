@@ -1578,10 +1578,12 @@ class OcrStageHandler:
                                 )
 
                         stage_summary = _compute_stage_summary(pages_data)
+                        spatial_params = self.extract_spatial_parameters(doc)
                         return {
                             "pages": pages_data,
                             "fullText": full_text,
                             "text": full_text,
+                            "spatial_parameters": spatial_params,
                             "confidence": 1.0,
                             "pageCount": total_p,
                             "processedPageCount": total_p,

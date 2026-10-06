@@ -193,8 +193,8 @@ class ClinicalStageHandler:
             structured["labResults"] = []
             structured["vitals"] = []
 
-        # 6. Run LabEvaluator normalization on labResults only if present
-        raw_labs = structured.get("labResults") or []
+        # 6. Run LabEvaluator normalization on labResults (preferring high-fidelity spatial parameters)
+        raw_labs = (raw_ocr_data or {}).get("spatial_parameters") or structured.get("labResults") or []
         if raw_labs:
             evaluated_labs = LabEvaluator.evaluate_all(raw_labs)
             structured["labResults"] = evaluated_labs

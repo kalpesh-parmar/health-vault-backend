@@ -244,5 +244,52 @@ describe("Commit 1E - Translation Safety, Placeholder Masking, and Health Checks
       expect(result.text).toContain("HbA1c");
       expect(result.text).toContain("8.5%");
     });
+
+    test("falls back to entire English summary with translationStatus unavailable when >30% sentences fail", async () => {
+      jest.spyOn(aiClient, "checkIndicTransHealth").mockResolvedValue(false);
+
+      // 5 distinct sentences
+      const text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five.";
+
+      // 2 fail, 3 succeed (2/5 = 40% > 30%)
+      jest
+        .spyOn(ollamaClient, "generate")
+        .mockResolvedValueOnce("વાક્ય એક.") // 1: success
+        .mockResolvedValueOnce("bad") // 2: fail (no match / retry fail)
+        .mockResolvedValueOnce("bad")
+        .mockResolvedValueOnce("વાક્ય ત્રણ.") // 3: success
+        .mockResolvedValueOnce("bad") // 4: fail
+        .mockResolvedValueOnce("bad")
+        .mockResolvedValueOnce("વાક્ય પાંચ."); // 5: success
+
+      const result = await aiClient.translateWithMetadata(text, "english", "gujarati");
+
+      expect(result.translationStatus).toBe("unavailable");
+      expect(result.retry).toBe(true);
+      expect(result.text).toBe(text); // Full English summary returned, no mixed language
+    });
+
+    test("allows translation when sentence failure rate is <= 30%", async () => {
+      jest.spyOn(aiClient, "checkIndicTransHealth").mockResolvedValue(false);
+
+      // 5 distinct sentences
+      const text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five.";
+
+      // 1 fails, 4 succeed (1/5 = 20% <= 30%)
+      jest
+        .spyOn(ollamaClient, "generate")
+        .mockResolvedValueOnce("વાક્ય એક.") // 1: success
+        .mockResolvedValueOnce("bad") // 2: fail
+        .mockResolvedValueOnce("bad")
+        .mockResolvedValueOnce("વાક્ય ત્રણ.") // 3: success
+        .mockResolvedValueOnce("વાક્ય ચાર.") // 4: success
+        .mockResolvedValueOnce("વાક્ય પાંચ."); // 5: success
+
+      const result = await aiClient.translateWithMetadata(text, "english", "gujarati");
+
+      expect(result.translationStatus).toBe("translated");
+      expect(result.retry).toBe(false);
+      expect(result.text).toContain("વાક્ય એક.");
+    });
   });
 });

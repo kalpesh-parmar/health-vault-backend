@@ -71,19 +71,32 @@ async function ocrProgressStream(req, res) {
   // 5. If the database record is already in a terminal state and no events were emitted,
   // emit final status and close immediately.
   const isTerminal =
-    job.status === "COMPLETED" || job.status === "FAILED" || job.status === "REJECTED";
+    job.status === "COMPLETED" ||
+    job.status === "PARTIAL" ||
+    job.status === "FAILED" ||
+    job.status === "REJECTED";
   if (isTerminal && eventsEmitted === 0 && !stream.isClosed()) {
-    const isCompleted = job.status === "COMPLETED";
+    const isPartial = job.status === "PARTIAL";
+    const isCompleted = job.status === "COMPLETED" || isPartial;
+    const partialPages =
+      job.extractedStructuredData?.partialPages || job.extractedStructuredData?.partial_pages || [];
     stream.write({
       eventId: 1,
       fileKey: job.fileKey,
-      stage: job.stage || (isCompleted ? "COMPLETED" : "FAILED"),
-      stageStatus: job.stageStatus || job.status,
+      stage: job.stage || (isCompleted ? (isPartial ? "PARTIAL" : "COMPLETED") : "FAILED"),
+      stageStatus: job.stageStatus || (isPartial ? "PARTIAL" : job.status),
       percentage: isCompleted ? 100 : job.percentage || 0,
-      status: isCompleted ? "SUCCESS" : "FAILED",
+      status: isPartial ? "PARTIAL" : isCompleted ? "SUCCESS" : "FAILED",
       error: job.error || null,
-      message: job.message || (isCompleted ? "Processing completed" : "Document processing failed"),
+      message:
+        job.message ||
+        (isPartial
+          ? `Some pages could not be read (Page ${partialPages.join(", ")})`
+          : isCompleted
+            ? "Processing completed"
+            : "Document processing failed"),
       extractedStructuredData: job.extractedStructuredData || null,
+      partialPages,
     });
     setImmediate(() => stream.close());
   }
@@ -158,18 +171,24 @@ async function runOcr(req, res) {
 function formatJobStatusPayload(job) {
   if (!job) return null;
   const isFailed = job.status === "FAILED" || job.status === "REJECTED";
-  const isCompleted = job.status === "COMPLETED";
+  const isPartial = job.status === "PARTIAL";
+  const isCompleted = job.status === "COMPLETED" || isPartial;
   const stageStatus =
-    job.stageStatus || (isFailed ? "FAILED" : isCompleted ? "COMPLETED" : "IN_PROGRESS");
+    job.stageStatus ||
+    (isFailed ? "FAILED" : isPartial ? "PARTIAL" : isCompleted ? "COMPLETED" : "IN_PROGRESS");
   const percentage = job.percentage ?? (isCompleted ? 100 : 0);
-  const status = isFailed ? "FAILED" : "SUCCESS";
+  const status = isFailed ? "FAILED" : isPartial ? "PARTIAL" : "SUCCESS";
+  const partialPages =
+    job.extractedStructuredData?.partialPages || job.extractedStructuredData?.partial_pages || [];
   const message =
     job.message ||
     (isFailed
       ? job.error || "Document processing failed"
-      : isCompleted
-        ? "Processing completed"
-        : `Processing ${job.stage || "document"}...`);
+      : isPartial
+        ? `Some pages could not be read (Page ${partialPages.join(", ")})`
+        : isCompleted
+          ? "Processing completed"
+          : `Processing ${job.stage || "document"}...`);
 
   const processingTimeMs =
     job.metadata?.processingTimingsMs?.totalDurationMs ||
@@ -188,12 +207,13 @@ function formatJobStatusPayload(job) {
     fileName: job.metadata?.originalName || job.fileKey.split("/").pop(),
     batchId: job.metadata?.batchId || null,
     patientId: job.userId,
-    stage: job.stage || (isCompleted ? "COMPLETED" : "QUEUED"),
+    stage: job.stage || (isCompleted ? (isPartial ? "PARTIAL" : "COMPLETED") : "QUEUED"),
     stageStatus,
     progress: percentage,
     percentage,
     status,
     message,
+    partialPages,
     processingTimeSeconds,
     processingTimeFormatted,
     totalTimeTaken: processingTimeFormatted,
