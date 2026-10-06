@@ -126,7 +126,7 @@ class Settings(BaseSettings):
         description="Hard timeout in seconds for PaddleOCR page inference before falling back to VLM.",
     )
     paddle_max_workers: int = Field(
-        default=4,
+        default=1,
         alias="PADDLE_MAX_WORKERS",
         description="Number of worker processes in PaddleOCR process pool to allow true page parallelism.",
     )
@@ -338,6 +338,11 @@ class Settings(BaseSettings):
         description="Whether to use generic reference range for INR (non-anticoagulated adults: 0.8-1.2). TODO: clinician sign-off required",
     )
 
+    classifier_model_path: str = Field(
+        default="models/med-doc-classifier",
+        alias="CLASSIFIER_MODEL_PATH",
+        description="Path to local weights and configs for lightweight medical document classifier.",
+    )
     medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")
     medgemma_max_pages: int = Field(default=2, alias="MEDGEMMA_MAX_PAGES")
     medgemma_timeout_ms: int = Field(default=120000, alias="MEDGEMMA_TIMEOUT_MS")
