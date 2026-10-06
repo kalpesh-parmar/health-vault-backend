@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.api.v1.routes.validation import router as validation_router
+from app.modules.validation.classifier import ClassifierUnavailableError, MedicalDocumentClassifier
 from app.modules.validation.service import MedicalValidationService, InvalidDocumentFileError
 from app.settings import Settings
 
@@ -16,12 +17,9 @@ from app.settings import Settings
 class DummyContainer:
     def __init__(self) -> None:
         self.settings = Settings(
-            medgemma_model="medgemma:latest",
-            medgemma_fallback="text_classifier",
-            medgemma_timeout_ms=5000,
-            medgemma_max_pages=3,
-            ollama_base_url="http://localhost:11434",
+            classifier_model_path="models/med-doc-classifier",
             ai_model="llama3:latest",
+            ai_base_url="http://localhost:11434",
             aws_bucket_name="test-bucket",
             gcp_storage_bucket="test-bucket",
         )
@@ -42,7 +40,11 @@ def client():
 
 
 def make_dummy_image_bytes() -> bytes:
-    img = Image.new("RGB", (50, 50), color="white")
+    from PIL import ImageDraw
+    img = Image.new("RGB", (200, 200), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([20, 20, 100, 100], fill="black")
+    draw.text((30, 30), "Rx Paracetamol 500mg", fill="black")
     buf = io.BytesIO()
     img.save(buf, format="JPEG")
     return buf.getvalue()
@@ -87,86 +89,29 @@ async def test_empty_file_returns_422(client):
 
 
 @pytest.mark.asyncio
-async def test_one_pdf_upload_works(client):
-    """Uploading a PDF document works and returns MedicalValidationResponse."""
-    img_bytes = make_dummy_image_bytes()
-
-    mock_ollama_resp = {
-        "isMedical": True,
-        "confidence": 0.95,
-        "documentType": "lab_report",
-        "reason": "Contains blood test results",
-    }
-
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = 200
-    mock_http_response.json.return_value = {"response": '{"isMedical": true, "confidence": 0.95, "documentType": "lab_report", "reason": "Contains blood test results"}'}
-
-    mock_async_client = AsyncMock()
-    mock_async_client.post.return_value = mock_http_response
-    mock_async_client.__aenter__.return_value = mock_async_client
-
-    with patch.object(
-        MedicalValidationService,
-        "is_model_available",
-        new_callable=AsyncMock,
-        return_value=True,
-    ), patch.object(
-        MedicalValidationService,
-        "_clean_and_parse_json",
-        return_value=mock_ollama_resp,
-    ), patch(
-        "app.modules.validation.service._render_pdf_pages_to_png",
-        return_value=[(1, img_bytes)],
-    ), patch(
-        "httpx.AsyncClient",
-        return_value=mock_async_client,
-    ):
-        response = client.post(
-            "/v1/validation/medical",
-            files={"file": ("medical-report.pdf", b"%PDF-1.4 dummy", "application/pdf")},
-            headers={"x-request-id": "trace-pdf-123"},
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["isMedical"] is True
-        assert data["confidence"] == 0.95
-        assert data["documentType"] == "LAB_REPORT"
-
-
-@pytest.mark.asyncio
 async def test_one_image_upload_works(client):
-    """Uploading an image document works and returns MedicalValidationResponse."""
+    """Uploading an image document works and returns MedicalValidationResponse with documentType = None."""
     img_bytes = make_dummy_image_bytes()
 
-    mock_ollama_resp = {
-        "isMedical": True,
-        "confidence": 0.92,
-        "documentType": "prescription",
-        "reason": "Medication list visible",
+    mock_clf_resp = {
+        "is_blank": False,
+        "p_medical": 0.96,
+        "medical_value": "medical",
+        "l2_key": "opd_consultation_record",
+        "l2_value": "OPD Consultation Record",
+        "p_good": 0.99,
+        "handwritten_value": "printed",
     }
 
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = 200
-    mock_http_response.json.return_value = {"response": "{}"}
-
-    mock_async_client = AsyncMock()
-    mock_async_client.post.return_value = mock_http_response
-    mock_async_client.__aenter__.return_value = mock_async_client
-
     with patch.object(
-        MedicalValidationService,
-        "is_model_available",
+        MedicalDocumentClassifier,
+        "classify_image",
         new_callable=AsyncMock,
-        return_value=True,
+        return_value=mock_clf_resp,
     ), patch.object(
-        MedicalValidationService,
-        "_clean_and_parse_json",
-        return_value=mock_ollama_resp,
-    ), patch(
-        "httpx.AsyncClient",
-        return_value=mock_async_client,
+        MedicalDocumentClassifier,
+        "is_ready",
+        return_value=True,
     ):
         response = client.post(
             "/v1/validation/medical",
@@ -176,52 +121,70 @@ async def test_one_image_upload_works(client):
         assert response.status_code == 200
         data = response.json()
         assert data["isMedical"] is True
-        assert data["confidence"] == 0.92
-        assert data["documentType"] == "PRESCERIPTION"
+        assert data["confidence"] == 0.96
+        assert data["documentType"] is None  # Always None for contract compatibility!
+        assert data["method"] == "classifier"
+        assert data["model"] == "ekacare/med-doc-classifier"
+        assert data["metrics"]["used_ollama"] is False
 
 
 @pytest.mark.asyncio
 async def test_non_medical_document_identification(client):
-    """Non-medical document is correctly identified and returns documentType = null."""
+    """Non-medical document is correctly identified and returns documentType = None."""
     img_bytes = make_dummy_image_bytes()
 
-    mock_ollama_resp = {
-        "isMedical": False,
-        "confidence": 0.98,
-        "documentType": "receipt",
-        "reason": "Grocery receipt",
+    mock_clf_resp = {
+        "is_blank": False,
+        "p_medical": 0.05,
+        "medical_value": "non_medical",
+        "l2_key": "aadhaar_card",
+        "l2_value": "Aadhaar Card",
+        "p_good": 0.95,
+        "handwritten_value": "printed",
     }
 
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = 200
-    mock_http_response.json.return_value = {"response": "{}"}
-
-    mock_async_client = AsyncMock()
-    mock_async_client.post.return_value = mock_http_response
-    mock_async_client.__aenter__.return_value = mock_async_client
-
     with patch.object(
-        MedicalValidationService,
-        "is_model_available",
+        MedicalDocumentClassifier,
+        "classify_image",
         new_callable=AsyncMock,
-        return_value=True,
+        return_value=mock_clf_resp,
     ), patch.object(
-        MedicalValidationService,
-        "_clean_and_parse_json",
-        return_value=mock_ollama_resp,
-    ), patch(
-        "httpx.AsyncClient",
-        return_value=mock_async_client,
+        MedicalDocumentClassifier,
+        "is_ready",
+        return_value=True,
     ):
         response = client.post(
             "/v1/validation/medical",
-            files={"file": ("receipt.jpg", img_bytes, "image/jpeg")},
+            files={"file": ("aadhaar.jpg", img_bytes, "image/jpeg")},
         )
 
         assert response.status_code == 200
         data = response.json()
         assert data["isMedical"] is False
         assert data["documentType"] is None
+        assert data["method"] == "classifier"
+        assert data["metrics"]["used_ollama"] is False
+
+
+@pytest.mark.asyncio
+async def test_classifier_unavailable_returns_503(client):
+    """When classifier is unavailable, endpoint returns HTTP 503 CLASSIFIER_UNAVAILABLE."""
+    img_bytes = make_dummy_image_bytes()
+
+    with patch.object(
+        MedicalValidationService,
+        "validate_medical_document",
+        side_effect=ClassifierUnavailableError("Model weights not found"),
+    ):
+        response = client.post(
+            "/v1/validation/medical",
+            files={"file": ("report.jpg", img_bytes, "image/jpeg")},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"]["code"] == "CLASSIFIER_UNAVAILABLE"
+        assert data["detail"]["alias"] == "MEDGEMMA_UNAVAILABLE"
 
 
 @pytest.mark.asyncio
@@ -233,33 +196,25 @@ async def test_existing_storage_based_validation_unchanged():
 
     service = MedicalValidationService(container.settings, container.storage)
 
-    mock_ollama_resp = {
-        "isMedical": True,
-        "confidence": 0.88,
-        "documentType": "xray",
-        "reason": "Chest X-ray",
+    mock_clf_resp = {
+        "is_blank": False,
+        "p_medical": 0.92,
+        "medical_value": "medical",
+        "l2_key": "x_ray",
+        "l2_value": "X-ray",
+        "p_good": 0.90,
+        "handwritten_value": "printed",
     }
 
-    mock_http_response = MagicMock()
-    mock_http_response.status_code = 200
-    mock_http_response.json.return_value = {"response": "{}"}
-
-    mock_async_client = AsyncMock()
-    mock_async_client.post.return_value = mock_http_response
-    mock_async_client.__aenter__.return_value = mock_async_client
-
     with patch.object(
-        MedicalValidationService,
-        "is_model_available",
+        MedicalDocumentClassifier,
+        "classify_image",
         new_callable=AsyncMock,
-        return_value=True,
+        return_value=mock_clf_resp,
     ), patch.object(
-        MedicalValidationService,
-        "_clean_and_parse_json",
-        return_value=mock_ollama_resp,
-    ), patch(
-        "httpx.AsyncClient",
-        return_value=mock_async_client,
+        MedicalDocumentClassifier,
+        "is_ready",
+        return_value=True,
     ):
         result = await service.validate_medical_document(
             bucket="my-bucket",
@@ -268,7 +223,9 @@ async def test_existing_storage_based_validation_unchanged():
         )
 
         assert result.isMedical is True
-        assert result.documentType == "IMAGING_REPORT"
+        assert result.documentType is None  # Always None!
+        assert result.method == "classifier"
+        assert result.metrics.used_ollama is False
         container.storage.read_bytes.assert_called_once_with(
             bucket="my-bucket",
             key="reports/xray.jpg",

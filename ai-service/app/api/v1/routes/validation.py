@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
 from app.api.v1.schemas.validation import MedicalValidationResponse
 from app.modules.validation.service import (
+    ClassifierUnavailableError,
     InvalidDocumentFileError,
     MedGemmaUnavailableError,
     MedicalValidationService,
@@ -49,11 +50,11 @@ async def validate_medical(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "UNREADABLE_FILE", "message": str(exc)},
         ) from exc
-    except MedGemmaUnavailableError as exc:
-        logger.error("MedGemma unavailable: %s", exc)
+    except (ClassifierUnavailableError, MedGemmaUnavailableError) as exc:
+        logger.error("Medical validation classifier unavailable: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "MEDGEMMA_UNAVAILABLE", "message": str(exc)},
+            detail={"code": "CLASSIFIER_UNAVAILABLE", "alias": "MEDGEMMA_UNAVAILABLE", "message": str(exc)},
         ) from exc
     except Exception as exc:
         logger.error("Unexpected error in medical validation: %s", exc, exc_info=True)

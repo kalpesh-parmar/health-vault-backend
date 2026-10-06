@@ -243,6 +243,16 @@ class Container:
         await self.language_detection.warm_up()
         await self.models.embeddings.warmup()
 
+        # Pre-load local medical document classifier (graceful fallback if missing)
+        try:
+            from app.modules.validation.classifier import MedicalDocumentClassifier
+            clf = MedicalDocumentClassifier.get_instance(self.settings.classifier_model_path)
+            clf.load()
+            clf.warmup()
+            logger.info("Lifespan: Medical document classifier loaded and ready.")
+        except Exception as exc:
+            logger.warning("Lifespan: Medical document classifier could not be loaded at startup: %s", exc)
+
     async def stop(self) -> None:
         await self.llm.close()
         await self.vision.close()

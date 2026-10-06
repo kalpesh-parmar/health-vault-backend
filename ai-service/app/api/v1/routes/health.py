@@ -29,9 +29,17 @@ async def health(request: Request) -> dict:
     paddle_bypass_orientation = getattr(paddle_engine, "bypass_orientation", True) if paddle_engine else True
     paddle_cpu_threads = getattr(paddle_engine, "cpu_threads", 4) if paddle_engine else 4
 
+    from app.modules.validation.classifier import MedicalDocumentClassifier
+    try:
+        clf = MedicalDocumentClassifier.get_instance(getattr(settings, "classifier_model_path", "models/med-doc-classifier"))
+        classifier_status = "ready" if clf.is_ready() else "unavailable"
+    except Exception:
+        classifier_status = "unavailable"
+
     return {
         "success": True,
         "service": "unified-ai",
+        "classifier": classifier_status,
         "database": database,
         "llm": {
             **llm_status,
