@@ -36,6 +36,8 @@ CLINICAL_REFERENCE_RANGES: dict[str, tuple[float, float, float | None, float | N
     # Coagulation
     "prothrombin_time": (11.0, 15.0, None, None, "sec"),
     "aptt": (25.0, 38.0, None, None, "sec"),
+    # TODO: clinician sign-off required
+    "inr": (0.8, 1.2, None, None, ""),
 
     # Renal Panel
     "creatinine": (0.6, 1.2, None, 5.0, "mg/dL"),
@@ -436,76 +438,78 @@ class LabEvaluator:
         range_high = None
         ref_str = reference_range or ""
         reference_raw = reference_range or ""
+        parsed = None
+
+        if reference_range:
+            parsed = LabRangeParser.parse_range(reference_range)
 
         if is_informational:
             computed_status = "info"
             range_source = None
             if not ref_str:
                 ref_str = f"{unit}".strip() if unit else ""
-        elif reference_range:
-            parsed = LabRangeParser.parse_range(reference_range)
-            if parsed["status"] == "parsed":
-                range_source = "printed"
-                op = parsed["operator"]
-                if op == "tiered":
-                    matched_tier = None
-                    if num_val is not None:
-                        for tier in parsed["tiers"]:
-                            t_op = tier.get("operator")
-                            t_low = tier.get("low")
-                            t_high = tier.get("high")
-                            if t_op == "<" and t_high is not None and num_val < t_high:
-                                matched_tier = tier["tier"]
-                                break
-                            elif t_op == "<=" and t_high is not None and num_val <= t_high:
-                                matched_tier = tier["tier"]
-                                break
-                            elif t_op == ">" and t_low is not None and num_val > t_low:
-                                matched_tier = tier["tier"]
-                                break
-                            elif t_op == ">=" and t_low is not None and num_val >= t_low:
-                                matched_tier = tier["tier"]
-                                break
-                            elif t_op == "-" and t_low is not None and t_high is not None and t_low <= num_val <= t_high:
-                                matched_tier = tier["tier"]
-                                break
-                    computed_status = matched_tier or "normal"
-                elif op in ("<", "<="):
-                    range_high = parsed["high"]
-                    if num_val is not None and range_high is not None:
-                        is_normal = (num_val < range_high) if op == "<" else (num_val <= range_high)
-                        computed_status = "normal" if is_normal else "high"
+        elif parsed and parsed["status"] == "parsed":
+            range_source = "printed"
+            op = parsed["operator"]
+            if op == "tiered":
+                matched_tier = None
+                if num_val is not None:
+                    for tier in parsed["tiers"]:
+                        t_op = tier.get("operator")
+                        t_low = tier.get("low")
+                        t_high = tier.get("high")
+                        if t_op == "<" and t_high is not None and num_val < t_high:
+                            matched_tier = tier["tier"]
+                            break
+                        elif t_op == "<=" and t_high is not None and num_val <= t_high:
+                            matched_tier = tier["tier"]
+                            break
+                        elif t_op == ">" and t_low is not None and num_val > t_low:
+                            matched_tier = tier["tier"]
+                            break
+                        elif t_op == ">=" and t_low is not None and num_val >= t_low:
+                            matched_tier = tier["tier"]
+                            break
+                        elif t_op == "-" and t_low is not None and t_high is not None and t_low <= num_val <= t_high:
+                            matched_tier = tier["tier"]
+                            break
+                computed_status = matched_tier or "normal"
+            elif op in ("<", "<="):
+                range_high = parsed["high"]
+                if num_val is not None and range_high is not None:
+                    is_normal = (num_val < range_high) if op == "<" else (num_val <= range_high)
+                    computed_status = "normal" if is_normal else "high"
+                else:
+                    computed_status = "no_range"
+            elif op in (">", ">="):
+                range_low = parsed["low"]
+                if num_val is not None and range_low is not None:
+                    raw_lower = (reference_range or "").lower()
+                    is_pathological_threshold = any(
+                        w in raw_lower for w in ("provisional", "diabet", "positive", "reactive", "abnormal")
+                    ) or (
+                        canonical_key in ("random_blood_glucose", "fasting_blood_glucose", "postprandial_blood_glucose")
+                    )
+                    if is_pathological_threshold:
+                        computed_status = "high" if num_val > range_low else "normal"
+                        range_high = range_low
+                        range_low = None
                     else:
-                        computed_status = "no_range"
-                elif op in (">", ">="):
-                    range_low = parsed["low"]
-                    if num_val is not None and range_low is not None:
-                        raw_lower = (reference_range or "").lower()
-                        is_pathological_threshold = any(
-                            w in raw_lower for w in ("provisional", "diabet", "positive", "reactive", "abnormal")
-                        ) or (
-                            canonical_key in ("random_blood_glucose", "fasting_blood_glucose", "postprandial_blood_glucose")
-                        )
-                        if is_pathological_threshold:
-                            computed_status = "high" if num_val > range_low else "normal"
-                            range_high = range_low
-                            range_low = None
-                        else:
-                            computed_status = "normal" if (num_val > range_low if op == ">" else num_val >= range_low) else "low"
+                        computed_status = "normal" if (num_val > range_low if op == ">" else num_val >= range_low) else "low"
+                else:
+                    computed_status = "no_range"
+            elif op == "-":
+                range_low = parsed["low"]
+                range_high = parsed["high"]
+                if num_val is not None and range_low is not None and range_high is not None:
+                    if num_val < range_low:
+                        computed_status = "low"
+                    elif num_val > range_high:
+                        computed_status = "high"
                     else:
-                        computed_status = "no_range"
-                elif op == "-":
-                    range_low = parsed["low"]
-                    range_high = parsed["high"]
-                    if num_val is not None and range_low is not None and range_high is not None:
-                        if num_val < range_low:
-                            computed_status = "low"
-                        elif num_val > range_high:
-                            computed_status = "high"
-                        else:
-                            computed_status = "normal"
-                    else:
-                        computed_status = "no_range"
+                        computed_status = "normal"
+                else:
+                    computed_status = "no_range"
             else:
                 computed_status = "no_range"
                 range_source = None
@@ -523,31 +527,54 @@ class LabEvaluator:
                 computed_status = "no_range"
             ref_str = f"{range_low} - {range_high} {unit or ''}".strip()
         elif canonical_key in CLINICAL_REFERENCE_RANGES:
-            g_low, g_high, _, _, g_unit = CLINICAL_REFERENCE_RANGES[canonical_key]
-            range_source = "generic"
-            range_low = g_low
-            range_high = g_high
-            if canonical_key == "hba1c" and num_val is not None:
-                if num_val < 5.7:
-                    computed_status = "normal"
-                elif 5.7 <= num_val < 6.5:
-                    computed_status = "prediabetic"
+            # Check generic INR config flag (TODO: clinician sign-off required)
+            allow_generic = True
+            if canonical_key == "inr":
+                try:
+                    from app.settings import settings
+                    allow_generic = getattr(settings, "enable_generic_inr_range", True)
+                except Exception:
+                    allow_generic = True
+
+            if allow_generic:
+                g_low, g_high, _, _, g_unit = CLINICAL_REFERENCE_RANGES[canonical_key]
+                range_source = "generic"
+                range_low = g_low
+                range_high = g_high
+                if canonical_key == "hba1c" and num_val is not None:
+                    if num_val < 5.7:
+                        computed_status = "normal"
+                    elif 5.7 <= num_val < 6.5:
+                        computed_status = "prediabetic"
+                    else:
+                        computed_status = "diabetic"
+                elif num_val is not None:
+                    if num_val < g_low:
+                        computed_status = "low"
+                    elif num_val > g_high:
+                        computed_status = "high"
+                    else:
+                        computed_status = "normal"
                 else:
-                    computed_status = "diabetic"
-            elif num_val is not None:
-                if num_val < g_low:
-                    computed_status = "low"
-                elif num_val > g_high:
-                    computed_status = "high"
-                else:
-                    computed_status = "normal"
+                    computed_status = "no_range"
+                unit_str = f" {g_unit}".strip()
+                ref_str = f"{g_low} - {g_high}" + (f" {unit_str}" if unit_str else "")
             else:
                 computed_status = "no_range"
-            ref_str = f"{g_low} - {g_high} {g_unit} (generic reference)"
+                range_source = None
+                ref_str = None
         else:
             computed_status = "no_range"
             range_source = None
-            ref_str = "See lab reference"
+            ref_str = None
+
+        # Sanitize "See lab reference" to null reference so UI shows localized "Range not provided"
+        if ref_str and "see lab reference" in str(ref_str).lower():
+            ref_str = None
+        if reference_raw and "see lab reference" in str(reference_raw).lower() and range_source != "generic":
+            ref_str = None
+        if computed_status == "no_range" and range_source is None:
+            ref_str = None
 
         # HbA1c tiered override for clinical cutoffs
         if not is_informational and canonical_key == "hba1c" and num_val is not None:
@@ -632,6 +659,15 @@ class LabEvaluator:
                 flag = "CRITICAL"
                 is_abnormal = True
 
+        # Tiers extraction (keep all tiers in payload for UI rendering)
+        tiers = list(parsed.get("tiers") or []) if ("parsed" in locals() and parsed) else []
+        if canonical_key == "hba1c" and not tiers:
+            tiers = [
+                {"tier": "normal", "low": None, "high": 5.7, "operator": "<", "label": "Normal"},
+                {"tier": "prediabetic", "low": 5.7, "high": 6.4, "operator": "-", "label": "Prediabetic"},
+                {"tier": "diabetic", "low": 6.5, "high": None, "operator": ">=", "label": "Diabetic"},
+            ]
+
         return {
             "testName": test_name.strip() if test_name else "Unknown Test",
             "canonicalKey": canonical_key,
@@ -652,6 +688,7 @@ class LabEvaluator:
             "unit_warning_message": unit_warning_message,
             "isAbnormal": is_abnormal,
             "isCritical": is_critical,
+            "tiers": tiers,
         }
 
     @classmethod

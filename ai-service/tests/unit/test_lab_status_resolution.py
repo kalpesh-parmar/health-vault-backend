@@ -75,7 +75,8 @@ TEST_CASES = [
     ("RDW-CV", 11.50, "11.60 - 14.00", "L", "%", "low", "borderline", False, False),
     ("Random Blood Sugar", 271.0, "70.0 - 140.0", None, "mg/dL", "high", "significant", False, False),
     ("Lymphocyte", 41.0, "20.0 - 40.0", None, "%", "high", "borderline", False, False),
-    ("INR", 1.623, "Therapeutic: 2.0-3.0", None, "", "no_range", None, False, False),
+    ("INR", 1.623, "Therapeutic: 2.0-3.0", None, "", "high", "significant", False, False),
+    ("Unknown Marker", 10.0, "See lab reference", None, "", "no_range", None, False, False),
 ]
 
 
@@ -118,3 +119,37 @@ class TestLabStatusResolutionTableDriven:
         assert res.get("unit_warning") == expected_unit_warning, (
             f"Failed unit_warning for {test_name}: expected {expected_unit_warning}, got {res.get('unit_warning')}"
         )
+
+    def test_generic_inr_config_flag_and_null_reference(self, monkeypatch):
+        """Check 5: generic INR toggle and sanitization of 'See lab reference' to null."""
+        from app.settings import settings
+
+        # Enabled: generic range used
+        monkeypatch.setattr(settings, "enable_generic_inr_range", True)
+        res_enabled = LabEvaluator.evaluate_result("INR", 1.623, reference_range="Therapeutic: 2.0-3.0")
+        assert res_enabled["status"] == "high"
+        assert res_enabled["range_source"] == "generic"
+        assert res_enabled["referenceRange"] == "0.8 - 1.2"
+
+        # Disabled: fallback to no_range and null referenceRange
+        monkeypatch.setattr(settings, "enable_generic_inr_range", False)
+        res_disabled = LabEvaluator.evaluate_result("INR", 1.623, reference_range="Therapeutic: 2.0-3.0")
+        assert res_disabled["status"] == "no_range"
+        assert res_disabled["range_source"] is None
+        assert res_disabled["referenceRange"] is None
+
+        # "See lab reference" replaced with null referenceRange
+        res_see_ref = LabEvaluator.evaluate_result("Novel Analyte", 5.0, reference_range="See lab reference")
+        assert res_see_ref["referenceRange"] is None
+        assert res_see_ref["status"] == "no_range"
+
+    def test_hba1c_tiers_in_payload(self):
+        """Check 6: HbA1c retains all tiers in payload for UI rendering."""
+        res_hba1c = LabEvaluator.evaluate_result("HbA1c", 8.5, unit="%")
+        assert "tiers" in res_hba1c
+        tiers = res_hba1c["tiers"]
+        assert len(tiers) == 3
+        tier_names = [t["tier"] for t in tiers]
+        assert "normal" in tier_names
+        assert "prediabetic" in tier_names
+        assert "diabetic" in tier_names

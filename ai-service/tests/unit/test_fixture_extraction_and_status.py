@@ -27,8 +27,8 @@ EXPECTED_PARAMETERS = {
     # Borderline high
     "Lymphocyte": {"value": 41.0, "unit": "%", "status": "borderline_high"},
 
-    # No range provided
-    "INR": {"value": 1.623, "status": "no_range"},
+    # Generic range provided (non-anticoagulated adult reference)
+    "INR": {"value": 1.623, "status": "high", "range_source": "generic"},
 
     # Info parameters (calculated / mean values)
     "Mean Plasma Glucose": {"value": 212.20, "status": "info"},
@@ -146,9 +146,15 @@ def test_all_fixture_parameters_match_clinical_status_expectations():
     assert eval_by_name["Lymphocyte"]["severity"] == "borderline"
     assert eval_by_name["Lymphocyte (Absolute)"]["status"] == "normal"
 
-    # Context / no range
-    assert eval_by_name["INR"]["status"] == "no_range"
+    # Generic reference for INR
+    assert eval_by_name["INR"]["status"] == "high"
+    assert eval_by_name["INR"]["range_source"] == "generic"
     assert eval_by_name["Basophils (Absolute)"]["status"] == "no_range"
+    assert eval_by_name["Basophils (Absolute)"]["referenceRange"] is None
+
+    # HbA1c tiers preserved in payload
+    assert "tiers" in eval_by_name["Hba1c"]
+    assert len(eval_by_name["Hba1c"]["tiers"]) >= 3
 
     # Informational
     assert eval_by_name["Mean Plasma Glucose"]["status"] == "info"

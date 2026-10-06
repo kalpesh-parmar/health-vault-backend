@@ -332,6 +332,11 @@ class Settings(BaseSettings):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
     validation_max_image_side: int = Field(default=1200, alias="VALIDATION_MAX_IMAGE_SIDE")
+    enable_generic_inr_range: bool = Field(
+        default=True,
+        alias="ENABLE_GENERIC_INR_RANGE",
+        description="Whether to use generic reference range for INR (non-anticoagulated adults: 0.8-1.2). TODO: clinician sign-off required",
+    )
 
     medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")
     medgemma_max_pages: int = Field(default=2, alias="MEDGEMMA_MAX_PAGES")
@@ -420,3 +425,6 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+settings = get_settings()
