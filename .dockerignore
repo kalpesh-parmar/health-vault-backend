@@ -1,0 +1,9 @@
+node_modules
+.env*
+coverage
+dist
+venv
+__pycache__
+*.pyc
+tmp
+tests/fixtures/validation_eval_corpus/

@@ -18,3 +18,4 @@ ai-service/debug_page_*.jpg
 #GSD
 .agent/
 .planning/
+ai-service/tests/fixtures/validation_eval_corpus/

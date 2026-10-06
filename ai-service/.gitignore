@@ -57,6 +57,7 @@ desktop.ini
 tests/fixtures/golden_scanned/en/
 tests/fixtures/golden_scanned/gu/gu_01*
 tests/fixtures/golden_docs/60300505154.pdf
+tests/fixtures/validation_eval_corpus/
 
 # Temporary debug images
 debug_page_*.jpg
