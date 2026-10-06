@@ -395,24 +395,24 @@ class LabEvaluator:
         info_keywords = (
             "mean plasma glucose",
             "mean blood glucose",
-            "pt mean",
-            "aptt mean",
-            "aptt control",
-            "pt control",
-            "aptt ratio",
             "isi",
             "international sensitivity index",
         )
         norm_name = (test_name or "").lower()
-        is_informational = any(k in norm_name for k in info_keywords) or (
-            canonical_key in (
-                "mean_plasma_glucose",
-                "pt_mean",
-                "aptt_mean",
-                "aptt_control",
-                "pt_control",
-                "aptt_ratio",
-                "isi",
+        is_informational = (
+            any(k in norm_name for k in info_keywords)
+            or ("pt" in norm_name and any(w in norm_name for w in ("mean", "control")))
+            or ("aptt" in norm_name and any(w in norm_name for w in ("mean", "control", "ratio")))
+            or (
+                canonical_key in (
+                    "mean_plasma_glucose",
+                    "pt_mean",
+                    "aptt_mean",
+                    "aptt_control",
+                    "pt_control",
+                    "aptt_ratio",
+                    "isi",
+                )
             )
         )
 
@@ -480,8 +480,18 @@ class LabEvaluator:
                 elif op in (">", ">="):
                     range_low = parsed["low"]
                     if num_val is not None and range_low is not None:
-                        is_normal = (num_val > range_low) if op == ">" else (num_val >= range_low)
-                        computed_status = "normal" if is_normal else "low"
+                        raw_lower = (reference_range or "").lower()
+                        is_pathological_threshold = any(
+                            w in raw_lower for w in ("provisional", "diabet", "positive", "reactive", "abnormal")
+                        ) or (
+                            canonical_key in ("random_blood_glucose", "fasting_blood_glucose", "postprandial_blood_glucose")
+                        )
+                        if is_pathological_threshold:
+                            computed_status = "high" if num_val > range_low else "normal"
+                            range_high = range_low
+                            range_low = None
+                        else:
+                            computed_status = "normal" if (num_val > range_low if op == ">" else num_val >= range_low) else "low"
                     else:
                         computed_status = "no_range"
                 elif op == "-":
@@ -538,6 +548,15 @@ class LabEvaluator:
             computed_status = "no_range"
             range_source = None
             ref_str = "See lab reference"
+
+        # HbA1c tiered override for clinical cutoffs
+        if not is_informational and canonical_key == "hba1c" and num_val is not None:
+            if num_val >= 6.5:
+                computed_status = "diabetic"
+            elif num_val >= 5.7:
+                computed_status = "prediabetic"
+            else:
+                computed_status = "normal"
 
         # 5. Severity computation
         severity = None
