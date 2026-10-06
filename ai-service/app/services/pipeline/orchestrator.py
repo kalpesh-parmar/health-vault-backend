@@ -454,6 +454,7 @@ class PipelineOrchestrator:
                         "summaryLanguage": summary_data.get("summaryLanguage"),
                         "preferredLanguage": summary_data.get("preferredLanguage"),
                         "keyPoints": summary_data.get("keyPoints"),
+                        "keyFindings": summary_data.get("keyFindings"),
                         "dosagePreserved": summary_data.get("dosagePreserved"),
                     })
 
@@ -494,6 +495,7 @@ class PipelineOrchestrator:
                         "summaryLanguage": summary_data.get("summaryLanguage"),
                         "preferredLanguage": summary_data.get("preferredLanguage"),
                         "keyPoints": summary_data.get("keyPoints"),
+                        "keyFindings": summary_data.get("keyFindings"),
                         "dosagePreserved": summary_data.get("dosagePreserved"),
                     })
 

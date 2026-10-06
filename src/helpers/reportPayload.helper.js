@@ -422,7 +422,7 @@ async function buildStructuredReportPayload({
       isOtherMedicalDoc,
       abnormalResults,
       normalResults,
-      keyFindings: docSummary,
+      keyFindings: structured.keyFindings || docSummary,
       whatThisMayMean: docSummary,
       labFindings,
       medicationFindings,

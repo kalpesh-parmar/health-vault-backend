@@ -28,7 +28,14 @@ class SummaryService:
         self.max_chunks = max_chunks
         self.num_predict = num_predict
 
-    async def summarize(self, text: str, *, mode: str = "concise", document_type: str = "medical") -> dict:
+    async def summarize(
+        self,
+        text: str,
+        *,
+        mode: str = "concise",
+        document_type: str = "medical",
+        abnormal_findings: str | None = None,
+    ) -> dict:
         compact = compress_for_llm(text, max_chars=self.chunk_chars * self.max_chunks)
         chunks = split_text(compact, max_chars=self.chunk_chars)[: self.max_chunks]
         if not chunks:
@@ -36,8 +43,13 @@ class SummaryService:
 
         results = await asyncio.gather(
             *[
-                self._summarize_chunk(chunk, mode=mode, document_type=document_type)
-                for chunk in chunks
+                self._summarize_chunk(
+                    chunk,
+                    mode=mode,
+                    document_type=document_type,
+                    abnormal_findings=abnormal_findings if idx == 0 else None,
+                )
+                for idx, chunk in enumerate(chunks)
             ],
             return_exceptions=True,
         )
@@ -78,7 +90,13 @@ class SummaryService:
 
         merged_text = "\n".join(json.dumps(partial, ensure_ascii=False) for partial in partials)
         try:
-            final = await self._summarize_chunk(merged_text, mode=mode, document_type=document_type, merge=True)
+            final = await self._summarize_chunk(
+                merged_text,
+                mode=mode,
+                document_type=document_type,
+                merge=True,
+                abnormal_findings=abnormal_findings,
+            )
             source = "llm_partial" if errors else "llm"
         except Exception as exc:
             logger.warning(
@@ -97,8 +115,22 @@ class SummaryService:
             "summaryErrors": errors[:3],
         }
 
-    async def _summarize_chunk(self, text: str, *, mode: str, document_type: str, merge: bool = False) -> dict:
-        prompt = build_prompt(text, mode=mode, document_type=document_type, merge=merge)
+    async def _summarize_chunk(
+        self,
+        text: str,
+        *,
+        mode: str,
+        document_type: str,
+        merge: bool = False,
+        abnormal_findings: str | None = None,
+    ) -> dict:
+        prompt = build_prompt(
+            text,
+            mode=mode,
+            document_type=document_type,
+            merge=merge,
+            abnormal_findings=abnormal_findings,
+        )
         token_cap = min(max(self.num_predict, 1024), 2048) if mode == "concise" else min(max(self.num_predict * 2, 2048), 4096)
         raw = await self.llm.chat(
             model=self.model,
@@ -110,14 +142,27 @@ class SummaryService:
         return parse_summary(raw, mode=mode, document_type=document_type)
 
 
-def build_prompt(text: str, *, mode: str, document_type: str, merge: bool) -> str:
+def build_prompt(
+    text: str,
+    *,
+    mode: str,
+    document_type: str,
+    merge: bool,
+    abnormal_findings: str | None = None,
+) -> str:
     style = "brief" if mode == "concise" else "detailed"
     action = "Merge these partial summaries" if merge else "Summarize this medical document"
-    return (
+    prompt = (
         f"{action}. Return JSON only: "
         '{"type":"","summary":[],"medications":[],"tests":[],"warnings":[],"follow_up":[]}. '
-        f"Style:{style}. Doc:{document_type}. Text:\n{text}"
+        f"Style:{style}. Doc:{document_type}."
     )
+    if abnormal_findings:
+        prompt += f"\n{abnormal_findings}\n"
+    else:
+        prompt += " "
+    prompt += f"Text:\n{text}"
+    return prompt
 
 
 def parse_summary(raw: str, *, mode: str, document_type: str) -> dict:
