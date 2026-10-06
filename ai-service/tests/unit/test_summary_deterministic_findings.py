@@ -311,7 +311,9 @@ async def test_summary_on_fixture_pdf_builds_key_findings_for_all_8_abnormal_fix
     )
 
     findings = result["keyFindings"]
-    assert len(findings) == 9, f"Expected 9 abnormal/borderline findings, got {len(findings)}: {[f['testName'] for f in findings]}"
+    from app.settings import settings
+    expected_count = 9 if settings.enable_generic_inr_range else 8
+    assert len(findings) == expected_count, f"Expected {expected_count} abnormal/borderline findings, got {len(findings)}: {[f['testName'] for f in findings]}"
 
     finding_names = [f["testName"] for f in findings]
     assert "Hemoglobin" in finding_names
@@ -322,7 +324,8 @@ async def test_summary_on_fixture_pdf_builds_key_findings_for_all_8_abnormal_fix
     assert "Hba1c" in finding_names
     assert "Patients Value (PT)" in finding_names
     assert "Lymphocyte" in finding_names
-    assert "INR" in finding_names
+    if settings.enable_generic_inr_range:
+        assert "INR" in finding_names
 
     # Check that deterministic summary contains all of them
     summary_text = result["summaryEnglish"]

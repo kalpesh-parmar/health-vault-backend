@@ -57,6 +57,7 @@ const REDACT_KEYS = new Set([
   "ocrText",
   "ocr_text",
   "extractedText",
+  "preview",
 ]);
 
 function redact(fields) {

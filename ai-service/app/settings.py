@@ -333,7 +333,7 @@ class Settings(BaseSettings):
         return v
     validation_max_image_side: int = Field(default=1200, alias="VALIDATION_MAX_IMAGE_SIDE")
     enable_generic_inr_range: bool = Field(
-        default=True,
+        default=False,
         alias="ENABLE_GENERIC_INR_RANGE",
         description="Whether to use generic reference range for INR (non-anticoagulated adults: 0.8-1.2). TODO: clinician sign-off required",
     )

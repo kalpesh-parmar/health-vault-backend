@@ -102,7 +102,7 @@ class SpatialRowBuilder:
             # Strip watermarks and IDs
             if UUID_RE.search(txt) or BRACKETED_ID_RE.search(txt):
                 continue
-            if "Years-Female" in txt or re.search(r"Ranoliya-\d+", txt):
+            if "Years-Female" in txt or "Years-Male" in txt or re.search(r"(?:Ranoliya|REDACTED)-\d+", txt):
                 continue
 
             cleaned.append(item)

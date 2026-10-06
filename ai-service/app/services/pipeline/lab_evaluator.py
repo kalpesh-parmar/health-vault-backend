@@ -528,13 +528,15 @@ class LabEvaluator:
             ref_str = f"{range_low} - {range_high} {unit or ''}".strip()
         elif canonical_key in CLINICAL_REFERENCE_RANGES:
             # Check generic INR config flag (TODO: clinician sign-off required)
-            allow_generic = True
+            allow_generic = False
             if canonical_key == "inr":
                 try:
                     from app.settings import settings
-                    allow_generic = getattr(settings, "enable_generic_inr_range", True)
+                    allow_generic = getattr(settings, "enable_generic_inr_range", False)
                 except Exception:
-                    allow_generic = True
+                    allow_generic = False
+            elif canonical_key in CLINICAL_REFERENCE_RANGES:
+                allow_generic = True
 
             if allow_generic:
                 g_low, g_high, _, _, g_unit = CLINICAL_REFERENCE_RANGES[canonical_key]

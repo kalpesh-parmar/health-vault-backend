@@ -70,6 +70,8 @@ def _install_safe_make_record() -> None:
     def safe_make_record(self, name, level, fn, lno, msg, args, exc_info,
                           func=None, extra=None, sinfo=None):
         if extra:
+            from app.core.logging_redaction import redact_sensitive_data
+            extra = redact_sensitive_data(extra)
             collisions = [key for key in extra if key in _RESERVED_LOG_RECORD_KEYS]
             if collisions:
                 extra = sanitize_log_extra(extra)
@@ -86,10 +88,14 @@ def _install_safe_make_record() -> None:
 
 
 def configure_logging(level: str = "INFO") -> None:
+    from app.core.logging_redaction import RedactingLoggingFilter
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.addFilter(RedactingLoggingFilter())
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=[stream_handler],
         force=True,
     )
     _install_safe_make_record()

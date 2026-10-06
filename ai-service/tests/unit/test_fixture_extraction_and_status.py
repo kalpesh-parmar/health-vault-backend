@@ -146,9 +146,14 @@ def test_all_fixture_parameters_match_clinical_status_expectations():
     assert eval_by_name["Lymphocyte"]["severity"] == "borderline"
     assert eval_by_name["Lymphocyte (Absolute)"]["status"] == "normal"
 
-    # Generic reference for INR
-    assert eval_by_name["INR"]["status"] == "high"
-    assert eval_by_name["INR"]["range_source"] == "generic"
+    # Generic reference for INR (depends on enable_generic_inr_range flag)
+    from app.settings import settings
+    if settings.enable_generic_inr_range:
+        assert eval_by_name["INR"]["status"] == "high"
+        assert eval_by_name["INR"]["range_source"] == "generic"
+    else:
+        assert eval_by_name["INR"]["status"] == "no_range"
+        assert eval_by_name["INR"]["referenceRange"] is None
     assert eval_by_name["Basophils (Absolute)"]["status"] == "no_range"
     assert eval_by_name["Basophils (Absolute)"]["referenceRange"] is None
 

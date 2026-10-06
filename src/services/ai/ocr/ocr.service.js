@@ -27,6 +27,7 @@ const {
 const aiClient = require("../clients/aiClient.service");
 const { MedicalExtractionSchema } = require("../../../validations/ocr.validation");
 const { parsePdf } = require("../../../utils/pdfParser");
+const { ocrLogger } = require("./ocr.logger");
 
 const {
   preprocessImage,
@@ -302,9 +303,8 @@ class OcrService {
       }
     }
 
-    console.error("[OcrService] All parsing strategies failed.", {
+    ocrLogger.error(options.traceId || "N/A", "all_parsing_strategies_failed", {
       jobId: options.jobId || "N/A",
-      traceId: options.traceId || "N/A",
       contentLength: raw.length,
       preview: raw.slice(0, 1000),
       parseErrors: parseErrors.join("; "),

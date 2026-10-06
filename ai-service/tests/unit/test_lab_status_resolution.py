@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from app.settings import settings
 from app.services.pipeline.lab_evaluator import LabEvaluator, LabRangeParser
 
 
@@ -75,7 +76,17 @@ TEST_CASES = [
     ("RDW-CV", 11.50, "11.60 - 14.00", "L", "%", "low", "borderline", False, False),
     ("Random Blood Sugar", 271.0, "70.0 - 140.0", None, "mg/dL", "high", "significant", False, False),
     ("Lymphocyte", 41.0, "20.0 - 40.0", None, "%", "high", "borderline", False, False),
-    ("INR", 1.623, "Therapeutic: 2.0-3.0", None, "", "high", "significant", False, False),
+    (
+        "INR",
+        1.623,
+        "Therapeutic: 2.0-3.0",
+        None,
+        "",
+        "high" if getattr(settings, "enable_generic_inr_range", False) else "no_range",
+        "significant" if getattr(settings, "enable_generic_inr_range", False) else None,
+        False,
+        False,
+    ),
     ("Unknown Marker", 10.0, "See lab reference", None, "", "no_range", None, False, False),
 ]
 

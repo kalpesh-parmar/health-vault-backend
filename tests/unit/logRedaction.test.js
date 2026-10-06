@@ -63,4 +63,31 @@ describe("OCR Logger and Redaction Hardening (Commit 4F)", () => {
     expect(cleaned.metadata.patientInfo.uhid).toBe("[redacted]");
     expect(cleaned.tags).toEqual(["lab_report", "cbc"]);
   });
+
+  it("redacts patient name and OCR snippet through the real logger (console output)", () => {
+    const { ocrLogger } = require("../../src/services/ai/ocr/ocr.logger");
+    const logSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      ocrLogger.info("trace_123", "ocr_page_completed", {
+        patientName: "Jane Doe",
+        rawText: "Hemoglobin (Hb) 11.20 gm% Normal Range 12-15",
+        status: "SUCCESS",
+      });
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      const emittedLog = logSpy.mock.calls[0][0];
+      const parsed = JSON.parse(emittedLog);
+
+      expect(parsed.traceId).toBe("trace_123");
+      expect(parsed.event).toBe("ocr_page_completed");
+      expect(parsed.status).toBe("SUCCESS");
+      expect(parsed.patientName).toBe("[redacted]");
+      expect(parsed.rawText).toBe("[redacted]");
+      expect(emittedLog).not.toContain("Jane Doe");
+      expect(emittedLog).not.toContain("Hemoglobin (Hb) 11.20");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

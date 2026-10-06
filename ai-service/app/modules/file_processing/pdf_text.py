@@ -272,7 +272,7 @@ def remove_watermark_and_id_tokens(
     """Removes watermark, background stamps, and case-ID tracking tokens from direct text.
 
     1. Removes UUID-like tokens (e.g. a3ec807f-1a85-4d6e-883a-c7b6a7762a7a)
-    2. Removes bracketed [case-name-age-sex] patterns (e.g. [5069200904-Manjulaben Ranoliya-70 Years-Female])
+    2. Removes bracketed [case-name-age-sex] patterns (e.g. [0000000000-Patient Name-70 Years-Female])
     3. Removes tokens repeated > 20 times on a page (excluding dictionary/medical tokens)
     4. Removes tokens repeated across >= 3 pages if doc_page_texts is provided
     """

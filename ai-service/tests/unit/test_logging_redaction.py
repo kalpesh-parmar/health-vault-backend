@@ -54,6 +54,37 @@ class TestLoggingRedaction(unittest.TestCase):
         self.assertEqual(cleaned["nested"]["safe_key"], "safe_val")
         self.assertEqual(cleaned["nested"]["patient_name"], "[redacted]")
 
+    def test_logged_snippet_and_patient_name_redacted_through_real_logger(self):
+        import io
+        import logging
+        from app.core.logging import configure_logging
+
+        log_stream = io.StringIO()
+        handler = logging.StreamHandler(log_stream)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s patient=%(patient_name)s raw=%(raw_text)s"))
+
+        # Configure and install safe makeRecord hook
+        configure_logging("INFO")
+        logger = logging.getLogger("test_redaction_logger")
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        try:
+            logger.info(
+                "Document stage processed",
+                extra={
+                    "patient_name": "Jane Doe",
+                    "raw_text": "Hemoglobin (Hb) 11.20 gm% Normal Range 12-15",
+                },
+            )
+            output = log_stream.getvalue()
+
+            self.assertIn("[redacted]", output)
+            self.assertNotIn("Jane Doe", output)
+            self.assertNotIn("Hemoglobin (Hb) 11.20", output)
+        finally:
+            logger.removeHandler(handler)
+
 
 if __name__ == "__main__":
     unittest.main()
