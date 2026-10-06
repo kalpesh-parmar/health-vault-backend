@@ -131,7 +131,7 @@ async function buildStructuredReportPayload({
   }
 
   // 2. Extract structured data safely
-  let structured = activeDoc.structuredExtractedData || {};
+  let structured = activeDoc.structuredExtractedData || activeDoc.extractedStructuredData || {};
   if (typeof structured === "string") {
     try {
       structured = JSON.parse(structured);
@@ -156,7 +156,9 @@ async function buildStructuredReportPayload({
         ? structured.labResults
         : [];
 
-  const rawDocType = String(activeDoc.documentType || structured.documentType || "").toUpperCase();
+  const rawDocType = String(
+    structured.documentType || structured.reportType || activeDoc.documentType || "",
+  ).toUpperCase();
   const isPrescription =
     rawDocType === "PRESCRIPTION" ||
     rawDocType === "PRESCERIPTION" ||
@@ -251,6 +253,8 @@ async function buildStructuredReportPayload({
       structured.summaryEnglish ||
       structured.summary ||
       activeDoc.summary ||
+      structured.remarks ||
+      activeDoc.remarks ||
       "",
   ).trim();
 
@@ -377,8 +381,31 @@ async function buildStructuredReportPayload({
   };
 }
 
+function formatReportSummaryPayload(reportData) {
+  if (!reportData || !reportData.document) return null;
+  const doc = reportData.document;
+  return {
+    report_id: doc.id,
+    report_name: doc.fileName || "Medical Document",
+    documentType: doc.documentType || "OTHER_MEDICAL_DOCUMENT",
+    report_date: doc.reportDate,
+    hospitalName: doc.hospitalName || null,
+    doctorName: doc.doctorName || null,
+    summary: doc.summary || "",
+    key_findings: doc.keyFindings || doc.summary || "",
+    patientDetails: doc.patientDetails || {},
+    isLabReport: Boolean(doc.isLabReport),
+    isPrescription: Boolean(doc.isPrescription),
+    isOtherMedicalDoc: Boolean(doc.isOtherMedicalDoc),
+    abnormal_values: doc.abnormalResults || [],
+    normal_values: doc.normalResults || [],
+    extracted_medicines: doc.medicationFindings || [],
+  };
+}
+
 module.exports = {
   buildStructuredReportPayload,
+  formatReportSummaryPayload,
   REPORT_QUESTIONS_I18N,
   GENERAL_DOC_QUESTIONS_I18N,
 };

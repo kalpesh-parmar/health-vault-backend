@@ -39,8 +39,7 @@ const {
   executeAddDocumentAction,
   normalizeUnifiedChatInput,
 } = require("../helpers/unifiedChat.helper");
-const { buildStructuredReportPayload } = require("../helpers/reportPayload.helper");
-const { and, eq, desc } = require("drizzle-orm");
+const { and, eq, desc, or } = require("drizzle-orm");
 const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
 const { ToWords } = require("to-words");
 
@@ -225,6 +224,15 @@ class V1Service {
       throw new InvalidRequestException("Missing parameters");
     }
 
+    const isUuid =
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+        documentId,
+      );
+
+    const condition = isUuid
+      ? or(eq(document.id, documentId), eq(document.s3Key, documentId))
+      : eq(document.s3Key, documentId);
+
     await db
       .update(document)
       .set({
@@ -232,7 +240,7 @@ class V1Service {
         remarks: "ERR_CODE:USER_CANCELLED",
         updatedAt: new Date(),
       })
-      .where(and(eq(document.id, documentId), eq(document.userId, userId)));
+      .where(and(condition, eq(document.userId, userId)));
 
     return { message: "Job cancelled successfully" };
   }
@@ -534,6 +542,58 @@ class V1Service {
           actionData?.skipAll === true;
 
         if (isSkipAction && !isActiveOnboardingStep) {
+          let reportSummaryPayload = null;
+          let actionsPayload = null;
+
+          if (userId) {
+            try {
+              const pendingSum =
+                dbState?.pendingReportSummary || effectiveState?.pendingReportSummary;
+              if (pendingSum && pendingSum.status !== "DELIVERED") {
+                reportSummaryPayload = { ...pendingSum };
+                delete reportSummaryPayload.status;
+
+                actionsPayload = [
+                  {
+                    actionType: "REPORT_SUMMARY",
+                    reportSummary: reportSummaryPayload,
+                  },
+                ];
+
+                const updatedState = {
+                  ...(dbState || {}),
+                  ...(effectiveState || {}),
+                  pendingReportSummary: {
+                    ...pendingSum,
+                    status: "DELIVERED",
+                  },
+                };
+                await userOnboardingRepository.updateByUserId(userId, { data: updatedState });
+              }
+            } catch (skipErr) {
+              console.warn(
+                "[UnifiedChat] Failed to build report summary on skip:",
+                skipErr.message,
+              );
+            }
+          }
+
+          const docSummaryObj = reportSummaryPayload
+            ? {
+                totalUploads: 1,
+                completed: 1,
+                failed: 0,
+                rejected: 0,
+                summary: reportSummaryPayload.summary || null,
+                text: messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
+                  successfulCount: 1,
+                  totalCount: 1,
+                  medicationCount: 0,
+                  failedCount: 0,
+                }),
+              }
+            : null;
+
           const replyText = messageConstants.MEDICATIONS_REVIEW_SKIPPED;
           const activeSessionId = effectiveSessionId;
 
@@ -543,7 +603,12 @@ class V1Service {
               userId,
               role: "assistant",
               content: replyText,
-              metadata: { actionType: "SKIP_MEDICINES" },
+              metadata: {
+                actionType: "SKIP_MEDICINES",
+                actions: actionsPayload,
+                reportSummary: reportSummaryPayload,
+                documentSummary: docSummaryObj,
+              },
             });
           }
 
@@ -552,6 +617,9 @@ class V1Service {
             actionType: "SKIP_MEDICINES",
             reply: replyText,
             sessionId: activeSessionId,
+            actions: actionsPayload,
+            reportSummary: reportSummaryPayload,
+            documentSummary: docSummaryObj,
           });
         }
 
@@ -1243,37 +1311,27 @@ class V1Service {
         let actionsPayload = null;
         if (userId) {
           try {
-            const reportData = await buildStructuredReportPayload({
-              docRecord: null,
-              targetDocId: documentId || null,
-              userId,
-              preferredLanguage: userLang,
-            });
-            if (reportData && reportData.document) {
-              const doc = reportData.document;
-              reportSummaryPayload = {
-                report_id: doc.id,
-                report_name: doc.fileName,
-                documentType: doc.documentType,
-                report_date: doc.reportDate,
-                hospitalName: doc.hospitalName,
-                doctorName: doc.doctorName,
-                summary: doc.summary,
-                key_findings: doc.keyFindings || doc.summary,
-                patientDetails: doc.patientDetails,
-                isLabReport: doc.isLabReport,
-                isPrescription: doc.isPrescription,
-                isOtherMedicalDoc: doc.isOtherMedicalDoc,
-                abnormal_values: doc.abnormalResults || [],
-                normal_values: doc.normalResults || [],
-                extracted_medicines: doc.medicationFindings || [],
-              };
+            const pendingSum =
+              dbState?.pendingReportSummary || effectiveState?.pendingReportSummary;
+            if (pendingSum && pendingSum.status !== "DELIVERED") {
+              reportSummaryPayload = { ...pendingSum };
+              delete reportSummaryPayload.status;
+
               actionsPayload = [
                 {
                   actionType: "REPORT_SUMMARY",
                   reportSummary: reportSummaryPayload,
                 },
               ];
+
+              const updatedState = {
+                ...terminalOnboardingState,
+                pendingReportSummary: {
+                  ...pendingSum,
+                  status: "DELIVERED",
+                },
+              };
+              await saveOnboardingState(userId, updatedState);
             }
           } catch (reportErr) {
             console.warn(
@@ -1282,6 +1340,22 @@ class V1Service {
             );
           }
         }
+
+        const docSummaryObj = reportSummaryPayload
+          ? {
+              totalUploads: 1,
+              completed: 1,
+              failed: 0,
+              rejected: 0,
+              summary: reportSummaryPayload.summary || null,
+              text: messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
+                successfulCount: 1,
+                totalCount: 1,
+                medicationCount: createdMeds ? createdMeds.length : 0,
+                failedCount: 0,
+              }),
+            }
+          : null;
 
         return buildUnifiedResponse({
           mode: "ACTION",
@@ -1294,6 +1368,7 @@ class V1Service {
           onboardingState: terminalOnboardingState,
           actions: actionsPayload,
           reportSummary: reportSummaryPayload,
+          documentSummary: docSummaryObj,
         });
       }
 

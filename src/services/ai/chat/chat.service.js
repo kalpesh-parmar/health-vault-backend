@@ -38,6 +38,10 @@ const {
   PREDEFINED_QUESTIONS_I18N,
 } = require("../../../constants/chatReplies");
 const { chatFastPath } = require("./chatFastPath.service");
+const {
+  buildStructuredReportPayload,
+  formatReportSummaryPayload,
+} = require("../../../helpers/reportPayload.helper");
 
 // Debug logger
 const debugLogger = {
@@ -391,6 +395,44 @@ ${chunksContent}`;
 
       if (!question?.trim()) {
         throw new InvalidRequestException("Question is required");
+      }
+
+      const normQ = question.trim().toUpperCase();
+      if (normQ === "ASK_ABOUT_REPORT" || normQ === "ASK_REPORT") {
+        const targetDoc = documentId && documentId.length > 0 ? documentId[0] : null;
+        const reportData = await buildStructuredReportPayload({
+          targetDocId: targetDoc,
+          userId,
+          preferredLanguage: passedLang || "english",
+        });
+
+        if (!reportData || reportData.error === "NO_REPORT_FOUND" || !reportData.document) {
+          const userLang = normalizeLanguage(passedLang || "english");
+          const replyText = NO_REPORT_FOUND_I18N[userLang] || NO_REPORT_FOUND_I18N.english;
+          return {
+            reply: replyText,
+            message: replyText,
+            mode: "NORMAL_CHAT",
+            actionType: "NORMAL_CHAT",
+            error: "NO_REPORT_FOUND",
+          };
+        }
+
+        const summaryPayload = formatReportSummaryPayload(reportData);
+        return {
+          reply: summaryPayload.summary || "Here is your report summary.",
+          message: summaryPayload.summary || "Here is your report summary.",
+          mode: "ACTION",
+          actionType: "REPORT_SUMMARY",
+          reportSummary: summaryPayload,
+          actions: [
+            {
+              actionType: "REPORT_SUMMARY",
+              reportSummary: summaryPayload,
+            },
+          ],
+          suggestedQuestions: reportData.suggestedQuestions || [],
+        };
       }
 
       const p = await patientRepository.findById(userId);

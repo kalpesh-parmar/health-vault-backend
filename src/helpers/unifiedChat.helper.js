@@ -7,6 +7,10 @@ const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const { normalizeMedicine } = require("./medicineNormalize.helper");
+const {
+  buildStructuredReportPayload,
+  formatReportSummaryPayload,
+} = require("./reportPayload.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -770,10 +774,11 @@ async function executeAddDocumentAction({
     });
   }
 
-  if (userId && !isOnboardingCompleted) {
-    const createdDocId =
-      docResult?.document?.id ||
-      (Array.isArray(docResult?.document) ? docResult.document[0]?.id : null);
+  const createdDocId =
+    docResult?.document?.id ||
+    (Array.isArray(docResult?.document) ? docResult.document[0]?.id : null);
+
+  if (userId) {
     if (createdDocId) {
       try {
         const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
@@ -793,6 +798,80 @@ async function executeAddDocumentAction({
         console.error("[executeAddDocumentAction] Failed to update onboarding record:", repoErr);
       }
     }
+  }
+
+  // Build structured report summary payload for CASE 1 & CASE 2
+  let reportSummaryPayload = null;
+  let actionsPayload = null;
+
+  if (userId || createdDocId) {
+    try {
+      const docRec = Array.isArray(docResult?.document)
+        ? docResult.document[0]
+        : docResult?.document;
+      const reportData = await buildStructuredReportPayload({
+        docRecord: docRec || null,
+        targetDocId: createdDocId || null,
+        userId: userId || null,
+        preferredLanguage,
+      });
+      if (reportData && reportData.document) {
+        reportSummaryPayload = formatReportSummaryPayload(reportData);
+      }
+    } catch (repErr) {
+      console.warn(
+        "[executeAddDocumentAction] Failed to build report summary payload:",
+        repErr.message,
+      );
+    }
+  }
+
+  if (documentSummary) {
+    documentSummary.summary = mainDocumentSummaryText || reportSummaryPayload?.summary || null;
+    documentSummary.text = replyText;
+  }
+
+  // CASE 1: No medicines found -> Attach REPORT_SUMMARY immediately in extraction response
+  // CASE 2: Medicines found -> Hold summary as pending in state, do NOT include in extraction response
+  if (extractedMedicines.length === 0) {
+    if (reportSummaryPayload) {
+      actionsPayload = [
+        {
+          actionType: "REPORT_SUMMARY",
+          reportSummary: reportSummaryPayload,
+        },
+      ];
+    }
+  } else if (userId && reportSummaryPayload) {
+    try {
+      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
+      const existingData = onboardingRecord?.data || {};
+      const updatedData = {
+        ...existingData,
+        documentId: createdDocId || existingData.documentId,
+        pendingReportSummary: {
+          ...reportSummaryPayload,
+          status: "PENDING",
+        },
+      };
+      if (onboardingRecord) {
+        await userOnboardingRepository.updateByUserId(userId, { data: updatedData });
+      } else {
+        await userOnboardingRepository.create({
+          userId,
+          step: existingData.currentStep || "ASK_LANGUAGE",
+          data: updatedData,
+        });
+      }
+    } catch (saveErr) {
+      console.warn(
+        "[executeAddDocumentAction] Failed to save pendingReportSummary:",
+        saveErr.message,
+      );
+    }
+    // Omit reportSummaryPayload from immediate extraction response when medicines are found
+    reportSummaryPayload = null;
+    actionsPayload = null;
   }
 
   const isPostOnboardingReview = isOnboardingCompleted && extractedMedicines.length > 0;
@@ -839,6 +918,8 @@ async function executeAddDocumentAction({
         medicines: extractedMedicines,
         suggestedAction,
         options,
+        actions: actionsPayload,
+        reportSummary: reportSummaryPayload,
       },
     });
   }
@@ -858,6 +939,8 @@ async function executeAddDocumentAction({
     medicines: extractedMedicines,
     suggestedAction,
     options,
+    actions: actionsPayload,
+    reportSummary: reportSummaryPayload,
   });
 }
 
