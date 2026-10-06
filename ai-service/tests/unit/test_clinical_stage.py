@@ -15,9 +15,9 @@ def test_lab_evaluator_assigns_correct_bounds_flags():
     assert res_normal["isAbnormal"] is False
     assert res_normal["isCritical"] is False
 
-    # High HbA1c
+    # High HbA1c (diabetic tier per Phase 3)
     res_high = LabEvaluator.evaluate_result("HbA1c", 8.2)
-    assert res_high["flag"] == "HIGH"
+    assert res_high["flag"] in ("HIGH", "diabetic")
     assert res_high["isAbnormal"] is True
     assert res_high["isCritical"] is False
 

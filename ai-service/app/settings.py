@@ -324,6 +324,13 @@ class Settings(BaseSettings):
     lifespan_warmup_ocr_languages: list[str] = Field(
         default=["en", "devanagari", "ta"], alias="LIFESPAN_WARMUP_OCR_LANGUAGES"
     )
+
+    @field_validator("lifespan_warmup_ocr_languages", mode="before")
+    @classmethod
+    def parse_warmup_ocr_languages(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
     validation_max_image_side: int = Field(default=1200, alias="VALIDATION_MAX_IMAGE_SIDE")
 
     medgemma_model: str = Field(default="medgemma:4b", alias="MEDGEMMA_MODEL")

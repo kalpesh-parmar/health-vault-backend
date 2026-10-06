@@ -170,7 +170,7 @@ def test_extract_text_normalizes_mixed_and_malformed_raw_detections(paddle_engin
         [box3, "String Line Three"],
     ]]
 
-    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img: mock_raw)
+    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img, **_kwargs: mock_raw)
 
     dummy_img = np.ones((100, 100, 3), dtype=np.uint8)
     res = paddle_engine.extract_text_from_image(dummy_img)
@@ -199,7 +199,7 @@ def test_extract_text_structured_dict_with_numpy_arrays(paddle_engine: PaddleOcr
         ]),
     }]
 
-    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img: mock_raw)
+    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img, **_kwargs: mock_raw)
 
     dummy_img = np.ones((100, 100, 3), dtype=np.uint8)
     res = paddle_engine.extract_text_from_image(dummy_img)
@@ -224,7 +224,7 @@ def test_extract_text_direct_dict_with_numpy_arrays(paddle_engine: PaddleOcrEngi
         ]),
     }
 
-    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img: mock_raw)
+    monkeypatch.setattr(paddle_engine, "_run_raw_ocr", lambda _img, **_kwargs: mock_raw)
 
     dummy_img = np.ones((100, 100, 3), dtype=np.uint8)
     res = paddle_engine.extract_text_from_image(dummy_img)
