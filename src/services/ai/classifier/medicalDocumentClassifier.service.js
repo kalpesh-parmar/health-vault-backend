@@ -255,7 +255,7 @@ class MedicalDocumentClassifierService {
     );
     const responseObj = await ollamaClient.chat(messages, env.chatModel, {
       temperature: 0,
-      maxTokens: 512,
+      maxTokens: 8192,
       format: "json",
       fallbackToThinking: false,
       returnFullResponse: true,

@@ -723,7 +723,7 @@ Return STRICT JSON only:
         structuringModel,
         {
           temperature: 0,
-          maxTokens: 512,
+          maxTokens: 8192,
           format: "json",
           rawOptions: { num_ctx: 8192 },
           think: false,
@@ -1464,7 +1464,7 @@ Return STRICT JSON only:
     try {
       const response = await ollamaClient.generate(prompt, structuringModel, {
         temperature: 0.1,
-        maxTokens: 512, // Capped to 512 tokens (~300 words) to prevent token bloat
+        maxTokens: 8192, // Capped to 512 tokens (~300 words) to prevent token bloat
         think: false,
         rawOptions: { num_ctx: 8192 },
       });

@@ -89,7 +89,7 @@ function sanitizePayload(value) {
       Object.entries(value).map(([key, child]) => [key, sanitizePayload(child)]),
     );
   }
-  if (typeof value === "string" && value.length > 512) {
+  if (typeof value === "string" && value.length > 8192) {
     return `<string len=${value.length} sha256=${crypto.createHash("sha256").update(value).digest("hex")}>`;
   }
   return value;

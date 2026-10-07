@@ -229,7 +229,7 @@ async function synthesizeClinicalSummary({
     try {
       const response = await ollamaClient.generate(prompt, model, {
         temperature: 0.1,
-        maxTokens: 512,
+        maxTokens: 8192,
         think: false,
         rawOptions: { num_ctx: 8192 },
       });
@@ -251,13 +251,13 @@ async function synthesizeClinicalSummary({
       const [respEng, respPref] = await Promise.all([
         ollamaClient.generate(promptEng, model, {
           temperature: 0.1,
-          maxTokens: 512,
+          maxTokens: 8192,
           think: false,
           rawOptions: { num_ctx: 8192 },
         }),
         ollamaClient.generate(promptPref, model, {
           temperature: 0.1,
-          maxTokens: 512,
+          maxTokens: 8192,
           think: false,
           rawOptions: { num_ctx: 8192 },
         }),
@@ -275,7 +275,7 @@ async function synthesizeClinicalSummary({
         try {
           const resp = await ollamaClient.generate(promptEng, model, {
             temperature: 0.1,
-            maxTokens: 512,
+            maxTokens: 8192,
             think: false,
             rawOptions: { num_ctx: 8192 },
           });
