@@ -44,16 +44,19 @@ def is_blank_page(image: Image.Image) -> bool:
         std_dev = float(stat.stddev[0])
 
         # Standard deviation check: completely uniform page has near-zero variance
-        if std_dev < 5.0:
+        if std_dev < 3.0:
             return True
 
-        # White pixel ratio: > 99% pixels are essentially pure white (> 250)
-        hist = gray.histogram()
-        total_pixels = sum(hist)
-        if total_pixels > 0:
-            white_pixels = sum(hist[250:])
-            if (white_pixels / total_pixels) > 0.99:
-                return True
+        # Check for essentially uniform page (e.g. slight scanner dust or faint uniform noise)
+        # Must have low variance (< 5.0) AND > 99.8% pixels near white (> 250) or dark (< 10)
+        if std_dev < 5.0:
+            hist = gray.histogram()
+            total_pixels = sum(hist)
+            if total_pixels > 0:
+                white_pixels = sum(hist[250:])
+                black_pixels = sum(hist[:10])
+                if (white_pixels / total_pixels) > 0.998 or (black_pixels / total_pixels) > 0.998:
+                    return True
 
         return False
     except Exception as e:

@@ -225,14 +225,24 @@ class MedicalValidationService:
                 return EvaluatedPage(
                     page_number=page_number,
                     label="ADVERTISEMENT",
-                    p_medical=p_medical,
+                    p_medical=0.0,
                     l2_key=l2_key,
                     p_good=p_good,
                 )
 
-        # 3. Scanned / raster image without text layer: pharma flyer guard
+        # 3. Quality head degradation check (< 0.30)
+        if p_good < 0.30:
+            return EvaluatedPage(
+                page_number=page_number,
+                label="UNKNOWN",
+                p_medical=p_medical,
+                l2_key=l2_key,
+                p_good=p_good,
+            )
+
+        # 4. Scanned / raster image without text layer: pharma flyer guard
         if not (page_text and page_text.strip()):
-            if l2_key in {"other_miscellaneous", "other_document", "medication_image"} and p_medical < 0.50:
+            if (l2_key in {"other_miscellaneous", "other_document", "medication_image"}) and p_medical < 0.50:
                 return EvaluatedPage(
                     page_number=page_number,
                     label="NON_MEDICAL",
@@ -241,12 +251,12 @@ class MedicalValidationService:
                     p_good=p_good,
                 )
 
-        # 4. Medical detection criteria
+        # 5. Medical detection criteria
         if p_medical >= 0.60 or (p_medical >= 0.50 and l2_key in CLINICAL_L2_KEYS):
             label = "MEDICAL"
         elif p_medical < 0.40 or l2_key in EXPLICIT_NON_MEDICAL_L2_KEYS:
             label = "NON_MEDICAL"
-        elif p_good < 0.30 or (0.40 <= p_medical < 0.60):
+        elif 0.40 <= p_medical < 0.60:
             label = "UNKNOWN"
         else:
             label = "NON_MEDICAL"
@@ -268,34 +278,35 @@ class MedicalValidationService:
         if n_active == 0:
             return False, 0.99, "Document is empty or blank"
 
-        max_p_med = max((p.p_medical for p in active_pages), default=0.0)
+        max_p_med = max((p.p_medical for p in active_pages if p.label == "MEDICAL"), default=0.0)
+        max_p_any = max((p.p_medical for p in active_pages), default=0.0)
         n_medical = sum(1 for p in active_pages if p.label == "MEDICAL")
         n_non_med = sum(1 for p in active_pages if p.label == "NON_MEDICAL")
         n_ad = sum(1 for p in active_pages if p.label == "ADVERTISEMENT")
 
         # Rule 2 [Anchor Medical Page]
         # A single high-confidence clinical page takes precedence; never rejected due to ads/bills
-        if any(p.p_medical >= 0.90 for p in active_pages):
+        if any(p.label == "MEDICAL" and p.p_medical >= 0.90 for p in active_pages):
             return True, round(max_p_med, 4), "Document contains verified clinical records"
 
         # Rule 3 [Predominantly Non-Medical - Gated Dilution]
         # Applies ONLY when no strong clinical page exists
-        if (not any(p.p_medical >= 0.90 for p in active_pages)) and n_non_med >= 2 and ((n_medical / n_active) < 0.33):
-            return False, round(1.0 - max_p_med, 4), "Document is predominantly non-medical"
+        if (not any(p.label == "MEDICAL" and p.p_medical >= 0.90 for p in active_pages)) and n_non_med >= 2 and ((n_medical / n_active) < 0.33):
+            return False, round(1.0 - max_p_any, 4), "Document is predominantly non-medical"
 
         # Rule 4 [Pure Non-Medical / Pure Advertisement]
         if n_medical == 0:
             if n_ad == n_active:
-                return False, round(1.0 - max_p_med, 4), "Document contains commercial advertisements or marketing flyers"
-            if n_non_med == n_active:
-                return False, round(1.0 - max_p_med, 4), "Document does not contain clinical healthcare records"
+                return False, round(1.0 - max_p_any, 4), "Document contains commercial advertisements or marketing flyers"
+            if n_non_med == n_active or (n_ad + n_non_med) == n_active:
+                return False, round(1.0 - max_p_any, 4), "Document does not contain clinical healthcare records"
 
         # Rule 5 [Majority / Balanced Clinical Content]
         if n_medical >= 1 and ((n_medical / n_active) >= 0.50):
             return True, round(max_p_med, 4), "Document contains valid medical records"
 
         # Rule 6 [Default Fallback - Fail-Closed / Low Confidence]
-        return False, round(1.0 - max_p_med, 4), "Unable to verify document authenticity with sufficient confidence"
+        return False, round(1.0 - max_p_any, 4), "Unable to verify document authenticity with sufficient confidence"
 
     def _normalize_document_type(self, raw_type: str | None, is_medical: bool) -> str | None:
         """Maintained for backwards-compatibility; validation always yields documentType=None."""
