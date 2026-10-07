@@ -1519,8 +1519,10 @@ Return STRICT JSON only:
 
   getModelConfig() {
     const visionModel = env.aiModel || "qwen3-vl:latest";
-    const isSingleModelMode = process.env.AI_SINGLE_MODEL_MODE !== "false";
-    const structuringModel = isSingleModelMode ? visionModel : env.chatModel || visionModel;
+    const isSingleModelMode = process.env.AI_SINGLE_MODEL_MODE === "true";
+    const structuringModel = isSingleModelMode
+      ? visionModel
+      : env.structuringModel || "qwen2.5:14b";
 
     return {
       visionModel,

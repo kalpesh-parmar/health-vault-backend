@@ -159,6 +159,7 @@ const env = Object.freeze({
   codeModel: process.env.CODE_MODEL,
   visionModel: process.env.VISION_MODEL || "qwen3-vl:latest",
   qwenVlModel: stringFromEnv("QWEN_VL_MODEL") || process.env.VISION_MODEL || "qwen3-vl:latest",
+  structuringModel: stringFromEnv("STRUCTURING_MODEL") || "qwen2.5:14b",
   popplerPath: process.env.POPPLER_PATH,
 
   // Embedding & Reminders
@@ -227,6 +228,7 @@ function validateEnv(config) {
   assertNonCloudModel(config.chatModel, "CHAT_MODEL");
   assertNonCloudModel(config.embeddingModel, "AI_EMBEDDING_MODEL");
   assertNonCloudModel(config.medgemmaModel, "MEDGEMMA_MODEL");
+  assertNonCloudModel(config.structuringModel, "STRUCTURING_MODEL");
 
   if (missing.length) {
     // eslint-disable-next-line no-console
