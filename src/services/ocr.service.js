@@ -224,23 +224,83 @@ class V1Service {
       throw new InvalidRequestException("Missing parameters");
     }
 
+    const identifier = String(documentId);
     const isUuid =
       /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-        documentId,
+        identifier,
       );
 
-    const condition = isUuid
-      ? or(eq(document.id, documentId), eq(document.s3Key, documentId))
-      : eq(document.s3Key, documentId);
+    let targetDocId = isUuid ? identifier : null;
+    let targetFileKey = !isUuid ? identifier : null;
 
-    await db
-      .update(document)
-      .set({
-        ocrStatus: ocrStatus.CANCELED,
-        remarks: "ERR_CODE:USER_CANCELLED",
-        updatedAt: new Date(),
-      })
+    // 1. Resolve from document table
+    const condition = isUuid
+      ? or(eq(document.id, identifier), eq(document.s3Key, identifier))
+      : eq(document.s3Key, identifier);
+
+    const [foundDoc] = await db
+      .select({ id: document.id, s3Key: document.s3Key })
+      .from(document)
       .where(and(condition, eq(document.userId, userId)));
+
+    if (foundDoc) {
+      targetDocId = foundDoc.id;
+      targetFileKey = foundDoc.s3Key;
+    }
+
+    // 2. Resolve from documentProcessingJob table if needed
+    const jobRow = await documentProcessingJobRepository
+      .findByFileKey(targetFileKey || identifier, userId)
+      .catch(() => null);
+
+    const targetJobId = isUuid && !foundDoc ? identifier : jobRow?.id;
+    if (jobRow) {
+      if (!targetFileKey) targetFileKey = jobRow.fileKey;
+      if (!targetDocId && targetFileKey) {
+        const [docByFileKey] = await db
+          .select({ id: document.id, s3Key: document.s3Key })
+          .from(document)
+          .where(and(eq(document.s3Key, targetFileKey), eq(document.userId, userId)));
+        if (docByFileKey) {
+          targetDocId = docByFileKey.id;
+        }
+      }
+    }
+
+    // 3. Update document table
+    if (targetDocId || targetFileKey) {
+      const docWhere = targetDocId
+        ? and(eq(document.id, targetDocId), eq(document.userId, userId))
+        : and(eq(document.s3Key, targetFileKey), eq(document.userId, userId));
+
+      await db
+        .update(document)
+        .set({
+          ocrStatus: ocrStatus.CANCELED,
+          remarks: "ERR_CODE:USER_CANCELLED",
+          updatedAt: new Date(),
+        })
+        .where(docWhere);
+    }
+
+    // 4. Update documentProcessingJob table
+    if (targetJobId) {
+      await documentProcessingJobRepository
+        .checkpointStage(targetJobId, {
+          status: "CANCELLED",
+          stageStatus: "CANCELLED",
+          stage: "CANCELLED",
+          message: "Job cancelled by user",
+          completedAt: new Date(),
+        })
+        .catch(() => null);
+    }
+
+    // 5. Abort active in-memory background OCR task
+    if (targetDocId) ocrService.cancelJob(targetDocId);
+    if (targetFileKey) ocrService.cancelJob(targetFileKey);
+    if (targetJobId) ocrService.cancelJob(targetJobId);
+    if (identifier) ocrService.cancelJob(identifier);
 
     return { message: "Job cancelled successfully" };
   }

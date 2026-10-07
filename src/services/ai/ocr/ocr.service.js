@@ -12,7 +12,8 @@ const {
 const prompts = require("../prompts");
 // const sharp = require("sharp");
 const userOnboardingRepository = require("../../../repositories/userOnboardingRepository");
-const { eq } = require("drizzle-orm");
+const { eq, or } = require("drizzle-orm");
+const AbortController = globalThis.AbortController;
 const { embeddingService } = require("../chat/embedding.service");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
@@ -61,6 +62,39 @@ const {
 } = require("../../../helpers/summary.helper");
 
 class OcrService {
+  constructor() {
+    this.activeJobs = new Map();
+  }
+
+  cancelJob(id) {
+    if (!id) return false;
+    const strId = String(id);
+    let found = false;
+    for (const [key, job] of this.activeJobs.entries()) {
+      if (
+        key === strId ||
+        job.documentId === strId ||
+        job.jobId === strId ||
+        job.fileKey === strId ||
+        job.traceId === strId ||
+        (job.fileKey && (job.fileKey.includes(strId) || strId.includes(job.fileKey))) ||
+        (job.traceId && (job.traceId.includes(strId) || strId.includes(job.traceId)))
+      ) {
+        job.isCancelled = true;
+        if (job.abortController) {
+          try {
+            job.abortController.abort();
+          } catch {
+            // ignore abort error
+          }
+        }
+        this.activeJobs.delete(key);
+        found = true;
+      }
+    }
+    return found;
+  }
+
   async convertPdfToImages(pdfBuffer, options = {}) {
     const tmpDir = path.resolve(__dirname, "../../../../tmp");
     if (!fs.existsSync(tmpDir)) {
@@ -716,607 +750,707 @@ Return STRICT JSON only:
 
   async extractMedicalData(file) {
     const traceId = file.traceId || "N/A";
-    const jobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
+    const rawJobId = traceId.startsWith("ocr_job_") ? traceId.replace("ocr_job_", "") : "N/A";
+    const jobId = rawJobId;
+    const fileKey =
+      file.fileKey || file.filename || file.s3Key || (rawJobId !== "N/A" ? rawJobId : null);
+    const docId = file.documentId || file.id || null;
     const onProgress = file.onProgress;
 
-    const { visionModel, structuringModel } = this.getModelConfig();
+    const abortController = new AbortController();
+    const jobInfo = {
+      documentId: docId ? String(docId) : "",
+      jobId: rawJobId ? String(rawJobId) : "",
+      fileKey: fileKey ? String(fileKey) : "",
+      traceId: String(traceId),
+      abortController,
+      isCancelled: false,
+    };
 
-    let fileBuffer = file.buffer;
-    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
-      const candidatePath = file.path || file.filePath;
-      if (candidatePath && fs.existsSync(candidatePath)) {
-        try {
-          fileBuffer = fs.readFileSync(candidatePath);
-        } catch (readErr) {
-          console.error(
-            `[OcrService] Failed to read file from path ${candidatePath}:`,
-            readErr.message,
+    if (docId) this.activeJobs.set(String(docId), jobInfo);
+    if (rawJobId && rawJobId !== "N/A") this.activeJobs.set(String(rawJobId), jobInfo);
+    if (fileKey) this.activeJobs.set(String(fileKey), jobInfo);
+    if (traceId) this.activeJobs.set(String(traceId), jobInfo);
+
+    file.signal = abortController.signal;
+    file.abortController = abortController;
+
+    const checkCancelled = async () => {
+      if (jobInfo.isCancelled || abortController.signal.aborted) {
+        const err = new Error("Job cancelled by user");
+        err.code = "ERR_CANCELED";
+        err.isCancelled = true;
+        throw err;
+      }
+      const conditions = [];
+      if (docId) conditions.push(eq(document.id, docId));
+      if (fileKey) conditions.push(eq(document.s3Key, fileKey));
+      if (rawJobId && rawJobId !== "N/A") {
+        const isUuid =
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+            rawJobId,
           );
+        if (isUuid) conditions.push(eq(document.id, rawJobId));
+      }
+      if (conditions.length > 0) {
+        try {
+          const [currentDoc] = await db
+            .select({ ocrStatus: document.ocrStatus })
+            .from(document)
+            .where(or(...conditions));
+          if (currentDoc && currentDoc.ocrStatus === ocrStatus.CANCELED) {
+            jobInfo.isCancelled = true;
+            try {
+              abortController.abort();
+            } catch {
+              /* ignore abort error */
+            }
+            const err = new Error("Job cancelled by user");
+            err.code = "ERR_CANCELED";
+            err.isCancelled = true;
+            throw err;
+          }
+        } catch (dbCheckErr) {
+          if (dbCheckErr.isCancelled) throw dbCheckErr;
         }
       }
-    }
+    };
 
-    if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
-      throw new Error("OCR received an empty or unreadable file buffer");
-    }
+    try {
+      await checkCancelled();
 
-    const isPdf =
-      file.mimeType === "application/pdf" ||
-      file.filename?.toLowerCase().endsWith(".pdf") ||
-      file.originalname?.toLowerCase().endsWith(".pdf");
+      const { visionModel, structuringModel } = this.getModelConfig();
 
-    let pageTexts = [];
-    let pageResults = [];
-    let isScannedPdfOrImage = false;
-    let skippedPages = [];
-    let failedPages = [];
-    let ocrIncomplete = false;
-    let hasMedicalPage = false;
-
-    // STEP 1: Digital PDF Text Extraction vs. Rasterization Fallback
-    if (isPdf) {
-      try {
-        const pdfParse = require("pdf-parse");
-        const pdfData = await pdfParse(fileBuffer);
-        // Strip control characters while preserving printable Unicode (µ, °, ±, non-English)
-        // eslint-disable-next-line no-control-regex -- intentionally stripping control characters from OCR output
-        const extracted = (pdfData.text || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "").trim();
-        if (extracted.length >= (env.aiMinTextChars || 50)) {
-          pageTexts = [extracted];
-          hasMedicalPage = true;
-          if (typeof onProgress === "function") {
-            try {
-              onProgress({
-                page: pdfData.numpages || 1,
-                totalPages: pdfData.numpages || 1,
-                stage: "OCR_RUNNING",
-              });
-            } catch (pErr) {
-              console.warn("[OcrService] onProgress callback threw:", pErr.message);
-            }
+      let fileBuffer = file.buffer;
+      if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+        const candidatePath = file.path || file.filePath;
+        if (candidatePath && fs.existsSync(candidatePath)) {
+          try {
+            fileBuffer = fs.readFileSync(candidatePath);
+          } catch (readErr) {
+            console.error(
+              `[OcrService] Failed to read file from path ${candidatePath}:`,
+              readErr.message,
+            );
           }
-        } else {
+        }
+      }
+
+      if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+        throw new Error("OCR received an empty or unreadable file buffer");
+      }
+
+      const isPdf =
+        file.mimeType === "application/pdf" ||
+        file.filename?.toLowerCase().endsWith(".pdf") ||
+        file.originalname?.toLowerCase().endsWith(".pdf");
+
+      let pageTexts = [];
+      let pageResults = [];
+      let isScannedPdfOrImage = false;
+      let skippedPages = [];
+      let failedPages = [];
+      let ocrIncomplete = false;
+      let hasMedicalPage = false;
+
+      // STEP 1: Digital PDF Text Extraction vs. Rasterization Fallback
+      if (isPdf) {
+        try {
+          const pdfParse = require("pdf-parse");
+          const pdfData = await pdfParse(fileBuffer);
+          // Strip control characters while preserving printable Unicode (µ, °, ±, non-English)
+
+          const extracted = (pdfData.text || "")
+            .replace(/[\p{Cc}]/gu, (char) =>
+              char === "\n" || char === "\r" || char === "\t" ? char : "",
+            )
+            .trim();
+          if (extracted.length >= (env.aiMinTextChars || 50)) {
+            pageTexts = [extracted];
+            hasMedicalPage = true;
+            if (typeof onProgress === "function") {
+              try {
+                onProgress({
+                  page: pdfData.numpages || 1,
+                  totalPages: pdfData.numpages || 1,
+                  stage: "OCR_RUNNING",
+                });
+              } catch (pErr) {
+                console.warn("[OcrService] onProgress callback threw:", pErr.message);
+              }
+            }
+          } else {
+            isScannedPdfOrImage = true;
+          }
+        } catch (err) {
+          console.warn(
+            "[OcrService] pdf-parse failed, falling back to rasterization:",
+            err.message,
+          );
           isScannedPdfOrImage = true;
         }
-      } catch (err) {
-        console.warn("[OcrService] pdf-parse failed, falling back to rasterization:", err.message);
+      } else {
         isScannedPdfOrImage = true;
       }
-    } else {
-      isScannedPdfOrImage = true;
-    }
 
-    // STEP 2: Sequential Single-Pass Per-Page Classify + Vision OCR
-    if (isScannedPdfOrImage) {
-      let base64Images = [];
-      if (isPdf) {
-        base64Images = await this.convertPdfToImages(fileBuffer);
-      } else {
-        const processedBuffer = await preprocessImage(fileBuffer);
-        const candidateBase64 = Buffer.isBuffer(processedBuffer)
-          ? processedBuffer.toString("base64")
-          : Buffer.isBuffer(fileBuffer)
-            ? fileBuffer.toString("base64")
-            : "";
-        if (candidateBase64) {
-          base64Images = [candidateBase64];
+      // STEP 2: Sequential Single-Pass Per-Page Classify + Vision OCR
+      if (isScannedPdfOrImage) {
+        let base64Images = [];
+        if (isPdf) {
+          base64Images = await this.convertPdfToImages(fileBuffer);
+        } else {
+          const processedBuffer = await preprocessImage(fileBuffer);
+          const candidateBase64 = Buffer.isBuffer(processedBuffer)
+            ? processedBuffer.toString("base64")
+            : Buffer.isBuffer(fileBuffer)
+              ? fileBuffer.toString("base64")
+              : "";
+          if (candidateBase64) {
+            base64Images = [candidateBase64];
+          }
         }
-      }
 
-      if (!base64Images.length) {
-        throw new Error("OCR produced no usable text");
-      }
+        if (!base64Images.length) {
+          throw new Error("OCR produced no usable text");
+        }
 
-      const totalPages = base64Images.length;
-      let completedPages = 0;
+        const totalPages = base64Images.length;
+        let completedPages = 0;
 
-      console.time(
-        `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
-      );
+        console.time(
+          `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
+        );
 
-      pageResults = await Promise.all(
-        base64Images.map(async (base64Img, index) => {
-          const pageNum = index + 1;
-          const pageHash = ocrPageCache.hashPageContent(base64Img);
-          const cachedResult = ocrPageCache.getPageOcr(pageHash);
-          if (cachedResult) {
-            console.log(
-              `[OcrService] Page ${pageNum} cache HIT (hash: ${pageHash.slice(0, 10)}...)`,
-            );
-            return {
-              pageNum,
-              pageType: cachedResult.pageType,
-              rawText: cachedResult.rawText,
-              status: "SUCCESS",
-              cached: true,
-            };
-          }
-
-          if (!base64Img || typeof base64Img !== "string" || base64Img.trim().length === 0) {
-            console.error(`[OcrService] Page ${pageNum} base64 image payload is empty or invalid`);
-            return {
-              pageNum,
-              pageType: "UNKNOWN",
-              rawText: "",
-              status: "FAILED",
-              error: "Empty image payload",
-            };
-          }
-
-          console.log(
-            `[OcrService] [DIAGNOSTIC] Page ${pageNum}/${totalPages}: imagesCount=1, base64Bytes=${base64Img.length}, visionModel=${visionModel}, traceId=${traceId}, jobId=${jobId}`,
-          );
-
-          let pageResponse;
-          let pageParsed = null;
-          let attempt = 0;
-          let lastError = null;
-
-          while (attempt < 2 && (!pageParsed || pageParsed.status === "FAILED")) {
-            attempt++;
-            try {
-              pageResponse = await ollamaClient.chat(
-                [
-                  {
-                    role: "user",
-                    content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
-                    images: [base64Img],
-                  },
-                ],
-                visionModel,
-                {
-                  temperature: 0,
-                  maxTokens: 8192,
-                  format: "json",
-                  keep_alive: -1,
-                  rawOptions: { num_ctx: 16384, num_predict: 8192 },
-                  think: false,
-                  fallbackToThinking: true,
-                },
-              );
-
-              const rawSnippet =
-                typeof pageResponse === "string"
-                  ? pageResponse.slice(0, 100).replace(/[\r\n]+/g, " ")
-                  : "NON_STRING";
+        pageResults = await Promise.all(
+          base64Images.map(async (base64Img, index) => {
+            const pageNum = index + 1;
+            const pageHash = ocrPageCache.hashPageContent(base64Img);
+            const cachedResult = ocrPageCache.getPageOcr(pageHash);
+            if (cachedResult) {
               console.log(
-                `[OcrService] [DIAGNOSTIC] Page ${pageNum} attempt ${attempt} response snippet: "${rawSnippet}..."`,
+                `[OcrService] Page ${pageNum} cache HIT (hash: ${pageHash.slice(0, 10)}...)`,
               );
-
-              pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
-              if (pageParsed && pageParsed.status !== "FAILED") {
-                break;
-              }
-            } catch (err) {
-              lastError = err;
-              console.warn(
-                `[OcrService] Vision OCR attempt ${attempt} failed on Page ${pageNum}:`,
-                err.message,
-              );
+              return {
+                pageNum,
+                pageType: cachedResult.pageType,
+                rawText: cachedResult.rawText,
+                status: "SUCCESS",
+                cached: true,
+              };
             }
-          }
 
-          try {
-            if (pageParsed && pageParsed.status !== "FAILED") {
-              const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
-              const rawText = pageParsed.rawText || "";
-              ocrPageCache.setPageOcr(pageHash, { pageType, rawText });
-              return { pageNum, pageType, rawText, status: "SUCCESS" };
-            } else {
+            if (!base64Img || typeof base64Img !== "string" || base64Img.trim().length === 0) {
+              console.error(
+                `[OcrService] Page ${pageNum} base64 image payload is empty or invalid`,
+              );
               return {
                 pageNum,
                 pageType: "UNKNOWN",
                 rawText: "",
                 status: "FAILED",
-                error: lastError?.message || "Unparseable vision response",
+                error: "Empty image payload",
               };
             }
-          } finally {
-            completedPages++;
-            if (typeof onProgress === "function") {
+
+            console.log(
+              `[OcrService] [DIAGNOSTIC] Page ${pageNum}/${totalPages}: imagesCount=1, base64Bytes=${base64Img.length}, visionModel=${visionModel}, traceId=${traceId}, jobId=${jobId}`,
+            );
+
+            let pageResponse;
+            let pageParsed = null;
+            let attempt = 0;
+            let lastError = null;
+
+            while (attempt < 2 && (!pageParsed || pageParsed.status === "FAILED")) {
+              attempt++;
+              await checkCancelled();
               try {
-                onProgress({
-                  page: completedPages,
-                  totalPages,
-                  stage: "OCR_RUNNING",
-                });
-              } catch (progressErr) {
-                console.warn("[OcrService] onProgress callback threw:", progressErr.message);
+                pageResponse = await ollamaClient.chat(
+                  [
+                    {
+                      role: "user",
+                      content: prompts.PAGE_CLASSIFY_OCR_PROMPT,
+                      images: [base64Img],
+                    },
+                  ],
+                  visionModel,
+                  {
+                    temperature: 0,
+                    maxTokens: 8192,
+                    format: "json",
+                    keep_alive: -1,
+                    rawOptions: { num_ctx: 16384, num_predict: 8192 },
+                    think: false,
+                    fallbackToThinking: true,
+                    signal: abortController.signal,
+                  },
+                );
+
+                const rawSnippet =
+                  typeof pageResponse === "string"
+                    ? pageResponse.slice(0, 100).replace(/[\r\n]+/g, " ")
+                    : "NON_STRING";
+                console.log(
+                  `[OcrService] [DIAGNOSTIC] Page ${pageNum} attempt ${attempt} response snippet: "${rawSnippet}..."`,
+                );
+
+                pageParsed = this.cleanAndParseJSON(pageResponse, { traceId, jobId });
+                if (pageParsed && pageParsed.status !== "FAILED") {
+                  break;
+                }
+              } catch (err) {
+                lastError = err;
+                if (
+                  err.code === "ERR_CANCELED" ||
+                  err.isCancelled ||
+                  err.name === "CanceledError" ||
+                  err.name === "AbortError" ||
+                  abortController.signal.aborted
+                ) {
+                  throw err;
+                }
+                console.warn(
+                  `[OcrService] Vision OCR attempt ${attempt} failed on Page ${pageNum}:`,
+                  err.message,
+                );
               }
             }
-          }
-        }),
-      );
 
-      console.timeEnd(
-        `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
-      );
-
-      const MEDICAL_PAGE_TYPES = new Set([
-        "MEDICAL",
-        "PRESCRIPTION",
-        "LAB_REPORT",
-        "IMAGING_REPORT",
-        "DISCHARGE_SUMMARY",
-        "CONSULTATION_REPORT",
-        "OTHER_MEDICAL_DOCUMENT",
-      ]);
-
-      const EXPLICIT_NON_MEDICAL_TYPES = new Set([
-        "ADVERTISEMENT",
-        "COVER",
-        "OTHER",
-        "RECEIPT",
-        "INVOICE",
-        "NON_MEDICAL",
-      ]);
-
-      const explicitNonMedicalPages = [];
-      const ambiguousOrFailedPages = [];
-
-      for (const res of pageResults) {
-        if (res.status === "SUCCESS") {
-          const typeUpper = (res.pageType || "").toUpperCase();
-          if (MEDICAL_PAGE_TYPES.has(typeUpper) || file.enforceMedicalGate === false) {
-            hasMedicalPage = true;
-            pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
-          } else if (EXPLICIT_NON_MEDICAL_TYPES.has(typeUpper)) {
-            skippedPages.push({ page: res.pageNum, reason: res.pageType });
-            explicitNonMedicalPages.push(res.pageNum);
-            console.warn(`[OcrService] Page ${res.pageNum} skipped (Type: ${res.pageType})`);
-          } else {
-            ambiguousOrFailedPages.push(res.pageNum);
-            pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
-          }
-        } else {
-          ocrIncomplete = true;
-          failedPages.push(res.pageNum);
-          ambiguousOrFailedPages.push(res.pageNum);
-          pageTexts.push(`--- Page ${res.pageNum} ---\n[OCR_FAILED]`);
-        }
-      }
-
-      // Document-Level Medical Check: Reject only if NO page was medical AND ALL completed pages were explicitly non-medical
-      if (!hasMedicalPage && file.enforceMedicalGate !== false) {
-        if (explicitNonMedicalPages.length > 0 && ambiguousOrFailedPages.length === 0) {
-          const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
-          const uniqueCategories = [...new Set(detectedCategories)];
-          const categoryStr =
-            uniqueCategories.length > 0
-              ? ` (detected category: ${uniqueCategories.join(", ")})`
-              : "";
-          throw new NonMedicalDocumentException(
-            `The uploaded file is not a medical document${categoryStr}.`,
-          );
-        }
-
-        // Inconclusive/ambiguous/failed classification: FAIL OPEN or mark RETRYABLE_UNKNOWN (Never fail closed)
-        console.warn(
-          `[OcrService] Medical gate inconclusive for document (ambiguous/failed pages: ${ambiguousOrFailedPages.join(", ")}). Failing open or flagging as retryable.`,
+            try {
+              if (pageParsed && pageParsed.status !== "FAILED") {
+                const pageType = (pageParsed.pageType || "MEDICAL").toUpperCase();
+                const rawText = pageParsed.rawText || "";
+                ocrPageCache.setPageOcr(pageHash, { pageType, rawText });
+                return { pageNum, pageType, rawText, status: "SUCCESS" };
+              } else {
+                return {
+                  pageNum,
+                  pageType: "UNKNOWN",
+                  rawText: "",
+                  status: "FAILED",
+                  error: lastError?.message || "Unparseable vision response",
+                };
+              }
+            } finally {
+              completedPages++;
+              if (typeof onProgress === "function") {
+                try {
+                  onProgress({
+                    page: completedPages,
+                    totalPages,
+                    stage: "OCR_RUNNING",
+                  });
+                } catch (progressErr) {
+                  console.warn("[OcrService] onProgress callback threw:", progressErr.message);
+                }
+              }
+            }
+          }),
         );
 
-        const usableText = pageTexts
-          .join("\n\n")
-          .replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "")
-          .trim();
+        console.timeEnd(
+          `[OcrService] Processing ${totalPages} page(s) in parallel with ${visionModel}...`,
+        );
 
-        if (!usableText) {
-          const retryErr = new AppError(
-            StatusCodes.INTERNAL_SERVER_ERROR,
-            "Medical document classification inconclusive (model output unparseable or failed). Scheduled for retry.",
-            "RETRYABLE_UNKNOWN",
-            true,
-          );
-          retryErr.retryable = true;
-          throw retryErr;
+        await checkCancelled();
+
+        const MEDICAL_PAGE_TYPES = new Set([
+          "MEDICAL",
+          "PRESCRIPTION",
+          "LAB_REPORT",
+          "IMAGING_REPORT",
+          "DISCHARGE_SUMMARY",
+          "CONSULTATION_REPORT",
+          "OTHER_MEDICAL_DOCUMENT",
+        ]);
+
+        const EXPLICIT_NON_MEDICAL_TYPES = new Set([
+          "ADVERTISEMENT",
+          "COVER",
+          "OTHER",
+          "RECEIPT",
+          "INVOICE",
+          "NON_MEDICAL",
+        ]);
+
+        const explicitNonMedicalPages = [];
+        const ambiguousOrFailedPages = [];
+
+        for (const res of pageResults) {
+          if (res.status === "SUCCESS") {
+            const typeUpper = (res.pageType || "").toUpperCase();
+            if (MEDICAL_PAGE_TYPES.has(typeUpper) || file.enforceMedicalGate === false) {
+              hasMedicalPage = true;
+              pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
+            } else if (EXPLICIT_NON_MEDICAL_TYPES.has(typeUpper)) {
+              skippedPages.push({ page: res.pageNum, reason: res.pageType });
+              explicitNonMedicalPages.push(res.pageNum);
+              console.warn(`[OcrService] Page ${res.pageNum} skipped (Type: ${res.pageType})`);
+            } else {
+              ambiguousOrFailedPages.push(res.pageNum);
+              pageTexts.push(`--- Page ${res.pageNum} ---\n${cleanOcrText(res.rawText)}`);
+            }
+          } else {
+            ocrIncomplete = true;
+            failedPages.push(res.pageNum);
+            ambiguousOrFailedPages.push(res.pageNum);
+            pageTexts.push(`--- Page ${res.pageNum} ---\n[OCR_FAILED]`);
+          }
         }
-      }
-    }
 
-    const rawText = pageTexts.join("\n\n").trim();
-    if (!rawText || rawText.replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "").trim() === "") {
-      throw new Error("OCR produced no usable text");
-    }
+        // Document-Level Medical Check: Reject only if NO page was medical AND ALL completed pages were explicitly non-medical
+        if (!hasMedicalPage && file.enforceMedicalGate !== false) {
+          if (explicitNonMedicalPages.length > 0 && ambiguousOrFailedPages.length === 0) {
+            const detectedCategories = skippedPages.map((s) => s.reason).filter(Boolean);
+            const uniqueCategories = [...new Set(detectedCategories)];
+            const categoryStr =
+              uniqueCategories.length > 0
+                ? ` (detected category: ${uniqueCategories.join(", ")})`
+                : "";
+            throw new NonMedicalDocumentException(
+              `The uploaded file is not a medical document${categoryStr}.`,
+            );
+          }
 
-    const { detectedLanguages, primaryLanguage, isIndic } = detectLanguages(
-      rawText,
-      file.userLanguage || file.preferredLanguage,
-    );
-
-    // STEP 3: Structured JSON Extraction + English Summary (Querying structuringModel)
-    const baseStructurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
-    console.log(`[OcrService] Structuring Pass: Querying ${structuringModel}...`);
-
-    let rawParsedCandidate = null;
-    let zodValidationError = null;
-    let isSchemaValidated = false;
-    let attempts = 0;
-    const maxAttempts = 2;
-
-    while (attempts < maxAttempts) {
-      attempts++;
-
-      const promptToUse =
-        attempts > 1 && zodValidationError
-          ? `${baseStructurePrompt}\n\n[PREVIOUS ATTEMPT FAILED SCHEMA VALIDATION]\nYour previous output failed schema validation with errors:\n${zodValidationError}\n\nPlease fix all errors and return valid JSON matching the exact schema.`
-          : baseStructurePrompt;
-
-      const jsonResponseText = await ollamaClient.generate(promptToUse, structuringModel, {
-        temperature: 0,
-        maxTokens: 8192, //4096,
-        format: "json",
-        keep_alive: -1,
-        rawOptions: { num_ctx: 16384 }, //8192
-        think: false,
-      });
-      const parsedCandidate = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
-      if (parsedCandidate && parsedCandidate.status !== "FAILED") {
-        rawParsedCandidate = parsedCandidate;
-
-        const zodResult = MedicalExtractionSchema.passthrough().safeParse(parsedCandidate);
-        if (zodResult.success) {
-          isSchemaValidated = true;
-          break;
-        } else {
-          zodValidationError = zodResult.error.issues
-            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-            .join("; ");
+          // Inconclusive/ambiguous/failed classification: FAIL OPEN or mark RETRYABLE_UNKNOWN (Never fail closed)
           console.warn(
-            `[OcrService] Zod schema validation gate failed (attempt ${attempts}/${maxAttempts}): ${zodValidationError}`,
+            `[OcrService] Medical gate inconclusive for document (ambiguous/failed pages: ${ambiguousOrFailedPages.join(", ")}). Failing open or flagging as retryable.`,
           );
+
+          const usableText = pageTexts
+            .join("\n\n")
+            .replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "")
+            .trim();
+
+          if (!usableText) {
+            const retryErr = new AppError(
+              StatusCodes.INTERNAL_SERVER_ERROR,
+              "Medical document classification inconclusive (model output unparseable or failed). Scheduled for retry.",
+              "RETRYABLE_UNKNOWN",
+              true,
+            );
+            retryErr.retryable = true;
+            throw retryErr;
+          }
         }
-      } else {
-        zodValidationError = "Output could not be parsed as valid JSON.";
       }
-    }
 
-    if (!rawParsedCandidate) {
-      throw new Error("AI response format is invalid.");
-    }
+      const rawText = pageTexts.join("\n\n").trim();
+      if (!rawText || rawText.replace(/--- Page \d+ ---\s*\[OCR_FAILED\]/g, "").trim() === "") {
+        throw new Error("OCR produced no usable text");
+      }
 
-    // Digital PDF validation check on structuring output
-    if (rawParsedCandidate.isMedicalDocument === false) {
-      throw new NonMedicalDocumentException(
-        rawParsedCandidate.reason || "The uploaded file is not a medical document.",
+      const { detectedLanguages, primaryLanguage, isIndic } = detectLanguages(
+        rawText,
+        file.userLanguage || file.preferredLanguage,
       );
-    }
 
-    rawParsedCandidate.rawText = rawText;
+      // STEP 3: Structured JSON Extraction + English Summary (Querying structuringModel)
+      const baseStructurePrompt = prompts.STRUCTURED_EXTRACTION_PROMPT(rawText);
+      console.log(`[OcrService] Structuring Pass: Querying ${structuringModel}...`);
 
-    // STEP 4: Entity Normalization & Output Mapping
-    let name = rawParsedCandidate.patientName || rawParsedCandidate.patient?.name || null;
-    let firstName = rawParsedCandidate.firstName || rawParsedCandidate.patient?.firstName || null;
-    let lastName = rawParsedCandidate.lastName || rawParsedCandidate.patient?.lastName || null;
-    let middleName = null;
+      let rawParsedCandidate = null;
+      let zodValidationError = null;
+      let isSchemaValidated = false;
+      let attempts = 0;
+      const maxAttempts = 2;
 
-    const combinedName =
-      name || (firstName || lastName ? `${firstName || ""} ${lastName || ""}`.trim() : null);
+      while (attempts < maxAttempts) {
+        attempts++;
+        await checkCancelled();
 
-    if (combinedName) {
-      const split = splitName(combinedName);
-      firstName = split.firstName;
-      middleName = split.middleName;
-      lastName = split.lastName;
-      name = combinedName;
-    }
+        const promptToUse =
+          attempts > 1 && zodValidationError
+            ? `${baseStructurePrompt}\n\n[PREVIOUS ATTEMPT FAILED SCHEMA VALIDATION]\nYour previous output failed schema validation with errors:\n${zodValidationError}\n\nPlease fix all errors and return valid JSON matching the exact schema.`
+            : baseStructurePrompt;
 
-    const summaryValue =
-      rawParsedCandidate.summaryEn ||
-      rawParsedCandidate.summary ||
-      rawParsedCandidate.remarks ||
-      (rawParsedCandidate.rawText ? rawParsedCandidate.rawText.slice(0, 200) : "");
+        const jsonResponseText = await ollamaClient.generate(promptToUse, structuringModel, {
+          temperature: 0,
+          maxTokens: 8192, //4096,
+          format: "json",
+          keep_alive: -1,
+          rawOptions: { num_ctx: 16384 }, //8192
+          think: false,
+          signal: abortController.signal,
+        });
+        const parsedCandidate = this.cleanAndParseJSON(jsonResponseText, { traceId, jobId });
+        if (parsedCandidate && parsedCandidate.status !== "FAILED") {
+          rawParsedCandidate = parsedCandidate;
 
-    let rawCandidateDocType = rawParsedCandidate.documentType || rawParsedCandidate.reportType;
+          const zodResult = MedicalExtractionSchema.passthrough().safeParse(parsedCandidate);
+          if (zodResult.success) {
+            isSchemaValidated = true;
+            break;
+          } else {
+            zodValidationError = zodResult.error.issues
+              .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+              .join("; ");
+            console.warn(
+              `[OcrService] Zod schema validation gate failed (attempt ${attempts}/${maxAttempts}): ${zodValidationError}`,
+            );
+          }
+        } else {
+          zodValidationError = "Output could not be parsed as valid JSON.";
+        }
+      }
 
-    const rawCandidateText = (rawParsedCandidate.rawText || "").toLowerCase();
-    const candidateMeds = asArray(rawParsedCandidate.medications);
-    const candidateLab = asArray(
-      rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
-    );
+      if (!rawParsedCandidate) {
+        throw new Error("AI response format is invalid.");
+      }
 
-    if (
-      !rawCandidateDocType ||
-      rawCandidateDocType === "LAB_REPORT" ||
-      rawCandidateDocType === "OTHER_MEDICAL_DOCUMENT"
-    ) {
+      // Digital PDF validation check on structuring output
+      if (rawParsedCandidate.isMedicalDocument === false) {
+        throw new NonMedicalDocumentException(
+          rawParsedCandidate.reason || "The uploaded file is not a medical document.",
+        );
+      }
+
+      rawParsedCandidate.rawText = rawText;
+
+      // STEP 4: Entity Normalization & Output Mapping
+      let name = rawParsedCandidate.patientName || rawParsedCandidate.patient?.name || null;
+      let firstName = rawParsedCandidate.firstName || rawParsedCandidate.patient?.firstName || null;
+      let lastName = rawParsedCandidate.lastName || rawParsedCandidate.patient?.lastName || null;
+      let middleName = null;
+
+      const combinedName =
+        name || (firstName || lastName ? `${firstName || ""} ${lastName || ""}`.trim() : null);
+
+      if (combinedName) {
+        const split = splitName(combinedName);
+        firstName = split.firstName;
+        middleName = split.middleName;
+        lastName = split.lastName;
+        name = combinedName;
+      }
+
+      const summaryValue =
+        rawParsedCandidate.summaryEn ||
+        rawParsedCandidate.summary ||
+        rawParsedCandidate.remarks ||
+        (rawParsedCandidate.rawText ? rawParsedCandidate.rawText.slice(0, 200) : "");
+
+      let rawCandidateDocType = rawParsedCandidate.documentType || rawParsedCandidate.reportType;
+
+      const rawCandidateText = (rawParsedCandidate.rawText || "").toLowerCase();
+      const candidateMeds = asArray(rawParsedCandidate.medications);
+      const candidateLab = asArray(
+        rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
+      );
+
       if (
-        (candidateMeds.length > 0 ||
-          /\b(?:prescription|rx|tab\.|tabs\.|cap\.|capsule|dr\.|clinic)\b/i.test(
-            rawCandidateText,
-          )) &&
-        candidateLab.length === 0
+        !rawCandidateDocType ||
+        rawCandidateDocType === "LAB_REPORT" ||
+        rawCandidateDocType === "OTHER_MEDICAL_DOCUMENT"
       ) {
-        rawCandidateDocType = "PRESCRIPTION";
-      }
-    }
-
-    const analyzedDocType = normalizeDocumentType(rawCandidateDocType);
-
-    const rawMeds = asArray(rawParsedCandidate.medications);
-    const formattedMeds = rawMeds.map((rawMed) => {
-      const m = typeof rawMed === "string" ? { name: rawMed.trim() } : rawMed || {};
-      const qty = m.quantity || m.qty || null;
-      const duration = m.duration || null;
-      const instructions =
-        m.instructions &&
-        !/^\d+$/.test(String(m.instructions).trim()) &&
-        String(m.instructions).trim() !== String(qty).trim() &&
-        String(m.instructions).trim() !== String(duration).trim()
-          ? m.instructions
-          : null;
-
-      const baseMed = {
-        name: m.name || null,
-        dosage: m.dosage || m.timeOfDay || null,
-        frequency: m.frequency || null,
-        duration: duration ? String(duration).trim() : null,
-        quantity: qty ? String(qty).trim() : null,
-        qty: qty ? String(qty).trim() : null,
-        instructions,
-        type: m.type || null,
-      };
-
-      const validated = validateMedication(baseMed);
-      return {
-        ...baseMed,
-        canonicalName: validated.canonicalName,
-        genericName: validated.genericName,
-        type: validated.type || baseMed.type,
-        isFormularyMatch: validated.isFormularyMatch,
-        confidence: validated.confidence,
-        flaggedForReview: validated.flaggedForReview,
-      };
-    });
-
-    let finalSummaryValue = summaryValue;
-    const isPrescriptionDoc =
-      analyzedDocType === documentType.PRESCRIPTION ||
-      analyzedDocType === "PRESCRIPTION" ||
-      analyzedDocType === "PRESCERIPTION";
-
-    if (
-      isPrescriptionDoc &&
-      (finalSummaryValue.toLowerCase().includes("cbc") ||
-        finalSummaryValue.toLowerCase().includes("blood test") ||
-        finalSummaryValue.toLowerCase().includes("hemoglobin") ||
-        !finalSummaryValue ||
-        finalSummaryValue === "No summary available.")
-    ) {
-      const parts = [];
-      const dr = rawParsedCandidate.doctorName || rawParsedCandidate.doctor?.name;
-      const hosp = rawParsedCandidate.hospitalName || rawParsedCandidate.hospital?.name;
-      const pat = name;
-      const dateStr = normalizeDate(rawParsedCandidate.reportDate);
-
-      const headerDetails = [
-        dr ? `Dr. ${dr.replace(/^Dr\.?\s*/i, "")}` : null,
-        hosp ? `at ${hosp}` : null,
-        pat ? `for ${pat}` : null,
-        dateStr ? `dated ${dateStr}` : null,
-      ]
-        .filter(Boolean)
-        .join(" ");
-      parts.push(`Prescription ${headerDetails}.`);
-
-      if (formattedMeds.length > 0) {
-        const medDetails = formattedMeds
-          .map((m) => {
-            const medParts = [m.name];
-            if (m.dosage) medParts.push(`dosage: ${m.dosage}`);
-            if (m.duration) medParts.push(`duration: ${m.duration}`);
-            if (m.quantity || m.qty) medParts.push(`quantity: ${m.quantity || m.qty}`);
-            if (m.instructions) medParts.push(`instructions: ${m.instructions}`);
-            return medParts.join(" (") + (medParts.length > 1 ? ")" : "");
-          })
-          .join(", ");
-        parts.push(`Prescribed medications: ${medDetails}.`);
+        if (
+          (candidateMeds.length > 0 ||
+            /\b(?:prescription|rx|tab\.|tabs\.|cap\.|capsule|dr\.|clinic)\b/i.test(
+              rawCandidateText,
+            )) &&
+          candidateLab.length === 0
+        ) {
+          rawCandidateDocType = "PRESCRIPTION";
+        }
       }
 
-      finalSummaryValue = parts.join(" ").trim();
-    }
+      const analyzedDocType = normalizeDocumentType(rawCandidateDocType);
 
-    const normSummaryLang = normalizeLanguage(primaryLanguage);
-    const keyPoints = extractKeyPoints(
-      {
-        diagnosis: rawParsedCandidate.diagnosis,
-        testResults: rawParsedCandidate.testResults || rawParsedCandidate.labTests,
-        medications: formattedMeds,
-      },
-      finalSummaryValue,
-      normSummaryLang,
-    );
+      const rawMeds = asArray(rawParsedCandidate.medications);
+      const formattedMeds = rawMeds.map((rawMed) => {
+        const m = typeof rawMed === "string" ? { name: rawMed.trim() } : rawMed || {};
+        const qty = m.quantity || m.qty || null;
+        const duration = m.duration || null;
+        const instructions =
+          m.instructions &&
+          !/^\d+$/.test(String(m.instructions).trim()) &&
+          String(m.instructions).trim() !== String(qty).trim() &&
+          String(m.instructions).trim() !== String(duration).trim()
+            ? m.instructions
+            : null;
 
-    const mapped = {
-      documentType: analyzedDocType,
-      reportType: analyzedDocType,
-      detectedLanguages,
-      primaryLanguage,
-      isIndic,
-      keyPoints,
-      summaryLanguage: normSummaryLang,
-      pages:
-        isScannedPdfOrImage && pageResults?.length > 0
-          ? pageResults.map((p) => ({
-              page: p.pageNum,
-              text: p.status === "SUCCESS" ? p.rawText : "",
-            }))
-          : [
-              {
-                page: 1,
-                text: rawParsedCandidate.rawText || "",
-              },
-            ],
-      medicalExtraction: {
+        const baseMed = {
+          name: m.name || null,
+          dosage: m.dosage || m.timeOfDay || null,
+          frequency: m.frequency || null,
+          duration: duration ? String(duration).trim() : null,
+          quantity: qty ? String(qty).trim() : null,
+          qty: qty ? String(qty).trim() : null,
+          instructions,
+          type: m.type || null,
+        };
+
+        const validated = validateMedication(baseMed);
+        return {
+          ...baseMed,
+          canonicalName: validated.canonicalName,
+          genericName: validated.genericName,
+          type: validated.type || baseMed.type,
+          isFormularyMatch: validated.isFormularyMatch,
+          confidence: validated.confidence,
+          flaggedForReview: validated.flaggedForReview,
+        };
+      });
+
+      let finalSummaryValue = summaryValue;
+      const isPrescriptionDoc =
+        analyzedDocType === documentType.PRESCRIPTION ||
+        analyzedDocType === "PRESCRIPTION" ||
+        analyzedDocType === "PRESCERIPTION";
+
+      if (
+        isPrescriptionDoc &&
+        (finalSummaryValue.toLowerCase().includes("cbc") ||
+          finalSummaryValue.toLowerCase().includes("blood test") ||
+          finalSummaryValue.toLowerCase().includes("hemoglobin") ||
+          !finalSummaryValue ||
+          finalSummaryValue === "No summary available.")
+      ) {
+        const parts = [];
+        const dr = rawParsedCandidate.doctorName || rawParsedCandidate.doctor?.name;
+        const hosp = rawParsedCandidate.hospitalName || rawParsedCandidate.hospital?.name;
+        const pat = name;
+        const dateStr = normalizeDate(rawParsedCandidate.reportDate);
+
+        const headerDetails = [
+          dr ? `Dr. ${dr.replace(/^Dr\.?\s*/i, "")}` : null,
+          hosp ? `at ${hosp}` : null,
+          pat ? `for ${pat}` : null,
+          dateStr ? `dated ${dateStr}` : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        parts.push(`Prescription ${headerDetails}.`);
+
+        if (formattedMeds.length > 0) {
+          const medDetails = formattedMeds
+            .map((m) => {
+              const medParts = [m.name];
+              if (m.dosage) medParts.push(`dosage: ${m.dosage}`);
+              if (m.duration) medParts.push(`duration: ${m.duration}`);
+              if (m.quantity || m.qty) medParts.push(`quantity: ${m.quantity || m.qty}`);
+              if (m.instructions) medParts.push(`instructions: ${m.instructions}`);
+              return medParts.join(" (") + (medParts.length > 1 ? ")" : "");
+            })
+            .join(", ");
+          parts.push(`Prescribed medications: ${medDetails}.`);
+        }
+
+        finalSummaryValue = parts.join(" ").trim();
+      }
+
+      const normSummaryLang = normalizeLanguage(primaryLanguage);
+      const keyPoints = extractKeyPoints(
+        {
+          diagnosis: rawParsedCandidate.diagnosis,
+          testResults: rawParsedCandidate.testResults || rawParsedCandidate.labTests,
+          medications: formattedMeds,
+        },
+        finalSummaryValue,
+        normSummaryLang,
+      );
+
+      const mapped = {
         documentType: analyzedDocType,
         reportType: analyzedDocType,
         detectedLanguages,
         primaryLanguage,
         isIndic,
-        summaryLanguage: normSummaryLang,
-        summaryEnglish: finalSummaryValue,
-        summaryInPreferredLanguage: finalSummaryValue,
         keyPoints,
-        validationPassed: isSchemaValidated,
-        validationError: isSchemaValidated ? null : zodValidationError,
-        ocrIncomplete,
-        failedPages,
-        skippedPages,
-        patientInfo: {
-          name,
-          firstName,
-          middleName,
-          lastName,
-          age: rawParsedCandidate.age || rawParsedCandidate.patient?.age || null,
-          gender: normalizeGender(rawParsedCandidate.gender || rawParsedCandidate.patient?.gender),
-          dateOfBirth: normalizeDate(
-            rawParsedCandidate.dateOfBirth || rawParsedCandidate.patient?.dateOfBirth,
-          ),
-          email: normalizeEmail(rawParsedCandidate.email || rawParsedCandidate.patient?.email),
-          phoneNumber: normalizePhone(
-            rawParsedCandidate.phoneNumber || rawParsedCandidate.patient?.phoneNumber,
-          ),
-          bloodGroup: normalizeBloodGroup(
-            rawParsedCandidate.bloodGroup || rawParsedCandidate.patient?.bloodGroup,
-          ),
-          allergies: asArray(rawParsedCandidate.allergies)
-            .map((a) => (typeof a === "string" ? a : String(a?.name || a?.value || "")))
-            .filter(Boolean),
-          medicalConditions: asArray(rawParsedCandidate.medicalConditions)
-            .map((c) => (typeof c === "string" ? c : String(c?.name || c?.value || "")))
-            .filter(Boolean),
-          address: rawParsedCandidate.address || rawParsedCandidate.patient?.address || null,
+        summaryLanguage: normSummaryLang,
+        pages:
+          isScannedPdfOrImage && pageResults?.length > 0
+            ? pageResults.map((p) => ({
+                page: p.pageNum,
+                text: p.status === "SUCCESS" ? p.rawText : "",
+              }))
+            : [
+                {
+                  page: 1,
+                  text: rawParsedCandidate.rawText || "",
+                },
+              ],
+        medicalExtraction: {
+          documentType: analyzedDocType,
+          reportType: analyzedDocType,
+          detectedLanguages,
+          primaryLanguage,
+          isIndic,
+          summaryLanguage: normSummaryLang,
+          summaryEnglish: finalSummaryValue,
+          summaryInPreferredLanguage: finalSummaryValue,
+          keyPoints,
+          validationPassed: isSchemaValidated,
+          validationError: isSchemaValidated ? null : zodValidationError,
+          ocrIncomplete,
+          failedPages,
+          skippedPages,
+          patientInfo: {
+            name,
+            firstName,
+            middleName,
+            lastName,
+            age: rawParsedCandidate.age || rawParsedCandidate.patient?.age || null,
+            gender: normalizeGender(
+              rawParsedCandidate.gender || rawParsedCandidate.patient?.gender,
+            ),
+            dateOfBirth: normalizeDate(
+              rawParsedCandidate.dateOfBirth || rawParsedCandidate.patient?.dateOfBirth,
+            ),
+            email: normalizeEmail(rawParsedCandidate.email || rawParsedCandidate.patient?.email),
+            phoneNumber: normalizePhone(
+              rawParsedCandidate.phoneNumber || rawParsedCandidate.patient?.phoneNumber,
+            ),
+            bloodGroup: normalizeBloodGroup(
+              rawParsedCandidate.bloodGroup || rawParsedCandidate.patient?.bloodGroup,
+            ),
+            allergies: asArray(rawParsedCandidate.allergies)
+              .map((a) => (typeof a === "string" ? a : String(a?.name || a?.value || "")))
+              .filter(Boolean),
+            medicalConditions: asArray(rawParsedCandidate.medicalConditions)
+              .map((c) => (typeof c === "string" ? c : String(c?.name || c?.value || "")))
+              .filter(Boolean),
+            address: rawParsedCandidate.address || rawParsedCandidate.patient?.address || null,
+          },
+          hospitalInfo: {
+            name: rawParsedCandidate.hospitalName || rawParsedCandidate.hospital?.name || null,
+          },
+          doctorInfo: {
+            name: rawParsedCandidate.doctorName || rawParsedCandidate.doctor?.name || null,
+          },
+          reportDate: normalizeDate(rawParsedCandidate.reportDate),
+          visitDate: normalizeDate(rawParsedCandidate.visitDate),
+          diagnosis: Array.isArray(rawParsedCandidate.diagnosis)
+            ? rawParsedCandidate.diagnosis
+            : rawParsedCandidate.diagnosis
+              ? [rawParsedCandidate.diagnosis]
+              : [],
+          medications: formattedMeds,
+          labResults: asArray(
+            rawParsedCandidate.testResults ||
+              rawParsedCandidate.labTests ||
+              rawParsedCandidate.tests,
+          ).map((rawTest) => {
+            const t = typeof rawTest === "string" ? { testName: rawTest.trim() } : rawTest || {};
+            return {
+              name: t.testName || t.name || null,
+              value: t.value || null,
+              unit: t.unit || null,
+              normalRange: t.referenceRange || t.normalRange || null,
+              isAbnormal: t.status === "ABNORMAL",
+            };
+          }),
+          summary: finalSummaryValue,
         },
-        hospitalInfo: {
-          name: rawParsedCandidate.hospitalName || rawParsedCandidate.hospital?.name || null,
-        },
-        doctorInfo: {
-          name: rawParsedCandidate.doctorName || rawParsedCandidate.doctor?.name || null,
-        },
-        reportDate: normalizeDate(rawParsedCandidate.reportDate),
-        visitDate: normalizeDate(rawParsedCandidate.visitDate),
-        diagnosis: Array.isArray(rawParsedCandidate.diagnosis)
-          ? rawParsedCandidate.diagnosis
-          : rawParsedCandidate.diagnosis
-            ? [rawParsedCandidate.diagnosis]
-            : [],
-        medications: formattedMeds,
-        labResults: asArray(
-          rawParsedCandidate.testResults || rawParsedCandidate.labTests || rawParsedCandidate.tests,
-        ).map((rawTest) => {
-          const t = typeof rawTest === "string" ? { testName: rawTest.trim() } : rawTest || {};
-          return {
-            name: t.testName || t.name || null,
-            value: t.value || null,
-            unit: t.unit || null,
-            normalRange: t.referenceRange || t.normalRange || null,
-            isAbnormal: t.status === "ABNORMAL",
-          };
-        }),
-        summary: finalSummaryValue,
-      },
-    };
+      };
 
-    return JSON.stringify(mapped);
+      return JSON.stringify(mapped);
+    } finally {
+      if (docId) this.activeJobs.delete(String(docId));
+      if (rawJobId && rawJobId !== "N/A") this.activeJobs.delete(String(rawJobId));
+      if (fileKey) this.activeJobs.delete(String(fileKey));
+      if (traceId) this.activeJobs.delete(String(traceId));
+    }
   }
 
   async generateSummary(rawText, language = "gujarati") {
@@ -2009,11 +2143,57 @@ Return STRICT JSON only:
     };
   }
 
-  async processAndStoreAsynchronously({ documentId, file, userId, uploadResult }) {
+  async processAndStoreAsynchronously({ documentId, file = {}, userId, uploadResult }) {
     const pipelineStartTime = Date.now();
     console.log(
       `[OcrService] [START] processAndStoreAsynchronously for documentId: ${documentId}, user: ${userId}`,
     );
+
+    const docId = String(documentId || "");
+    const jId = String(file.jobId || "");
+    const fKey = String(uploadResult?.data?.fileKey || uploadResult?.fileKey || file.fileKey || "");
+
+    const abortController = new AbortController();
+    const jobInfo = {
+      documentId: docId,
+      jobId: jId,
+      fileKey: fKey,
+      abortController,
+      isCancelled: false,
+    };
+
+    if (docId) this.activeJobs.set(docId, jobInfo);
+    if (jId) this.activeJobs.set(jId, jobInfo);
+    if (fKey) this.activeJobs.set(fKey, jobInfo);
+
+    file.signal = abortController.signal;
+    file.abortController = abortController;
+
+    const checkCancelled = async () => {
+      if (jobInfo.isCancelled || abortController.signal.aborted) {
+        const err = new Error("Job cancelled by user");
+        err.code = "ERR_CANCELED";
+        err.isCancelled = true;
+        throw err;
+      }
+      if (docId) {
+        try {
+          const [currentDoc] = await db
+            .select({ ocrStatus: document.ocrStatus })
+            .from(document)
+            .where(eq(document.id, docId));
+          if (currentDoc && currentDoc.ocrStatus === ocrStatus.CANCELED) {
+            jobInfo.isCancelled = true;
+            const err = new Error("Job cancelled by user");
+            err.code = "ERR_CANCELED";
+            err.isCancelled = true;
+            throw err;
+          }
+        } catch (dbCheckErr) {
+          if (dbCheckErr.isCancelled) throw dbCheckErr;
+        }
+      }
+    };
 
     // Fetch preferred language from onboarding state
     let preferredLanguage = "english";
@@ -2032,9 +2212,11 @@ Return STRICT JSON only:
     }
 
     try {
+      await checkCancelled();
+
       // 2. Perform OCR
       const tOcrStart = Date.now();
-      const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult.documentType);
+      const isGraphicalDocument = this.isGraphicalDocumentType(uploadResult?.documentType);
       let ocrResult;
       let structuredData;
       let extractDurationMs = 0;
@@ -2056,6 +2238,8 @@ Return STRICT JSON only:
             `[OcrService] [OCR] Duration: ${Date.now() - tOcrStart}ms. Page count = ${ocrResult.pageCount}.`,
           );
 
+          await checkCancelled();
+
           // 3. Extract structured medical data
           const tExtractStart = Date.now();
           structuredData = await this.extractMedicalDataFromText(ocrResult.rawText);
@@ -2066,6 +2250,8 @@ Return STRICT JSON only:
         }
       }
       const ocrDurationMs = Date.now() - tOcrStart;
+
+      await checkCancelled();
 
       // 4. Generate summaries in English and preferred language
       const tSummaryStart = Date.now();
@@ -2104,6 +2290,8 @@ Return STRICT JSON only:
         `[OcrService] [SUMMARY] Duration: ${summaryDurationMs}ms. Summaries generated. Key points: ${keyPoints.length}.`,
       );
 
+      await checkCancelled();
+
       // Ensure data contains both summaries, key points, & normalized documentType
       const analyzedDocumentType = normalizeDocumentType(
         structuredData?.documentType || structuredData?.reportType || uploadResult?.documentType,
@@ -2141,6 +2329,8 @@ Return STRICT JSON only:
       console.log(
         `[OcrService] [DATABASE] Duration: ${dbDurationMs}ms. Document ${documentId} updated. Indexing in RAG...`,
       );
+
+      await checkCancelled();
 
       // 6. Index Document in RAG
       const tRagStart = Date.now();
@@ -2182,6 +2372,36 @@ Return STRICT JSON only:
         `[OcrService] [SUCCESS] processAndStoreAsynchronously completed for document ${documentId}`,
       );
     } catch (err) {
+      const isUserCancelled =
+        err.code === "ERR_CANCELED" ||
+        err.name === "AbortError" ||
+        err.isCancelled === true ||
+        jobInfo.isCancelled === true;
+
+      if (isUserCancelled) {
+        console.log(
+          `[OcrService] Document processing stopped because documentId ${documentId} was cancelled by user.`,
+        );
+        return;
+      }
+
+      if (docId) {
+        try {
+          const [currentDoc] = await db
+            .select({ ocrStatus: document.ocrStatus })
+            .from(document)
+            .where(eq(document.id, docId));
+          if (currentDoc && currentDoc.ocrStatus === ocrStatus.CANCELED) {
+            console.log(
+              `[OcrService] Document processing stopped because documentId ${documentId} is marked CANCELED in DB.`,
+            );
+            return;
+          }
+        } catch {
+          // ignore error
+        }
+      }
+
       const totalFailedDurationMs = Date.now() - pipelineStartTime;
       console.error(
         `[OcrService] [ERROR] processAndStoreAsynchronously failed after ${totalFailedDurationMs}ms for document ${documentId}:`,
@@ -2199,6 +2419,10 @@ Return STRICT JSON only:
       } catch (dbErr) {
         console.error(`[OcrService] Failed to set document status to FAILED in DB:`, dbErr);
       }
+    } finally {
+      if (docId) this.activeJobs.delete(docId);
+      if (jId) this.activeJobs.delete(jId);
+      if (fKey) this.activeJobs.delete(fKey);
     }
   }
 }

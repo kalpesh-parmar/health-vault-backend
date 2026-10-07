@@ -1,3 +1,4 @@
+const axios = require("axios");
 const { createHttpClient } = require("../configs/http.config");
 const apiConfig = require("../configs/api.config");
 const { env } = require("../configs/env");
@@ -37,6 +38,17 @@ class OllamaClient {
         return await this.client(requestConfig);
       } catch (error) {
         attempt++;
+        const isCanceled =
+          axios.isCancel(error) ||
+          error.name === "CanceledError" ||
+          error.name === "AbortError" ||
+          error.code === "ERR_CANCELED" ||
+          Boolean(requestConfig.signal?.aborted);
+
+        if (isCanceled) {
+          throw error;
+        }
+
         const isNetworkOrTimeout = !error.response || error.response.status >= 500;
         if (attempt > retries || !isNetworkOrTimeout) {
           throw error;
@@ -337,6 +349,7 @@ class OllamaClient {
       data: payload,
       timeout: (options.timeout ?? env.aiTimeoutMs) || 300000,
       headers: { "Content-Type": "application/json" },
+      signal: options.signal,
     };
 
     try {

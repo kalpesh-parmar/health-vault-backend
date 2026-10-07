@@ -20,6 +20,8 @@ jest.mock("../../src/configs/db", () => ({
   },
 }));
 
+const todayStr = new Date().toISOString().split("T")[0];
+
 describe("Medication Batch & Single Creation with Reminders", () => {
   const userId = "test-user-batch-123";
 
@@ -43,7 +45,7 @@ describe("Medication Batch & Single Creation with Reminders", () => {
         dosePerIntake: 1,
         medicationSchedule: { Morning: "08:00:00" },
         foodFrequency: "AFTER_FOOD",
-        startDate: "2026-10-05",
+        startDate: todayStr,
         totalQuantity: 10,
       };
 
@@ -87,7 +89,7 @@ describe("Medication Batch & Single Creation with Reminders", () => {
             dosePerIntake: 1,
             medicationSchedule: { Morning: "09:00:00" },
             foodFrequency: "AFTER_FOOD",
-            startDate: "2026-10-05",
+            startDate: todayStr,
             totalQuantity: 5,
           },
         ],
@@ -162,7 +164,7 @@ describe("Medication Batch & Single Creation with Reminders", () => {
         dosePerIntake: 1,
         medicationSchedule: { Morning: "08:00:00" },
         foodFrequency: "AFTER_FOOD",
-        startDate: "2026-10-05",
+        startDate: todayStr,
         totalQuantity: 30,
       };
 
