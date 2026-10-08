@@ -213,6 +213,10 @@ class DocumentPersistenceService {
       })
       .returning();
 
+    if (documentRow && documentRow.s3Key) {
+      documentRow.url = `/file/view?fileKey=${encodeURIComponent(documentRow.s3Key)}`;
+    }
+
     const documentId = documentRow?.id || "doc_test";
     await artifacts.upsertOcrRaw({
       blocks: rawOcrData?.blocks || [],

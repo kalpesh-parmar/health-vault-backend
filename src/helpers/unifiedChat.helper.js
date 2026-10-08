@@ -1,6 +1,7 @@
-const { eq, and } = require("drizzle-orm");
+const { eq, and, or, desc } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
+const { documentProcessingJob } = require("../models/documentProcessingJob");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
@@ -234,6 +235,103 @@ function extractFileKey(item) {
   return null;
 }
 
+async function getRealS3Key(docItem, userId = null) {
+  if (!docItem || typeof docItem !== "object") return null;
+  const rawKey = docItem.s3Key || docItem.fileKey || docItem.s3_key || docItem.file_key;
+
+  if (rawKey && typeof rawKey === "string" && rawKey.includes("/")) {
+    return rawKey;
+  }
+
+  try {
+    const conditions = [];
+    if (docItem.id) {
+      conditions.push(eq(document.id, docItem.id));
+    } else if (rawKey) {
+      conditions.push(or(eq(document.s3Key, rawKey), eq(document.id, rawKey)));
+    }
+    if (userId) {
+      conditions.push(eq(document.userId, userId));
+    }
+
+    if (conditions.length > 0) {
+      const [dbRow] = await db
+        .select({ s3Key: document.s3Key })
+        .from(document)
+        .where(and(...conditions))
+        .limit(1);
+
+      if (dbRow && dbRow.s3Key && dbRow.s3Key.includes("/")) {
+        return dbRow.s3Key;
+      }
+    }
+  } catch {
+    // ignore DB error
+  }
+
+  try {
+    if (rawKey) {
+      const [job] = await db
+        .select({ fileKey: documentProcessingJob.fileKey })
+        .from(documentProcessingJob)
+        .where(or(eq(documentProcessingJob.id, rawKey), eq(documentProcessingJob.fileKey, rawKey)))
+        .limit(1);
+      if (job && job.fileKey && job.fileKey.includes("/")) {
+        return job.fileKey;
+      }
+    }
+  } catch {
+    // ignore DB error
+  }
+
+  if (userId) {
+    try {
+      const conditions = [eq(document.userId, userId), eq(document.softDelete, false)];
+      if (docItem.fileName) {
+        conditions.push(eq(document.fileName, docItem.fileName));
+      }
+      const [latestDoc] = await db
+        .select({ s3Key: document.s3Key })
+        .from(document)
+        .where(and(...conditions))
+        .orderBy(desc(document.createdAt))
+        .limit(1);
+
+      if (latestDoc && latestDoc.s3Key && latestDoc.s3Key.includes("/")) {
+        return latestDoc.s3Key;
+      }
+    } catch {
+      // ignore DB error
+    }
+  }
+
+  return rawKey || null;
+}
+
+async function attachDocumentViewUrl(docItem, userId = null) {
+  if (!docItem || typeof docItem !== "object") return docItem;
+  const realKey = await getRealS3Key(docItem, userId || docItem.userId);
+
+  const url = realKey
+    ? `/file/view?fileKey=${encodeURIComponent(realKey)}`
+    : docItem.url || docItem.fileUrl || null;
+
+  return {
+    ...docItem,
+    s3Key: realKey || docItem.s3Key || null,
+    fileKey: realKey || docItem.fileKey || null,
+    url,
+  };
+}
+
+async function ensureDocumentViewUrls(docOrDocs, userId = null) {
+  if (!docOrDocs) return docOrDocs;
+  if (Array.isArray(docOrDocs)) {
+    return Promise.all(docOrDocs.map((d) => attachDocumentViewUrl(d, userId)));
+  }
+  return attachDocumentViewUrl(docOrDocs, userId);
+}
+
 async function executeAddDocumentAction({
   userId,
   actionData,
@@ -337,6 +435,8 @@ async function executeAddDocumentAction({
           id: existingJob.id,
           fileName,
           s3Key: currentS3Key,
+          fileKey: currentS3Key,
+          url: `/file/view?fileKey=${encodeURIComponent(currentS3Key)}`,
           currentStep: existingJob.currentStep,
           completedSteps: existingJob.completedSteps,
           pendingSteps: existingJob.pendingSteps,
@@ -372,6 +472,8 @@ async function executeAddDocumentAction({
           id: job.id,
           fileName,
           s3Key: currentS3Key,
+          fileKey: currentS3Key,
+          url: `/file/view?fileKey=${encodeURIComponent(currentS3Key)}`,
           ocrStatus: ocrStatusEnum?.IN_PROGRESS || "in_progress",
         });
         createdJobs.push(job);
@@ -660,10 +762,15 @@ async function executeAddDocumentAction({
       }
 
       const st = String(d.ocrStatus || d.status || d.stageStatus || "COMPLETED").toUpperCase();
+      const docKey =
+        d.s3Key || d.fileKey || (typeof d.id === "string" && d.id.includes("/") ? d.id : null);
       documentsStatusList.push(st);
       documentsBatchList.push({
         id: d.id || d.s3Key || null,
         fileName: d.fileName || batchDocumentsName[i] || "document",
+        s3Key: d.s3Key || d.fileKey || null,
+        fileKey: d.s3Key || d.fileKey || null,
+        url: docKey ? `/file/view?fileKey=${encodeURIComponent(docKey)}` : d.url || null,
         status: st,
         ocrStatus: d.ocrStatus || d.status || "COMPLETED",
         summary: docSum || null,
@@ -683,10 +790,15 @@ async function executeAddDocumentAction({
       }
 
       const st = String(j.status || j.ocrStatus || j.stageStatus || "PENDING").toUpperCase();
+      const jobKey =
+        j.s3Key || j.fileKey || (typeof j.id === "string" && j.id.includes("/") ? j.id : null);
       documentsStatusList.push(st);
       documentsBatchList.push({
         id: j.jobId || j.s3Key || j.id || null,
         fileName: j.fileName || batchDocumentsName[i] || "document",
+        s3Key: j.s3Key || j.fileKey || null,
+        fileKey: j.s3Key || j.fileKey || null,
+        url: jobKey ? `/file/view?fileKey=${encodeURIComponent(jobKey)}` : j.url || null,
         status: st,
         ocrStatus: j.ocrStatus || j.status || "PENDING",
         summary: jobSum || null,
@@ -697,10 +809,14 @@ async function executeAddDocumentAction({
     filesList.forEach((f, i) => {
       const fn = f.fileName || batchDocumentsName[i] || "document";
       const st = failedCount > 0 ? "FAILED" : "COMPLETED";
+      const fKey = extractFileKey(f);
       documentsStatusList.push(st);
       documentsBatchList.push({
-        id: f.fileKey || null,
+        id: fKey || null,
         fileName: fn,
+        s3Key: fKey || null,
+        fileKey: fKey || null,
+        url: fKey ? `/file/view?fileKey=${encodeURIComponent(fKey)}` : null,
         status: st,
         ocrStatus: st,
         summary: null,
@@ -817,6 +933,9 @@ async function executeAddDocumentAction({
       });
       if (reportData && reportData.document) {
         reportSummaryPayload = formatReportSummaryPayload(reportData);
+        if (reportSummaryPayload) {
+          reportSummaryPayload = await attachDocumentViewUrl(reportSummaryPayload, userId);
+        }
       }
     } catch (repErr) {
       console.warn(
@@ -898,6 +1017,8 @@ async function executeAddDocumentAction({
         ]
       : [];
 
+  const finalFormattedDocument = await ensureDocumentViewUrls(docResult?.document, userId);
+
   if (activeSessionId) {
     await chatSessionRepository.appendMessage({
       sessionId: activeSessionId,
@@ -908,7 +1029,7 @@ async function executeAddDocumentAction({
         mode: "ACTION",
         actionType: returnedActionType,
         documentId: docResult?.document?.id,
-        document: docResult?.document,
+        document: finalFormattedDocument,
         documentSummary,
         documentsName: batchDocumentsName,
         documentsStatus: documentsStatusList,
@@ -935,7 +1056,7 @@ async function executeAddDocumentAction({
     summary: mainDocumentSummaryText || docResult?.document?.summary || null,
     documents: documentsBatchList,
     sessionId: activeSessionId,
-    document: docResult.document,
+    document: finalFormattedDocument,
     medicines: extractedMedicines,
     suggestedAction,
     options,
