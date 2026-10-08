@@ -375,6 +375,11 @@ async function buildStructuredReportPayload({
       s3Key: activeDoc.s3Key || null,
       fileKey: activeDoc.s3Key || activeDoc.fileKey || null,
       fileUrl: activeDoc.fileUrl || null,
+      url:
+        activeDoc.url ||
+        (activeDoc.s3Key || activeDoc.fileKey
+          ? `/file/view?fileKey=${encodeURIComponent(activeDoc.s3Key || activeDoc.fileKey)}`
+          : null),
     },
     suggestedQuestions,
     options: [],
@@ -384,6 +389,9 @@ async function buildStructuredReportPayload({
 function formatReportSummaryPayload(reportData) {
   if (!reportData || !reportData.document) return null;
   const doc = reportData.document;
+  const docKey = doc.fileKey || doc.s3Key || null;
+  const viewUrl =
+    doc.url || (docKey ? `/file/view?fileKey=${encodeURIComponent(docKey)}` : doc.fileUrl || null);
   return {
     report_id: doc.id,
     report_name: doc.fileName || "Medical Document",
@@ -400,6 +408,9 @@ function formatReportSummaryPayload(reportData) {
     abnormal_values: doc.abnormalResults || [],
     normal_values: doc.normalResults || [],
     extracted_medicines: doc.medicationFindings || [],
+    s3Key: docKey,
+    fileKey: docKey,
+    url: viewUrl,
   };
 }
 
