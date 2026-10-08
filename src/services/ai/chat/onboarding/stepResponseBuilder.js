@@ -3,7 +3,10 @@ const { getLocalizedText } = require("../../../../helpers/onboarding.helper");
 const { languageTypeValues, languageNativeLabels } = require("../../../../enums/languageType");
 const { bloodGroupTypeValues } = require("../../../../enums/bloodGroupType");
 const { getProfileMismatches, getMissingRequiredStep } = require("./onboardingStateMachine");
-const { buildStructuredReportPayload } = require("../../../../helpers/reportPayload.helper");
+const {
+  buildStructuredReportPayload,
+  formatReportSummaryPayload,
+} = require("../../../../helpers/reportPayload.helper");
 
 const REPORT_QUESTIONS_I18N = {
   english: [
@@ -700,7 +703,28 @@ async function getLocalizedResponse(step, state) {
           options: [],
         };
       }
-      return payload;
+
+      const summaryPayload = formatReportSummaryPayload(payload);
+      const replyMsg = await getLocalizedText(
+        "onboarding.reportSummary.reply",
+        "Here is your uploaded report summary.",
+        state.preferredLanguage,
+      );
+
+      return {
+        ...payload,
+        action: "ASK_REPORT",
+        actionType: "ASK_REPORT",
+        message: replyMsg,
+        reply: replyMsg,
+        reportSummary: summaryPayload,
+        actions: [
+          {
+            actionType: "REPORT_SUMMARY",
+            reportSummary: summaryPayload,
+          },
+        ],
+      };
     }
 
     case "REGISTER_USER":

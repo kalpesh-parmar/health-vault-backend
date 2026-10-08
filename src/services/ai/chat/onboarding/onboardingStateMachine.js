@@ -197,7 +197,7 @@ function getNextRequiredOrOptionalStep(state) {
     (Array.isArray(state.foundMedicines) && state.foundMedicines.length > 0) ||
     (Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0);
 
-  if (!state.medicinesConfirmed && hasExtractedMedicines) {
+  if (!state.medicinesConfirmed && hasExtractedMedicines && state.currentStep !== "ASK_REPORT") {
     state.medicationFlowStarted = true;
     if (!Array.isArray(state.medicinesToAdd) || state.medicinesToAdd.length === 0) {
       state.medicinesToAdd = medicationService.buildFromDocument(state.foundMedicines);

@@ -558,7 +558,18 @@ class V1Service {
         effectiveState.medicinesToAdd.length > 0 &&
         effectiveState?.medicinesConfirmed !== true;
 
-      if (isAddMedicineMsg) {
+      const isReportActionMsg =
+        message === "ASK_REPORT" ||
+        message === "ASK_ABOUT_REPORT" ||
+        actionType === "ASK_REPORT" ||
+        actionType === "ASK_ABOUT_REPORT";
+
+      if (isReportActionMsg) {
+        currentOnboardingStep = "ASK_REPORT";
+        effectiveState.currentStep = "ASK_REPORT";
+        effectiveState.medicinesConfirmed = true;
+        effectiveState.medicationFlowDone = true;
+      } else if (isAddMedicineMsg) {
         currentOnboardingStep = "ADD_MEDICINE";
         effectiveState.currentStep = "ADD_MEDICINE";
       } else if (
@@ -945,6 +956,8 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || onboardingResult?.state?.medicinesToAdd || [],
             sessionId: effectiveSessionId,
+            actions: onboardingResult?.actions || null,
+            reportSummary: onboardingResult?.reportSummary || null,
           });
           if (onboardingResult?.completionMessage) {
             responsePayload.completionMessage = onboardingResult.completionMessage;
@@ -1228,6 +1241,8 @@ class V1Service {
             options: onboardingResult?.options || [],
             medicines: onboardingResult?.medicines || [],
             sessionId: effectiveSessionId,
+            actions: onboardingResult?.actions || null,
+            reportSummary: onboardingResult?.reportSummary || null,
           });
           if (onboardingResult?.completionMessage) {
             responsePayload.completionMessage = onboardingResult.completionMessage;
@@ -1812,6 +1827,8 @@ class V1Service {
           options: onboardingResult?.options || [],
           medicines: onboardingResult?.medicines || [],
           document: onboardingResult?.document || null,
+          actions: onboardingResult?.actions || null,
+          reportSummary: onboardingResult?.reportSummary || null,
         });
         responsePayload.state = onboardingResult?.state || state;
         responsePayload.mode = onboardingResult?.mode || responsePayload.mode;

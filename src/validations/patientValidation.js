@@ -102,7 +102,7 @@ const updatePatientSchema = z
     lastName: nameField(errorConstants.LAST_NAME_REQUIRED).optional(),
     gender: z.enum(genderTypeValue).optional(),
     password: passwordField.optional(),
-    mobile: mobileField.optional(),
+    mobile: mobileField.or(z.literal("")).optional().nullable(),
     countryCode: z.string().max(10).trim().optional().nullable(),
     profileImageKey: profileImageKey,
     status: z.enum(userStatusValues).optional(),

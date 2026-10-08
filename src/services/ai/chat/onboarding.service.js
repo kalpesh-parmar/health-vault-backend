@@ -1439,6 +1439,20 @@ async function updateStateFromMessage(state, message, userId = null) {
         .trim()
         .toUpperCase();
 
+      const isAskReport =
+        val === "ASK_REPORT" ||
+        val === "ASK_ABOUT_REPORT" ||
+        payload.action === "ASK_REPORT" ||
+        payload.actionType === "ASK_REPORT" ||
+        payload.key === "ASK_REPORT";
+
+      if (isAskReport) {
+        state.medicationFlowDone = true;
+        state.medicinesConfirmed = true;
+        state.currentStep = "ASK_REPORT";
+        break;
+      }
+
       const isConfirm =
         val === "CONFIRM" || val === "CONFIRM_SELECTED" || payload.selected !== undefined;
       const isAdd =
@@ -2011,6 +2025,8 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
+      state.medicationFlowDone = true;
+      state.medicinesConfirmed = true;
       state.currentStep = "ASK_REPORT";
       break;
     }
@@ -3278,18 +3294,22 @@ class OnboardingService {
     const shouldAppendMessage =
       !isSilentCall &&
       state.chatSessionId &&
-      response.message &&
-      response.message.trim().length > 0 &&
+      ((response.message && response.message.trim().length > 0) || response.document) &&
       nextStep !== "COMPLETE" &&
       nextStep !== "POST_ONBOARDING" &&
       nextStep !== "REGISTER_USER";
 
     if (shouldAppendMessage) {
+      const messageContent =
+        response.message && response.message.trim().length > 0
+          ? response.message
+          : response.document?.summary || "Here is your report summary.";
+
       const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
         role: "assistant",
-        content: response.message,
+        content: messageContent,
         metadata: {
           action: response.action || null,
           renderType: response.renderType || null,
@@ -3309,6 +3329,8 @@ class OnboardingService {
           document: response.document || null,
           suggestedQuestions: response.suggestedQuestions || null,
           keyFindings: response.document?.keyFindings || null,
+          actions: response.actions || null,
+          reportSummary: response.reportSummary || null,
         },
       });
       if (savedMsg && savedMsg.createdAt) {

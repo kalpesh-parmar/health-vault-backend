@@ -31,7 +31,7 @@ const patient = pgTable(
 
     // Phone authentication fields
     mobile: varchar("mobile", { length: 20 }),
-    countryCode: varchar("country_code", { length: 10 }),
+    countryCode: varchar("country_code", { length: 10 }).default("+91"),
     firebaseUid: varchar("firebase_uid", { length: 255 }),
     // isActive: boolean("is_active").default(true).notNull(),
     lastLoginAt: timestamp("last_login_at"),

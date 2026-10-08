@@ -56,6 +56,7 @@
   "onboarding.medicineOptions.addMore": "और दवाएँ जोड़ें",
   "onboarding.medicineOptions.goToDashboard": "डैशबोर्ड पर जाएँ",
   "onboarding.medicineOptions.askAboutReport": "मेरी रिपोर्ट के बारे में पूछें",
+  "onboarding.reportSummary.reply": "यहाँ आपकी अपलोड की गई रिपोर्ट का सारांश है।",
   "onboarding.complete.message": "धन्यवाद! ऑनबोर्डिंग पूरी हो गई है।",
   "onboarding.canSkip.message": "आपका ऑनबोर्डिंग पूरा हो गया है! अब SKIP बटन सक्रिय हो गया है। आप SKIP पर टैप करके सीधे डैशबोर्ड पर जा सकते हैं और बाकी चरण बाद में भी पूरे कर सकते हैं।",
   "onboarding.complete.addMoreMedicines": "और दवाएँ जोड़ें",

@@ -349,7 +349,7 @@ async function buildStructuredReportPayload({
 
   return {
     action: "ASK_REPORT",
-    message: "",
+    message: docSummary || "Here is your report summary.",
     document: {
       id: activeDoc.id || docIdToFetch,
       fileName: activeDoc.fileName || "Medical Document",

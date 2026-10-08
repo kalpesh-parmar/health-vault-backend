@@ -25,9 +25,25 @@ describe("normalizePhoneNumber Utility Tests", () => {
     expect(result.countryCode).toBe("+91");
   });
 
+  test("should default countryCode to +91 for 10-digit mobile number when countryCode is omitted", () => {
+    const result = normalizePhoneNumber({ mobile: "9876543210" });
+    expect(result.mobile).toBe("9876543210");
+    expect(result.countryCode).toBe("+91");
+  });
+
   test("should handle null inputs gracefully", () => {
     const result = normalizePhoneNumber({ mobile: null, countryCode: null });
     expect(result.mobile).toBeNull();
     expect(result.countryCode).toBeNull();
+  });
+
+  test("should return countryCode as null when mobile is null or empty string", () => {
+    const res1 = normalizePhoneNumber({ mobile: null, countryCode: "+91" });
+    expect(res1.mobile).toBeNull();
+    expect(res1.countryCode).toBeNull();
+
+    const res2 = normalizePhoneNumber({ mobile: "", countryCode: "+91" });
+    expect(res2.mobile).toBeNull();
+    expect(res2.countryCode).toBeNull();
   });
 });

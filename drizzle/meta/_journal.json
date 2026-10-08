@@ -204,6 +204,13 @@
       "when": 1788931125615,
       "tag": "0027_smiling_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791451277118,
+      "tag": "0028_conscious_hercules",
+      "breakpoints": true
     }
   ]
 }

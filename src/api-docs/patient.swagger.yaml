@@ -70,8 +70,14 @@ components:
           enum: [female, male]
         # password:
         #   type: string
-        phone:
+        mobile:
           type: string
+          nullable: true
+          description: Patient mobile number (setting to null or empty removes mobile and country code)
+        countryCode:
+          type: string
+          nullable: true
+          description: Country code (automatically cleared when mobile is removed)
         dateOfBirth:
           type: string
           format: date

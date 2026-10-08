@@ -106,13 +106,9 @@ function normalizePhoneNumber(payload = {}) {
   const inputCountryCode = payload.countryCode ? String(payload.countryCode).trim() : null;
 
   if (!inputMobile) {
-    let formattedCountryCode = inputCountryCode;
-    if (formattedCountryCode && !formattedCountryCode.startsWith("+")) {
-      formattedCountryCode = `+${formattedCountryCode.replace(/[^\d]/g, "")}`;
-    }
     return {
       mobile: null,
-      countryCode: formattedCountryCode || null,
+      countryCode: null,
     };
   }
 
@@ -143,7 +139,7 @@ function normalizePhoneNumber(payload = {}) {
 
   return {
     mobile: mobile || null,
-    countryCode: countryCode || null,
+    countryCode: countryCode || (mobile ? "+91" : null),
   };
 }
 

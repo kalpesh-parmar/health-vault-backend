@@ -1,0 +1,1 @@
+ALTER TABLE "patients" ALTER COLUMN "country_code" SET DEFAULT '+91';

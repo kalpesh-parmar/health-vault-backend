@@ -300,14 +300,20 @@ class PatientService {
     }
 
     if (data.mobile !== undefined || data.countryCode !== undefined) {
-      const phoneNorm = normalizePhoneNumber({
-        mobile: data.mobile !== undefined ? data.mobile : existingPatient.mobile,
-        countryCode:
-          data.countryCode !== undefined ? data.countryCode : existingPatient.countryCode,
-      });
-      if (data.mobile !== undefined || phoneNorm.mobile) data.mobile = phoneNorm.mobile;
-      if (data.countryCode !== undefined || phoneNorm.countryCode) {
-        data.countryCode = phoneNorm.countryCode;
+      const mergedMobile = data.mobile !== undefined ? data.mobile : existingPatient.mobile;
+      const mergedCountryCode =
+        data.countryCode !== undefined ? data.countryCode : existingPatient.countryCode;
+
+      if (!mergedMobile || String(mergedMobile).trim() === "") {
+        data.mobile = null;
+        data.countryCode = null;
+      } else {
+        const phoneNorm = normalizePhoneNumber({
+          mobile: mergedMobile,
+          countryCode: mergedCountryCode,
+        });
+        data.mobile = phoneNorm.mobile;
+        data.countryCode = phoneNorm.mobile ? phoneNorm.countryCode : null;
       }
     }
 
@@ -572,7 +578,7 @@ class PatientService {
         patientCode,
         firebaseUid,
         mobile: mobile,
-        countryCode: countryCode,
+        countryCode: countryCode || "+91",
         email: email,
         firstName: firstName,
         lastName: lastName,
