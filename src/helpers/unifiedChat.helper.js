@@ -854,6 +854,7 @@ async function executeAddDocumentAction({
     totalCount: totalUploads,
     medicationCount: extractedMedicines.length,
     failedCount,
+    language: preferredLanguage,
   });
 
   let activeSessionId = sessionId;

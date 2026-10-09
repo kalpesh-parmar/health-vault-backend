@@ -54,4 +54,28 @@ describe("DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW Message Formatting Tests", () =>
       "2 of 3 documents processed successfully.\nWe found 4 medications for your review.\n1 document could not be processed. Please retry them below.",
     );
   });
+
+  test("should format single document in Gujarati preferred language", () => {
+    const msg = DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
+      successfulCount: 1,
+      totalCount: 1,
+      medicationCount: 2,
+      failedCount: 0,
+      language: "gujarati",
+    });
+    expect(msg).toBe("૧ દસ્તાવેજ સફળતાપૂર્વક પ્રોસેસ થયો.\nઅમે તમારી સમીક્ષા માટે 2 દવાઓ શોધી છે.");
+  });
+
+  test("should format multi-document in Gujarati preferred language", () => {
+    const msg = DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
+      successfulCount: 2,
+      totalCount: 3,
+      medicationCount: 3,
+      failedCount: 1,
+      language: "gujarati",
+    });
+    expect(msg).toBe(
+      "2 માંથી 3 દસ્તાવેજો સફળતાપૂર્વક પ્રોસેસ થયા.\nઅમે તમારી સમીક્ષા માટે 3 દવાઓ શોધી છે.\n1 દસ્તાવેજ પ્રોસેસ કરી શકાયા નથી. કૃપા કરીને નીચે ફરીથી પ્રયાસ કરો.",
+    );
+  });
 });

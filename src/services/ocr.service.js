@@ -649,6 +649,13 @@ class V1Service {
             }
           }
 
+          const skipUserLang =
+            preferredLanguage ||
+            patient?.preferredLanguage ||
+            dbState?.preferredLanguage ||
+            effectiveState?.preferredLanguage ||
+            "english";
+
           const docSummaryObj = reportSummaryPayload
             ? {
                 totalUploads: 1,
@@ -661,6 +668,7 @@ class V1Service {
                   totalCount: 1,
                   medicationCount: 0,
                   failedCount: 0,
+                  language: skipUserLang,
                 }),
               }
             : null;
@@ -1428,6 +1436,7 @@ class V1Service {
                 totalCount: 1,
                 medicationCount: createdMeds ? createdMeds.length : 0,
                 failedCount: 0,
+                language: userLang,
               }),
             }
           : null;

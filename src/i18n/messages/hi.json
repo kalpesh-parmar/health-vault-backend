@@ -1,0 +1,15 @@
+{
+  "DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW": {
+    "singleSuccess": "1 दस्तावेज़ सफलतापूर्वक संसाधित हुआ।",
+    "singleFailed": "1 दस्तावेज़ संसाधित नहीं किया जा सका।",
+    "singlePartial": "{successfulCount} में से {totalCount} दस्तावेज़ संसाधित हुए।",
+    "multiSuccess": "{successfulCount} में से {totalCount} दस्तावेज़ सफलतापूर्वक संसाधित हुए।",
+    "medicationsFoundSingle": "\nहमने आपकी समीक्षा के लिए 1 दवा पाई है।",
+    "medicationsFoundPlural": "\nहमने आपकी समीक्षा के लिए {medicationCount} दवाएं पाई हैं।",
+    "noMedicationsFound": "\nसमीक्षा के लिए कोई दवा नहीं मिली।",
+    "failedRetrySingle": "\n1 दस्तावेज़ संसाधित नहीं किया जा सका। कृपया नीचे पुनः प्रयास करें।",
+    "failedRetryPlural": "\n{failedCount} दस्तावेज़ संसाधित नहीं किए जा सके। कृपया नीचे पुनः प्रयास करें।",
+    "legacyMsgSingle": "दस्तावेज़ '{fileName}' संसाधित हो गया है। आपके दस्तावेज़ में {count} दवाएं मिली हैं। कृपया समीक्षा करें और अपनी सक्रिय दवाओं में जोड़ने के लिए पुष्टि करें:",
+    "legacyMsgPlural": "दस्तावेज़ '{fileName}' संसाधित हो गया है। आपके दस्तावेज़ में {count} दवाएं मिली हैं। कृपया समीक्षा करें और अपनी सक्रिय दवाओं में जोड़ने के लिए पुष्टि करें:"
+  }
+}

@@ -1,3 +1,5 @@
+const { formatDocumentMedicationsExtractedReview } = require("../helpers/i18n.helper");
+
 const messageConstants = Object.freeze({
   CRON_STARTED: "Cron started successfully",
   CRON_STOPPED: "Cron stopped successfully",
@@ -81,38 +83,8 @@ const messageConstants = Object.freeze({
   NO_FILE_UPLOAD: "No file uploaded",
   UNAUTHORIZED_ACCESS: "Unauthorized access",
   UNSUPPORTED_STORAGE_PROVIDER: (providerName) => `Unsupported storage provider '${providerName}'`,
-  DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (params, legacyCount) => {
-    if (typeof params === "object" && params !== null) {
-      const { successfulCount = 0, totalCount = 0, medicationCount = 0, failedCount = 0 } = params;
-      let msg = "";
-
-      if (totalCount === 1) {
-        if (successfulCount === 1) {
-          msg = "1 document processed successfully.";
-        } else if (failedCount === 1) {
-          msg = "1 document could not be processed.";
-        } else {
-          msg = `${successfulCount} of ${totalCount} documents processed.`;
-        }
-      } else {
-        msg = `${successfulCount} of ${totalCount} documents processed successfully.`;
-      }
-
-      if (medicationCount > 0) {
-        msg += `\nWe found ${medicationCount} medication${medicationCount === 1 ? "" : "s"} for your review.`;
-      } else if (successfulCount > 0) {
-        msg += `\nNo medications found for review.`;
-      }
-
-      if (failedCount > 0 && totalCount > 1) {
-        msg += `\n${failedCount} document${failedCount === 1 ? "" : "s"} could not be processed. Please retry them below.`;
-      }
-      return msg;
-    }
-    const fileName = params || "document";
-    const count = legacyCount || 0;
-    return `Document '${fileName}' has been processed. Found ${count} medication${count > 1 ? "s" : ""} in your document. Please review and confirm to add them to your active medications:`;
-  },
+  DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW: (params, legacyCount, legacyLanguage) =>
+    formatDocumentMedicationsExtractedReview(params, legacyCount, legacyLanguage),
   MEDICATIONS_CONFIRMED_SUCCESS:
     "Selected medications have been added to your active list successfully.",
   MEDICATIONS_REVIEW_SKIPPED: "Medication review skipped.",

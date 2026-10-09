@@ -1435,7 +1435,14 @@ async function updateStateFromMessage(state, message, userId = null) {
         }
       }
 
-      const val = String(payload.value || payload.action || payload.key || msg || "")
+      const val = String(
+        payload.value ||
+          payload.action ||
+          payload.actionType ||
+          payload.key ||
+          payload.message ||
+          (typeof msg === "string" ? msg : ""),
+      )
         .trim()
         .toUpperCase();
 
@@ -1461,7 +1468,36 @@ async function updateStateFromMessage(state, message, userId = null) {
         val === "ADD_MORE_MEDICINES" ||
         val.includes("ADD_MORE") ||
         payload.addNew;
-      const isSkip = val === "SKIP" || val === "SKIP_ALL" || payload.skipAll;
+      const skipPatterns = [
+        "SKIP",
+        "SKIP_ALL",
+        "CANCEL",
+        "CANCEL_MEDICINE",
+        "SKIP_MEDICINE",
+        "રદ",
+        "રદ કરો",
+        "છોડી દો",
+        "સ્કિપ",
+        "રદ્દ",
+        "રદ્દ કરો",
+        "रद्द",
+        "रद्द करें",
+        "छोड़ें",
+        "स्किप",
+        "रद्द करा",
+        "सोडा",
+        "ரத்து",
+        "தவிர்",
+        "ஸ்கிப்",
+      ];
+      const isSkip =
+        skipPatterns.includes(val) ||
+        skipPatterns.some((p) => val.includes(p)) ||
+        payload.skipAll ||
+        payload.actionType === "CANCEL" ||
+        payload.actionType === "SKIP" ||
+        payload.actionType === "SKIP_MEDICINE" ||
+        payload.actionType === "CANCEL_MEDICINE";
 
       // Handle duplicate conflict resolution payloads if provided
       if (Array.isArray(payload.resolutions)) {
@@ -1640,6 +1676,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       } else if (isSkip) {
         state.medicationFlowDone = true;
         state.medicinesConfirmed = true;
+        state.cancellationNotice = true;
         state.currentStep = "MEDICINE_OPTIONS";
       }
       break;
@@ -1929,6 +1966,33 @@ async function updateStateFromMessage(state, message, userId = null) {
         rawKey.includes("DASHBOARD")
       ) {
         key = "DASHBOARD";
+      } else if (
+        rawKey === "SKIP" ||
+        rawKey === "CANCEL" ||
+        rawKey === "SKIP_ALL" ||
+        rawKey === "SKIP_MEDICINE" ||
+        rawKey === "CANCEL_MEDICINE" ||
+        rawKey.includes("SKIP") ||
+        rawKey.includes("CANCEL") ||
+        [
+          "રદ",
+          "રદ કરો",
+          "છોડી દો",
+          "સ્કિપ",
+          "રદ્દ",
+          "રદ્દ કરો",
+          "रद्द",
+          "रद्द करें",
+          "छोड़ें",
+          "स्किप",
+          "रद्द करा",
+          "सोडा",
+          "ரத்து",
+          "தவிர்",
+          "ஸ்கிப்",
+        ].some((p) => rawKey.includes(p))
+      ) {
+        key = "MEDICINE_OPTIONS";
       }
 
       if (key === "ADD") {
@@ -1949,6 +2013,9 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.isOnboardingCompleted = false;
         state.medicinesConfirmed = true;
         state.currentStep = "ASK_REPORT";
+      } else if (key === "MEDICINE_OPTIONS") {
+        state.currentStep = "MEDICINE_OPTIONS";
+        state.cancellationNotice = true;
       } else if (typeof msg === "string" && msg.trim().length > 0) {
         const isJsonPayload = msg.trim().startsWith("{");
         if (!isJsonPayload) {
@@ -2475,6 +2542,12 @@ class OnboardingService {
       parsedInputPayload?.isSilent === true ||
       parsedInputPayload?.action === "DRAFT_SYNC" ||
       parsedInputPayload?.actionType === "DRAFT_SYNC";
+
+    if (parsedInputPayload?.preferredLanguage) {
+      state.preferredLanguage = normalizeLanguage(parsedInputPayload.preferredLanguage);
+    } else if (state.preferredLanguage) {
+      state.preferredLanguage = normalizeLanguage(state.preferredLanguage);
+    }
 
     // Legacy duplicate appendChatMessage removed: canonical message persistence with resolvedLabel and metadata is handled at line 2362
     // Ensure state fields are initialized

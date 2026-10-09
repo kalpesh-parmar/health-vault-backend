@@ -1,0 +1,15 @@
+{
+  "DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW": {
+    "singleSuccess": "1 document processed successfully.",
+    "singleFailed": "1 document could not be processed.",
+    "singlePartial": "{successfulCount} of {totalCount} documents processed.",
+    "multiSuccess": "{successfulCount} of {totalCount} documents processed successfully.",
+    "medicationsFoundSingle": "\nWe found 1 medication for your review.",
+    "medicationsFoundPlural": "\nWe found {medicationCount} medications for your review.",
+    "noMedicationsFound": "\nNo medications found for review.",
+    "failedRetrySingle": "\n1 document could not be processed. Please retry them below.",
+    "failedRetryPlural": "\n{failedCount} documents could not be processed. Please retry them below.",
+    "legacyMsgSingle": "Document '{fileName}' has been processed. Found {count} medication in your document. Please review and confirm to add them to your active medications:",
+    "legacyMsgPlural": "Document '{fileName}' has been processed. Found {count} medications in your document. Please review and confirm to add them to your active medications:"
+  }
+}
