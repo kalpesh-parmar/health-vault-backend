@@ -73,7 +73,8 @@ async def test_swagger_openapi_schema(client):
     else:
         props = multipart_schema.get("properties", {})
 
-    assert list(props.keys()) == ["file"]
+    assert "file" in props
+    assert set(props.keys()).issubset({"file", "maxPages", "max_pages"})
 
 
 @pytest.mark.asyncio

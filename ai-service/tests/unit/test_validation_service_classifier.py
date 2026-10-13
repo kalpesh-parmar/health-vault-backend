@@ -136,3 +136,71 @@ async def test_validate_medical_document_prescription_returns_null_doctype(servi
     assert resp.model == "ekacare/med-doc-classifier"
     assert resp.metrics.used_ollama is False
     assert resp.metrics.pages_used == 1
+
+
+@pytest.mark.asyncio
+async def test_adaptive_exit_page1_anchor_skips_later_pages(service):
+    """Confirm that when page 1 has p_medical >= 0.95 with total_pages > 3, only 1 page is evaluated."""
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(4):
+        p = doc.new_page()
+        p.insert_text((50, 50), "Sample text")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    mock_eval = AsyncMock(
+        return_value=EvaluatedPage(
+            page_number=1,
+            label="MEDICAL",
+            p_medical=0.96,
+            l2_key="opd_consultation_record",
+            p_good=1.0,
+        )
+    )
+
+    with patch.object(service, "_evaluate_single_page", mock_eval):
+        resp = await service.validate_medical_document(
+            file_bytes=pdf_bytes,
+            file_name="4page_doc.pdf",
+        )
+
+    assert resp.isMedical is True
+    assert resp.confidence == 0.96
+    assert resp.metrics.pages_used == 1
+    assert mock_eval.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_validate_medical_document_respects_max_pages_param(service):
+    """Confirm that passing max_pages=1 evaluates only the first page even if p_medical < 0.95."""
+    import fitz
+
+    doc = fitz.open()
+    for _ in range(4):
+        p = doc.new_page()
+        p.insert_text((50, 50), "Sample text")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    mock_eval = AsyncMock(
+        return_value=EvaluatedPage(
+            page_number=1,
+            label="MEDICAL",
+            p_medical=0.70,
+            l2_key="opd_consultation_record",
+            p_good=1.0,
+        )
+    )
+
+    with patch.object(service, "_evaluate_single_page", mock_eval):
+        resp = await service.validate_medical_document(
+            file_bytes=pdf_bytes,
+            file_name="4page_doc.pdf",
+            max_pages=1,
+        )
+
+    assert resp.metrics.pages_used == 1
+    assert mock_eval.call_count == 1
+

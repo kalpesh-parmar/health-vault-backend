@@ -186,7 +186,7 @@ class MedicalValidationService:
         if total_pages <= 0:
             return []
         if total_pages <= 3:
-            return list(range(total_pages))
+            return list(range(total_pages))[:max_pages_cap]
 
         selected = [0, 1, 2, total_pages - 1]
         deduped = sorted(list(dict.fromkeys(selected)))
@@ -368,7 +368,9 @@ class MedicalValidationService:
                 "Uploaded file is empty" if file_bytes is not None else "File in storage is empty"
             )
 
+        t_bytes_start = time.perf_counter()
         format_type = self._validate_document_bytes(document_bytes, effective_filename)
+        print(f"  [PYTHON TIMING] _validate_document_bytes took {(time.perf_counter() - t_bytes_start)*1000:.2f}ms (format={format_type})", flush=True)
 
         is_pdf = (
             format_type == "pdf"
@@ -381,24 +383,38 @@ class MedicalValidationService:
 
         if is_pdf:
             try:
+                t_fitz_open = time.perf_counter()
                 with fitz.open(stream=document_bytes, filetype="pdf") as doc:
+                    print(f"  [PYTHON TIMING] fitz.open took {(time.perf_counter() - t_fitz_open)*1000:.2f}ms (total_pages={doc.page_count})", flush=True)
                     total_pages = doc.page_count
                     if total_pages == 0:
                         raise InvalidDocumentFileError("No usable pages extracted from PDF")
 
-                    page_indices = self._select_pages_to_evaluate(total_pages, max_pages_cap=5)
+                    cap = max_pages if (max_pages is not None and max_pages > 0) else 5
+                    page_indices = self._select_pages_to_evaluate(total_pages, max_pages_cap=cap)
+                    print(f"  [PYTHON TIMING] pages selected for evaluation: {page_indices}", flush=True)
                     for p_idx in page_indices:
+                        t_page_start = time.perf_counter()
                         page = doc.load_page(p_idx)
                         page_text = page.get_text()
+                        t_pix_start = time.perf_counter()
                         pix = page.get_pixmap(dpi=150)
+                        t_pix_elapsed = (time.perf_counter() - t_pix_start) * 1000
+                        t_pil_start = time.perf_counter()
                         pil_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        t_pil_elapsed = (time.perf_counter() - t_pil_start) * 1000
 
+                        t_eval_start = time.perf_counter()
                         ev_page = await self._evaluate_single_page(
                             image=pil_img,
                             page_number=p_idx + 1,
                             page_text=page_text,
                         )
+                        t_eval_elapsed = (time.perf_counter() - t_eval_start) * 1000
+                        t_page_total = (time.perf_counter() - t_page_start) * 1000
                         evaluated_pages.append(ev_page)
+
+                        print(f"  [PYTHON TIMING] Page {p_idx+1}: pixmap(dpi=150)={t_pix_elapsed:.2f}ms, Image.frombytes={t_pil_elapsed:.2f}ms, eval={t_eval_elapsed:.2f}ms | Page Total={t_page_total:.2f}ms (label={ev_page.label}, p_med={ev_page.p_medical:.4f})", flush=True)
 
                         # Adaptive exit: if anchor medical page found with P(medical) >= 0.95 on Page 1, proceed
                         if ev_page.p_medical >= 0.95 and p_idx == 0 and total_pages > 3:
@@ -406,6 +422,7 @@ class MedicalValidationService:
                                 "medical_validation_high_confidence_anchor_page1",
                                 extra={"trace_id": trace, "p_medical": ev_page.p_medical},
                             )
+                            break
             except InvalidDocumentFileError:
                 raise
             except ClassifierUnavailableError:
@@ -431,7 +448,9 @@ class MedicalValidationService:
                 raise InvalidDocumentFileError(f"Failed to open image file: {exc}") from exc
 
         # Apply First-Match-Wins decision rules
+        t_rules_start = time.perf_counter()
         is_medical, confidence, reason = self._apply_ordered_decision_rules(evaluated_pages)
+        print(f"  [PYTHON TIMING] _apply_ordered_decision_rules took {(time.perf_counter() - t_rules_start)*1000:.2f}ms", flush=True)
 
         elapsed = round(time.monotonic() - started, 3)
 
