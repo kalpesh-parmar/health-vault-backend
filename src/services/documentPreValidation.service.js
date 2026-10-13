@@ -3,7 +3,7 @@ const path = require("path");
 const sharp = require("sharp");
 const aiServiceClient = require("../clients/aiServiceClient");
 const { MAX_FILE_SIZES } = require("./uploadFile.service");
-const { parsePdf } = require("../utils/pdfParser");
+
 const { ALLOWED_EXTENSION } = require("../configs/fileConfig");
 const { validationCache, computeSha256 } = require("./cache/validationCache.service");
 const { medgemmaQueue } = require("./queue/medgemmaQueue.service");
@@ -35,12 +35,7 @@ function checkMagicBytes(buffer, ext) {
     }
     case "png": {
       // PNG starts with 89 50 4E 47 0D 0A 1A 0A
-      return (
-        buffer[0] === 0x89 &&
-        buffer[1] === 0x50 &&
-        buffer[2] === 0x4e &&
-        buffer[3] === 0x47
-      );
+      return buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
     }
     case "webp": {
       // WEBP starts with 'RIFF' at 0 and 'WEBP' at 8
@@ -63,12 +58,7 @@ function checkMagicBytes(buffer, ext) {
     }
     case "doc": {
       // Classic DOC starts with D0 CF 11 E0
-      return (
-        buffer[0] === 0xd0 &&
-        buffer[1] === 0xcf &&
-        buffer[2] === 0x11 &&
-        buffer[3] === 0xe0
-      );
+      return buffer[0] === 0xd0 && buffer[1] === 0xcf && buffer[2] === 0x11 && buffer[3] === 0xe0;
     }
     default:
       return true;
@@ -133,7 +123,7 @@ async function validatePreUploadDocument(file, options = {}) {
   }
 
   const originalName = file.originalname || file.name || file.filename || "document";
-  const size = file.size !== undefined ? file.size : (file.buffer ? file.buffer.length : 0);
+  const size = file.size !== undefined ? file.size : file.buffer ? file.buffer.length : 0;
 
   // 1. Cheap pre-validation: File size check
   if (size > MAX_FILE_SIZE_BYTES) {
@@ -161,7 +151,8 @@ async function validatePreUploadDocument(file, options = {}) {
       isValid: false,
       code: "UNSUPPORTED_TYPE",
       title: "Unsupported file type",
-      message: "This file type isn't supported. Please select PDF, JPG, JPEG or another supported medical file type.",
+      message:
+        "This file type isn't supported. Please select PDF, JPG, JPEG or another supported medical file type.",
     };
   }
 
@@ -200,11 +191,11 @@ async function validatePreUploadDocument(file, options = {}) {
     };
   }
 
-  // 4. Cheap pre-validation: Structural Integrity Check
+  // 4. Cheap pre-validation: Structural Integrity Check (%PDF- header check)
   if (ext === "pdf") {
-    try {
-      await parsePdf(buffer);
-    } catch {
+    const tHeader = Date.now();
+    const headerChunk = buffer.subarray(0, Math.min(buffer.length, 1024)).toString("binary");
+    if (!headerChunk.includes("%PDF-")) {
       return {
         isValid: false,
         code: "CORRUPTED_FILE",
@@ -212,6 +203,9 @@ async function validatePreUploadDocument(file, options = {}) {
         message: "This file appears to be corrupted.",
       };
     }
+    console.log(
+      `    [NODE TIMING] [validatePreUploadDocument] %PDF- header check took ${Date.now() - tHeader}ms`,
+    );
   }
 
   if (["jpg", "jpeg", "png", "webp", "tiff", "tif"].includes(ext)) {
@@ -240,6 +234,9 @@ async function validatePreUploadDocument(file, options = {}) {
   if (!options.skipCache) {
     const cached = validationCache.get(sha256);
     if (cached) {
+      console.log(
+        `    [NODE TIMING] [validatePreUploadDocument] validationCache hit for sha256=${sha256}`,
+      );
       return {
         ...cached,
         sha256,
@@ -260,6 +257,7 @@ async function validatePreUploadDocument(file, options = {}) {
 
   // 7. Queued Canonical Medical Validation via POST /v1/validation/medical
   try {
+    const tValMed = Date.now();
     const response = await medgemmaQueue.run(async () => {
       return await aiServiceClient.validateMedicalDocument({
         file: {
@@ -273,6 +271,9 @@ async function validatePreUploadDocument(file, options = {}) {
         timeout: env.validationTimeoutMs || 30000,
       });
     });
+    console.log(
+      `    [NODE TIMING] [validatePreUploadDocument] aiServiceClient.validateMedicalDocument took ${Date.now() - tValMed}ms`,
+    );
 
     const validationData = response?.data || response;
 
@@ -316,10 +317,13 @@ async function validatePreUploadDocument(file, options = {}) {
       err.statusCode === 503 ||
       err.errorCode === "MEDGEMMA_UNAVAILABLE" ||
       err.code === "ECONNREFUSED" ||
-      (err.message && (err.message.includes("503") || err.message.includes("refused") || err.message.includes("unavailable")));
+      (err.message &&
+        (err.message.includes("503") ||
+          err.message.includes("refused") ||
+          err.message.includes("unavailable")));
 
     console.warn(
-      `[documentPreValidation] AI medical validation error for "${originalName}": ${err.message}`
+      `[documentPreValidation] AI medical validation error for "${originalName}": ${err.message}`,
     );
 
     if (failOpen) {
