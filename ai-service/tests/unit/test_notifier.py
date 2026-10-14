@@ -119,3 +119,43 @@ def test_publish_strictly_rejects_phi_keys():
         )
 
     assert "PHI violation" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_publish_progress_failure_fields():
+    db = MagicMock()
+    mock_session = AsyncMock()
+
+    async def mock_session_gen():
+        yield mock_session
+
+    db.session = mock_session_gen
+    notifier = ProgressNotifier(db)
+
+    job_id = uuid.uuid4()
+    file_key = "patient/123/doc.pdf"
+
+    payload_str = await notifier.publish_progress(
+        job_id=job_id,
+        file_key=file_key,
+        stage="OCR_RUNNING",
+        stage_status="FAILED",
+        progress=20,
+        percentage=20,
+        message="OCR processing failed",
+        error_code="OCR_EXTRACTION_FAILED",
+        failed_stage="OCR_RUNNING",
+        retryable=True,
+        requires_reupload=False,
+        attempt_count=2,
+    )
+
+    data = json.loads(payload_str)
+    event = data["event"]
+    assert event["status"] == "FAILED"
+    assert event["stageStatus"] == "FAILED"
+    assert event["errorCode"] == "OCR_EXTRACTION_FAILED"
+    assert event["failedStage"] == "OCR_RUNNING"
+    assert event["retryable"] is True
+    assert event["requiresReupload"] is False
+    assert event["attemptCount"] == 2

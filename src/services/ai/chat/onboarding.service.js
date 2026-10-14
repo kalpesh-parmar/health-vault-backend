@@ -1996,50 +1996,102 @@ async function saveOnboardingState(userId, state) {
 
   // Persist onboarding state to database for resumption on app reopen
   const existingRecord = await userOnboardingRepository.findByUserId(userId);
+  const existingData = existingRecord?.data || {};
+
+  const mergedUserData = {
+    ...(existingData.existingUserData || {}),
+    ...(state.existingUserData || {}),
+  };
+
   const stateToSave = {
-    preferredLanguage: state.preferredLanguage,
-    flowMode: state.flowMode,
-    currentStep: state.currentStep,
-    documentUploaded: state.documentUploaded,
-    documentConfirmed: state.documentConfirmed,
-    documentOwnershipConfirmed: state.documentOwnershipConfirmed,
-    documentExtracted: state.documentExtracted,
-    isOnboardingCompleted: state.isOnboardingCompleted,
-    existingUserData: state.existingUserData,
-    bloodGroupSkipped: state.bloodGroupSkipped ?? false,
-    allergiesSkipped: state.allergiesSkipped ?? false,
-    hasSkipped: state.hasSkipped || false,
-    completionMessageSent: state.completionMessageSent || false,
-    pendingProfileConflict: state.pendingProfileConflict || false,
-    uploadedMedicalDocument: state.uploadedMedicalDocument,
-    medicinesToAdd: state.medicinesToAdd,
-    foundMedicines: state.foundMedicines,
-    medicinesFlowStarted: state.medicinesFlowStarted,
-    medicinesConfirmed: state.medicinesConfirmed,
-    currentMedicineIndex: state.currentMedicineIndex,
-    medicinesSkipped: state.medicinesSkipped,
-    medicinesSavedToDb: state.medicinesSavedToDb,
-    hasSocialData: state.hasSocialData,
-    socialData: state.socialData,
-    hasLoginData: state.hasLoginData,
-    loginData: state.loginData,
-    profileConfirmed: state.profileConfirmed,
-    selectedProfileSource: state.selectedProfileSource || null,
-    useSocialData: state.useSocialData || false,
-    useDocumentData: state.useDocumentData || false,
-    profileManuallyEdited: state.profileManuallyEdited || false,
-    documentText: state.documentText,
-    documentData: state.documentData,
-    loginProvider: state.loginProvider,
-    documentId: state.documentId || null,
-    loadedDocumentId: state.loadedDocumentId || null,
-    chatSessionId: state.chatSessionId || null,
-    documentAttachedToChat: state.documentAttachedToChat || false,
-    activeMedicine: state.activeMedicine || null,
-    confirmMode: state.confirmMode || null,
-    pendingQueue: state.pendingQueue || [],
-    validMedsToBulkCreate: state.validMedsToBulkCreate || [],
-    medicationFlowDone: state.medicationFlowDone || false,
+    ...existingData,
+    ...state,
+    preferredLanguage: state.preferredLanguage || existingData.preferredLanguage,
+    flowMode: state.flowMode || existingData.flowMode,
+    currentStep: state.currentStep || existingData.currentStep,
+    documentUploaded:
+      state.documentUploaded !== undefined ? state.documentUploaded : existingData.documentUploaded,
+    documentConfirmed:
+      state.documentConfirmed !== undefined
+        ? state.documentConfirmed
+        : existingData.documentConfirmed,
+    documentOwnershipConfirmed:
+      state.documentOwnershipConfirmed !== undefined
+        ? state.documentOwnershipConfirmed
+        : existingData.documentOwnershipConfirmed,
+    documentExtracted:
+      state.documentExtracted !== undefined
+        ? state.documentExtracted
+        : existingData.documentExtracted,
+    isOnboardingCompleted:
+      state.isOnboardingCompleted !== undefined
+        ? state.isOnboardingCompleted
+        : existingData.isOnboardingCompleted,
+    existingUserData: mergedUserData,
+    bloodGroupSkipped: state.bloodGroupSkipped ?? existingData.bloodGroupSkipped ?? false,
+    allergiesSkipped: state.allergiesSkipped ?? existingData.allergiesSkipped ?? false,
+    hasSkipped: state.hasSkipped || existingData.hasSkipped || false,
+    completionMessageSent:
+      state.completionMessageSent || existingData.completionMessageSent || false,
+    pendingProfileConflict:
+      state.pendingProfileConflict || existingData.pendingProfileConflict || false,
+    uploadedMedicalDocument: state.uploadedMedicalDocument || existingData.uploadedMedicalDocument,
+    medicinesToAdd: state.medicinesToAdd || existingData.medicinesToAdd || [],
+    foundMedicines: state.foundMedicines || existingData.foundMedicines || [],
+    medicinesFlowStarted:
+      state.medicinesFlowStarted !== undefined
+        ? state.medicinesFlowStarted
+        : existingData.medicinesFlowStarted,
+    medicinesConfirmed:
+      state.medicinesConfirmed !== undefined
+        ? state.medicinesConfirmed
+        : existingData.medicinesConfirmed,
+    currentMedicineIndex:
+      state.currentMedicineIndex !== undefined
+        ? state.currentMedicineIndex
+        : existingData.currentMedicineIndex,
+    medicinesSkipped:
+      state.medicinesSkipped !== undefined ? state.medicinesSkipped : existingData.medicinesSkipped,
+    medicinesSavedToDb:
+      state.medicinesSavedToDb !== undefined
+        ? state.medicinesSavedToDb
+        : existingData.medicinesSavedToDb,
+    hasSocialData:
+      state.hasSocialData !== undefined ? state.hasSocialData : existingData.hasSocialData,
+    socialData: state.socialData || existingData.socialData,
+    hasLoginData: state.hasLoginData !== undefined ? state.hasLoginData : existingData.hasLoginData,
+    loginData: state.loginData || existingData.loginData,
+    profileConfirmed:
+      state.profileConfirmed !== undefined ? state.profileConfirmed : existingData.profileConfirmed,
+    selectedProfileSource:
+      state.selectedProfileSource || existingData.selectedProfileSource || null,
+    useSocialData:
+      state.useSocialData !== undefined ? state.useSocialData : existingData.useSocialData,
+    useDocumentData:
+      state.useDocumentData !== undefined ? state.useDocumentData : existingData.useDocumentData,
+    profileManuallyEdited:
+      state.profileManuallyEdited !== undefined
+        ? state.profileManuallyEdited
+        : existingData.profileManuallyEdited,
+    documentText: state.documentText || existingData.documentText,
+    documentData: state.documentData || existingData.documentData,
+    loginProvider: state.loginProvider || existingData.loginProvider,
+    documentId: state.documentId || existingData.documentId || null,
+    loadedDocumentId: state.loadedDocumentId || existingData.loadedDocumentId || null,
+    chatSessionId: state.chatSessionId || existingData.chatSessionId || null,
+    documentAttachedToChat:
+      state.documentAttachedToChat !== undefined
+        ? state.documentAttachedToChat
+        : existingData.documentAttachedToChat,
+    activeMedicine:
+      state.activeMedicine !== undefined ? state.activeMedicine : existingData.activeMedicine,
+    confirmMode: state.confirmMode || existingData.confirmMode || null,
+    pendingQueue: state.pendingQueue || existingData.pendingQueue || [],
+    validMedsToBulkCreate: state.validMedsToBulkCreate || existingData.validMedsToBulkCreate || [],
+    medicationFlowDone:
+      state.medicationFlowDone !== undefined
+        ? state.medicationFlowDone
+        : existingData.medicationFlowDone,
   };
 
   if (existingRecord) {
@@ -3001,6 +3053,17 @@ class OnboardingService {
       hasFields: !!response.fields,
       fieldsLength: response.fields?.length,
     });
+
+    if (userId) {
+      try {
+        await saveOnboardingState(userId, state);
+      } catch (saveErr) {
+        console.warn(
+          "[OnboardingService] Failed to persist onboarding state per-turn:",
+          saveErr.message,
+        );
+      }
+    }
 
     return {
       ...response,

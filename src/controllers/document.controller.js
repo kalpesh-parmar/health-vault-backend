@@ -8,7 +8,11 @@
 
 const fs = require("fs");
 const { StatusCodes } = require("http-status-codes");
-const { paginatedSuccessResponse, successResponse, errorResponse } = require("../helpers/generalResponse");
+const {
+  paginatedSuccessResponse,
+  successResponse,
+  errorResponse,
+} = require("../helpers/generalResponse");
 const documentService = require("../services/document.service");
 const documentPreValidationService = require("../services/documentPreValidation.service");
 const { messageConstants } = require("../constants/messageConstants");
@@ -88,7 +92,9 @@ async function validateDocuments(req, res) {
   const files = req.files || (req.file ? [req.file] : []);
   const clientFileId = req.body?.clientFileId || null;
   const clientFileIds = req.body?.clientFileIds
-    ? (Array.isArray(req.body.clientFileIds) ? req.body.clientFileIds : [req.body.clientFileIds])
+    ? Array.isArray(req.body.clientFileIds)
+      ? req.body.clientFileIds
+      : [req.body.clientFileIds]
     : [];
 
   try {

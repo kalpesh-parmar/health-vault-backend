@@ -42,15 +42,75 @@ async def test_chunking_bounds_under_8192_tokens():
 
 
 @pytest.mark.asyncio
-async def test_embedding_stage_fallback_dimension_1024():
+async def test_embedding_stage_failure_raises_retryable_stage_execution_error():
+    from app.core.errors import StageExecutionError
+
     embedding_service = MagicMock(spec=EmbeddingService)
     embedding_service.expected_dim = 1024
     embedding_service.chunk_text.return_value = ["Fallback chunk"]
     embedding_service.embed_texts = AsyncMock(side_effect=RuntimeError("Ollama unreachable"))
 
     handler = EmbeddingStageHandler(embedding_service=embedding_service)
-    result = await handler.generate_embeddings(full_text="Sample text")
 
+    with pytest.raises(StageExecutionError) as exc_info:
+        await handler.generate_embeddings(full_text="Sample text")
+
+    err = exc_info.value
+    assert err.stage == "EMBEDDING"
+    assert err.error_code == "EMBEDDING_FAILED"
+    assert err.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_embedding_stage_vector_dimension_mismatch():
+    from app.core.errors import StageExecutionError
+
+    embedding_service = MagicMock(spec=EmbeddingService)
+    embedding_service.expected_dim = 1024
+    embedding_service.chunk_text.return_value = ["Chunk 1"]
+    # Return 512 dimensions instead of 1024
+    embedding_service.embed_texts = AsyncMock(return_value=[[0.1] * 512])
+
+    handler = EmbeddingStageHandler(embedding_service=embedding_service)
+
+    with pytest.raises(StageExecutionError) as exc_info:
+        await handler.generate_embeddings(full_text="Sample text")
+
+    err = exc_info.value
+    assert err.stage == "EMBEDDING"
+    assert err.error_code == "EMBEDDING_DIMENSION_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_embedding_stage_non_finite_vector_value():
+    import math
+    from app.core.errors import StageExecutionError
+
+    embedding_service = MagicMock(spec=EmbeddingService)
+    embedding_service.expected_dim = 1024
+    embedding_service.chunk_text.return_value = ["Chunk 1"]
+    bad_vector = [0.1] * 1024
+    bad_vector[10] = float("nan")
+    embedding_service.embed_texts = AsyncMock(return_value=[bad_vector])
+
+    handler = EmbeddingStageHandler(embedding_service=embedding_service)
+
+    with pytest.raises(StageExecutionError) as exc_info:
+        await handler.generate_embeddings(full_text="Sample text")
+
+    err = exc_info.value
+    assert err.stage == "EMBEDDING"
+    assert err.error_code == "EMBEDDING_VECTOR_NON_FINITE"
+
+
+@pytest.mark.asyncio
+async def test_embedding_stage_empty_text():
+    embedding_service = MagicMock(spec=EmbeddingService)
+    embedding_service.expected_dim = 1024
+    handler = EmbeddingStageHandler(embedding_service=embedding_service)
+
+    result = await handler.generate_embeddings(full_text="   \n  ")
     assert result["embeddingsGenerated"] is True
-    assert result["vectorDimension"] == 1024
-    assert len(result["chunks"][0]["vector"]) == 1024
+    assert result["chunkCount"] == 0
+    assert result["chunks"] == []
+    embedding_service.embed_texts.assert_not_called()

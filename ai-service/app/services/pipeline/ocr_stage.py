@@ -20,7 +20,7 @@ from app.constants.stages import (
     STAGE_VALIDATING,
     STATUS_IN_PROGRESS,
 )
-from app.core.errors import NonMedicalDocumentException, OcrEmptyResultError
+from app.core.errors import NonMedicalDocumentException, OcrEmptyResultError, OcrStageFailureError
 from app.infrastructure.storage.s3 import CorruptFileException, S3StorageClient
 from app.modules.file_processing.office_text import try_extract_office_text_from_bytes
 from app.modules.file_processing.pdf_text import (
@@ -36,6 +36,86 @@ from app.services.pipeline.preprocessing import preprocess_document_image
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class FieldEvidenceStatus:
+    """Field-level optical evidence statuses for clinical entity extraction."""
+    VERIFIED = "VERIFIED"
+    UNCONFIRMED = "UNCONFIRMED"
+    UNREADABLE = "UNREADABLE"
+
+
+def is_blank_or_unreadable_refusal(text: str | None) -> bool:
+    """Returns True if the text is a conversational VLM refusal declaring an image blank/unreadable, rather than medical content."""
+    if not text:
+        return False
+    stripped = text.strip()
+    # Refusal declarations are short messages from the VLM when no text is found
+    if len(stripped) > 250:
+        return False
+
+    blank_refusal_patterns = (
+        r"\b(?:image|page|document)\s+is\s+(?:entirely\s+|completely\s+)?blank\b",
+        r"\bno\s+visible\s+(?:text|content|writing|words|characters)\b",
+        r"\b(?:i\s+am\s+)?unable\s+to\s+(?:read|transcribe|extract|detect)\s+(?:any\s+)?(?:text|content|writing)\b",
+        r"\bwhite\s+background\s+with\s+no\s+(?:visible\s+)?text\b",
+        r"\bno\s+text\s+(?:found|detected|present)\b",
+    )
+    for pattern in blank_refusal_patterns:
+        if re.search(pattern, stripped, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def has_ocr_failure_placeholders(text: str | None) -> bool:
+    """Returns True if the OCR text contains explicit page failure markers or unreadable/blank declarations."""
+    if not text:
+        return False
+    if (
+        re.search(r"\[PAGE \d+ OCR FAILED", text)
+        or "CLINICAL DATA UNREADABLE" in text
+        or "[OCR FAILED]" in text
+    ):
+        return True
+
+    return is_blank_or_unreadable_refusal(text)
+
+
+def validate_ocr_result(raw_ocr_data: dict[str, Any] | None) -> None:
+    """Validates OCR stage output, raising OcrStageFailureError if failed or placeholder markers exist."""
+    if not raw_ocr_data or not isinstance(raw_ocr_data, dict):
+        raise OcrStageFailureError(
+            message="OCR stage failed to produce output dictionary",
+            error_code="OCR_EMPTY_RESULT",
+            stage_details={"reason": "raw_ocr_data is None or empty"},
+        )
+
+    full_text = str(raw_ocr_data.get("fullText") or raw_ocr_data.get("text") or "").strip()
+    if not full_text:
+        raise OcrStageFailureError(
+            message="OCR stage failed to extract any readable text",
+            error_code="OCR_EMPTY_TEXT",
+            stage_details={"reason": "fullText is empty"},
+        )
+
+    if has_ocr_failure_placeholders(full_text):
+        raise OcrStageFailureError(
+            message="OCR stage produced unreadable failure markers for one or more pages",
+            error_code="OCR_EXTRACTION_FAILED",
+            stage_details={
+                "failed_page_count": raw_ocr_data.get("metrics", {}).get("failed_page_count", 1),
+                "reason": "placeholder_detected",
+            },
+        )
+
+    metrics = raw_ocr_data.get("metrics") or {}
+    if metrics.get("failed_page_count", 0) > 0:
+        raise OcrStageFailureError(
+            message=f"OCR failed on {metrics.get('failed_page_count')} page(s)",
+            error_code="OCR_PAGE_FAILED",
+            stage_details={"failed_page_count": metrics.get("failed_page_count")},
+        )
+
 
 
 @contextlib.contextmanager
@@ -220,8 +300,8 @@ class OcrStageHandler:
             )
             return 1, 110
 
-        concurrency = int(getattr(self.settings, "paddle_max_workers", 4))
-        concurrency = max(1, min(concurrency, 8))
+        concurrency = int(getattr(self.settings, "ocr_page_concurrency", getattr(self.vision, "page_concurrency", 2)) or 2)
+        concurrency = max(1, min(concurrency, 4))
         return concurrency, 150
 
     async def _extract_paddle_safe(self, img_bytes: bytes, lang: str | None = None) -> dict[str, Any]:
@@ -706,6 +786,151 @@ class OcrStageHandler:
             status = "FALLBACK" if fallback_reason else "SUCCESS"
             return raw_vision_text, vision_conf, lines, "qwen_vl", status
 
+    async def _inspect_uncertain_regions_if_needed(
+        self,
+        img_bytes: bytes,
+        page_num: int,
+        page_text: str,
+        detected_script: str | None,
+        mime: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """
+        Conditionally inspects high-resolution region crops from raw image bytes
+        ONLY when critical medical fields (patient identity, age, clinic name, dosages)
+        show uncertainty, omission, or visual ambiguity.
+
+        Guarantees:
+        - Never triggered on clean, unambiguous extractions (zero extra latency for majority of pages).
+        - Original image bytes are preserved as the immutable ground truth source.
+        - Full-page text is never blindly overwritten by contradictory crop output.
+        - Never guesses or invents patient information.
+        - Attaches field-level evidence status (VERIFIED, UNCONFIRMED, UNREADABLE).
+        """
+        evidence: dict[str, Any] = {}
+        if not self.vision or not img_bytes or not page_text:
+            return page_text, evidence
+
+        # 1. Detection of Uncertainty in Critical Medical Fields
+        has_gujarati = bool(re.search(r"[\u0A80-\u0AFF]", page_text))
+        is_indic_doc = detected_script in ("gujarati", "hindi", "tamil", "devanagari") or has_gujarati
+
+        clinic_indicators = (
+            "હોસ્પિટલ", "ક્લિનિક", "દવાખાનું", "લેબોરેટરી", "કેન્દ્ર",
+            "hospital", "clinic", "laboratory", "health center", "dispensary",
+            "अस्पताल", "क्लिनिक", "प्रयोगशाला", "மருத்துவமனை"
+        )
+        first_250_chars = page_text[:300].lower()
+        has_facility_in_header = any(ind in first_250_chars for ind in clinic_indicators)
+
+        has_patient_line = bool(re.search(r"(?:patient\s*name|દર્દીનું\s*નામ|પેટિન્ટ\s*નેમ|मरीज\s*का\s*नाम|பெயர்)", page_text, flags=re.IGNORECASE))
+        has_age_indicator = bool(re.search(r"(?:age|ઉંમર|ઉમર|वय|उम्र|வயது)\s*[:\s/]*\s*(\d+|[\u0A66-\u0A6F]+|[\u0966-\u096F]+)", page_text, flags=re.IGNORECASE))
+
+        # Trigger check: only run targeted pass if critical uncertainty is detected
+        needs_header_reinspection = (not has_facility_in_header and is_indic_doc)
+        needs_patient_reinspection = (not has_patient_line and is_indic_doc)
+
+        if not (needs_header_reinspection or needs_patient_reinspection):
+            evidence["facilityName"] = {"status": FieldEvidenceStatus.VERIFIED if has_facility_in_header else FieldEvidenceStatus.UNCONFIRMED, "source": "full_page_ocr"}
+            evidence["patientIdentity"] = {"status": FieldEvidenceStatus.VERIFIED if has_patient_line else FieldEvidenceStatus.UNCONFIRMED, "source": "full_page_ocr"}
+            evidence["patientAge"] = {"status": FieldEvidenceStatus.VERIFIED if has_age_indicator else FieldEvidenceStatus.UNREADABLE, "source": "full_page_ocr"}
+            return page_text, evidence
+
+        logger.info(
+            "Page %d: Uncertain critical medical fields detected (missing_header=%s, missing_patient=%s). Triggering targeted ROI inspection.",
+            page_num, needs_header_reinspection, needs_patient_reinspection
+        )
+
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                w, h = img.size
+                crop_h = max(10, int(round(h * 0.25)))
+                roi_crop = img.crop((0, 0, w, crop_h))
+                buf = io.BytesIO()
+                roi_crop.save(buf, format="PNG")
+                crop_bytes = buf.getvalue()
+
+            crop_prompt = (
+                "You are an expert medical transcription engine focusing on the top header of a clinical document.\n"
+                "Extract ONLY the visible text in this specific header region verbatim in original Unicode script without transliteration:\n"
+                "1. Hospital/Clinic Name and facility branding\n"
+                "2. Doctor Name and qualifications\n"
+                "3. Patient Name, Age, Gender, and Date\n"
+                "CRITICAL: Accurately decode authentic Indic numerals (e.g. Gujarati ૦=0..૯=9, ૫=5, ૬=6). Never guess, hallucinate, or assume missing information."
+            )
+
+            crop_res = await self.vision.extract_image(
+                crop_bytes,
+                prompt=crop_prompt,
+                filename=f"page_{page_num}_header_crop.png",
+                mime_type="image/png",
+                max_pages=1,
+                script_hint=detected_script,
+            )
+            crop_text = (crop_res.get("text") or "").strip()
+
+            if not crop_text or is_blank_or_unreadable_refusal(crop_text):
+                evidence["facilityName"] = {"status": FieldEvidenceStatus.UNREADABLE, "source": "header_crop"}
+                return page_text, evidence
+
+            # 2. Non-Destructive Evidence Reconciliation (Requirement 6, 8, 9)
+            discovered_facility = None
+            for line in crop_text.splitlines():
+                line_clean = line.strip()
+                if any(ind in line_clean.lower() for ind in clinic_indicators):
+                    discovered_facility = line_clean
+                    break
+
+            reconciled_text = page_text
+            if discovered_facility and discovered_facility.lower() not in page_text.lower():
+                reconciled_text = f"{discovered_facility}\n\n{page_text}"
+                evidence["facilityName"] = {
+                    "value": discovered_facility,
+                    "status": FieldEvidenceStatus.VERIFIED,
+                    "source": "header_crop"
+                }
+            elif discovered_facility:
+                evidence["facilityName"] = {
+                    "value": discovered_facility,
+                    "status": FieldEvidenceStatus.VERIFIED,
+                    "source": "concordant"
+                }
+            else:
+                evidence["facilityName"] = {
+                    "status": FieldEvidenceStatus.UNCONFIRMED,
+                    "source": "full_page_ocr"
+                }
+
+            # Check patient age evidence
+            crop_age_match = re.search(r"(?:age|ઉંમર|ઉમર|वय|उम्र|வயது)\s*[:\s/]*\s*([0-9\u0A66-\u0A6F\u0966-\u096F]+(?:\s*(?:વર્ષ|वर्ष|years|yrs))?)", crop_text, flags=re.IGNORECASE)
+            page_age_match = re.search(r"(?:age|ઉંમર|ઉમર|वय|उम्र|வயது)\s*[:\s/]*\s*([0-9\u0A66-\u0A6F\u0966-\u096F]+(?:\s*(?:વર્ષ|वर्ष|years|yrs))?)", page_text, flags=re.IGNORECASE)
+
+            if crop_age_match and page_age_match:
+                if crop_age_match.group(1).strip() == page_age_match.group(1).strip():
+                    evidence["patientAge"] = {"value": crop_age_match.group(1).strip(), "status": FieldEvidenceStatus.VERIFIED, "source": "concordant"}
+                else:
+                    evidence["patientAge"] = {
+                        "value": page_age_match.group(1).strip(),
+                        "crop_candidate": crop_age_match.group(1).strip(),
+                        "status": FieldEvidenceStatus.UNCONFIRMED,
+                        "source": "conflict_preserved"
+                    }
+            elif page_age_match:
+                evidence["patientAge"] = {"value": page_age_match.group(1).strip(), "status": FieldEvidenceStatus.VERIFIED, "source": "full_page_ocr"}
+            elif crop_age_match:
+                evidence["patientAge"] = {"value": crop_age_match.group(1).strip(), "status": FieldEvidenceStatus.UNCONFIRMED, "source": "header_crop"}
+            else:
+                evidence["patientAge"] = {"status": FieldEvidenceStatus.UNREADABLE, "source": "none"}
+
+            evidence["patientIdentity"] = {"status": FieldEvidenceStatus.VERIFIED if has_patient_line else FieldEvidenceStatus.UNCONFIRMED, "source": "header_crop"}
+            evidence["crop_inspected"] = True
+            evidence["crop_text_sample"] = crop_text[:200]
+            return reconciled_text, evidence
+
+        except Exception as crop_exc:
+            logger.warning("Targeted ROI inspection failed on page %d: %s", page_num, crop_exc)
+            evidence["crop_error"] = str(crop_exc)
+            return page_text, evidence
+
     async def _extract_page_with_tiered_ocr(
         self,
         img_bytes: bytes,
@@ -771,7 +996,7 @@ class OcrStageHandler:
 
         # ── Step 0.5: Check SHA-256 Result Cache ──
         if self.cache is not None:
-            config_hash = getattr(self.paddle, "config_hash", "") if self.paddle else ""
+            config_hash = getattr(self.vision, "config_hash", "qwen_vl") if self.vision else ""
             cached_res = self.cache.get(img_bytes, engine_config_hash=config_hash)
             if cached_res is not None:
                 cached_res["page"] = page_num
@@ -785,10 +1010,8 @@ class OcrStageHandler:
                 logger.info("Page %d OCR cache hit (SHA-256 key, elapsed_ms=%d)", page_num, cached_res.get("elapsed_ms", 0))
                 return cached_res
 
-        # ── Step 1: Script Detection Before OCR ──
+        # ── Step 1: Script Detection Before OCR (Hint for validation) ──
         t_lang = time.perf_counter()
-        target_lang = "en"
-        is_non_latin_page = False
         detected_script = "latin"
         from app.modules.ocr.script_detector import detect_scripts_in_text
 
@@ -810,502 +1033,22 @@ class OcrStageHandler:
                         detected_script = "tamil"
                     elif fn_stem.startswith(("gu_", "gu-", "gujarati")) or "_gu_" in fn_stem or fn_stem.endswith("_gu"):
                         detected_script = "gujarati"
-
-                if detected_script in ("devanagari", "hindi", "marathi"):
-                    target_lang = "devanagari"
-                    is_non_latin_page = False
-                elif detected_script in ("tamil", "ta"):
-                    target_lang = "ta"
-                    is_non_latin_page = False
-                elif detected_script in ("gujarati", "gu"):
-                    is_non_latin_page = True
-                    target_lang = detected_script
-                else:
-                    raw_lang = getattr(self.paddle, "lang", "en") if self.paddle else "en"
-                    target_lang = raw_lang if isinstance(raw_lang, str) else "en"
-                    is_non_latin_page = False
-
-                if detected_script != "latin":
-                    logger.info(
-                        "Page %d pre-OCR script detection identified script: %s -> target_lang: %s (skip_paddle=%s)",
-                        page_num, detected_script, target_lang, is_non_latin_page
-                    )
-            else:
-                raw_lang = getattr(self.paddle, "lang", "en") if self.paddle else "en"
-                target_lang = raw_lang if isinstance(raw_lang, str) else "en"
         stage_timings["lang_detect_ms"] = round((time.perf_counter() - t_lang) * 1000, 2)
 
-        t_init = time.perf_counter()
-        paddle_available = False
-        with ocr_timer("model_load_ms", engine="paddleocr", page=page_num):
-            paddle_available = bool(self.paddle and getattr(self.paddle, "is_available", lambda: True)())
-            if not paddle_available:
-                if self.paddle and getattr(self.paddle, "_init_error", None) is not None:
-                    fallback_reason = f"primary_init_failed: {self.paddle._init_error}"
-                elif not self.paddle:
-                    fallback_reason = "primary_not_configured"
-        stage_timings["engine_init_ms"] = round((time.perf_counter() - t_init) * 1000, 2)
-
-        paddle_res = None
-        concurrent_race_enabled = bool(
-            getattr(getattr(self, "settings", None), "ocr_concurrent_race_enabled", True)
-            and paddle_available
-            and self.vision
-            and not is_non_latin_page
-        )
-
-        if is_non_latin_page:
-            # Skip PaddleOCR completely for unsupported non-Latin scripts (e.g. Gujarati) - preserve CPU cycles and route directly to VLM
-            fallback_reason = f"UNREAD_NON_LATIN_SCRIPT_PRE_DETECTED_{detected_script.upper()}"
-            logger.info("Page %d non-Latin script pre-detected (%s), skipping PaddleOCR directly to VLM", page_num, detected_script)
-        elif concurrent_race_enabled:
-            # ── Concurrent Race: Run PaddleOCR and VLM concurrently, cancel loser ──
+        # ── Step 2: Primary Vision OCR (Qwen3-VL via Ollama) ──
+        if self.vision:
             try:
-                logger.info("Page %d launching concurrent race: PaddleOCR vs VLM", page_num)
-
-                async def _paddle_runner() -> tuple[dict[str, Any] | None, float, Exception | None]:
-                    t_inf = time.perf_counter()
-                    timeout_sec = float(getattr(getattr(self, "settings", None), "paddle_timeout_seconds", 20.0))
-                    logger.info(
-                        "[TIMING_EVIDENCE] Page %d: _paddle_runner entered (timeout=%.1fs, bytes=%d, lang=%s)",
-                        page_num, timeout_sec, len(img_bytes), target_lang
-                    )
-                    try:
-                        p_res = await asyncio.wait_for(
-                            self._extract_paddle_safe(img_bytes, lang=target_lang),
-                            timeout=timeout_sec,
-                        )
-                        p_dur = round((time.perf_counter() - t_inf) * 1000, 2)
-                        logger.info("[TIMING_EVIDENCE] Page %d: _paddle_runner completed in %.2fms", page_num, p_dur)
-                        return p_res, p_dur, None
-                    except asyncio.TimeoutError as te:
-                        p_dur = round((time.perf_counter() - t_inf) * 1000, 2)
-                        logger.warning(
-                            "[TIMING_EVIDENCE] Page %d: PaddleOCR timed out! Elapsed=%.2fms (timer target was %.1fs, overrun=%.2fms)",
-                            page_num, p_dur, timeout_sec, p_dur - (timeout_sec * 1000)
-                        )
-                        return None, p_dur, te
-                    except Exception as pe:
-                        p_dur = round((time.perf_counter() - t_inf) * 1000, 2)
-                        logger.warning("[TIMING_EVIDENCE] Page %d: PaddleOCR exception after %.2fms: %s", page_num, p_dur, pe)
-                        return None, p_dur, pe
-
-                async def _vlm_runner() -> tuple[dict[str, Any] | None, float, Exception | None]:
-                    t_vl = time.perf_counter()
-                    try:
-                        v_res = await self.vision.extract_image(
-                            img_bytes,
-                            filename=f"page_{page_num}.jpg",
-                            mime_type=mime,
-                            max_pages=1,
-                        )
-                        return v_res, round((time.perf_counter() - t_vl) * 1000, 2), None
-                    except asyncio.CancelledError:
-                        return None, round((time.perf_counter() - t_vl) * 1000, 2), None
-                    except Exception as ve:
-                        return None, round((time.perf_counter() - t_vl) * 1000, 2), ve
-
-                p_task = asyncio.create_task(_paddle_runner())
-                v_task = asyncio.create_task(_vlm_runner())
-
-                done, pending = await asyncio.wait([p_task, v_task], return_when=asyncio.FIRST_COMPLETED)
-
-                if p_task in done:
-                    p_res, p_ms, p_err = p_task.result()
-                    stage_timings["ocr_infer_ms"] = p_ms
-                    paddle_res = p_res
-
-                    if paddle_res and not p_err:
-                        timings = paddle_res.get("timings") or {}
-                        stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
-                        stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
-                        if timings.get("engine_init_ms"):
-                            stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
-                        if timings.get("queue_wait_ms"):
-                            stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
-
-                        t_qg = time.perf_counter()
-                        with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
-                            gate_result = self.quality_gate.evaluate(paddle_res)
-                        stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
-
-                        min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
-                        mean_c = float(paddle_res.get("mean_confidence") or 0.0)
-                        low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
-                        can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
-
-                        if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
-                            v_task.cancel()
-                            logger.info(
-                                "Page %d PaddleOCR won concurrent race (conf=%.2f, elapsed=%dms), cancelled VLM",
-                                page_num,
-                                mean_c,
-                                p_ms,
-                            )
-                            page_text = paddle_res.get("full_text") or ""
-                            confidence = mean_c or 0.95
-                            lines = paddle_res.get("lines") or []
-                            engine_used = f"paddleocr_{target_lang}" if target_lang != "en" else "paddleocr"
-                            status = "SUCCESS"
-                            fallback_reason = None
-                        else:
-                            fallback_reason = gate_result.reason
-                            logger.info("Page %d PaddleOCR quality gate failed (%s)", page_num, fallback_reason)
-
-                            # Check if this was an un-hinted page that might be an Indic document (Hindi, Marathi, Tamil)
-                            is_indic_candidate = (
-                                target_lang == "en"
-                                and (
-                                    gate_result.reason == "UNREAD_NON_LATIN_SCRIPT"
-                                    or "LOW_VALID_TOKEN_RATIO" in str(gate_result.reason)
-                                    or bool(gate_result.details.get("script_info", {}).get("has_potential_unread_non_latin"))
-                                )
-                            )
-                            indic_recovered = False
-                            if is_indic_candidate:
-                                detected_scripts = gate_result.details.get("script_info", {}).get("detected_scripts", [])
-                                retry_lang = "ta" if "tamil" in detected_scripts else "devanagari"
-                                try:
-                                    logger.info(
-                                        "Page %d attempting concurrent race local CPU Indic recovery with lang=%s",
-                                        page_num, retry_lang
-                                    )
-                                    t_retry = time.perf_counter()
-                                    timeout_sec = float(getattr(self.settings, "paddle_timeout_seconds", 20.0))
-                                    indic_res = await asyncio.wait_for(
-                                        self._extract_paddle_safe(img_bytes, lang=retry_lang),
-                                        timeout=timeout_sec,
-                                    )
-                                    if indic_res:
-                                        indic_gate = self.quality_gate.evaluate(indic_res)
-                                        target_chars_found = self._has_target_script_chars(indic_res.get("full_text") or "", retry_lang)
-                                        if indic_gate.passed and not indic_gate.has_unread_non_latin and target_chars_found:
-                                            v_task.cancel()
-                                            paddle_res = indic_res
-                                            gate_result = indic_gate
-                                            page_text = indic_res.get("full_text") or ""
-                                            confidence = float(indic_res.get("mean_confidence") or 0.95)
-                                            lines = indic_res.get("lines") or []
-                                            engine_used = f"paddleocr_{retry_lang}"
-                                            status = "SUCCESS"
-                                            fallback_reason = None
-                                            indic_recovered = True
-                                            stage_timings["indic_recovery_ms"] = round((time.perf_counter() - t_retry) * 1000, 2)
-                                            logger.info(
-                                                "Page %d Indic recovery succeeded with %s in %.2fms (conf=%.4f), cancelled VLM",
-                                                page_num, retry_lang, stage_timings["indic_recovery_ms"], confidence
-                                            )
-                                except Exception as retry_err:
-                                    logger.warning("Page %d Indic recovery attempt failed: %s", page_num, retry_err)
-
-                            if not indic_recovered:
-                                crop_info = None
-                                try:
-                                    with Image.open(io.BytesIO(img_bytes)) as pil_img:
-                                        img_dims = pil_img.size
-                                    crop_info = self._compute_failing_bboxes_union(paddle_res.get("lines") or [], img_dims)
-                                except Exception:
-                                    crop_info = None
-
-                                if crop_info is not None:
-                                    v_task.cancel()
-                                    crop_box, failing_indices = crop_info
-                                    logger.info(
-                                        "Page %d attempting localized crop-only VLM fallback in concurrent race for %d lines (box=%s)",
-                                        page_num, len(failing_indices), crop_box
-                                    )
-                                    t_crop = time.perf_counter()
-                                    crop_lines = await self._extract_crop_with_vlm(
-                                        img_bytes, crop_box, mime=mime, expected_script=detected_script
-                                    )
-                                    stage_timings["vlm_crop_ms"] = round((time.perf_counter() - t_crop) * 1000, 2)
-                                    if crop_lines:
-                                        failing_set = set(failing_indices)
-                                        retained = [
-                                            l for idx, l in enumerate(paddle_res.get("lines") or [])
-                                            if idx not in failing_set and not self._is_pseudo_latin_noise(l)
-                                        ]
-                                        merged = self._deduplicate_lines(retained, crop_lines)
-                                        if merged:
-                                            page_text = "\n".join(l["text"] for l in merged)
-                                            confidence = round(sum(float(l.get("confidence") or 0.95) for l in merged) / len(merged), 4)
-                                            lines = merged
-                                            engine_used = "hybrid_paddle_crop_vlm"
-                                            status = "FALLBACK"
-                                            fallback_reason = None
-                                            logger.info(
-                                                "Page %d localized crop VLM fallback succeeded in %.2fms (recovered %d lines, total=%d lines)",
-                                                page_num, stage_timings["vlm_crop_ms"], len(crop_lines), len(lines)
-                                            )
-
-                                if status != "FALLBACK":
-                                    logger.info("Page %d awaiting concurrent VLM (fallback_reason=%s)", page_num, fallback_reason)
-                                    try:
-                                        v_res, v_ms, v_err = await v_task
-                                    except asyncio.CancelledError:
-                                        v_res, v_ms, v_err = None, 0.0, None
-                                    stage_timings["vlm_call_ms"] = v_ms
-                                    if v_res and not v_err:
-                                        page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
-                                        page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                            v_res, paddle_res, fallback_reason, expected_script=detected_script
-                                        )
-                                else:
-                                    try:
-                                        await v_task
-                                    except (asyncio.CancelledError, Exception):
-                                        pass
-                    else:
-                        # Paddle errored or timed out; await VLM
-                        timeout_sec = float(getattr(self.settings, "paddle_timeout_seconds", 20.0))
-                        fb_reason = f"PADDLE_TIMEOUT_{timeout_sec}S" if isinstance(p_err, asyncio.TimeoutError) else "PADDLE_FAILED"
-                        fallback_reason = fb_reason
-                        logger.info("Page %d PaddleOCR failed/timed out (%s), awaiting concurrent VLM", page_num, fb_reason)
-                        v_res, v_ms, v_err = await v_task
-                        stage_timings["vlm_call_ms"] = v_ms
-                        if v_res and not v_err:
-                            page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
-                            page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                v_res, None, fb_reason, expected_script=detected_script
-                            )
-                elif v_task in done:
-                    v_res, v_ms, v_err = v_task.result()
-                    stage_timings["vlm_call_ms"] = v_ms
-                    v_text = (v_res.get("text") or "").strip() if v_res else ""
-                    v_script = detect_scripts_in_text(v_text)
-                    v_conf = float(v_res.get("confidence") or 0.95) if (v_res and v_text) else 0.0
-
-                    if v_res and (v_script.get("has_non_latin") or v_conf >= 0.85):
-                        p_task.cancel()
-                        fb_reason = "UNREAD_NON_LATIN_SCRIPT" if v_script.get("has_non_latin") else None
-                        logger.info(
-                            "[TIMING_EVIDENCE] Page %d: VLM won concurrent race (non_latin=%s, elapsed=%dms), called p_task.cancel() on PaddleOCR task",
-                            page_num,
-                            v_script.get("has_non_latin"),
-                            v_ms,
-                        )
-                        page_telemetry = (v_res.get("metrics") or {}).get("telemetry") or {}
-                        page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                            v_res, None, fb_reason, expected_script=detected_script
-                        )
-                        fallback_reason = fb_reason
-                    else:
-                        # VLM completed first but produced low confidence / empty text; await Paddle
-                        p_err = None
-                        try:
-                            p_res, p_ms, p_err = await p_task
-                            stage_timings["ocr_infer_ms"] = p_ms
-                            paddle_res = p_res
-                        except asyncio.CancelledError:
-                            paddle_res = None
-                        except Exception as pe:
-                            p_err = pe
-                            paddle_res = None
-
-                        if paddle_res and not p_err:
-                            gate_result = self.quality_gate.evaluate(paddle_res)
-                            min_conf = getattr(self.settings, "ocr_router_min_confidence", 0.82)
-                            mean_c = float(paddle_res.get("mean_confidence") or 0.0)
-                            low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
-                            can_bypass_low_conf = (mean_c >= min_conf and low_conf_ratio <= 0.15)
-                            if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
-                                page_text = paddle_res.get("full_text") or ""
-                                confidence = mean_c or 0.95
-                                lines = paddle_res.get("lines") or []
-                                engine_used = f"paddleocr_{target_lang}" if target_lang != "en" else "paddleocr"
-                                status = "SUCCESS"
-                                fallback_reason = None
-                            else:
-                                if v_res:
-                                    page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                        v_res, paddle_res, gate_result.reason, expected_script=detected_script
-                                    )
-                        elif v_res:
-                            page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                                v_res, None, "VLM_FALLBACK", expected_script=detected_script
-                            )
-            except Exception as race_err:
-                fallback_reason = f"concurrent_race_error: {race_err}"
-                logger.warning("Page %d concurrent race exception: %s", page_num, race_err)
-        elif paddle_available:
-            # ── Standard Sequential PaddleOCR ──
-            timeout_sec = float(getattr(getattr(self, "settings", None), "paddle_timeout_seconds", 20.0))
-            try:
-                t_infer = time.perf_counter()
-                with ocr_timer("ocr_infer_ms", engine="paddleocr", lang=target_lang, pass_num=1, page=page_num):
-                    paddle_res = await asyncio.wait_for(
-                        self._extract_paddle_safe(img_bytes, lang=target_lang),
-                        timeout=timeout_sec,
-                    )
-                stage_timings["ocr_infer_ms"] = round((time.perf_counter() - t_infer) * 1000, 2)
-
-                timings = paddle_res.get("timings") or {}
-                stage_timings["det_ms"] = float(timings.get("detector_ms", 0.0))
-                stage_timings["rec_ms"] = float(timings.get("recognizer_ms", 0.0))
-                if timings.get("engine_init_ms"):
-                    stage_timings["engine_init_ms"] += float(timings.get("engine_init_ms", 0.0))
-                if timings.get("queue_wait_ms"):
-                    stage_timings["queue_wait_ms"] += float(timings.get("queue_wait_ms", 0.0))
-
-                t_qg = time.perf_counter()
-                with ocr_timer("quality_gate_ms", engine="paddleocr", page=page_num):
-                    gate_result = self.quality_gate.evaluate(paddle_res)
-                stage_timings["quality_gate_ms"] = round((time.perf_counter() - t_qg) * 1000, 2)
-
-                t_post = time.perf_counter()
-                with ocr_timer("postprocess_ms", engine="paddleocr", page=page_num):
-                    min_conf = getattr(getattr(self, "settings", None), "ocr_router_min_confidence", 0.82)
-                    mean_c = float(paddle_res.get("mean_confidence") or 0.0)
-                    low_conf_ratio = float(gate_result.details.get("low_confidence_line_ratio") or 0.0)
-
-                    page_telemetry.update({
-                        "get_instance_ms": timings.get("get_instance_ms", 0),
-                        "engine_init_ms": timings.get("engine_init_ms", 0),
-                        "image_decode_ms": timings.get("image_decode_ms", 0),
-                        "detector_ms": timings.get("detector_ms", 0),
-                        "recognizer_ms": timings.get("recognizer_ms", 0),
-                        "result_conversion_ms": timings.get("result_conversion_ms", 0),
-                        "total_ocr_ms": timings.get("total_ocr_ms", 0),
-                        "queue_wait_ms": timings.get("queue_wait_ms", 0),
-                        "worker_pid": paddle_res.get("worker_pid"),
-                    })
-                    logger.info(
-                        "Page %d PaddleOCR timings: total=%d ms, det=%d ms, rec=%d ms, decode=%d ms, conv=%d ms, engine_init=%d ms, queue_wait=%d ms, pid=%s (lines=%d, conf=%.4f)",
-                        page_num,
-                        timings.get("total_ocr_ms", 0),
-                        timings.get("detector_ms", 0),
-                        timings.get("recognizer_ms", 0),
-                        timings.get("image_decode_ms", 0),
-                        timings.get("result_conversion_ms", 0),
-                        timings.get("engine_init_ms", 0),
-                        timings.get("queue_wait_ms", 0),
-                        paddle_res.get("worker_pid"),
-                        paddle_res.get("line_count", 0),
-                        mean_c,
-                    )
-
-                    can_bypass_low_conf = (
-                        mean_c >= min_conf
-                        and low_conf_ratio <= 0.15
-                    )
-                    if (gate_result.passed or can_bypass_low_conf) and not gate_result.has_unread_non_latin:
-                        page_text = paddle_res.get("full_text") or ""
-                        confidence = mean_c or 0.95
-                        lines = paddle_res.get("lines") or []
-                        engine_used = f"paddleocr_{target_lang}" if target_lang != "en" else "paddleocr"
-                        status = "SUCCESS"
-                        fallback_reason = None
-                    else:
-                        fallback_reason = gate_result.reason
-                        logger.info("Page %d PaddleOCR quality gate failed: %s", page_num, fallback_reason)
-
-                        # Check if this was an un-hinted page that might be an Indic document (Hindi, Marathi, Tamil)
-                        # Attempt local CPU Indic recovery before escalating to heavy VLM
-                        is_indic_candidate = (
-                            target_lang == "en"
-                            and (
-                                gate_result.reason == "UNREAD_NON_LATIN_SCRIPT"
-                                or "LOW_VALID_TOKEN_RATIO" in str(gate_result.reason)
-                                or bool(gate_result.details.get("script_info", {}).get("has_potential_unread_non_latin"))
-                            )
-                        )
-                        if is_indic_candidate:
-                            detected_scripts = gate_result.details.get("script_info", {}).get("detected_scripts", [])
-                            retry_lang = "ta" if "tamil" in detected_scripts else "devanagari"
-                            try:
-                                logger.info(
-                                    "Page %d attempting local CPU Indic recovery with lang=%s",
-                                    page_num, retry_lang
-                                )
-                                t_retry = time.perf_counter()
-                                indic_res = await asyncio.wait_for(
-                                    self._extract_paddle_safe(img_bytes, lang=retry_lang),
-                                    timeout=timeout_sec,
-                                )
-                                if indic_res:
-                                    indic_gate = self.quality_gate.evaluate(indic_res)
-                                    target_chars_found = self._has_target_script_chars(indic_res.get("full_text") or "", retry_lang)
-                                    if indic_gate.passed and not indic_gate.has_unread_non_latin and target_chars_found:
-                                        paddle_res = indic_res
-                                        gate_result = indic_gate
-                                        page_text = indic_res.get("full_text") or ""
-                                        confidence = float(indic_res.get("mean_confidence") or 0.95)
-                                        lines = indic_res.get("lines") or []
-                                        engine_used = f"paddleocr_{retry_lang}"
-                                        status = "SUCCESS"
-                                        fallback_reason = None
-                                        stage_timings["indic_recovery_ms"] = round((time.perf_counter() - t_retry) * 1000, 2)
-                                        logger.info(
-                                            "Page %d Indic recovery succeeded with %s in %.2fms (conf=%.4f)",
-                                            page_num, retry_lang, stage_timings["indic_recovery_ms"], confidence
-                                        )
-                            except Exception as retry_err:
-                                logger.warning("Page %d Indic recovery attempt failed: %s", page_num, retry_err)
-
-                stage_timings["postprocess_ms"] = round((time.perf_counter() - t_post) * 1000, 2)
-            except asyncio.TimeoutError:
-                fallback_reason = f"PADDLE_TIMEOUT_{timeout_sec}S"
-                stage_timings["ocr_infer_ms"] = round((time.perf_counter() - t_infer) * 1000, 2)
-                logger.warning("Page %d PaddleOCR timed out after %.1fs, falling back to VLM", page_num, timeout_sec)
-            except Exception as p_err:
-                fallback_reason = f"PaddleOCR exception: {p_err}"
-                logger.warning("Page %d PaddleOCR exception: %s", page_num, p_err)
-
-        # ── Step 1.5: Attempt Localized Crop-Only VLM Fallback ──
-        if status != "SUCCESS" and self.vision and paddle_res and paddle_res.get("lines"):
-            try:
-                with Image.open(io.BytesIO(img_bytes)) as pil_img:
-                    img_dims = pil_img.size
-                crop_info = self._compute_failing_bboxes_union(paddle_res["lines"], img_dims)
-                if crop_info is not None:
-                    crop_box, failing_indices = crop_info
-                    logger.info(
-                        "Page %d attempting localized crop-only VLM fallback for %d lines (box=%s)",
-                        page_num, len(failing_indices), crop_box
-                    )
-                    t_crop = time.perf_counter()
-                    crop_lines = await self._extract_crop_with_vlm(
-                        img_bytes, crop_box, mime=mime, expected_script=detected_script
-                    )
-                    stage_timings["vlm_crop_ms"] = round((time.perf_counter() - t_crop) * 1000, 2)
-                    if crop_lines:
-                        failing_set = set(failing_indices)
-                        retained = [
-                            l for idx, l in enumerate(paddle_res["lines"])
-                            if idx not in failing_set and not self._is_pseudo_latin_noise(l)
-                        ]
-                        merged = self._deduplicate_lines(retained, crop_lines)
-                        if merged:
-                            page_text = "\n".join(l["text"] for l in merged)
-                            confidence = round(sum(float(l.get("confidence") or 0.95) for l in merged) / len(merged), 4)
-                            lines = merged
-                            engine_used = "hybrid_paddle_crop_vlm"
-                            status = "FALLBACK"
-                            fallback_reason = None
-                            logger.info(
-                                "Page %d localized crop VLM fallback succeeded in %.2fms (recovered %d lines, total=%d lines)",
-                                page_num, stage_timings["vlm_crop_ms"], len(crop_lines), len(lines)
-                            )
-            except Exception as crop_err:
-                logger.warning("Page %d crop VLM fallback attempt failed: %s", page_num, crop_err)
-
-        # ── Step 2: Fallback to Full-Page Vision Model (Qwen3-VL) if needed ──
-        if status != "SUCCESS" and engine_used != "hybrid_paddle_crop_vlm" and self.vision:
-            try:
-                logger.info(
-                    "Routing page %d to Vision Model (fallback_reason=%s)",
-                    page_num,
-                    fallback_reason or "Primary engine not configured",
-                )
+                logger.info("Routing page %d to Qwen3-VL vision OCR", page_num)
                 t_vlm = time.perf_counter()
-                with ocr_timer("ocr_infer_ms", engine="qwen_vl", lang=target_lang, pass_num=2, page=page_num):
+                with ocr_timer("ocr_infer_ms", engine="qwen_vl", page=page_num):
                     res = await self.vision.extract_image(
                         img_bytes,
                         filename=f"page_{page_num}.jpg",
                         mime_type=mime,
                         max_pages=1,
+                        script_hint=detected_script,
                     )
-                    # Multi-Engine / Multi-Prompt Retry: empty output or unclosed think indicates prompt refusal, model stall, or think leak
+                    # Check for empty response or unclosed think block indicating prompt refusal or model stall
                     from app.services.pipeline.summary_stage import strip_think_tokens
                     raw_text = (res.get("text") or "").strip()
                     has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_text, flags=re.IGNORECASE))
@@ -1320,7 +1063,7 @@ class OcrStageHandler:
                                 filename=f"page_{page_num}.jpg",
                                 mime_type=mime,
                                 max_pages=1,
-                                prompt="Extract and transcribe all printed and handwritten text in this medical document exactly as written line by line.",
+                                script_hint=detected_script,
                             )
                             retry_text = (retry_res.get("text") or "").strip()
                             retry_unclosed = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", retry_text, flags=re.IGNORECASE))
@@ -1334,13 +1077,29 @@ class OcrStageHandler:
                             logger.warning("Page %d VLM retry failed: %s", page_num, retry_err)
 
                 stage_timings["vlm_call_ms"] = round((time.perf_counter() - t_vlm) * 1000, 2)
+                stage_timings["ocr_infer_ms"] = stage_timings["vlm_call_ms"]
                 page_telemetry = (res.get("metrics") or {}).get("telemetry") or {}
                 t_post_vlm = time.perf_counter()
                 with ocr_timer("postprocess_ms", engine="qwen_vl", page=page_num):
                     page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                        res, paddle_res, fallback_reason, expected_script=detected_script
+                        res, None, None, expected_script=detected_script
                     )
-                stage_timings["postprocess_ms"] += round((time.perf_counter() - t_post_vlm) * 1000, 2)
+                stage_timings["postprocess_ms"] = round((time.perf_counter() - t_post_vlm) * 1000, 2)
+                evidence: dict[str, Any] = {}
+                if status.startswith("FAILED"):
+                    error_msg = status
+                    fallback_reason = status
+                    status = "FAILED"
+                else:
+                    t_roi = time.perf_counter()
+                    page_text, evidence = await self._inspect_uncertain_regions_if_needed(
+                        img_bytes=img_bytes,
+                        page_num=page_num,
+                        page_text=page_text,
+                        detected_script=detected_script,
+                        mime=mime,
+                    )
+                    stage_timings["vlm_crop_ms"] = round((time.perf_counter() - t_roi) * 1000, 2)
             except Exception as v_err:
                 error_msg = str(v_err)
                 logger.warning("Vision OCR failed on page %d: %s", page_num, v_err)
@@ -1349,6 +1108,18 @@ class OcrStageHandler:
                 lines = []
                 engine_used = "none"
                 status = "FAILED"
+                fallback_reason = f"VISION_ERROR: {v_err}"
+                evidence = {}
+        else:
+            error_msg = "Vision model service is not configured"
+            logger.error("Page %d: Vision model service not configured", page_num)
+            page_text = ""
+            confidence = 0.0
+            lines = []
+            engine_used = "none"
+            status = "FAILED"
+            fallback_reason = "VISION_NOT_CONFIGURED"
+            evidence = {}
 
         elapsed_page_ms = int(round((time.perf_counter() - page_start) * 1000))
         stage_timings["total_page_ms"] = float(elapsed_page_ms)
@@ -1367,11 +1138,12 @@ class OcrStageHandler:
             "cached": False,
             "telemetry": page_telemetry,
             "stage_timings": stage_timings,
+            "evidence": evidence,
         }
 
         # Cache successful page OCR extractions (zero cache poisoning)
         if status in {"SUCCESS", "FALLBACK"} and self.cache is not None and page_text:
-            config_hash = getattr(self.paddle, "config_hash", "") if self.paddle else ""
+            config_hash = getattr(self.vision, "config_hash", "qwen_vl") if self.vision else ""
             self.cache.set(img_bytes, res, engine_config_hash=config_hash)
 
         return res
@@ -1393,8 +1165,7 @@ class OcrStageHandler:
         """Execute tiered OCR processing:
         1. DOCX/DOC: Direct office XML text extraction (<10ms).
         2. Born-Digital PDF: Direct vector text extraction (<50ms).
-        3. Scanned PDF / Multi-frame TIFF / Raster images: PaddleOCR primary with QualityGate
-           and Qwen3-VL fallback.
+        3. Scanned PDF / Multi-frame TIFF / Raster images: Qwen3-VL vision OCR.
         Emits per-page progressive SSE notifications and isolates page failures.
         """
         t0 = time.monotonic()
@@ -1760,7 +1531,7 @@ class OcrStageHandler:
         with ocr_timer("postprocess_ms", scope="document_assembly"):
             text_parts: list[str] = []
             for p in pages_data:
-                if p.get("status") == "FAILED" or not p.get("text"):
+                if str(p.get("status", "")).startswith("FAILED") or not p.get("text"):
                     text_parts.append(f"[PAGE {p['page']} OCR FAILED - CLINICAL DATA UNREADABLE]")
                 else:
                     text_parts.append(p["text"])
@@ -1769,11 +1540,11 @@ class OcrStageHandler:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
 
             used_direct = any(p.get("engine") in {"pymupdf_direct", "office_direct"} for p in pages_data)
-            used_paddle = any(p.get("engine", "").startswith("paddleocr") or p.get("engine") == "hybrid_paddle_vlm" for p in pages_data)
-            used_qwen = any(p.get("engine") in {"qwen_vl", "hybrid_paddle_vlm"} for p in pages_data)
-            used_ocr = used_paddle or used_qwen
+            used_paddle = False
+            used_qwen = any(p.get("engine") == "qwen_vl" for p in pages_data)
+            used_ocr = used_qwen
             fallback_count = sum(1 for p in pages_data if p.get("status") == "FALLBACK")
-            failed_count = sum(1 for p in pages_data if p.get("status") == "FAILED")
+            failed_count = sum(1 for p in pages_data if str(p.get("status", "")).startswith("FAILED") or not p.get("text"))
 
             confidences = [p["confidence"] for p in pages_data if p.get("confidence") is not None]
             mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else (0.95 if full_text else 0.5)
@@ -1797,6 +1568,18 @@ class OcrStageHandler:
             raster_ocr_count = sum(1 for p in pages_data if p.get("engine") not in {"pymupdf_direct", "office_direct"})
             hybrid_extraction = bool(direct_text_count > 0 and raster_ocr_count > 0)
 
+        doc_evidence: dict[str, Any] = {}
+        for p in pages_data:
+            p_ev = p.get("evidence")
+            if p_ev and isinstance(p_ev, dict):
+                for key, value in p_ev.items():
+                    existing = doc_evidence.get(key)
+                    if (
+                        existing is None
+                        or (isinstance(existing, dict) and existing.get("status") != FieldEvidenceStatus.VERIFIED)
+                    ):
+                        doc_evidence[key] = value
+
         stage_summary = _compute_stage_summary(pages_data)
         return {
             "pages": pages_data,
@@ -1806,6 +1589,7 @@ class OcrStageHandler:
             "pageCount": total_p,
             "processedPageCount": total_p,
             "detectedLanguages": detected_langs,
+            "evidence": doc_evidence,
             "metrics": {
                 "used_direct_text": used_direct,
                 "used_ocr": used_ocr,

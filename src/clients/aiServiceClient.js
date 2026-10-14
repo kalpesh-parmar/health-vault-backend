@@ -26,11 +26,19 @@ class AiServiceClient {
     return apiConfig.aiService.baseURL;
   }
 
-  async postWithRetry(endpoint, body, { headers, timeout = DEFAULT_TIMEOUT, retries = 1 } = {}) {
+  async postWithRetry(
+    endpoint,
+    body,
+    { headers, timeout = DEFAULT_TIMEOUT, retries = 1, ...restOptions } = {},
+  ) {
     let lastError;
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
-        const response = await this.client.post(endpoint, body, { headers, timeout });
+        const response = await this.client.post(endpoint, body, {
+          headers,
+          timeout,
+          ...restOptions,
+        });
         return response.data;
       } catch (error) {
         lastError = error;
@@ -85,6 +93,7 @@ class AiServiceClient {
   }
 
   async validateMedicalDocument({ file, fileName, mimeType, maxPages = 1, timeout }) {
+    const tFormBuildStart = Date.now();
     const formData = new FormData();
 
     let filePayload = file;
@@ -105,13 +114,61 @@ class AiServiceClient {
       formData.append("maxPages", String(maxPages));
     }
 
+    const tFormBuildMs = Date.now() - tFormBuildStart;
     const effectiveTimeout = timeout || env.validationTimeoutMs || env.medgemmaTimeoutMs;
 
-    return this.postWithRetry(this.endpoints.validateMedical, formData, {
+    let tUploadDone = null;
+    let tFirstChunk = null;
+    let tParseStart = null;
+    let tParseEnd = null;
+
+    const tSendStart = Date.now();
+    console.log(
+      `      [NODE TIMING] [HTTP -> Python POST ${this.endpoints.validateMedical}] START (FormData build: ${tFormBuildMs}ms)`,
+    );
+
+    const valRes = await this.postWithRetry(this.endpoints.validateMedical, formData, {
       timeout: effectiveTimeout,
       retries: 1,
       headers: formData.getHeaders(),
+      onUploadProgress: (progress) => {
+        if (!tUploadDone && progress.loaded >= (progress.total || progress.loaded)) {
+          tUploadDone = Date.now();
+        }
+      },
+      transformResponse: [
+        (data) => {
+          tFirstChunk = Date.now();
+          tParseStart = Date.now();
+          let parsed = data;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            // Keep raw data if not JSON
+          }
+          tParseEnd = Date.now();
+          return parsed;
+        },
+      ],
     });
+
+    const tEnd = Date.now();
+    const totalHttp = tEnd - tSendStart;
+    const uploadDuration = tUploadDone ? tUploadDone - tSendStart : 0;
+    const serverProcessing =
+      tFirstChunk && tUploadDone
+        ? tFirstChunk - tUploadDone
+        : tFirstChunk
+          ? tFirstChunk - tSendStart
+          : totalHttp;
+    const responseRead = tParseEnd && tParseStart ? tParseEnd - tParseStart : 0;
+
+    console.log(
+      `      [NODE TIMING] [HTTP -> Python POST ${this.endpoints.validateMedical}] BREAKDOWN: ` +
+        `FormData Build=${tFormBuildMs}ms | Request Send (Socket Upload)=${uploadDuration}ms | ` +
+        `Server Wait=${serverProcessing}ms | Response Read=${responseRead}ms | Total HTTP=${totalHttp}ms`,
+    );
+    return valRes;
   }
 
   async runOcrFromStorage({ bucket, fileKey, mimeType, mode = "concise" }) {
@@ -164,13 +221,21 @@ class AiServiceClient {
   }
 
   async dispatchDocumentProcessing(payload) {
-    return this.postWithRetry(this.endpoints.processDocument, payload, {
+    const tPostDispatch = Date.now();
+    console.log(
+      `      [NODE TIMING] [HTTP -> Python POST ${this.endpoints.processDocument}] START`,
+    );
+    const dispatchRes = await this.postWithRetry(this.endpoints.processDocument, payload, {
       headers: {
         "X-Internal-Service-Key": env.internalServiceKey,
       },
       timeout: 15000,
       retries: 2,
     });
+    console.log(
+      `      [NODE TIMING] [HTTP -> Python POST ${this.endpoints.processDocument}] COMPLETED in ${Date.now() - tPostDispatch}ms`,
+    );
+    return dispatchRes;
   }
 }
 

@@ -201,6 +201,56 @@ function getMissingRequiredStep(state) {
 }
 
 /**
+ * Determines whether there is a genuine unresolved conflict between profile sources.
+ * A genuine conflict occurs when:
+ * 1. An uploaded document has been extracted with demographic data to compare against login/existing data,
+ *    and ownership was confirmed, but profile choice has not yet been resolved/confirmed.
+ * 2. There is social login data AND document data or existing discrepancies that require explicit source selection.
+ * In a manual flow without uploaded/extracted documents, user input is inherently authoritative and there is no conflict.
+ * @param {object} state - Onboarding state object
+ * @returns {boolean} True if RESOLVE_PROFILE_SOURCE is genuinely required
+ */
+function hasGenuineProfileConflict(state) {
+  if (state.profileConfirmed) {
+    return false;
+  }
+
+  // Pure manual flow or skip flow without document has no external source conflict
+  if (state.flowMode === "MANUAL" || state.flowMode === "SKIP") {
+    const hasDoc = Boolean(
+      (state.documentUploaded || state.uploadedMedicalDocument) &&
+      (state.documentExtracted ||
+        (state.documentData && Object.keys(state.documentData).length > 0)),
+    );
+    if (!hasDoc) {
+      return false;
+    }
+  }
+
+  // Upload flow with extracted document awaiting profile confirmation
+  const isUploadWithExtractedDoc = Boolean(
+    (state.flowMode === "UPLOAD" || state.documentUploaded || state.uploadedMedicalDocument) &&
+    (state.documentExtracted ||
+      (state.documentData && Object.keys(state.documentData).length > 0)) &&
+    state.documentOwnershipConfirmed !== false,
+  );
+
+  if (isUploadWithExtractedDoc) {
+    return true;
+  }
+
+  // Social data with multiple conflicting profile records
+  if (state.hasSocialData && state.socialData && (state.loginData || state.documentData)) {
+    const { hasMismatch } = getProfileMismatches(state);
+    if (hasMismatch) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Calculates next required or optional step based on state completeness.
  * @param {object} state - Onboarding state object
  * @returns {string} Next step name
@@ -213,9 +263,12 @@ function getNextRequiredOrOptionalStep(state) {
     return missingRequired;
   }
 
-  if (!state.profileConfirmed) {
+  if (hasGenuineProfileConflict(state)) {
     return "RESOLVE_PROFILE_SOURCE";
   }
+
+  // Once all required profile fields are present and there is no conflict, profile is confirmed
+  state.profileConfirmed = true;
 
   // HARD RULE: Once state.profileConfirmed === true, REQUIRED questions and RESOLVE_PROFILE_SOURCE must NEVER be returned again.
   // Move to OPTIONAL Q&A:
@@ -638,6 +691,7 @@ module.exports = {
   isProfileComplete,
   getMissingRequiredStep,
   getNextRequiredOrOptionalStep,
+  hasGenuineProfileConflict,
   canSkipOnboarding,
   getProfileMismatches,
   mergeAndApplyProfile,

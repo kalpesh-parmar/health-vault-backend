@@ -97,6 +97,24 @@ class SseConnectionService {
   }
 
   publish(channelKey, event, { fromAdapter = false } = {}) {
+    const channel = this.channels.get(channelKey);
+
+    // Stale worker protection: ignore events from older attempts
+    if (
+      channel &&
+      event.attemptCount !== undefined &&
+      channel.lastAttemptCount !== undefined &&
+      Number(event.attemptCount) < Number(channel.lastAttemptCount)
+    ) {
+      return null;
+    }
+    if (channel && event.attemptCount !== undefined) {
+      channel.lastAttemptCount = Math.max(
+        Number(channel.lastAttemptCount || 0),
+        Number(event.attemptCount),
+      );
+    }
+
     const batchId = event.batchId || this.fileKeyToBatch.get(channelKey) || null;
 
     const documentEvent = this.emit(channelKey, false, {
@@ -105,6 +123,14 @@ class SseConnectionService {
       batchId,
     });
 
+    const isTerminal =
+      TERMINAL_STAGES.has(documentEvent.stage) ||
+      TERMINAL_STAGES.has(documentEvent.stageStatus) ||
+      documentEvent.stageStatus === "REJECTED" ||
+      documentEvent.status === "FAILED" ||
+      documentEvent.type === "document.completed" ||
+      documentEvent.type === "document.failed";
+
     if (batchId) {
       // Batch has its own eventId sequence.
       this.emit(batchChannelKey(batchId), true, {
@@ -112,15 +138,13 @@ class SseConnectionService {
         eventId: undefined,
       });
 
-      const isTerminal =
-        TERMINAL_STAGES.has(documentEvent.stage) ||
-        TERMINAL_STAGES.has(documentEvent.stageStatus) ||
-        documentEvent.type === "document.completed" ||
-        documentEvent.type === "document.failed";
-
       if (isTerminal) {
         this.markDocumentDone(batchId, documentEvent.fileKey);
       }
+    }
+
+    if (isTerminal) {
+      this.closeChannel(channelKey);
     }
 
     if (this.adapter && !fromAdapter) {

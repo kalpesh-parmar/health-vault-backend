@@ -54,11 +54,58 @@ router.post("/list-paginated", verifyToken, documentController.listDocumentsPagi
 
 router.post("/validate", verifyToken, documentUploadMulter, documentController.validateDocuments);
 
+const timedVerifyToken = async (req, res, next) => {
+  const t0 = Date.now();
+  console.log(`\n[NODE TIMING] [POST /documents/upload] 1. verifyToken START at ${t0}`);
+  try {
+    await verifyToken(req, res, (err) => {
+      console.log(
+        `[NODE TIMING] [POST /documents/upload] 1. verifyToken COMPLETED in ${Date.now() - t0}ms`,
+      );
+      next(err);
+    });
+  } catch (err) {
+    console.log(
+      `[NODE TIMING] [POST /documents/upload] 1. verifyToken FAILED in ${Date.now() - t0}ms`,
+    );
+    next(err);
+  }
+};
+
+const timedMulter = (req, res, next) => {
+  const t0 = Date.now();
+  console.log(`[NODE TIMING] [POST /documents/upload] 2. documentUploadMulter START at ${t0}`);
+  documentUploadMulter(req, res, (err) => {
+    console.log(
+      `[NODE TIMING] [POST /documents/upload] 2. documentUploadMulter COMPLETED in ${Date.now() - t0}ms (files=${req.files?.length || 0})`,
+    );
+    next(err);
+  });
+};
+
+const timedValidateDocumentUpload = async (req, res, next) => {
+  const t0 = Date.now();
+  console.log(`[NODE TIMING] [POST /documents/upload] 3. validateDocumentUpload START at ${t0}`);
+  try {
+    await validateDocumentUpload(req, res, (err) => {
+      console.log(
+        `[NODE TIMING] [POST /documents/upload] 3. validateDocumentUpload COMPLETED in ${Date.now() - t0}ms`,
+      );
+      next(err);
+    });
+  } catch (err) {
+    console.log(
+      `[NODE TIMING] [POST /documents/upload] 3. validateDocumentUpload FAILED in ${Date.now() - t0}ms`,
+    );
+    next(err);
+  }
+};
+
 router.post(
   "/upload",
-  verifyToken,
-  documentUploadMulter,
-  validateDocumentUpload,
+  timedVerifyToken,
+  timedMulter,
+  timedValidateDocumentUpload,
   documentController.uploadDocuments,
 );
 

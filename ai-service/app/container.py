@@ -119,10 +119,10 @@ class Container:
         # Pipeline Stage Handlers & Orchestrator
         from app.infrastructure.db.repositories.job_repository import JobRepository
         from app.infrastructure.db.repositories.lab_result_repository import LabResultRepository
+        from app.infrastructure.db.repositories.intelligence_repository import IntelligenceRepository
         from app.services.notifier import ProgressNotifier
         from app.services.pipeline.lifecycle_service import PipelineLifecycleService
         from app.services.pipeline.checkpoint_service import CheckpointService
-        from app.modules.ocr.paddle_engine import PaddleOcrEngine
         from app.modules.ocr.cache import OcrResultCache
         from app.services.pipeline.ocr_stage import OcrStageHandler
         from app.services.pipeline.layout_stage import LayoutStageHandler
@@ -135,25 +135,18 @@ class Container:
 
         self.job_repo = JobRepository(self.db)
         self.lab_result_repo = LabResultRepository(self.db)
+        self.intelligence_repo = IntelligenceRepository(db=self.db)
         self.notifier = ProgressNotifier(self.db)
         self.lifecycle_service = PipelineLifecycleService(self.job_repo, self.notifier)
         self.checkpoint_service = CheckpointService(self.job_repo, self.storage)
 
-        self.paddle_ocr = PaddleOcrEngine.get_instance(
-            enable_mkldnn=settings.paddle_enable_mkldnn,
-            bypass_orientation=settings.paddle_bypass_orientation,
-            cpu_threads=settings.paddle_cpu_threads,
-            rec_batch_num=settings.paddle_rec_batch_num,
-            max_workers=settings.paddle_max_workers,
-            det_limit_side_len=settings.paddle_det_limit_side_len,
-            use_gpu=settings.paddle_use_gpu,
-        )
+        self.paddle_ocr = None
         self.ocr_cache = OcrResultCache.get_default()
         self.ocr_stage_handler = OcrStageHandler(
             self.storage,
             lifecycle=self.lifecycle_service,
             vision_service=self.vision_model,
-            paddle_engine=self.paddle_ocr,
+            paddle_engine=None,
             min_direct_text_chars=settings.ai_min_text_chars,
             cache=self.ocr_cache,
             settings=settings,
@@ -181,6 +174,7 @@ class Container:
             summary_handler=self.summary_stage_handler,
             embedding_handler=self.embedding_stage_handler,
             lab_result_repo=self.lab_result_repo,
+            intelligence_repo=self.intelligence_repo,
         )
 
     @property
@@ -232,10 +226,6 @@ class Container:
 
     async def start(self) -> None:
         if self.settings.lifespan_warmup_enabled:
-            try:
-                await self.paddle_ocr.async_warm_up(self.settings.lifespan_warmup_ocr_languages)
-            except Exception as exc:
-                logger.warning("Lifespan PaddleOCR warm-up warning: %s", exc)
             await self._prewarm_ollama_models()
 
         await self.vision.warm_up()

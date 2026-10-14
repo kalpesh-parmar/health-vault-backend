@@ -5,6 +5,7 @@ import logging
 from typing import Any, Callable, Coroutine
 from uuid import UUID
 
+from app.core.errors import sanitize_pipeline_error
 from app.infrastructure.db.repositories.job_repository import JobRepository
 from app.infrastructure.db.session import Database
 from app.settings import Settings
@@ -131,7 +132,7 @@ class WorkerRunner:
                 logger.info("Default no-op handler executed for job %s", job_id)
         except Exception as e:
             logger.exception("Job %s failed with error: %s", job_id, e)
-            await self.repo.fail_job(job_id, error=str(e))
+            await self.repo.fail_job(job_id, error=sanitize_pipeline_error(e))
         finally:
             try:
                 await heartbeat.stop()

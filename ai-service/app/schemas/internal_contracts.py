@@ -42,6 +42,11 @@ class InnerProgressEvent(BaseModel):
     percentage: int
     status: str = "SUCCESS"
     message: str
+    errorCode: str | None = None
+    failedStage: str | None = None
+    retryable: bool | None = None
+    requiresReupload: bool | None = None
+    attemptCount: int | None = None
     page: ProgressPageInfo | None = None
     detectedLanguages: list[str] = Field(default_factory=list)
     timestamp: str

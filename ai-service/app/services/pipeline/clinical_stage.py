@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import time
@@ -10,6 +11,127 @@ from app.services.pipeline.lab_evaluator import LabEvaluator
 from app.services.pipeline.clinical_completeness import evaluate_heuristic_completeness
 
 logger = logging.getLogger(__name__)
+
+
+def _is_none_token(val: Any) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, str):
+        cleaned = val.strip().lower()
+        return cleaned in ("none", "null", "n/a", "nil", "na", "")
+    if isinstance(val, dict):
+        return not val or all(_is_none_token(v) for v in val.values())
+    return False
+
+
+def _clean_clinical_list(items: Any) -> list[Any]:
+    if not isinstance(items, list):
+        return []
+    cleaned: list[Any] = []
+    for item in items:
+        if _is_none_token(item):
+            continue
+        if isinstance(item, dict):
+            clean_item = {k: v for k, v in item.items() if not _is_none_token(v)}
+            if not clean_item:
+                continue
+            # Filter out vitals that are actually differential blood count test names hallucinated as unit
+            if "unit" in clean_item and "value" in clean_item and "name" not in clean_item:
+                unit_lower = str(clean_item["unit"]).lower()
+                if any(diff in unit_lower for diff in ("lymphocyte", "eosinophil", "polymorph", "neutrophil", "monocyte", "basophil")):
+                    continue
+            cleaned.append(clean_item)
+        elif isinstance(item, str):
+            clean_str = item.strip()
+            if not _is_none_token(clean_str):
+                cleaned.append(clean_str)
+        else:
+            cleaned.append(item)
+    return cleaned
+
+
+def _merge_dict_values(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    all_keys = set(base.keys()) | set(overlay.keys())
+    for k in all_keys:
+        b_val = base.get(k)
+        o_val = overlay.get(k)
+        if isinstance(b_val, dict) and isinstance(o_val, dict):
+            merged[k] = _merge_dict_values(b_val, o_val)
+        elif not _is_none_token(o_val):
+            merged[k] = o_val
+        elif not _is_none_token(b_val):
+            merged[k] = b_val
+    return merged
+
+
+def merge_ai_fields(structured: dict[str, Any], ai_extracted: dict[str, Any]) -> dict[str, Any]:
+    """Merge AI-extracted fields into structured baseline data using a strict whitelist.
+
+    Guarantees:
+    - Whitelist permitted sections: documentInfo, patientInfo, providerInfo, facilityInfo,
+      financialSummary, additionalInformation, and clinical lists.
+    - If baseline or document content indicates a LAB_REPORT, documentType stays LAB_REPORT
+      and never downgrades to PRESCRIPTION.
+    - For LAB_REPORT documents, vitals, symptoms, and diagnosis remain strictly empty lists.
+    - Eliminates any 'None' / 'null' string tokens from all merged fields and lists.
+    """
+    merged = copy.deepcopy(structured)
+
+    base_doc_info = merged.get("documentInfo") or {}
+    base_doc_type = base_doc_info.get("documentType")
+    # Identify if baseline or content is a lab report
+    has_lab_results = bool(merged.get("labResults"))
+    has_medications = bool(merged.get("medications"))
+    is_lab_report = (base_doc_type == "LAB_REPORT") or (has_lab_results and not has_medications)
+
+    # 1. Merge whitelisted dict sections
+    whitelisted_sections = (
+        "documentInfo",
+        "patientInfo",
+        "providerInfo",
+        "facilityInfo",
+        "financialSummary",
+        "additionalInformation",
+    )
+    for sec in whitelisted_sections:
+        if ai_extracted.get(sec):
+            base_sec = merged.get(sec, {})
+            ai_sec = ai_extracted[sec]
+            if isinstance(base_sec, dict) and isinstance(ai_sec, dict):
+                merged[sec] = _merge_dict_values(base_sec, ai_sec)
+            else:
+                merged[sec] = ai_sec
+
+    # Enforce documentType integrity
+    merged.setdefault("documentInfo", {})
+    if is_lab_report:
+        merged["documentInfo"]["documentType"] = "LAB_REPORT"
+    else:
+        ai_doc_type = (ai_extracted.get("documentInfo") or {}).get("documentType")
+        if ai_doc_type and not _is_none_token(ai_doc_type):
+            merged["documentInfo"]["documentType"] = ai_doc_type
+        elif base_doc_type and not _is_none_token(base_doc_type):
+            merged["documentInfo"]["documentType"] = base_doc_type
+
+    # 2. Merge clinical lists
+    if is_lab_report:
+        merged["vitals"] = []
+        merged["symptoms"] = []
+        merged["diagnosis"] = []
+        for list_key in ("medications", "procedures", "treatments", "treatmentPlan"):
+            raw_list = ai_extracted.get(list_key) if ai_extracted.get(list_key) is not None else merged.get(list_key, [])
+            merged[list_key] = _clean_clinical_list(raw_list)
+    else:
+        for list_key in ("diagnosis", "symptoms", "vitals", "medications", "procedures", "treatments", "treatmentPlan"):
+            raw_list = ai_extracted.get(list_key) if ai_extracted.get(list_key) is not None else merged.get(list_key, [])
+            merged[list_key] = _clean_clinical_list(raw_list)
+
+    # 3. Lab results preservation
+    if not merged.get("labResults") and ai_extracted.get("labResults"):
+        merged["labResults"] = _clean_clinical_list(ai_extracted["labResults"])
+
+    return merged
 
 
 class ClinicalStageHandler:
@@ -120,39 +242,7 @@ class ClinicalStageHandler:
                     }
                     ai_extracted = await self.extraction.normalize_structured_ocr(ocr_payload)
                     if ai_extracted and isinstance(ai_extracted, dict):
-                        # Merge AI extracted canonical sections with base heuristic
-                        for sec in (
-                            "documentInfo",
-                            "patientInfo",
-                            "providerInfo",
-                            "facilityInfo",
-                            "financialSummary",
-                            "additionalInformation",
-                        ):
-                            if ai_extracted.get(sec):
-                                base_sec = structured.get(sec, {})
-                                if isinstance(base_sec, dict) and isinstance(ai_extracted[sec], dict):
-                                    structured[sec] = {
-                                        **{k: v for k, v in base_sec.items() if v is not None},
-                                        **{k: v for k, v in ai_extracted[sec].items() if v is not None},
-                                    }
-                                else:
-                                    structured[sec] = ai_extracted[sec]
-
-                        for list_key in (
-                            "diagnosis",
-                            "symptoms",
-                            "vitals",
-                            "medications",
-                            "procedures",
-                            "treatments",
-                            "treatmentPlan",
-                        ):
-                            if ai_extracted.get(list_key):
-                                structured[list_key] = ai_extracted[list_key]
-
-                        if ai_extracted.get("labResults"):
-                            structured["labResults"] = ai_extracted["labResults"]
+                        structured = merge_ai_fields(structured, ai_extracted)
                 except Exception as exc:
                     model_name = getattr(self.extraction, "chat_model", None) or getattr(
                         self.extraction, "vision_model", None
@@ -191,6 +281,10 @@ class ClinicalStageHandler:
             structured["diagnosis"] = []
             structured["medications"] = []
             structured["labResults"] = []
+            structured["vitals"] = []
+        elif "LAB_REPORT" in doc_type.upper() and not structured.get("medications"):
+            structured["diagnosis"] = []
+            structured["symptoms"] = []
             structured["vitals"] = []
 
         # 6. Run LabEvaluator normalization on labResults (preferring high-fidelity spatial parameters)

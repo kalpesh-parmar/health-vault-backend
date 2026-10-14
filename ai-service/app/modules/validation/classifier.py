@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any, Optional
 
 import numpy as np
@@ -163,7 +164,10 @@ class MedicalDocumentClassifier:
             }
 
         # Run forward inference
+        t_model_start = time.perf_counter()
         res = self.model.classify(image)
+        t_model_elapsed = (time.perf_counter() - t_model_start) * 1000
+        print(f"    [PYTHON TIMING] self.model.classify(image) CPU forward pass took {t_model_elapsed:.2f}ms", flush=True)
 
         med_info = res.get("medical", {})
         p_medical = float(med_info.get("p_positive", 0.0))

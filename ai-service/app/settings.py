@@ -191,9 +191,9 @@ class Settings(BaseSettings):
         description="Explicit context window size in tokens allocated for Ollama vision model evaluation.",
     )
     vlm_num_predict: int = Field(
-        default=1536,
+        default=4096,
         alias="VLM_NUM_PREDICT",
-        description="Maximum tokens to generate during vision model OCR fallback to prevent runaway generation.",
+        description="Maximum tokens to generate during vision model OCR to prevent token exhaustion.",
     )
     clinical_heuristic_bypass_min_confidence: float = Field(
         default=0.85,
@@ -235,11 +235,6 @@ class Settings(BaseSettings):
     def PREPROCESS_MAX_DESKEW_ANGLE(self) -> float:
         return self.preprocess_max_deskew_angle
 
-    paddle_timeout_seconds: float = Field(
-        default=30.0,
-        alias="PADDLE_TIMEOUT_SECONDS",
-        description="Maximum seconds to wait for PaddleOCR inference before fallback.",
-    )
 
     # Quality Gate settings (Plan 3.3)
     quality_gate_max_fragment_ratio: float = Field(

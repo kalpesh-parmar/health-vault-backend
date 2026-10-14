@@ -152,6 +152,24 @@ class OcrProgressBus {
    * when the fileKey has been registered via registerBatch().
    */
   publish(channelKey, event, { fromAdapter = false } = {}) {
+    const channel = this._channels.get(channelKey);
+
+    // Stale worker protection: ignore events from older attempts
+    if (
+      channel &&
+      event.attemptCount !== undefined &&
+      channel.lastAttemptCount !== undefined &&
+      Number(event.attemptCount) < Number(channel.lastAttemptCount)
+    ) {
+      return null;
+    }
+    if (channel && event.attemptCount !== undefined) {
+      channel.lastAttemptCount = Math.max(
+        Number(channel.lastAttemptCount || 0),
+        Number(event.attemptCount),
+      );
+    }
+
     const batchId = event.batchId ?? this._fileKeyToBatch.get(channelKey) ?? null;
 
     const enriched = this._emit(channelKey, false, {
@@ -160,14 +178,22 @@ class OcrProgressBus {
       batchId,
     });
 
+    const isTerminal =
+      TERMINAL_STAGES.has(enriched.stage) ||
+      TERMINAL_STAGES.has(enriched.stageStatus) ||
+      enriched.stageStatus === "REJECTED" ||
+      enriched.status === "FAILED" ||
+      enriched.type === "document.completed" ||
+      enriched.type === "document.failed";
+
     if (batchId) {
       this._emit(batchChannelKey(batchId), true, { ...enriched, eventId: undefined });
-      if (TERMINAL_STAGES.has(enriched.stage)) {
+      if (isTerminal) {
         this._markDocumentDone(batchId, enriched.fileKey);
       }
     }
 
-    if (TERMINAL_STAGES.has(enriched.stage)) {
+    if (isTerminal) {
       this._closeChannel(channelKey);
     }
 
@@ -175,6 +201,14 @@ class OcrProgressBus {
       this._adapter.publish(channelKey, enriched);
     }
     return enriched;
+  }
+
+  reopen(channelKey) {
+    const channel = this._channels.get(channelKey);
+    if (!channel) return this._getOrCreate(channelKey, false);
+    channel.terminal = false;
+    channel.expiresAt = Date.now() + STREAM_TTL_MS;
+    return channel;
   }
 
   /** Write one event into one channel. Never fans out — avoids recursion. */

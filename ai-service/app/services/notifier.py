@@ -50,6 +50,11 @@ class ProgressNotifier:
         page: int | None = None,
         total_pages: int | None = None,
         detected_languages: list[str] | None = None,
+        error_code: str | None = None,
+        failed_stage: str | None = None,
+        retryable: bool | None = None,
+        requires_reupload: bool | None = None,
+        attempt_count: int | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> SseWireEnvelope:
         # Zero-PHI safety check: ensure no extra fields leak PHI
@@ -63,6 +68,17 @@ class ProgressNotifier:
             page_info = ProgressPageInfo(done=page, total=total_pages)
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        overall_status = "FAILED" if stage_status in ("FAILED", "REJECTED") else "SUCCESS"
+
+        if extra_fields:
+            error_code = error_code or extra_fields.get("errorCode")
+            failed_stage = failed_stage or extra_fields.get("failedStage")
+            if retryable is None:
+                retryable = extra_fields.get("retryable")
+            if requires_reupload is None:
+                requires_reupload = extra_fields.get("requiresReupload")
+            if attempt_count is None:
+                attempt_count = extra_fields.get("attemptCount")
 
         event = InnerProgressEvent(
             jobId=str(job_id),
@@ -73,8 +89,13 @@ class ProgressNotifier:
             stageStatus=stage_status,
             progress=int(progress),
             percentage=int(percentage),
-            status="SUCCESS",
+            status=overall_status,
             message=message,
+            errorCode=error_code,
+            failedStage=failed_stage,
+            retryable=retryable,
+            requiresReupload=requires_reupload,
+            attemptCount=attempt_count,
             page=page_info,
             detectedLanguages=detected_languages or [],
             timestamp=now_iso,
@@ -123,6 +144,11 @@ class ProgressNotifier:
         page: int | None = None,
         total_pages: int | None = None,
         detected_languages: list[str] | None = None,
+        error_code: str | None = None,
+        failed_stage: str | None = None,
+        retryable: bool | None = None,
+        requires_reupload: bool | None = None,
+        attempt_count: int | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> str:
         envelope = self.build_envelope(
@@ -138,6 +164,11 @@ class ProgressNotifier:
             page=page,
             total_pages=total_pages,
             detected_languages=detected_languages,
+            error_code=error_code,
+            failed_stage=failed_stage,
+            retryable=retryable,
+            requires_reupload=requires_reupload,
+            attempt_count=attempt_count,
             extra_fields=extra_fields,
         )
 

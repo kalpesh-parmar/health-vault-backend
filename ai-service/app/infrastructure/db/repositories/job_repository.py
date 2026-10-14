@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import json
+import logging
 from typing import Any, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import text
 
 from app.infrastructure.db.session import Database
+
+logger = logging.getLogger(__name__)
 
 
 class ReconcileResult(NamedTuple):
@@ -140,7 +143,8 @@ class JobRepository:
         checkpoint_data: dict[str, Any],
         raw_ocr_data: dict[str, Any] | None = None,
         extracted_structured_data: dict[str, Any] | None = None,
-    ) -> None:
+        attempt_count: int | None = None,
+    ) -> bool:
         query = text(
             """
             UPDATE document_processing_jobs
@@ -156,6 +160,7 @@ class JobRepository:
                 updated_at = NOW()
             WHERE id = :job_id
               AND status = 'RUNNING'
+              AND (CAST(:attempt_count AS INTEGER) IS NULL OR attempt_count = CAST(:attempt_count AS INTEGER))
             """
         )
         params = {
@@ -168,10 +173,13 @@ class JobRepository:
             "checkpoint_data": json.dumps(checkpoint_data),
             "raw_ocr_data": json.dumps(raw_ocr_data) if raw_ocr_data is not None else None,
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
+            "attempt_count": attempt_count,
         }
         async for session in self.db.session():
-            await session.execute(query, params)
+            result = await session.execute(query, params)
             await session.commit()
+            return bool(result.rowcount and result.rowcount > 0)
+        return False
 
     async def complete_job(
         self,
@@ -182,7 +190,8 @@ class JobRepository:
         raw_ocr_data: dict[str, Any] | None = None,
         extracted_structured_data: dict[str, Any] | None = None,
         status: str = "COMPLETED",
-    ) -> None:
+        attempt_count: int | None = None,
+    ) -> bool:
         query = text(
             """
             UPDATE document_processing_jobs
@@ -200,6 +209,7 @@ class JobRepository:
                 updated_at = NOW()
             WHERE id = :job_id
               AND status = 'RUNNING'
+              AND (CAST(:attempt_count AS INTEGER) IS NULL OR attempt_count = CAST(:attempt_count AS INTEGER))
             """
         )
         params = {
@@ -210,10 +220,13 @@ class JobRepository:
             "checkpoint_data": json.dumps(checkpoint_data),
             "raw_ocr_data": json.dumps(raw_ocr_data) if raw_ocr_data is not None else None,
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
+            "attempt_count": attempt_count,
         }
         async for session in self.db.session():
-            await session.execute(query, params)
+            result = await session.execute(query, params)
             await session.commit()
+            return bool(result.rowcount and result.rowcount > 0)
+        return False
 
     async def sync_to_documents_table(
         self,
@@ -302,33 +315,94 @@ class JobRepository:
         self,
         job_id: UUID,
         error: str,
+        failed_stage: str | None = None,
+        message: str | None = None,
+        completed_stages: list[str] | None = None,
+        checkpoint_data: dict[str, Any] | None = None,
         retryable: bool = True,
         requires_reupload: bool = False,
-    ) -> None:
+        attempt_count: int | None = None,
+        error_code: str | None = None,
+        stage_details: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        if error_code or stage_details:
+            checkpoint_data = dict(checkpoint_data or {})
+            if error_code and "error_code" not in checkpoint_data:
+                checkpoint_data["error_code"] = error_code
+            if stage_details and "stage_details" not in checkpoint_data:
+                checkpoint_data["stage_details"] = stage_details
+
         query = text(
             """
             UPDATE document_processing_jobs
             SET status = 'FAILED',
+                stage = COALESCE(:failed_stage, stage),
                 stage_status = 'FAILED',
                 error = :error,
+                message = COALESCE(:message, :error),
                 retryable = :retryable,
                 requires_reupload = :requires_reupload,
+                completed_stages = COALESCE(:completed_stages, completed_stages),
+                checkpoint_data = COALESCE(CAST(:checkpoint_data AS JSONB), checkpoint_data),
                 updated_at = NOW()
             WHERE id = :job_id
               AND status = 'RUNNING'
+              AND (CAST(:attempt_count AS INTEGER) IS NULL OR attempt_count = CAST(:attempt_count AS INTEGER))
             """
         )
-        async for session in self.db.session():
-            await session.execute(
-                query,
-                {
-                    "job_id": job_id,
-                    "error": error,
-                    "retryable": retryable,
-                    "requires_reupload": requires_reupload,
-                },
+        params = {
+            "job_id": job_id,
+            "failed_stage": failed_stage,
+            "error": error,
+            "message": message,
+            "completed_stages": completed_stages,
+            "checkpoint_data": json.dumps(checkpoint_data) if checkpoint_data is not None else None,
+            "retryable": retryable,
+            "requires_reupload": requires_reupload,
+            "attempt_count": attempt_count,
+        }
+        try:
+            async for session in self.db.session():
+                result = await session.execute(query, params)
+                await session.commit()
+                return bool(result.rowcount and result.rowcount > 0)
+        except Exception as e:
+            logger.error(
+                "Primary fail_job query failed for job %s: %s. Executing emergency fallback update.",
+                job_id,
+                e,
+                exc_info=True,
             )
-            await session.commit()
+            try:
+                from app.core.errors import sanitize_pipeline_error
+
+                emergency_query = text(
+                    """
+                    UPDATE document_processing_jobs
+                    SET status = 'FAILED',
+                        stage_status = 'FAILED',
+                        error = :error,
+                        updated_at = NOW()
+                    WHERE id = :job_id
+                    """
+                )
+                clean_err = sanitize_pipeline_error(error)
+                async for session in self.db.session():
+                    result = await session.execute(
+                        emergency_query,
+                        {"job_id": job_id, "error": clean_err},
+                    )
+                    await session.commit()
+                    return bool(result.rowcount and result.rowcount > 0)
+            except Exception as fb_err:
+                logger.critical(
+                    "Emergency fallback fail_job also failed for job %s: %s",
+                    job_id,
+                    fb_err,
+                    exc_info=True,
+                )
+        return False
 
     async def reject_job(self, job_id: UUID, reason: str) -> None:
         query = text(

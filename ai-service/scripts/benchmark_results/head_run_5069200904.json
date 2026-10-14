@@ -1,0 +1,292 @@
+{
+  "documentType": "PRESCRIPTION",
+  "patientInfo": {
+    "age": 70,
+    "name": "Manjulaben Ranoliya",
+    "firstName": "Manjulaben",
+    "lastName": "Ranoliya",
+    "fullName": "Manjulaben Ranoliya",
+    "gender": "FEMALE"
+  },
+  "providerInfo": {
+    "primary": {
+      "name": "Dr. HARDIK SUVAGIYA",
+      "specialty": "Patho.",
+      "registrationNumber": null,
+      "phone": null,
+      "qualification": null,
+      "isPrimary": true
+    },
+    "providers": [
+      {
+        "name": "Dr. Dhiren Kapupara",
+        "specialty": "M.D.",
+        "registrationNumber": null,
+        "phone": null,
+        "qualification": null,
+        "isPrimary": false
+      },
+      {
+        "name": "Dr. Dhaval Chauhan",
+        "specialty": "M.B. D.C.P.",
+        "registrationNumber": null,
+        "phone": null,
+        "qualification": null,
+        "isPrimary": false
+      }
+    ]
+  },
+  "facilityInfo": {
+    "name": "Green Cross Genetics Lab PVT. LTD.",
+    "address": "Junagadh"
+  },
+  "vitals": [
+    {
+      "value": "11.20",
+      "unit": "gm%"
+    },
+    {
+      "value": "3.76",
+      "unit": "RBC Count Mill/c.mm"
+    },
+    {
+      "value": "7300",
+      "unit": "WBC Count /c.mm"
+    },
+    {
+      "value": "370000",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "50",
+      "unit": "Lymphocyte"
+    },
+    {
+      "value": "41",
+      "unit": "Eosinophils"
+    },
+    {
+      "value": "08",
+      "unit": "Monocytes"
+    },
+    {
+      "value": "00",
+      "unit": "Basophils"
+    },
+    {
+      "value": "73",
+      "unit": "Polymorphs"
+    },
+    {
+      "value": "34.40",
+      "unit": "Hematocrit/PCV (Measured)"
+    },
+    {
+      "value": "91.40",
+      "unit": "MCV"
+    },
+    {
+      "value": "29.80",
+      "unit": "MCH"
+    },
+    {
+      "value": "32.60",
+      "unit": "MCHC"
+    },
+    {
+      "value": "11.50",
+      "unit": "RDW-CV"
+    },
+    {
+      "value": "3.7",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "12",
+      "unit": "Hemoglobin (Photometric)"
+    },
+    {
+      "value": "10",
+      "unit": "RBC Count Mill/c.mm"
+    },
+    {
+      "value": "7300",
+      "unit": "WBC Count /c.mm"
+    },
+    {
+      "value": "370000",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "50",
+      "unit": "Lymphocyte"
+    },
+    {
+      "value": "41",
+      "unit": "Eosinophils"
+    },
+    {
+      "value": "08",
+      "unit": "Monocytes"
+    },
+    {
+      "value": "00",
+      "unit": "Basophils"
+    },
+    {
+      "value": "73",
+      "unit": "Polymorphs"
+    },
+    {
+      "value": "34.40",
+      "unit": "Hematocrit/PCV (Measured)"
+    },
+    {
+      "value": "91.40",
+      "unit": "MCV"
+    },
+    {
+      "value": "29.80",
+      "unit": "MCH"
+    },
+    {
+      "value": "32.60",
+      "unit": "MCHC"
+    },
+    {
+      "value": ""
+    }
+  ],
+  "symptoms": ["None"],
+  "diagnosis": ["Diabetes"],
+  "labResults_count": 6,
+  "summaryEnglish": "{'type': 'CBC', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin (Photometric)', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': []}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}",
+  "summaryInPreferredLanguage": "{'type': 'CBC', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin (Photometric)', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': []}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}",
+  "summaryLanguage": "gujarati",
+  "keyFindings": [],
+  "keyPoints": [
+    "Diagnosis: Diabetes",
+    "{'type': 'CBC', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin (Photometric)', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': [{'type': 'Hemoglobin', 'summary': []}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}"
+  ],
+  "extractionPath": "ai_normalized",
+  "ai_normalized_vitals": [
+    {
+      "value": "11.20",
+      "unit": "gm%"
+    },
+    {
+      "value": "3.76",
+      "unit": "RBC Count Mill/c.mm"
+    },
+    {
+      "value": "7300",
+      "unit": "WBC Count /c.mm"
+    },
+    {
+      "value": "370000",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "50",
+      "unit": "Lymphocyte"
+    },
+    {
+      "value": "41",
+      "unit": "Eosinophils"
+    },
+    {
+      "value": "08",
+      "unit": "Monocytes"
+    },
+    {
+      "value": "00",
+      "unit": "Basophils"
+    },
+    {
+      "value": "73",
+      "unit": "Polymorphs"
+    },
+    {
+      "value": "34.40",
+      "unit": "Hematocrit/PCV (Measured)"
+    },
+    {
+      "value": "91.40",
+      "unit": "MCV"
+    },
+    {
+      "value": "29.80",
+      "unit": "MCH"
+    },
+    {
+      "value": "32.60",
+      "unit": "MCHC"
+    },
+    {
+      "value": "11.50",
+      "unit": "RDW-CV"
+    },
+    {
+      "value": "3.7000",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "12",
+      "unit": "gm%"
+    },
+    {
+      "value": "3.8",
+      "unit": "RBC Count Mill/c.mm"
+    },
+    {
+      "value": "4000",
+      "unit": "WBC Count /c.mm"
+    },
+    {
+      "value": "370000",
+      "unit": "Platelet Count"
+    },
+    {
+      "value": "50",
+      "unit": "Lymphocyte"
+    },
+    {
+      "value": "41",
+      "unit": "Eosinophils"
+    },
+    {
+      "value": "08",
+      "unit": "Monocytes"
+    },
+    {
+      "value": "00",
+      "unit": "Basophils"
+    },
+    {
+      "value": "40",
+      "unit": "Polymorphs"
+    },
+    {
+      "value": "36",
+      "unit": "Hematocrit/PCV (Measured)"
+    },
+    {
+      "value": "91",
+      "unit": "MCV"
+    },
+    {
+      "value": "29",
+      "unit": "MCH"
+    },
+    {
+      "value": "32",
+      "unit": "MCHC"
+    },
+    {
+      "value": "11",
+      "unit": "RDW-"
+    }
+  ],
+  "ai_normalized_diagnosis": ["Diabetes"],
+  "ai_normalized_documentType": "PRESCRIPTION"
+}

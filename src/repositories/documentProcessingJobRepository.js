@@ -166,6 +166,30 @@ class DocumentProcessingJobRepository {
     return row || null;
   }
 
+  async findActiveJobBySha256(userId, sha256, maxAgeMinutes = 60) {
+    if (!userId || !sha256) return null;
+    const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+    const [row] = await db
+      .select()
+      .from(documentProcessingJob)
+      .where(
+        and(
+          eq(documentProcessingJob.userId, userId),
+          sql`${documentProcessingJob.metadata}->>'sha256' = ${sha256}`,
+          sql`${documentProcessingJob.createdAt} >= ${cutoff}`,
+          or(
+            eq(documentProcessingJob.status, "QUEUED"),
+            eq(documentProcessingJob.status, "RUNNING"),
+            eq(documentProcessingJob.status, "COMPLETED"),
+            eq(documentProcessingJob.status, "PARTIAL"),
+          ),
+        ),
+      )
+      .orderBy(sql`${documentProcessingJob.createdAt} DESC`)
+      .limit(1);
+    return row || null;
+  }
+
   async claimJobForRetry(fileKey, userId) {
     const [row] = await db
       .update(documentProcessingJob)
@@ -384,6 +408,28 @@ class DocumentProcessingJobRepository {
         ...patch,
       })
       .where(eq(documentProcessingJob.id, jobId))
+      .returning();
+    return row || null;
+  }
+
+  async claimJobForRetryReEnqueue(jobId, patch = {}) {
+    if (!jobId) return null;
+    const [row] = await db
+      .update(documentProcessingJob)
+      .set({
+        status: "QUEUED",
+        stageStatus: "QUEUED",
+        error: null,
+        updatedAt: new Date(),
+        ...patch,
+      })
+      .where(
+        and(
+          eq(documentProcessingJob.id, jobId),
+          ne(documentProcessingJob.status, "RUNNING"),
+          ne(documentProcessingJob.status, "QUEUED"),
+        ),
+      )
       .returning();
     return row || null;
   }

@@ -64,7 +64,7 @@ def structured_document_prompt(structured_ocr: dict) -> list[dict]:
             "role": "user",
             "content": f"""Convert this OCR content into normalized JSON conforming to the 14-section schema:
 {{
-  "documentInfo": {{"documentType": "PRESCRIPTION", "language": "en"}},
+  "documentInfo": {{"documentType": null, "language": "en"}},
   "patientInfo": {{"fullName": null, "age": null, "gender": null}},
   "providerInfo": {{"primary": {{"name": null, "specialty": null}}, "providers": []}},
   "facilityInfo": {{"name": null, "address": null}},
@@ -72,7 +72,7 @@ def structured_document_prompt(structured_ocr: dict) -> list[dict]:
   "symptoms": [],
   "vitals": [],
   "labResults": [{{"testName": "Test", "value": "10", "unit": "mg/dL"}}],
-  "medications": [{{"name": "Drug", "dosage": "500mg", "frequency": "1-0-1"}}],
+  "medications": [{{"name": "Drug", "dosage": "1mg", "frequency": "1-0-1"}}],
   "procedures": [],
   "treatments": [],
   "treatmentPlan": [],

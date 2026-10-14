@@ -257,6 +257,53 @@ def extract_key_bullet_points(
     return points[:limit]
 
 
+def summary_is_sane(
+    cand_summary: str,
+    structured_data: dict[str, Any],
+    key_findings: list[dict[str, Any]] | None = None,
+) -> bool:
+    """Clinical sanity gate for summary outputs.
+
+    Rejects:
+    1. Stringified dictionaries/JSON, e.g. "{'type': ..." or "{'summary': ..."
+    2. Blatant clinical contradictions, such as claiming 'APTT is high' when APTT
+       in structured lab results is clinically normal.
+    """
+    if not cand_summary or not isinstance(cand_summary, str):
+        return False
+    cand_clean = cand_summary.strip()
+    if not cand_clean:
+        return False
+
+    # 1. Reject serialized dict/JSON structures
+    if "{'type'" in cand_clean or '{"type"' in cand_clean or "{'summary'" in cand_clean or '{"summary"' in cand_clean:
+        return False
+    if cand_clean.startswith(("{", "[")) and (": " in cand_clean or ":'" in cand_clean or ':"' in cand_clean):
+        return False
+
+    cand_lower = cand_clean.lower()
+
+    # 2. Check for APTT contradiction (claiming APTT is high/elevated when APTT is normal)
+    lab_results = structured_data.get("labResults") or []
+    aptt_is_normal = False
+    for r in lab_results:
+        t_name = str(r.get("testName", "")).lower()
+        if "aptt" in t_name or "partial thromboplastin" in t_name:
+            st = str(r.get("status", "")).lower()
+            is_abnormal = bool(r.get("isAbnormal", False))
+            if st in ("normal", "within normal limits", "optimal") or (st not in ("high", "elevated", "low") and not is_abnormal):
+                aptt_is_normal = True
+                break
+
+    if aptt_is_normal:
+        high_pat1 = re.search(r"\baptt\b[^.,;:!?\n]{0,30}\b(?:is\s+)?(?:high|elevated|prolonged|increased|abnormal)\b", cand_lower)
+        high_pat2 = re.search(r"\b(?:high|elevated|prolonged|increased)\s+[^.,;:!?\n]{0,20}\baptt\b", cand_lower)
+        if high_pat1 or high_pat2:
+            return False
+
+    return True
+
+
 class SummaryStageHandler:
     """Stage 8: SUMMARIZING.
     Synthesizes clinical summaries grounded in deterministic code statuses,
@@ -309,11 +356,14 @@ class SummaryStageHandler:
                 if summary_items:
                     cand_summary = strip_think_tokens(" ".join(summary_items))
                     is_valid, missing = verify_abnormal_parameters_present(key_findings, cand_summary)
-                    if is_valid:
+                    is_sane = summary_is_sane(cand_summary, structured_data, key_findings=key_findings)
+                    if is_valid and is_sane:
                         english_summary = cand_summary
                     else:
                         logger.warning(
-                            "Summary omitted abnormal tests %s. Retrying once with strict prompt...",
+                            "Summary rejected (valid=%s, sane=%s, missing=%s). Retrying once with strict prompt...",
+                            is_valid,
+                            is_sane,
                             missing,
                         )
                         retry_instruction = (
@@ -339,11 +389,14 @@ class SummaryStageHandler:
                         if retry_items:
                             retry_cand = strip_think_tokens(" ".join(retry_items))
                             is_retry_valid, retry_missing = verify_abnormal_parameters_present(key_findings, retry_cand)
-                            if is_retry_valid:
+                            is_retry_sane = summary_is_sane(retry_cand, structured_data, key_findings=key_findings)
+                            if is_retry_valid and is_retry_sane:
                                 english_summary = retry_cand
                             else:
                                 logger.warning(
-                                    "Summary still missing abnormal tests %s after retry. Falling back to deterministic structured summary.",
+                                    "Summary rejected after retry (valid=%s, sane=%s, missing=%s). Falling back to deterministic structured summary.",
+                                    is_retry_valid,
+                                    is_retry_sane,
                                     retry_missing,
                                 )
                                 english_summary = self._fallback_clinical_summary(raw_text, structured_data, key_findings=key_findings)
@@ -359,7 +412,7 @@ class SummaryStageHandler:
                     extra={"model": model_name, "error_type": type(e).__name__, "error": str(e)},
                 )
 
-        if not english_summary:
+        if not english_summary or not summary_is_sane(english_summary, structured_data, key_findings=key_findings):
             english_summary = self._fallback_clinical_summary(raw_text, structured_data, key_findings=key_findings)
 
         # HF-1: Strip any <think> reasoning tokens
@@ -370,28 +423,48 @@ class SummaryStageHandler:
 
         # 4. Translate to preferred language if non-English
         summary_preferred = english_summary
-        if canonical_lang not in ("english", "en") and self.translation and self.translation.is_warm:
-            try:
-                translated = await self.translation.translate(
-                    text=english_summary,
-                    source_language="english",
-                    target_language=canonical_lang,
-                )
-                if translated and translated.strip():
-                    cleaned_trans = strip_think_tokens(translated)
-                    from app.modules.ocr.fallback_validator import FallbackOutputValidator
-                    val = FallbackOutputValidator()
-                    is_valid_script, ratio, _ = val.validate_target_script(cleaned_trans, canonical_lang)
-                    if is_valid_script and ratio >= 0.5:
-                        summary_preferred = cleaned_trans
+        summary_language = "english"
+        translation_status = "SUCCESS" if canonical_lang in ("english", "en") else "FAILED"
+
+        if canonical_lang not in ("english", "en"):
+            if self.translation and self.translation.is_warm:
+                try:
+                    translated = await self.translation.translate(
+                        text=english_summary,
+                        src_lang="english",
+                        tgt_lang=canonical_lang,
+                    )
+                    if translated and translated.strip():
+                        cleaned_trans = strip_think_tokens(translated)
+                        from app.modules.ocr.fallback_validator import FallbackOutputValidator
+                        val = FallbackOutputValidator()
+                        is_valid_script, ratio, _ = val.validate_target_script(cleaned_trans, canonical_lang)
+                        if is_valid_script and ratio >= 0.5:
+                            summary_preferred = cleaned_trans
+                            summary_language = canonical_lang
+                            translation_status = "SUCCESS"
+                        else:
+                            logger.warning(
+                                "Translation to %s rejected due to insufficient script ratio (%.2f < 0.5)",
+                                canonical_lang,
+                                ratio,
+                            )
+                            summary_preferred = english_summary
+                            summary_language = "english"
+                            translation_status = "FAILED"
                     else:
-                        logger.warning(
-                            "Translation to %s rejected due to insufficient script ratio (%.2f < 0.5)",
-                            canonical_lang,
-                            ratio,
-                        )
-            except Exception as e:
-                logger.warning("Translation to %s failed: %s", canonical_lang, e)
+                        summary_preferred = english_summary
+                        summary_language = "english"
+                        translation_status = "FAILED"
+                except Exception as e:
+                    logger.warning("Translation to %s failed: %s", canonical_lang, e)
+                    summary_preferred = english_summary
+                    summary_language = "english"
+                    translation_status = "FAILED"
+            else:
+                summary_preferred = english_summary
+                summary_language = "english"
+                translation_status = "FAILED"
 
         # Verify numerical dosage preservation
         dosages_in_english = re.findall(r"\b\d+(?:\.\d+)?\s*(?:mg|ml|gm|mcg|iu|%)\b", english_summary, re.IGNORECASE)
@@ -415,8 +488,9 @@ class SummaryStageHandler:
         return {
             "summaryEnglish": english_summary,
             "summaryInPreferredLanguage": summary_preferred,
-            "summaryLanguage": canonical_lang,
+            "summaryLanguage": summary_language,
             "preferredLanguage": canonical_lang,
+            "translationStatus": translation_status,
             "keyPoints": key_points,
             "keyFindings": key_findings,
             "key_findings": key_findings,

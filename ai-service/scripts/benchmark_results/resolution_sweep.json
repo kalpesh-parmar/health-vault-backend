@@ -1,0 +1,54 @@
+[
+  {
+    "max_side": 1500,
+    "dimensions": "1091x1500",
+    "bytes": 130779,
+    "avg_latency_s": 7.95,
+    "latencies": [15.9, 0.0],
+    "has_sterling_clinic": false,
+    "has_ramanbhai_name": false,
+    "has_age_56": false,
+    "has_age_45": true,
+    "meds_count": 4,
+    "sample_text": "મેનાગર, સીબી-એન રોડ, આદાનાંકી | ફોન: 096-800444\nપેટિન્ટ નેમ / Patient Name: શ્રી રમાશાણા પટેલ | ઉમર / Age: 45 વર્ષ | જાતિ / Gender: પુરુષ\nદાખલ તારીખ: 24/03/2020\nનિદાન / Diagnosis: પીએમસીકા ડીસેબ્રેસ્ટન અને સીએસએસટીસ (Hypertension & Type 2 Diabetes)\n1. Tab. Glimisave M1 (ગ્લિમિસેવ એમ1)\n• સવારે ભૂખ પાછું એક ઓલી (1-0-0) (30 ડોઝ)\n2. Tab. Telma 40 (ટેલ્"
+  },
+  {
+    "max_side": 1800,
+    "dimensions": "1309x1800",
+    "bytes": 188831,
+    "avg_latency_s": 35.18,
+    "latencies": [70.27, 0.08],
+    "has_sterling_clinic": false,
+    "has_ramanbhai_name": false,
+    "has_age_56": false,
+    "has_age_45": true,
+    "meds_count": 4,
+    "sample_text": "મેનાગર, સીબી-એન રોડ, આનાદાલા | ફોન: 096-800444\nએડ્રેસ / Patient Name: શ્રી રમાશાણી પટેલ | ઉમર / Age: 45 વર્ષ | જાત / Gender: પુરુષ\nદાતાના દિવસ: 24/03/2020\nનિદાન / Diagnosis: પીએમડીકસ ડીસેબ્રેટેશન અને સીએસએસટીસ (Hypertension & Type 2 Diabetes)\n1. Tab. Glimisave M1 (ગ્લિમિસેવ એમ1)\n• સવારે ભૂખ્યા પાસે એ ઓલી (1-0-0) (30 ડોઝ)\n2. Tab. Telma 40 (ટેલ્મા 40"
+  },
+  {
+    "max_side": 2000,
+    "dimensions": "1455x2000",
+    "bytes": 236344,
+    "avg_latency_s": 44.22,
+    "latencies": [88.36, 0.08],
+    "has_sterling_clinic": false,
+    "has_ramanbhai_name": false,
+    "has_age_56": false,
+    "has_age_45": true,
+    "meds_count": 4,
+    "sample_text": "મેનાજર, સીબી-એન રોડ, આદિનાથ જી. ફોન: 096-809999\nએડ્રેસ / Patient Name: શ્રી રમાશાણી પટેલ | ઉમર / Age: 45 વર્ષ | જાત / Gender: પુરુષ\nતારીખ: 24/03/2020\nનિદાન / Diagnosis: પીએમડીક્સ ડીએબેટેસિયા અને સીએસએસટીસ (Hypertension & Type 2 Diabetes)\n1. Tab. Glimisave M1 (ગ્લિમિસેવ એમ1)\n• સવારે ભૂખ પીએ તે ઓછી (1-0-0) (30 ડેસ)\n2. Tab. Telma 40 (ટેલ્મા 40)\n• સવાર"
+  },
+  {
+    "max_side": 2200,
+    "dimensions": "1600x2200",
+    "bytes": 4989412,
+    "avg_latency_s": 20.88,
+    "latencies": [41.61, 0.14],
+    "has_sterling_clinic": false,
+    "has_ramanbhai_name": false,
+    "has_age_56": false,
+    "has_age_45": true,
+    "meds_count": 4,
+    "sample_text": "મેનાગર, સીબી-એન રોડ, આદાનાંકી | ફોન: 096-800444\nપેટિન્ટ નેમ / Patient Name: શ્રી રમાશાણા પટેલ | ઉમર / Age: 45 વર્ષ | જાતિ / Gender: પુરુષ\nદાખલ તારીખ: 24/03/2020\nનિદાન / Diagnosis: પીએમસીકા ડીસેબ્રેસ્ટન અને સીએસએસટીસ (Hypertension & Type 2 Diabetes)\n1. Tab. Glimisave M1 (ગ્લિમિસેવ એમ1)\n• સવારે ભૂખ પાછું એક ઓલી (1-0-0) (30 ડોઝ)\n2. Tab. Telma 40 (ટેલ્"
+  }
+]

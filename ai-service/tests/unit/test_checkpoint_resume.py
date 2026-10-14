@@ -67,13 +67,23 @@ async def test_resume_skips_all_completed_stages():
     repo = MagicMock()
     repo.update_job_checkpoint = AsyncMock()
     repo.complete_job = AsyncMock()
+    repo.fail_job = AsyncMock()
+    repo.reject_job = AsyncMock()
 
     lifecycle = MagicMock()
     lifecycle.report_progress = AsyncMock()
+    lifecycle.notifier = MagicMock()
+    lifecycle.notifier.publish_progress = AsyncMock()
 
     checkpoint = MagicMock()
     checkpoint.persist_stage_checkpoint = AsyncMock(return_value={})
     checkpoint.load_stage_artifact = AsyncMock()
+    checkpoint.load_raw_ocr_data = AsyncMock(
+        return_value={"fullText": "Patient with cough and fever", "metrics": {"failed_page_count": 0}}
+    )
+    checkpoint.load_extracted_structured_data = AsyncMock(
+        return_value={"diagnosis": ["Acute Bronchitis"]}
+    )
 
     s3_client = MagicMock()
     s3_client.read_bytes = AsyncMock(return_value=b"dummy")

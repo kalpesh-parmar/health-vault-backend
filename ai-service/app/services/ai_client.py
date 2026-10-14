@@ -299,19 +299,30 @@ class ChatCompletionsClient(AiClient):
 
         t_enc_start = time.monotonic()
         actual_prompt = _json_only_prompt(prompt) if json_only else prompt
-        image_chat_msg = _image_chat_content(data=data, mime_type=mime_type, prompt=actual_prompt)
         encode_ms = int((time.monotonic() - t_enc_start) * 1000)
 
         options: dict[str, Any] = {
             "temperature": temperature,
-            "num_predict": self.config.num_predict or self.config.max_output_tokens,
+            "num_predict": self.config.num_predict or 4096,
         }
         if self.config.num_ctx:
             options["num_ctx"] = self.config.num_ctx
 
+        messages = [
+            {
+                "role": "user",
+                "content": actual_prompt,
+                "images": [base64.b64encode(data).decode("ascii")],
+            },
+            {
+                "role": "assistant",
+                "content": "</think>",
+            },
+        ]
+
         payload = {
             "model": self.config.model,
-            "messages": [image_chat_msg],
+            "messages": messages,
             "stream": False,
             "think": False,
             "keep_alive": getattr(self.config, "keep_alive", "10m") or "10m",
@@ -384,7 +395,8 @@ class ChatCompletionsClient(AiClient):
 
             _validate_ollama_vision_payload(payload)
             client = self._ensure_http_client()
-            url = f"{_ollama_base_url(self.base_url)}/api/chat"
+            endpoint = "/api/generate" if "prompt" in payload else "/api/chat"
+            url = f"{_ollama_base_url(self.base_url)}{endpoint}"
             safe_payload = _sanitize_payload(payload)
             logger.info(
                 "ollama_vision_request",
@@ -392,7 +404,7 @@ class ChatCompletionsClient(AiClient):
                     "engine": self.engine,
                     "model": self.config.model,
                     "url": url,
-                    "endpoint": "/api/chat",
+                    "endpoint": endpoint,
                     "mime_type": mime_type,
                     "image_size_bytes": image_size,
                     "payload_structure": _ollama_vision_payload_structure(payload),
@@ -410,7 +422,7 @@ class ChatCompletionsClient(AiClient):
                         "engine": self.engine,
                         "model": self.config.model,
                         "url": url,
-                        "endpoint": "/api/chat",
+                        "endpoint": endpoint,
                         "mime_type": mime_type,
                         "image_size_bytes": image_size,
                         "error": str(exc),
@@ -906,11 +918,8 @@ def _ollama_response_text(response: dict[str, Any]) -> str:
     fallback = response.get("response") if isinstance(response, dict) else None
     if isinstance(fallback, str) and fallback.strip():
         return fallback
-    if isinstance(message, dict):
-        reasoning = message.get("reasoning_content") or message.get("thinking") or message.get("reasoning")
-        if isinstance(reasoning, str) and reasoning.strip():
-            return reasoning
-    return content or fallback or ""
+    # Note: Internal reasoning / thinking is NEVER returned as OCR output.
+    return ""
 
 
 def _ollama_finish_reason(response: dict[str, Any]) -> str | None:
@@ -966,9 +975,6 @@ def _finish_reason(response: Any) -> str | None:
 
 
 def _image_chat_content(*, data: bytes, mime_type: str, prompt: str) -> dict[str, Any]:
-    # Ollama native vision format expects raw base64 strings in
-    # messages[].images. Do not include a data URL prefix and do not use the
-    # OpenAI image_url content-part shape here.
     return {
         "role": "user",
         "content": prompt,
@@ -1000,19 +1006,30 @@ def _validate_ollama_vision_payload(payload: dict[str, Any]) -> None:
         raise AiClientHttpError("Invalid Ollama vision payload: model is required", request_body=_sanitize_payload(payload))
     if payload.get("stream") is not False:
         raise AiClientHttpError("Invalid Ollama vision payload: stream must be false", request_body=_sanitize_payload(payload))
-    messages = payload.get("messages")
-    if not isinstance(messages, list) or not messages:
-        raise AiClientHttpError("Invalid Ollama vision payload: messages must be a non-empty array", request_body=_sanitize_payload(payload))
-    for index, message in enumerate(messages):
-        if not isinstance(message, dict):
-            raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}] must be an object", request_body=_sanitize_payload(payload))
-        if message.get("role") not in {"user", "assistant", "system"}:
-            raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].role is invalid", request_body=_sanitize_payload(payload))
-        if not isinstance(message.get("content"), str):
-            raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].content must be a string", request_body=_sanitize_payload(payload))
-        images = message.get("images")
+    if "prompt" in payload:
+        if not isinstance(payload.get("prompt"), str) or not payload["prompt"].strip():
+            raise AiClientHttpError("Invalid Ollama vision payload: prompt must be a non-empty string", request_body=_sanitize_payload(payload))
+        images = payload.get("images")
         if not isinstance(images, list) or not images or not all(isinstance(item, str) and item for item in images):
-            raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].images must be a non-empty string array", request_body=_sanitize_payload(payload))
+            raise AiClientHttpError("Invalid Ollama vision payload: images must be a non-empty string array", request_body=_sanitize_payload(payload))
+    elif "messages" in payload:
+        messages = payload.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise AiClientHttpError("Invalid Ollama vision payload: messages must be a non-empty array", request_body=_sanitize_payload(payload))
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}] must be an object", request_body=_sanitize_payload(payload))
+            if message.get("role") not in {"user", "assistant", "system"}:
+                raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].role is invalid", request_body=_sanitize_payload(payload))
+            if not isinstance(message.get("content"), str):
+                raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].content must be a string", request_body=_sanitize_payload(payload))
+            if message.get("role") == "user":
+                images = message.get("images")
+                if not isinstance(images, list) or not images or not all(isinstance(item, str) and item for item in images):
+                    raise AiClientHttpError(f"Invalid Ollama vision payload: messages[{index}].images must be a non-empty string array", request_body=_sanitize_payload(payload))
+    else:
+        raise AiClientHttpError("Invalid Ollama vision payload: either prompt or messages is required", request_body=_sanitize_payload(payload))
+
     options = payload.get("options")
     if not isinstance(options, dict):
         raise AiClientHttpError("Invalid Ollama vision payload: options must be an object", request_body=_sanitize_payload(payload))
@@ -1023,6 +1040,16 @@ def _validate_ollama_vision_payload(payload: dict[str, Any]) -> None:
 
 
 def _ollama_vision_payload_structure(payload: dict[str, Any]) -> dict[str, Any]:
+    if "prompt" in payload:
+        images = payload.get("images") or []
+        return {
+            "model": payload.get("model"),
+            "prompt_length": len(payload.get("prompt", "")),
+            "image_count": len(images) if isinstance(images, list) else 0,
+            "image_base64_lengths": [len(image) for image in images if isinstance(image, str)],
+            "stream": payload.get("stream"),
+            "options_keys": sorted((payload.get("options") or {}).keys()),
+        }
     messages = payload.get("messages") or []
     first_message = messages[0] if messages and isinstance(messages[0], dict) else {}
     images = first_message.get("images") or []

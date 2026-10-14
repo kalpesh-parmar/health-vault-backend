@@ -7,6 +7,8 @@ import re
 import uuid
 from typing import TYPE_CHECKING
 
+from app.core.errors import TranslationError
+
 if TYPE_CHECKING:
     from app.settings import Settings
 
@@ -300,4 +302,4 @@ class TranslationService:
             return unmasked_text
         except Exception as e:
             logger.error(f"[TranslationService][{request_id}] Error during translation: {e}", exc_info=True)
-            return text
+            raise TranslationError(f"Translation failed: {e}") from e

@@ -34,9 +34,13 @@ class CheckpointService:
         checkpoint_data: dict[str, Any],
         raw_ocr_data: dict[str, Any] | None = None,
         extracted_structured_data: dict[str, Any] | None = None,
+        attempt_count: int | None = None,
     ) -> dict[str, Any]:
         """Persists stage data. Offloads to S3 if payload exceeds 500KB."""
         updated_checkpoint = dict(checkpoint_data)
+        updated_checkpoint["schemaVersion"] = "1.0.0"
+        updated_checkpoint["processingVersion"] = "2.0.0"
+        updated_checkpoint["completedStages"] = list(completed_stages)
 
         # Check size of stage_data
         encoded_data = json.dumps(stage_data, ensure_ascii=False).encode("utf-8")
@@ -91,6 +95,7 @@ class CheckpointService:
             checkpoint_data=updated_checkpoint,
             raw_ocr_data=persisted_raw_ocr,
             extracted_structured_data=extracted_structured_data,
+            attempt_count=attempt_count,
         )
 
         return updated_checkpoint
@@ -113,3 +118,59 @@ class CheckpointService:
             return json.loads(raw_bytes.decode("utf-8"))
 
         return data
+
+    async def load_raw_ocr_data(
+        self,
+        raw_ocr_data: dict[str, Any] | None,
+        checkpoint_data: dict[str, Any],
+        file_key: str,
+        bucket: str,
+    ) -> dict[str, Any] | None:
+        """Resolves full raw OCR artifact from memory, S3 pointer, or checkpoint data."""
+        if raw_ocr_data and isinstance(raw_ocr_data, dict):
+            if raw_ocr_data.get("_s3_ref") and raw_ocr_data.get("s3Key"):
+                s3_bucket = raw_ocr_data.get("s3Bucket") or bucket
+                s3_key = raw_ocr_data["s3Key"]
+                logger.info("Resolving offloaded raw OCR artifact from s3://%s/%s", s3_bucket, s3_key)
+                raw_bytes = await self.s3_client.read_bytes(bucket=s3_bucket, key=s3_key)
+                return json.loads(raw_bytes.decode("utf-8"))
+            if raw_ocr_data.get("pages") or raw_ocr_data.get("fullText"):
+                return raw_ocr_data
+
+        # Check if stage artifact was saved under OCR_RUNNING
+        stage_ocr = checkpoint_data.get("OCR_RUNNING")
+        if isinstance(stage_ocr, dict) and stage_ocr.get("_s3_ref") and stage_ocr.get("s3Key"):
+            s3_bucket = stage_ocr.get("s3Bucket") or bucket
+            s3_key = stage_ocr["s3Key"]
+            try:
+                raw_bytes = await self.s3_client.read_bytes(bucket=s3_bucket, key=s3_key)
+                return json.loads(raw_bytes.decode("utf-8"))
+            except Exception:
+                pass
+
+        # Check default S3 artifact key
+        ocr_s3_key = f"{file_key}.ocr.json"
+        try:
+            raw_bytes = await self.s3_client.read_bytes(bucket=bucket, key=ocr_s3_key)
+            return json.loads(raw_bytes.decode("utf-8"))
+        except Exception:
+            pass
+
+        return raw_ocr_data
+
+    async def load_extracted_structured_data(
+        self,
+        extracted_data: dict[str, Any] | None,
+        checkpoint_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Resolves structured clinical extraction data from memory, S3 pointer, or checkpoint."""
+        if extracted_data and isinstance(extracted_data, dict):
+            if extracted_data.get("_s3_ref") and extracted_data.get("s3Key"):
+                s3_bucket = extracted_data.get("s3Bucket")
+                s3_key = extracted_data["s3Key"]
+                logger.info("Resolving offloaded extracted data artifact from s3://%s/%s", s3_bucket, s3_key)
+                raw_bytes = await self.s3_client.read_bytes(bucket=s3_bucket, key=s3_key)
+                return json.loads(raw_bytes.decode("utf-8"))
+            return extracted_data
+
+        return await self.load_stage_artifact(checkpoint_data, "FIELD_EXTRACTION")

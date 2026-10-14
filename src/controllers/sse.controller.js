@@ -34,14 +34,32 @@ class SseController {
         channel.ownerId = job.userId;
         channel.fileName = job.metadata?.originalName || null;
         channel.batchId = job.metadata?.batchId || null;
+        const isJobTerminal =
+          ["COMPLETED", "FAILED", "REJECTED"].includes(job.status) ||
+          ["COMPLETED", "FAILED", "REJECTED"].includes(job.stageStatus);
+        if (isJobTerminal) {
+          channel.terminal = true;
+        }
+        if (job.attemptCount) {
+          channel.lastAttemptCount = Number(job.attemptCount);
+        }
         if (job.status) {
           channel.buffer.push({
-            type: "document.progress",
+            type:
+              isJobTerminal && job.status === "FAILED"
+                ? "document.failed"
+                : isJobTerminal && job.status === "COMPLETED"
+                  ? "document.completed"
+                  : "document.progress",
             fileKey,
             batchId: job.metadata?.batchId || null,
             fileName: job.metadata?.originalName || null,
             stage: job.stage,
             stageStatus: job.stageStatus,
+            failedStage: job.checkpointData?.failedStage || job.stage,
+            errorCode: job.checkpointData?.errorCode || "PIPELINE_FAILED",
+            retryable: job.checkpointData?.retryable !== false && job.retryable !== false,
+            attemptCount: job.attemptCount || 1,
             progress: job.percentage || 0,
             percentage: job.percentage || 0,
             status: job.status === "FAILED" ? ProcessStatus.FAILED : ProcessStatus.SUCCESS,

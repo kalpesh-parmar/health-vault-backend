@@ -36,13 +36,48 @@ import numpy as np
 
 _JSON_FENCE = re.compile(r"```(?:json)?|```", re.IGNORECASE)
 
-_OCR_PROMPT = (
-    "You are an accurate OCR engine for medical documents. "
-    "Transcribe ALL visible text exactly as it appears in this document image into clean markdown/plain text. "
-    "Preserve line breaks, exact numbers, test names, values, units, reference intervals, dates, and tabular column alignments. "
-    "Do not summarize, interpret, translate, or omit any text. "
-    "Output ONLY the transcribed document text."
-)
+
+def build_ocr_prompt(script_hint: str | None = None) -> str:
+    """Build an accurate OCR prompt enforcing native Unicode script preservation and verbatim clinical extraction."""
+    prompt = (
+        "You are an accurate, verbatim OCR engine for medical documents.\n"
+        "Transcribe ALL visible text exactly as it appears in this document image into clean markdown or plain text.\n"
+        "CRITICAL SCRIPT PRESERVATION RULES:\n"
+        "- Transcribe every word in its authentic original language and Unicode script (e.g. Gujarati script text must be output using Gujarati Unicode characters U+0A80-U+0AFF, Hindi/Marathi in Devanagari U+0900-U+097F, Tamil in Tamil script U+0B80-U+0BFF, and English in Latin script).\n"
+        "- NEVER transliterate, convert, or substitute regional Indic scripts (such as Gujarati, Tamil) into Hindi or Devanagari.\n"
+        "- For mixed-script documents (e.g. Gujarati prescription with English medicine names), transcribe each language block in its native script exactly at its original layout position.\n"
+        "- Transcribe medicine names, strengths (e.g., 500mg, 40mg), dosages, frequencies (e.g., 1-0-0, 0-1-0), durations, patient demographics, and dates verbatim. Never invent, hallucinate, omit, or alter medical values.\n"
+        "- Preserve line breaks, numeric values, units, reference ranges, and tabular column alignments.\n"
+        "- Output ONLY the transcribed document text. Do not include introductory notes, conversational preamble, translations, summaries, or explanations."
+    )
+    if script_hint:
+        hint_clean = script_hint.strip().lower()
+        if hint_clean == "gujarati":
+            prompt += (
+                "\nADVISORY SCRIPT HINT: This document is expected to contain Gujarati script (ગુજરાતી) and/or English. "
+                "Ensure any Gujarati text is transcribed exclusively in authentic Gujarati Unicode characters (U+0A80-U+0AFF) and never mapped to Devanagari/Hindi.\n"
+                "GUJARATI NUMERAL TRANSCRIPTION RULES:\n"
+                "- Accurately decode Gujarati numerals without digit substitution or shape transposition:\n"
+                "  ૦=0, ૧=1, ૨=2, ૩=3, ૪=4, ૫=5, ૬=6, ૭=7, ૮=8, ૯=9.\n"
+                "- Take special care: Gujarati digit ૫ represents 5 (do NOT transcribe as 4), and Gujarati digit ૬ represents 6 (do NOT transcribe as 5).\n"
+                "- Transcribe all numerals, patient ages, dates, frequencies, and dosages faithfully in original Gujarati numerals or Arabic numbers as printed."
+            )
+        elif hint_clean == "tamil":
+            prompt += (
+                "\nADVISORY SCRIPT HINT: This document is expected to contain Tamil script (தமிழ்) and/or English. "
+                "Ensure any Tamil text is transcribed exclusively in authentic Tamil Unicode characters (U+0B80-U+0BFF)."
+            )
+        elif hint_clean in {"devanagari", "hindi", "marathi"}:
+            prompt += (
+                "\nADVISORY SCRIPT HINT: This document is expected to contain Devanagari script (देवनागरी) and/or English. "
+                "Ensure Devanagari text is transcribed accurately in Devanagari Unicode characters (U+0900-U+097F).\n"
+                "DEVANAGARI NUMERAL TRANSCRIPTION RULES:\n"
+                "- Accurately decode Devanagari numerals without digit substitution: ०=0, १=1, २=2, ३=3, ४=4, ५=5, ६=6, ७=7, ८=8, ९=9."
+            )
+    return prompt
+
+
+_OCR_PROMPT = build_ocr_prompt()
 
 
 def downscale_image_if_needed(
@@ -281,6 +316,7 @@ class VisionModelService:
         mime_type: str | None = None,
         max_pages: int = 1,
         prompt: str | None = None,
+        script_hint: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         del filename, max_pages, kwargs
@@ -289,7 +325,8 @@ class VisionModelService:
         resolved = (mime_type or "image/png").split(";")[0].strip().lower()
         if resolved == "image/tiff":
             raise VisionModelRequestError("TIFF is not supported by the configured single-model OCR path")
-        return await self._extract(image_bytes, mime_type=resolved, prompt=prompt)
+        effective_prompt = prompt or (build_ocr_prompt(script_hint) if script_hint else None)
+        return await self._extract(image_bytes, mime_type=resolved, prompt=effective_prompt)
 
     async def _extract(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> dict[str, Any]:
         started = time.monotonic()
@@ -565,39 +602,9 @@ class VisionModelService:
                     prompt=actual_prompt,
                 )
         except Exception as exc:
-            if globals().get("global_ocr") is not None:
-                logger.warning("Primary AI client failed (%s); attempting PaddleOCR fallback", exc)
-                return self._generate_paddleocr(data, mime_type=mime_type)
             kind = _classify_error(exc)
             logger.error("ai_request_error", extra={"engine": getattr(getattr(self, "_client", None), "engine", "ai-client"), "model": self.model, "kind": kind, "error": str(exc)[:300]})
             raise VisionModelRequestError(f"AI vision request failed: {exc}", classification=kind) from exc
-
-    def _generate_paddleocr(self, data: bytes, *, mime_type: str) -> tuple[str, str | None]:
-        try:
-            t0 = time.monotonic()
-            img_array = np.frombuffer(data, np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-            if img is None:
-                raise ValueError("Failed to decode image bytes for PaddleOCR")
-            result = global_ocr.ocr(img)
-            extracted_text = ""
-            if result and result[0]:
-                if isinstance(result[0], dict) and "rec_texts" in result[0]:
-                    extracted_text = "\n".join(result[0]["rec_texts"])
-                elif isinstance(result[0], list) and isinstance(result[0][0], (list, tuple)) and len(result[0][0]) > 1:
-                    try:
-                        extracted_text = "\n".join([line[1][0] for line in result[0]])
-                    except Exception:
-                        pass
-            structured_json = {
-                "pages": [{"page": 1, "text": extracted_text, "confidence": 0.95}],
-                "medicalExtraction": empty_medical_extraction(),
-                "summary": empty_summary()
-            }
-            logger.info("paddleocr_fallback_completed", extra={"chars": len(extracted_text), "elapsed_ms": int((time.monotonic() - t0) * 1000)})
-            return json.dumps(structured_json), "STOP"
-        except Exception as exc:
-            raise VisionModelRequestError(f"PaddleOCR fallback failed: {exc}") from exc
 
 
 def _render_pdf_pages_to_png(pdf_bytes: bytes, *, max_pages: int) -> list[tuple[int, bytes]]:
