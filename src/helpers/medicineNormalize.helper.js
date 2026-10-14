@@ -648,6 +648,8 @@ function normalizeCreateMedicationInput(payload = {}) {
       FREQUENCY_TO_DB_MAP[upper] ||
       FREQUENCY_TO_DB_MAP[underscored] ||
       frequencyType.ONCE_DAILY;
+  } else {
+    input.frequency = frequencyType.ONCE_DAILY;
   }
 
   function formatHHMMSS(t) {
@@ -664,33 +666,40 @@ function normalizeCreateMedicationInput(payload = {}) {
     medicationSchedule &&
     typeof medicationSchedule === "object" &&
     !Array.isArray(medicationSchedule) &&
-    (medicationSchedule.Morning ||
+    Boolean(
+      medicationSchedule.Morning ||
       medicationSchedule.morning ||
+      medicationSchedule.MORNING ||
       medicationSchedule.Noon ||
       medicationSchedule.noon ||
+      medicationSchedule.NOON ||
       medicationSchedule.Night ||
       medicationSchedule.night ||
+      medicationSchedule.NIGHT ||
       medicationSchedule.Custom ||
-      medicationSchedule.custom);
+      medicationSchedule.custom ||
+      medicationSchedule.CUSTOM,
+    );
 
   if (hasValidScheduleKeys) {
     const formattedSched = {};
-    if (medicationSchedule.Morning || medicationSchedule.morning) {
-      formattedSched.Morning = formatHHMMSS(
-        medicationSchedule.Morning || medicationSchedule.morning,
-      );
+    const morningVal =
+      medicationSchedule.Morning || medicationSchedule.morning || medicationSchedule.MORNING;
+    const noonVal = medicationSchedule.Noon || medicationSchedule.noon || medicationSchedule.NOON;
+    const nightVal =
+      medicationSchedule.Night || medicationSchedule.night || medicationSchedule.NIGHT;
+    const customVal =
+      medicationSchedule.Custom || medicationSchedule.custom || medicationSchedule.CUSTOM;
+
+    if (morningVal) formattedSched.Morning = formatHHMMSS(morningVal);
+    if (noonVal) formattedSched.Noon = formatHHMMSS(noonVal);
+    if (nightVal) formattedSched.Night = formatHHMMSS(nightVal);
+    if (customVal) {
+      formattedSched.Custom = Array.isArray(customVal)
+        ? customVal.map(formatHHMMSS)
+        : [formatHHMMSS(customVal)];
     }
-    if (medicationSchedule.Noon || medicationSchedule.noon) {
-      formattedSched.Noon = formatHHMMSS(medicationSchedule.Noon || medicationSchedule.noon);
-    }
-    if (medicationSchedule.Night || medicationSchedule.night) {
-      formattedSched.Night = formatHHMMSS(medicationSchedule.Night || medicationSchedule.night);
-    }
-    if (medicationSchedule.Custom || medicationSchedule.custom) {
-      const c = medicationSchedule.Custom || medicationSchedule.custom;
-      formattedSched.Custom = Array.isArray(c) ? c.map(formatHHMMSS) : [formatHHMMSS(c)];
-    }
-    medicationSchedule = formattedSched;
+    input.medicationSchedule = formattedSched;
   } else {
     const rawTimes =
       Array.isArray(medicationSchedule) && medicationSchedule.length > 0
@@ -722,8 +731,6 @@ function normalizeCreateMedicationInput(payload = {}) {
         }
       });
       input.medicationSchedule = newSched;
-    } else if (input.frequency === frequencyType.ONCE_DAILY || input.frequency === "ONCE") {
-      input.medicationSchedule = { Morning: "09:00:00" };
     } else if (input.frequency === frequencyType.TWICE_DAILY || input.frequency === "TWICE") {
       input.medicationSchedule = { Morning: "09:00:00", Night: "21:00:00" };
     } else if (
@@ -732,7 +739,25 @@ function normalizeCreateMedicationInput(payload = {}) {
     ) {
       input.medicationSchedule = { Morning: "09:00:00", Noon: "14:00:00", Night: "21:00:00" };
     } else {
-      medicationSchedule = { Morning: "09:00:00" };
+      input.medicationSchedule = { Morning: "09:00:00" };
+    }
+  }
+
+  // Align schedule slots count with frequency requirements
+  if (input.frequency === frequencyType.TWICE_DAILY) {
+    if (!input.medicationSchedule.Night && !input.medicationSchedule.Noon) {
+      input.medicationSchedule.Night = "21:00:00";
+    }
+  } else if (input.frequency === frequencyType.THREE_TIMES_DAILY) {
+    if (!input.medicationSchedule.Noon) input.medicationSchedule.Noon = "14:00:00";
+    if (!input.medicationSchedule.Night) input.medicationSchedule.Night = "21:00:00";
+  } else if (input.frequency === frequencyType.ONCE_DAILY) {
+    const keys = Object.keys(input.medicationSchedule).filter(
+      (k) => input.medicationSchedule[k] !== undefined,
+    );
+    if (keys.length > 1) {
+      const firstKey = keys[0];
+      input.medicationSchedule = { [firstKey]: input.medicationSchedule[firstKey] };
     }
   }
   if (

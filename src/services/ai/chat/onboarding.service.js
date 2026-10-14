@@ -2173,6 +2173,15 @@ class OnboardingService {
     if (state.pendingQueue === undefined || state.pendingQueue === null) state.pendingQueue = [];
     if (state.validMedsToBulkCreate === undefined || state.validMedsToBulkCreate === null)
       state.validMedsToBulkCreate = [];
+    if (
+      state.validMedsToBulkCreate.length === 0 &&
+      Array.isArray(state.medicinesToAdd) &&
+      state.medicinesToAdd.length > 0
+    ) {
+      state.validMedsToBulkCreate = state.medicinesToAdd
+        .filter((m) => m && (m.name || m.medicationName))
+        .map((m) => ({ ...m }));
+    }
     if (state.medicationFlowDone === undefined || state.medicationFlowDone === null)
       state.medicationFlowDone = false;
 

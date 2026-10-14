@@ -555,6 +555,33 @@ class V1Service {
             userPrefLang,
           );
 
+          let availableMeds = [];
+          if (Array.isArray(body?.medicines) && body.medicines.length > 0) {
+            availableMeds = body.medicines;
+          } else if (typeof message === "string" && message.trim().startsWith("{")) {
+            try {
+              const parsed = JSON.parse(message);
+              if (Array.isArray(parsed?.medicines) && parsed.medicines.length > 0) {
+                availableMeds = parsed.medicines;
+              }
+            } catch {
+              // Ignore parse error
+            }
+          }
+          if (availableMeds.length === 0 && activeSessionId) {
+            try {
+              const msgs = await chatSessionRepository.listMessages(activeSessionId);
+              for (const m of msgs || []) {
+                if (Array.isArray(m?.metadata?.medicines) && m.metadata.medicines.length > 0) {
+                  availableMeds = m.metadata.medicines;
+                  break;
+                }
+              }
+            } catch {
+              // Ignore lookup error
+            }
+          }
+
           if (activeSessionId) {
             let userContent = displayLabel;
             if (
@@ -598,6 +625,7 @@ class V1Service {
                 action: "ADD_MEDICINE",
                 actionType: "ADD_MEDICINE",
                 options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
+                ...(availableMeds.length > 0 ? { medicines: availableMeds } : {}),
               },
             });
           }
@@ -608,6 +636,7 @@ class V1Service {
             reply: replyPrompt,
             sessionId: activeSessionId,
             options: [{ label: "Cancel", value: "CANCEL", actionType: "CANCEL" }],
+            medicines: availableMeds,
           });
         }
 
@@ -943,31 +972,48 @@ class V1Service {
             medsToProcess[i] = normalizeCreateMedicationInput(medData);
           }
 
-          const unsavedMeds = effectiveState?.medicinesSavedToDb
-            ? []
-            : medsToProcess.filter(
-                (m) =>
-                  m &&
-                  !m.isSaved &&
-                  !m.dbId &&
-                  m.resolution !== "KEEP_EXISTING" &&
-                  m.resolution !== "REMOVE_NEW",
-              );
+          const unsavedMeds = medsToProcess.filter(
+            (m) =>
+              m &&
+              !m.isSaved &&
+              !m.dbId &&
+              m.resolution !== "KEEP_EXISTING" &&
+              m.resolution !== "REMOVE_NEW",
+          );
 
           if (unsavedMeds.length > 0) {
             const bulkResult = await medicationService.bulkCreate(userId, unsavedMeds);
-            createdMeds = bulkResult?.created || bulkResult || [];
+            const created = bulkResult?.created || [];
+            const kept = bulkResult?.kept || [];
+            createdMeds =
+              created.length > 0
+                ? created
+                : kept.length > 0
+                  ? kept
+                  : Array.isArray(bulkResult)
+                    ? bulkResult
+                    : [];
           } else {
-            createdMeds = [];
+            const existingSaved = medsToProcess.filter((m) => m && (m.isSaved || m.dbId));
+            createdMeds = existingSaved.length > 0 ? existingSaved : [];
           }
         } else if (isConfirmAction && hasMedicineActionData) {
-          if (!effectiveState?.medicinesSavedToDb && !actionData?.isSaved && !actionData?.dbId) {
+          if (!actionData?.isSaved && !actionData?.dbId) {
             const bulkResult = await medicationService.bulkCreate(userId, [
               normalizeCreateMedicationInput(actionData),
             ]);
-            createdMeds = bulkResult?.created || bulkResult || [];
+            const created = bulkResult?.created || [];
+            const kept = bulkResult?.kept || [];
+            createdMeds =
+              created.length > 0
+                ? created
+                : kept.length > 0
+                  ? kept
+                  : Array.isArray(bulkResult)
+                    ? bulkResult
+                    : [];
           } else {
-            createdMeds = [];
+            createdMeds = [actionData];
           }
         }
         const createdMed = createdMeds[0] || null;
@@ -978,11 +1024,30 @@ class V1Service {
           if (!stateToUpdate.medicinesToAdd) stateToUpdate.medicinesToAdd = [];
 
           if (isConfirmAction) {
-            stateToUpdate.medicinesConfirmed = true;
-            stateToUpdate.medicinesSavedToDb = true;
-            stateToUpdate.medicationFlowDone = true;
-            stateToUpdate.medicinesToAdd = [];
-            stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+            const hasPersisted = Array.isArray(createdMeds) && createdMeds.length > 0;
+            if (hasPersisted) {
+              stateToUpdate.medicinesConfirmed = true;
+              stateToUpdate.medicinesSavedToDb = true;
+              stateToUpdate.medicationFlowDone = true;
+              stateToUpdate.medicinesToAdd = [];
+              stateToUpdate.validMedsToBulkCreate = [];
+              stateToUpdate.currentStep = "MEDICINE_OPTIONS";
+            } else {
+              // Persistence failed: do not falsely mark medicines as saved to DB or wipe medicinesToAdd
+              stateToUpdate.medicinesConfirmed = false;
+              stateToUpdate.medicinesSavedToDb = false;
+              stateToUpdate.medicationFlowDone = false;
+              if (
+                (!stateToUpdate.validMedsToBulkCreate ||
+                  stateToUpdate.validMedsToBulkCreate.length === 0) &&
+                Array.isArray(stateToUpdate.medicinesToAdd) &&
+                stateToUpdate.medicinesToAdd.length > 0
+              ) {
+                stateToUpdate.validMedsToBulkCreate = stateToUpdate.medicinesToAdd.filter(
+                  (m) => m && (m.name || m.medicationName),
+                );
+              }
+            }
           } else {
             stateToUpdate.medicinesConfirmed = false;
             stateToUpdate.medicinesSavedToDb = false;
@@ -1043,6 +1108,9 @@ class V1Service {
         };
 
         if (!createdMeds || createdMeds.length === 0) {
+          console.error(
+            `[UnifiedChat] CONFIRM_MEDICINES persistence failed for userId=${userId}: total=${Array.isArray(medsToProcess) ? medsToProcess.length : 0}, created=0`,
+          );
           const replyText = await getLocalizedText(
             "onboarding.addMedicine.saveFailed",
             "We were unable to save your medications. Please review the details and try again.",
@@ -1076,6 +1144,7 @@ class V1Service {
           isOnboardingCompleted: true,
           currentStep: "POST_ONBOARDING",
           medicinesToAdd: [],
+          validMedsToBulkCreate: [],
           foundMedicines: [],
         };
 

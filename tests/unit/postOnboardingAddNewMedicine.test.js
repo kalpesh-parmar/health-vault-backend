@@ -108,6 +108,7 @@ describe("Post-Onboarding Add New Medicine Response Alignment (Option A)", () =>
         },
       },
     ]);
+    jest.spyOn(chatSessionRepository, "appendMessage").mockResolvedValue({ id: "msg_456" });
 
     const body = {
       sessionId: "session_test_123",

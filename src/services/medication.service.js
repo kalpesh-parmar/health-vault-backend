@@ -662,7 +662,18 @@ class MedicationService {
           }
         }
       } catch (cErr) {
-        console.error("[MedicationService] Error creating new medication:", cErr.message);
+        console.error(
+          `[MedicationService] Error creating new medication for userId=${userId}: ${cErr.message}`,
+        );
+        // Idempotency check: if medication was already created in DB for this user, treat as kept/existing
+        try {
+          const dupCheck = await this.checkDuplicateMedication(userId, normalized);
+          if (dupCheck.hasDuplicate && dupCheck.matchedMedication) {
+            kept.push(dupCheck.matchedMedication);
+          }
+        } catch {
+          // Ignore secondary lookup errors
+        }
       }
     }
 
