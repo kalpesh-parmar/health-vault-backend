@@ -637,7 +637,7 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       expect(res2.state.currentStep).toBe("COMPLETE");
     });
 
-    test("Selecting 'Go to Dashboard' persists user response and does not append redundant assistant message", async () => {
+    test("Selecting 'Go to Dashboard' acts as a navigation action without appending orphaned messages", async () => {
       let state = {
         preferredLanguage: "english",
         flowMode: "MANUAL",
@@ -667,23 +667,8 @@ describe("Comprehensive Onboarding & Post-Onboarding Flows Test Suite", () => {
       expect(res.state.isOnboardingCompleted).toBe(true);
       expect(res.state.currentStep).toBe("COMPLETE");
 
-      // Verify user message was appended with 'Go to Dashboard'
-      expect(appendSpy).toHaveBeenCalledTimes(1);
-      expect(appendSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          sessionId: "session-1",
-          userId: "user-105-dash",
-          role: "user",
-          content: "Go to Dashboard",
-          metadata: expect.objectContaining({
-            rawValue: "DASHBOARD",
-          }),
-        }),
-      );
-
-      // Verify assistant message was NOT appended
-      const assistantCalls = appendSpy.mock.calls.filter((call) => call[0].role === "assistant");
-      expect(assistantCalls.length).toBe(0);
+      // Verify NO messages (neither user nor assistant) were appended to chat_messages
+      expect(appendSpy).toHaveBeenCalledTimes(0);
     });
   });
 

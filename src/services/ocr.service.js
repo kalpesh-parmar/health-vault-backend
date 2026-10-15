@@ -1327,6 +1327,9 @@ class V1Service {
         console.log(`[UnifiedChat] Executing Onboarding State Machine for userId=${userId}`);
         let state = inputState;
         let isStaleDuplicateSubmission = false;
+        const isRepeatableReportAction =
+          message === "ASK_REPORT" || message === "ASK_ABOUT_REPORT" || actionType === "ASK_REPORT";
+
         if (!state || Object.keys(state).length === 0) {
           state = dbState;
         } else {
@@ -1422,7 +1425,10 @@ class V1Service {
           isStaleDuplicateSubmission = false;
           let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
           if (incomingStateCleaned.currentStep && dbState?.currentStep) {
-            if (isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)) {
+            if (
+              !isRepeatableReportAction &&
+              isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)
+            ) {
               case3AuthoritativeStep = dbState.currentStep;
               if (incomingStateCleaned.currentStep !== dbState.currentStep) {
                 isStaleDuplicateSubmission = true;
@@ -1486,7 +1492,7 @@ class V1Service {
           // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
           // Checking merged state caused premature step advancement before onboardingService.chat executed, causing the Blood Group answer
           // to be executed against ASK_ALLERGIES.
-          if (isStepAlreadySatisfied(state.currentStep, dbState)) {
+          if (!isRepeatableReportAction && isStepAlreadySatisfied(state.currentStep, dbState)) {
             isStaleDuplicateSubmission = true;
             state.currentStep = getNextRequiredOrOptionalStep(state);
           }
@@ -1532,7 +1538,7 @@ class V1Service {
 
         let effectiveMessage = message;
         let effectiveDisplayLabel = displayLabel;
-        if (isStaleDuplicateSubmission) {
+        if (isStaleDuplicateSubmission && !isRepeatableReportAction) {
           effectiveMessage = null;
           effectiveDisplayLabel = null;
           if (dbState && Object.keys(dbState).length > 0) {
@@ -1550,6 +1556,10 @@ class V1Service {
               currentStep: state.currentStep,
             };
           }
+        }
+
+        if (isRepeatableReportAction && !effectiveMessage) {
+          effectiveMessage = actionType || "ASK_REPORT";
         }
 
         if (
@@ -1597,6 +1607,7 @@ class V1Service {
           isRejected: onboardingResult?.isRejected || false,
           rejectionReason: onboardingResult?.rejectionReason || null,
         });
+        responsePayload.action = onboardingResult?.action || responsePayload.actionType;
         responsePayload.state = onboardingResult?.state || state;
         responsePayload.mode = onboardingResult?.mode || responsePayload.mode;
         responsePayload.isRejected = onboardingResult?.isRejected || false;
@@ -1611,6 +1622,8 @@ class V1Service {
           responsePayload.completionAction = onboardingResult.completionAction;
         }
         responsePayload.suggestedQuestions = onboardingResult?.suggestedQuestions || [];
+        responsePayload.reportSummary =
+          onboardingResult?.document?.summary || onboardingResult?.reportSummary || null;
         if (onboardingResult?.totalBuffered !== undefined) {
           responsePayload.totalBuffered = onboardingResult.totalBuffered;
         }
