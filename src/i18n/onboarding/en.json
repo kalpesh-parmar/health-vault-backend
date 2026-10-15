@@ -66,6 +66,7 @@
   "onboarding.retryUpload": "Retry Upload",
   "onboarding.manual": "Enter Details Manually",
   "onboarding.document.ownership": "Is this document yours?",
+  "onboarding.document.extracted_review": "Your document has been processed successfully. Please review it below.",
   "onboarding.yes": "Yes",
   "onboarding.no": "No",
   "onboarding.skip": "Skip",

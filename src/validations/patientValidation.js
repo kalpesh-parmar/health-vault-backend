@@ -7,6 +7,8 @@ const { userStatusValues } = require("../enums/userStatus.enum");
 const { providerValues } = require("../enums/providerType");
 const { loginTypeValues } = require("../enums/loginType.enum");
 
+const { languageTypeValues } = require("../enums/languageType");
+
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const uppercaseRegex = /[A-Z]/;
 const lowercaseRegex = /[a-z]/;
@@ -85,6 +87,7 @@ const createPatientSchema = z
     profileImageKey: profileImageKey,
     allergies: allergiesField,
     bloodGroup: z.string().trim().optional().nullable(),
+    preferredLanguage: z.enum(languageTypeValues).optional().nullable(),
   })
   .strict()
   .transform((data) => {
@@ -107,6 +110,7 @@ const updatePatientSchema = z
     status: z.enum(userStatusValues).optional(),
     allergies: allergiesField,
     bloodGroup: z.string().trim().optional().nullable(),
+    preferredLanguage: z.enum(languageTypeValues).optional().nullable(),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, errorConstants.INVALID_REQUEST)

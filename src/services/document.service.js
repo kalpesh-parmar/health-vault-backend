@@ -684,7 +684,7 @@ class DocumentService {
     return updatedDocument;
   }
 
-  async uploadDocuments(files, authUserId) {
+  async uploadDocuments(files, authUserId, overrideLanguage) {
     try {
       if (!authUserId) {
         throw new InvalidRequestException(errorConstants.UNAUTHORIZED_ACCESS_TO_PATIENT_RESOURCE);
@@ -711,7 +711,10 @@ class DocumentService {
 
       const executeUpload = async () => {
         const patientId = authUserId;
-        const preferredLanguage = existingPatient.preferredLanguage || "english";
+        let preferredLanguage = existingPatient.preferredLanguage || "english";
+        if (overrideLanguage && typeof overrideLanguage === "string") {
+          preferredLanguage = normalizeLanguage(overrideLanguage);
+        }
 
         const batchId = newBatchId();
         const fileKeys = list.map(() => newFileKey());

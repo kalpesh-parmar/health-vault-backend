@@ -84,7 +84,11 @@ async function retryDocument(req, res) {
 }
 
 async function uploadDocuments(req, res) {
-  const result = await documentService.uploadDocuments(req.files, req.auth.userId);
+  const result = await documentService.uploadDocuments(
+    req.files,
+    req.auth.userId,
+    req.body?.preferredLanguage,
+  );
   return successResponse(res, result, messageConstants.FILE_UPLOADED, StatusCodes.ACCEPTED);
 }
 
