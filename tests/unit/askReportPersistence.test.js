@@ -19,6 +19,11 @@ jest.mock("../../src/repositories/userOnboardingRepository", () => ({
   updateByUserId: jest.fn().mockResolvedValue({}),
 }));
 
+jest.mock("../../src/repositories/chatSessionRepository", () => ({
+  listMessages: jest.fn().mockResolvedValue({ items: [] }),
+  appendMessage: jest.fn().mockResolvedValue({ id: "msg-1" }),
+}));
+
 jest.mock("../../src/services/documentIdentity.service", () => ({
   resolveCanonicalDocument: jest.fn().mockImplementation(({ documentIdOrFileKey }) =>
     Promise.resolve({
@@ -221,7 +226,7 @@ describe("ASK_REPORT Persistence & Dashboard Navigation Regression Suite", () =>
   });
 
   describe("3. DASHBOARD Navigation Action Persistence Isolation", () => {
-    test("does not persist orphaned user message or empty assistant message when DASHBOARD is received in MANUAL flow", async () => {
+    test("persists exactly one explicit user selection message and zero synthetic assistant messages when DASHBOARD is received in MANUAL flow", async () => {
       const appendSpy = jest.spyOn(chatService, "appendChatMessage");
       appendSpy.mockClear();
 
@@ -247,11 +252,20 @@ describe("ASK_REPORT Persistence & Dashboard Navigation Regression Suite", () =>
       expect(res.state.isOnboardingCompleted).toBe(true);
       expect(res.state.currentStep).toBe("COMPLETE");
 
-      // Verify no message was appended
-      expect(appendSpy).toHaveBeenCalledTimes(0);
+      // Verify exactly one explicit user message was appended and zero assistant messages
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(appendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: "user",
+          content: "Go to Dashboard",
+          metadata: expect.objectContaining({
+            selectedOption: "DASHBOARD",
+          }),
+        }),
+      );
     });
 
-    test("does not persist orphaned user message when GO_TO_DASHBOARD alias is received in UPLOAD flow", async () => {
+    test("persists exactly one explicit user selection message when GO_TO_DASHBOARD alias is received in UPLOAD flow", async () => {
       const appendSpy = jest.spyOn(chatService, "appendChatMessage");
       appendSpy.mockClear();
 
@@ -276,7 +290,16 @@ describe("ASK_REPORT Persistence & Dashboard Navigation Regression Suite", () =>
 
       expect(res.state.isOnboardingCompleted).toBe(true);
       expect(res.state.currentStep).toBe("POST_ONBOARDING");
-      expect(appendSpy).toHaveBeenCalledTimes(0);
+      expect(appendSpy).toHaveBeenCalledTimes(1);
+      expect(appendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          role: "user",
+          content: "Go to Dashboard",
+          metadata: expect.objectContaining({
+            selectedOption: "DASHBOARD",
+          }),
+        }),
+      );
     });
   });
 

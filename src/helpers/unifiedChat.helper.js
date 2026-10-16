@@ -27,7 +27,11 @@ function normalizeUnifiedChatInput(body = {}) {
     fromScreen = null,
     page = null,
     limit = null,
+    clientMessageId = null,
+    client_message_id = null,
   } = body || {};
+
+  const effectiveClientMessageId = clientMessageId || client_message_id || null;
 
   const normalizedMessage =
     message !== undefined && message !== null
@@ -60,6 +64,7 @@ function normalizeUnifiedChatInput(body = {}) {
     fromScreen: fromScreen || (state && state.fromScreen) || null,
     page: parsedPage && Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : null,
     limit: parsedLimit && Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
+    clientMessageId: effectiveClientMessageId,
   };
 }
 
@@ -723,22 +728,6 @@ async function executeAddDocumentAction({
     } catch (sErr) {
       console.warn("[executeAddDocumentAction] Failed to initialize session:", sErr.message);
     }
-  }
-
-  if (activeSessionId) {
-    await chatSessionRepository.appendMessage({
-      sessionId: activeSessionId,
-      userId,
-      role: "assistant",
-      content: replyText,
-      metadata: {
-        actionType: "ADD_DOCUMENT",
-        documentId: docResult?.document?.id,
-        documentSummary,
-        documentsName: batchDocumentsName,
-        medicines: extractedMedicines || [],
-      },
-    });
   }
 
   if (userId && !isOnboardingCompleted) {
