@@ -875,10 +875,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         }
 
-        const isSocial =
-          state.hasSocialData === true ||
-          ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-        state.profileConfirmed = !isSocial;
+        state.profileConfirmed = Boolean(state.profileConfirmed);
         state.currentStep = computeCurrentStep(state);
       } else if (answer === "NO") {
         state.documentOwnershipConfirmed = false;

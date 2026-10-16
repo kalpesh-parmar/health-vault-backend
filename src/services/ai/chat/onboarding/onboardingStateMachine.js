@@ -215,6 +215,18 @@ function hasGenuineProfileConflict(state) {
     return false;
   }
 
+  // Social data with multiple conflicting profile records
+  if (
+    state.hasSocialData &&
+    state.socialData &&
+    (state.loginData || state.existingUserData || state.documentData)
+  ) {
+    const { hasMismatch } = getProfileMismatches(state);
+    if (hasMismatch) {
+      return true;
+    }
+  }
+
   // Pure manual flow or skip flow without document has no external source conflict
   if (state.flowMode === "MANUAL" || state.flowMode === "SKIP") {
     const hasDoc = Boolean(
@@ -239,14 +251,6 @@ function hasGenuineProfileConflict(state) {
     return true;
   }
 
-  // Social data with multiple conflicting profile records
-  if (state.hasSocialData && state.socialData && (state.loginData || state.documentData)) {
-    const { hasMismatch } = getProfileMismatches(state);
-    if (hasMismatch) {
-      return true;
-    }
-  }
-
   return false;
 }
 
@@ -263,12 +267,9 @@ function getNextRequiredOrOptionalStep(state) {
     return missingRequired;
   }
 
-  if (hasGenuineProfileConflict(state)) {
+  if (hasGenuineProfileConflict(state) || !state.profileConfirmed) {
     return "RESOLVE_PROFILE_SOURCE";
   }
-
-  // Once all required profile fields are present and there is no conflict, profile is confirmed
-  state.profileConfirmed = true;
 
   // HARD RULE: Once state.profileConfirmed === true, REQUIRED questions and RESOLVE_PROFILE_SOURCE must NEVER be returned again.
   // Move to OPTIONAL Q&A:
