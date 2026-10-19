@@ -112,9 +112,13 @@ class Container:
         )
         self.rag = RagService(self.models.embeddings, settings.rag_top_k)
         self.chat = ChatService(self.llm, self.rag, chat_model)
-        from app.services.translation_service import TranslationService
-        self.translation = TranslationService(settings)
         self.language_detection = LanguageDetectionService()
+        from app.services.translation_service import TranslationService
+        self.translation = TranslationService(
+            settings,
+            llm_service=self.llm,
+            language_detection=self.language_detection,
+        )
 
         # Pipeline Stage Handlers & Orchestrator
         from app.infrastructure.db.repositories.job_repository import JobRepository
@@ -229,8 +233,8 @@ class Container:
             await self._prewarm_ollama_models()
 
         await self.vision.warm_up()
-        await self.translation.warm_up()
         await self.language_detection.warm_up()
+        await self.translation.warm_up()
         await self.models.embeddings.warmup()
 
         # Pre-load local medical document classifier (graceful fallback if missing)

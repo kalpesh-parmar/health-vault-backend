@@ -297,6 +297,8 @@ class Settings(BaseSettings):
     translation_model_name: str = Field(
         default="ai4bharat/indictrans2-en-indic-dist-200M", alias="TRANSLATION_MODEL_NAME"
     )
+    translation_model: str = Field(default="qwen2.5:14b", alias="TRANSLATION_MODEL")
+    translation_provider: str = Field(default="auto", alias="TRANSLATION_PROVIDER")
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
     translation_num_beams: int = Field(default=1, alias="TRANSLATION_NUM_BEAMS")
 

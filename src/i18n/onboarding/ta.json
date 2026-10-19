@@ -66,6 +66,7 @@
   "onboarding.retryUpload": "மீண்டும் முயற்சி செய்",
   "onboarding.manual": "விவரங்களை கைமுறையாக உள்ளிடவும்",
   "onboarding.document.ownership": "இந்த ஆவணம் உங்களுடையதா?",
+  "onboarding.document.extracted_review": "உங்கள் ஆவணம் வெற்றிகரமாகச் செயலாக்கப்பட்டது. தயவுசெய்து கீழே உங்கள் ஆவணத்தைச் சரிபார்க்கவும்.",
   "onboarding.yes": "ஆம்",
   "onboarding.no": "இல்லை",
   "onboarding.skip": "தவிர்",

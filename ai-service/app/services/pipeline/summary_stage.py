@@ -425,46 +425,56 @@ class SummaryStageHandler:
         summary_preferred = english_summary
         summary_language = "english"
         translation_status = "SUCCESS" if canonical_lang in ("english", "en") else "FAILED"
+        translation_provider = "none"
 
         if canonical_lang not in ("english", "en"):
-            if self.translation and self.translation.is_warm:
+            if self.translation and getattr(self.translation, "is_warm", False):
                 try:
                     translated = await self.translation.translate(
                         text=english_summary,
                         src_lang="english",
                         tgt_lang=canonical_lang,
                     )
-                    if translated and translated.strip():
-                        cleaned_trans = strip_think_tokens(translated)
-                        from app.modules.ocr.fallback_validator import FallbackOutputValidator
-                        val = FallbackOutputValidator()
-                        is_valid_script, ratio, _ = val.validate_target_script(cleaned_trans, canonical_lang)
-                        if is_valid_script and ratio >= 0.5:
-                            summary_preferred = cleaned_trans
+                    meta = getattr(self.translation, "last_metadata", None)
+                    if isinstance(meta, dict) and meta.get("status"):
+                        if meta.get("status") == "SUCCESS":
+                            summary_preferred = meta.get("translated_text") or translated
                             summary_language = canonical_lang
                             translation_status = "SUCCESS"
+                            translation_provider = meta.get("provider", "none")
                         else:
+                            summary_preferred = english_summary
+                            summary_language = "english"
+                            translation_status = meta.get("status", "FALLBACK_ORIGINAL")
+                            translation_provider = meta.get("provider", "none")
                             logger.warning(
-                                "Translation to %s rejected due to insufficient script ratio (%.2f < 0.5)",
+                                "Translation to %s did not succeed (%s: %s). Falling back to English.",
                                 canonical_lang,
-                                ratio,
+                                translation_status,
+                                meta.get("error"),
                             )
+                    else:
+                        if translated and translated.strip():
+                            summary_preferred = strip_think_tokens(translated)
+                            summary_language = canonical_lang
+                            translation_status = "SUCCESS"
+                            translation_provider = "indictrans2"
+                        else:
                             summary_preferred = english_summary
                             summary_language = "english"
                             translation_status = "FAILED"
-                    else:
-                        summary_preferred = english_summary
-                        summary_language = "english"
-                        translation_status = "FAILED"
+                            translation_provider = "none"
                 except Exception as e:
-                    logger.warning("Translation to %s failed: %s", canonical_lang, e)
+                    logger.warning("Translation to %s failed: %s. Preserving English summary.", canonical_lang, e)
                     summary_preferred = english_summary
                     summary_language = "english"
                     translation_status = "FAILED"
+                    translation_provider = "none"
             else:
                 summary_preferred = english_summary
                 summary_language = "english"
                 translation_status = "FAILED"
+                translation_provider = "none"
 
         # Verify numerical dosage preservation
         dosages_in_english = re.findall(r"\b\d+(?:\.\d+)?\s*(?:mg|ml|gm|mcg|iu|%)\b", english_summary, re.IGNORECASE)
@@ -478,11 +488,14 @@ class SummaryStageHandler:
                     break
 
         logger.info(
-            "Summary generated successfully: english_chars=%d, preferred_chars=%d, key_points=%d, key_findings=%d",
+            "Summary generated successfully: english_chars=%d, preferred_chars=%d, key_points=%d, key_findings=%d, lang=%s, status=%s, provider=%s",
             len(english_summary),
             len(summary_preferred),
             len(key_points),
             len(key_findings),
+            summary_language,
+            translation_status,
+            translation_provider,
         )
 
         return {
@@ -491,6 +504,7 @@ class SummaryStageHandler:
             "summaryLanguage": summary_language,
             "preferredLanguage": canonical_lang,
             "translationStatus": translation_status,
+            "translationProvider": translation_provider,
             "keyPoints": key_points,
             "keyFindings": key_findings,
             "key_findings": key_findings,

@@ -2,11 +2,11 @@ const { eq, and } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
-const { messageConstants } = require("../constants/messageConstants");
 const medicationService = require("../services/medication.service");
 const aiClient = require("../services/ai/clients/aiClient.service");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const { normalizeMedicine } = require("./medicineNormalize.helper");
+const { getLocalizedText } = require("./onboarding.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -701,12 +701,11 @@ async function executeAddDocumentAction({
       }
     }
   }
-  replyText = messageConstants.DOCUMENT_MEDICATIONS_EXTRACTED_REVIEW({
-    successfulCount: completedCount,
-    totalCount: totalUploads,
-    medicationCount: extractedMedicines.length,
-    failedCount,
-  });
+  replyText = await getLocalizedText(
+    "onboarding.document.extracted_review",
+    "Your document has been processed successfully. Please review it below.",
+    preferredLanguage,
+  );
 
   let activeSessionId = sessionId;
   if (!activeSessionId && userId) {

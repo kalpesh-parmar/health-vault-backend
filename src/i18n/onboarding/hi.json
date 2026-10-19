@@ -66,6 +66,7 @@
   "onboarding.retryUpload": "पुनः प्रयास करें",
   "onboarding.manual": "मैन्युअल रूप से जानकारी दर्ज करें",
   "onboarding.document.ownership": "क्या यह दस्तावेज़ आपका है?",
+  "onboarding.document.extracted_review": "आपके दस्तावेज़ की प्रक्रिया सफलतापूर्वक पूरी हो गई है। कृपया नीचे अपने दस्तावेज़ की समीक्षा करें।",
   "onboarding.yes": "हाँ",
   "onboarding.no": "नहीं",
   "onboarding.skip": "छोड़ें",

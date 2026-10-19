@@ -2591,7 +2591,12 @@ class OnboardingService {
       }
     }
 
-    if (!isInitCall && !isSilentCall && state.chatSessionId) {
+    const isNavigationOnly =
+      msg === "DASHBOARD" ||
+      msg === "GO_TO_DASHBOARD" ||
+      (typeof msg === "string" && msg.trim().toUpperCase() === "DASHBOARD");
+
+    if (!isInitCall && !isSilentCall && !isNavigationOnly && state.chatSessionId) {
       let resolvedLabel = null;
       if (state.currentStep && msg !== undefined && msg !== null) {
         try {
@@ -3008,21 +3013,26 @@ class OnboardingService {
     const response = await createResponse(nextStep, state);
 
     let assistantMsgCreatedAt = new Date().toISOString();
+    const isAskReport = response.action === "ASK_REPORT" && Boolean(response.document);
+    const hasValidMessage = response.message && response.message.trim().length > 0;
     const shouldAppendMessage =
       !isSilentCall &&
       state.chatSessionId &&
-      response.message &&
-      response.message.trim().length > 0 &&
+      (hasValidMessage || isAskReport) &&
       nextStep !== "COMPLETE" &&
       nextStep !== "POST_ONBOARDING" &&
       nextStep !== "REGISTER_USER";
 
     if (shouldAppendMessage) {
+      const contentToStore = isAskReport
+        ? (response.document.summary || response.message || "Medical Report Summary").trim()
+        : response.message;
+
       const savedMsg = await chatService.appendChatMessage({
         sessionId: state.chatSessionId,
         userId,
         role: "assistant",
-        content: response.message,
+        content: contentToStore,
         metadata: {
           action: response.action || null,
           renderType: response.renderType || null,
@@ -3033,15 +3043,17 @@ class OnboardingService {
           subtitle: response.subtitle || null,
           explainer: response.explainer || null,
           loginSummary: response.loginSummary || null,
-          documentSummary: response.documentSummary || null,
+          documentSummary: isAskReport ? null : response.documentSummary || null,
           loginProvider: response.loginProvider || null,
           sourceComparison: response.sourceComparison || null,
           medicine: response.medicine || null,
-          summary: response.summary || null,
+          summary: isAskReport ? null : response.summary || null,
           medicines: response.medicines || null,
           document: response.document || null,
           suggestedQuestions: response.suggestedQuestions || null,
-          keyFindings: response.document?.keyFindings || null,
+          keyFindings: isAskReport ? null : response.document?.keyFindings || null,
+          preferredLanguage:
+            state.preferredLanguage || response.document?.preferredLanguage || "english",
         },
       });
       if (savedMsg && savedMsg.createdAt) {

@@ -66,6 +66,7 @@
   "onboarding.retryUpload": "पुन्हा प्रयत्न करा",
   "onboarding.manual": "मॅन्युअली माहिती भरा",
   "onboarding.document.ownership": "हा दस्तऐवज तुमचा आहे का?",
+  "onboarding.document.extracted_review": "तुमच्या दस्तऐवजाची प्रक्रिया यशस्वीरित्या पूर्ण झाली आहे. कृपया खाली तुमच्या दस्तऐवजाचे पुनरावलोकन करा.",
   "onboarding.yes": "होय",
   "onboarding.no": "नाही",
   "onboarding.skip": "वगळा",

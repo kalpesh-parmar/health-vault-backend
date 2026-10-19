@@ -1725,17 +1725,51 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     const userOnboardingRepository = require("../src/repositories/userOnboardingRepository");
     const { db } = require("../src/configs/db");
 
-    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is ASK_REPORT even if onboarding completed", async () => {
+    const authProviderRepository = require("../src/repositories/authProviderRepository");
+    const { chatService } = require("../src/services/ai/chat/chat.service");
+
+    beforeEach(() => {
+      jest.spyOn(authProviderRepository, "findByUserId").mockResolvedValue([]);
+      jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({
+        id: "msg-persisted-mock",
+        createdAt: new Date(),
+      });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is ASK_REPORT even if onboarding completed (REAL onboardingService.chat)", async () => {
       jest.spyOn(patientRepository, "findById").mockResolvedValue({
         id: "patient-completed",
         onboardingCompleted: true,
       });
       jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
         data: {
+          userId: "patient-completed",
           preferredLanguage: "english",
           isOnboardingCompleted: true,
           medicationFlowDone: true,
           currentStep: "POST_ONBOARDING",
+          chatSessionId: "session-test-ask-rep",
+          documentId: "doc-123",
+          documentRecord: {
+            id: "doc-123",
+            fileName: "test_report.pdf",
+            documentType: "LAB_REPORT",
+            summary: "Patient vitals are normal.",
+            structuredExtractedData: {
+              isLabReport: true,
+              patientDetails: { name: "Jane Doe", doctorName: "Dr. Smith" },
+              tests: [{ name: "Hemoglobin", value: "14.2", unit: "g/dL", status: "Normal" }],
+              abnormalResults: [],
+              normalResults: [
+                { name: "Hemoglobin", value: "14.2", unit: "g/dL", status: "Normal" },
+              ],
+              keyFindings: "Patient vitals are normal.",
+            },
+          },
           existingUserData: {
             firstName: "Jane",
             lastName: "Doe",
@@ -1748,16 +1782,10 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           allergiesSkipped: true,
         },
       });
-      jest.spyOn(onboardingService, "chat").mockResolvedValue({
-        action: "ASK_REPORT",
-        message: "",
-        document: {
-          id: "doc-123",
-          summaryEnglish: "Test Summary",
-          keyFindings: ["Normal findings"],
-        },
-        suggestedQuestions: ["What are key findings?"],
-        state: { currentStep: "ASK_REPORT" },
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue(true);
+      const appendSpy = jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({
+        id: "msg-persisted-123",
+        createdAt: new Date(),
       });
 
       const res = await ocrService.onboardingChat("patient-completed", {
@@ -1767,24 +1795,52 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
       expect(res.mode).toBe("ONBOARDING");
       expect(res.actionType).toBe("ASK_REPORT");
+      expect(res.action).toBe("ASK_REPORT");
       expect(res.document).toBeDefined();
       expect(res.document.id).toBe("doc-123");
-      expect(res.suggestedQuestions).toEqual(["What are key findings?"]);
+      expect(res.document.fileName).toBe("test_report.pdf");
+      expect(res.document.isLabReport).toBe(true);
+      expect(Array.isArray(res.suggestedQuestions)).toBe(true);
+      expect(res.suggestedQuestions.length).toBeGreaterThan(0);
+      expect(appendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-test-ask-rep",
+          userId: "patient-completed",
+          role: "assistant",
+          content: "Patient vitals are normal.",
+          metadata: expect.objectContaining({
+            action: "ASK_REPORT",
+            document: expect.objectContaining({ id: "doc-123" }),
+          }),
+        }),
+      );
 
       jest.restoreAllMocks();
     });
 
-    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is legacy ASK_ABOUT_REPORT", async () => {
+    test("D2 Fix: ocrService.onboardingChat forces onboarding state machine when message is legacy ASK_ABOUT_REPORT (REAL onboardingService.chat)", async () => {
       jest.spyOn(patientRepository, "findById").mockResolvedValue({
         id: "patient-completed",
         onboardingCompleted: true,
       });
       jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
         data: {
+          userId: "patient-completed",
           preferredLanguage: "english",
           isOnboardingCompleted: true,
           medicationFlowDone: true,
           currentStep: "POST_ONBOARDING",
+          chatSessionId: "session-test-ask-rep",
+          documentId: "doc-123",
+          documentRecord: {
+            id: "doc-123",
+            fileName: "test_report.pdf",
+            summary: "Patient vitals are normal.",
+            structuredExtractedData: {
+              isLabReport: true,
+              patientDetails: { name: "Jane Doe", doctorName: "Dr. Smith" },
+            },
+          },
           existingUserData: {
             firstName: "Jane",
             lastName: "Doe",
@@ -1797,12 +1853,10 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
           allergiesSkipped: true,
         },
       });
-      jest.spyOn(onboardingService, "chat").mockResolvedValue({
-        action: "ASK_REPORT",
-        message: "",
-        document: { id: "doc-123", summaryEnglish: "Test Summary" },
-        suggestedQuestions: ["What are key findings?"],
-        state: { currentStep: "ASK_REPORT" },
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue(true);
+      jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({
+        id: "msg-persisted-legacy",
+        createdAt: new Date(),
       });
 
       const res = await ocrService.onboardingChat("patient-completed", {
@@ -1812,6 +1866,83 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
 
       expect(res.mode).toBe("ONBOARDING");
       expect(res.actionType).toBe("ASK_REPORT");
+      expect(res.document).toBeDefined();
+      expect(res.document.id).toBe("doc-123");
+
+      jest.restoreAllMocks();
+    });
+
+    test("Regression check: Repeated ASK_REPORT calls for completed patient remain supported and are not suppressed as duplicate", async () => {
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-completed",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          userId: "patient-completed",
+          preferredLanguage: "english",
+          isOnboardingCompleted: true,
+          medicationFlowDone: true,
+          currentStep: "POST_ONBOARDING",
+          chatSessionId: "session-test-ask-rep",
+          documentId: "doc-123",
+          documentRecord: {
+            id: "doc-123",
+            fileName: "test_report.pdf",
+            summary: "Patient vitals are normal.",
+          },
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue(true);
+      jest.spyOn(chatService, "appendChatMessage").mockResolvedValue({
+        id: "msg-123",
+        createdAt: new Date(),
+      });
+
+      const res1 = await ocrService.onboardingChat("patient-completed", {
+        message: "ASK_REPORT",
+        state: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
+      });
+      const res2 = await ocrService.onboardingChat("patient-completed", {
+        message: "ASK_REPORT",
+        state: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
+      });
+
+      expect(res1.actionType).toBe("ASK_REPORT");
+      expect(res1.document).toBeDefined();
+      expect(res2.actionType).toBe("ASK_REPORT");
+      expect(res2.document).toBeDefined();
+
+      jest.restoreAllMocks();
+    });
+
+    test("Regression check: ASK_REPORT without an uploaded document returns safe fallback message", async () => {
+      jest.spyOn(patientRepository, "findById").mockResolvedValue({
+        id: "patient-completed",
+        onboardingCompleted: true,
+      });
+      jest.spyOn(userOnboardingRepository, "findByUserId").mockResolvedValue({
+        data: {
+          userId: "patient-completed",
+          preferredLanguage: "english",
+          isOnboardingCompleted: true,
+          medicationFlowDone: true,
+          currentStep: "POST_ONBOARDING",
+          chatSessionId: "session-test-ask-rep",
+          documentId: null,
+          documentRecord: null,
+        },
+      });
+      jest.spyOn(userOnboardingRepository, "updateByUserId").mockResolvedValue(true);
+
+      const res = await ocrService.onboardingChat("patient-completed", {
+        message: "ASK_REPORT",
+        state: { isOnboardingCompleted: true, currentStep: "POST_ONBOARDING" },
+      });
+
+      expect(res.actionType).toBe("NORMAL_CHAT");
+      expect(res.document).toBeNull();
+      expect(res.reply).toContain("You haven't uploaded any medical reports yet");
 
       jest.restoreAllMocks();
     });
