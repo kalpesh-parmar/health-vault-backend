@@ -64,6 +64,10 @@ class SseConnectionService {
     channel.subscribers.set(subscriberId, { sink, onTerminal });
     channel.expiresAt = Date.now() + config.streamTtlMs;
 
+    console.log(
+      `[sseConnection] [SUBSCRIBE] Client subscribed to channelKey: '${channelKey}' (active subscribers: ${channel.subscribers.size})`,
+    );
+
     const since = Number.isFinite(Number(sinceEventId)) ? Number(sinceEventId) : -1;
 
     // Replay only events newer than Last-Event-ID.
@@ -172,6 +176,16 @@ class SseConnectionService {
     }
 
     channel.expiresAt = Date.now() + config.streamTtlMs;
+
+    const subscriberCount = channel.subscribers.size;
+    console.log(
+      `[sseConnection] [EMIT] channelKey: '${channelKey}' | stage: ${enriched.stage} (${enriched.stageStatus || enriched.status || "N/A"}) | pct: ${enriched.percentage}% | subscribers: ${subscriberCount}`,
+    );
+    if (subscriberCount === 0) {
+      console.warn(
+        `[sseConnection] [NO_ACTIVE_SUBSCRIBERS] Warning: 0 subscribers active on '${channelKey}'. Event buffered in memory (buffer size: ${channel.buffer.length}).`,
+      );
+    }
 
     for (const subscriber of channel.subscribers.values()) {
       try {

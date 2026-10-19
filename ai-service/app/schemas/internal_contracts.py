@@ -15,6 +15,7 @@ class DocumentProcessRequest(BaseModel):
     jobId: UUID
     patientId: UUID
     documentId: UUID
+    batchId: str | None = None
     storage: StoragePointer
     documentType: str | None = None
     preferredLanguage: str = "en"
@@ -42,6 +43,9 @@ class InnerProgressEvent(BaseModel):
     percentage: int
     status: str = "SUCCESS"
     message: str
+    currentStep: str | None = None
+    completedSteps: int | None = None
+    totalSteps: int | None = 9
     errorCode: str | None = None
     failedStage: str | None = None
     retryable: bool | None = None

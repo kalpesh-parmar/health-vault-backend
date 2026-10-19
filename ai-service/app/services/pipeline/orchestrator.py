@@ -189,6 +189,7 @@ class PipelineOrchestrator:
         checkpoint_data: dict[str, Any],
         attempt_count: int,
         document_id: UUID | None = None,
+        batch_id: str | None = None,
     ) -> None:
         """Handles stage failure: persists status FAILED with exact stage and emits terminal SSE event."""
         logger.error(
@@ -216,6 +217,7 @@ class PipelineOrchestrator:
                 percentage=current_pct,
                 message=str(exc),
                 document_id=document_id,
+                batch_id=batch_id,
             )
             return
         elif isinstance(exc, CorruptFileException):
@@ -230,6 +232,7 @@ class PipelineOrchestrator:
                 percentage=current_pct,
                 message=str(exc),
                 document_id=document_id,
+                batch_id=batch_id,
             )
             return
         else:
@@ -271,6 +274,7 @@ class PipelineOrchestrator:
             percentage=current_pct,
             message=error_msg,
             document_id=document_id,
+            batch_id=batch_id,
             error_code=error_code,
             failed_stage=stage,
             retryable=retryable,
@@ -303,6 +307,19 @@ class PipelineOrchestrator:
             or metadata.get("documentId")
         )
         document_id = UUID(str(raw_doc_id)) if raw_doc_id else None
+        batch_id = (
+            metadata.get("batchId")
+            or metadata.get("batch_id")
+            or job.get("batch_id")
+            or job.get("batchId")
+            or checkpoint_data.get("batchId")
+            or checkpoint_data.get("batch_id")
+        )
+        if batch_id and "batchId" not in checkpoint_data:
+            checkpoint_data["batchId"] = batch_id
+        if document_id and "documentId" not in checkpoint_data:
+            checkpoint_data["documentId"] = str(document_id)
+
         expected_sha256 = metadata.get("sha256")
         bucket = checkpoint_data.get("s3Bucket") or getattr(
             self.s3_client.settings, "aws_bucket_name", "health-vault-documents"
@@ -315,9 +332,11 @@ class PipelineOrchestrator:
         )
 
         logger.info(
-            "Starting pipeline orchestration for job %s (fileKey=%s, s3Key=%s, attempt=%d, completed=%s, failedStage=%s)",
+            "Starting pipeline orchestration for job %s (fileKey=%s, batchId=%s, documentId=%s, s3Key=%s, attempt=%d, completed=%s, failedStage=%s)",
             job_id,
             file_key,
+            batch_id,
+            document_id,
             s3_key,
             attempt_count,
             completed_stages,
@@ -365,7 +384,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_VALIDATING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_VALIDATING)
+                        current_pct, calculate_stage_percentage(STAGE_VALIDATING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -388,6 +407,8 @@ class PipelineOrchestrator:
                         message="Document validated",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -400,6 +421,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
 
@@ -422,7 +444,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_UPLOADING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_UPLOADING)
+                        current_pct, calculate_stage_percentage(STAGE_UPLOADING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -445,6 +467,8 @@ class PipelineOrchestrator:
                         message="Storage pointer verified",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -457,6 +481,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
 
@@ -478,6 +503,8 @@ class PipelineOrchestrator:
                         current_pct=current_pct,
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
 
                     # Validate OCR result (detects page failures, placeholders, unreadable text)
@@ -485,7 +512,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_OCR_RUNNING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_OCR_RUNNING)
+                        current_pct, calculate_stage_percentage(STAGE_OCR_RUNNING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -510,6 +537,8 @@ class PipelineOrchestrator:
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
                         raw_ocr_data=raw_ocr_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -522,6 +551,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
             elif not raw_ocr_data:
@@ -541,7 +571,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_PARSING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_PARSING)
+                        current_pct, calculate_stage_percentage(STAGE_PARSING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -564,6 +594,8 @@ class PipelineOrchestrator:
                         message="Layout and tables parsed",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -576,6 +608,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
             elif not layout_data:
@@ -602,7 +635,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_GRAPH_EXTRACTION)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_GRAPH_EXTRACTION)
+                        current_pct, calculate_stage_percentage(STAGE_GRAPH_EXTRACTION, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -625,6 +658,8 @@ class PipelineOrchestrator:
                         message="Visual graphs and charts extracted",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -637,6 +672,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
 
@@ -687,7 +723,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_FIELD_EXTRACTION)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_FIELD_EXTRACTION)
+                        current_pct, calculate_stage_percentage(STAGE_FIELD_EXTRACTION, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -712,6 +748,8 @@ class PipelineOrchestrator:
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
                         extracted_structured_data=extracted_structured_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -724,6 +762,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
             elif not extracted_structured_data:
@@ -743,7 +782,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_ANALYZING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_ANALYZING)
+                        current_pct, calculate_stage_percentage(STAGE_ANALYZING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -766,6 +805,8 @@ class PipelineOrchestrator:
                         message="Clinical safety analysis completed",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -778,6 +819,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
 
@@ -805,7 +847,7 @@ class PipelineOrchestrator:
 
                     completed_stages.append(STAGE_SUMMARIZING)
                     current_pct = ensure_monotonic_progress(
-                        current_pct, calculate_stage_percentage(STAGE_SUMMARIZING)
+                        current_pct, calculate_stage_percentage(STAGE_SUMMARIZING, is_completed=True)
                     )
                     checkpoint_data = await self.checkpoint.persist_stage_checkpoint(
                         job_id=job_id,
@@ -829,6 +871,8 @@ class PipelineOrchestrator:
                         message="Summary synthesized",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                     )
                 except Exception as exc:
                     await self._handle_stage_failure(
@@ -841,6 +885,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
             elif extracted_structured_data and "summaryEnglish" not in extracted_structured_data:
@@ -916,6 +961,7 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         attempt_count=attempt_count,
                         document_id=document_id,
+                        batch_id=batch_id,
                     )
                     return
 
@@ -982,6 +1028,7 @@ class PipelineOrchestrator:
                 completed_stages=completed_stages,
                 checkpoint_data=checkpoint_data,
                 document_id=document_id,
+                batch_id=batch_id,
             )
 
             logger.info("Job %s finished with status %s (100%%).",job_id,completion_status)
@@ -999,6 +1046,7 @@ class PipelineOrchestrator:
                 checkpoint_data=checkpoint_data,
                 attempt_count=attempt_count,
                 document_id=document_id,
+                batch_id=batch_id,
             )
         finally:
             if temp_path and temp_path.exists():

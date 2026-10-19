@@ -822,6 +822,7 @@ class DocumentService {
                     s3Key,
                     sha256,
                     documentId: canonicalDocumentId,
+                    batchId,
                   },
                 });
                 console.log(
@@ -847,6 +848,7 @@ class DocumentService {
                   jobId: jobRow.id,
                   patientId,
                   documentId: canonicalDocumentId,
+                  batchId,
                   storage: {
                     bucket,
                     key: s3Key,

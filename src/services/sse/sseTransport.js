@@ -19,6 +19,9 @@ function writeEvent(res, event, eventName = "progress") {
   }
   res.write(`event: ${eventName}\n`);
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+  if (typeof res.flush === "function") {
+    res.flush();
+  }
 }
 
 function attachSseStream(req, res, { onClose } = {}) {
