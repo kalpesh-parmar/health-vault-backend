@@ -261,6 +261,7 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
+        clientMessageId,
       } = normalizedInput;
       console.log("[MEDICINES]===", normalizedInput.message);
 
@@ -1329,6 +1330,13 @@ class V1Service {
         let isStaleDuplicateSubmission = false;
         const isRepeatableReportAction =
           message === "ASK_REPORT" || message === "ASK_ABOUT_REPORT" || actionType === "ASK_REPORT";
+        const isTerminalNavigationAction =
+          message === "DASHBOARD" ||
+          message === "GO_TO_DASHBOARD" ||
+          actionType === "DASHBOARD" ||
+          actionType === "GO_TO_DASHBOARD" ||
+          (typeof message === "string" && message.trim().toUpperCase() === "DASHBOARD");
+        const isExemptFromStaleDuplicate = isRepeatableReportAction || isTerminalNavigationAction;
 
         if (!state || Object.keys(state).length === 0) {
           state = dbState;
@@ -1426,7 +1434,7 @@ class V1Service {
           let case3AuthoritativeStep = dbState?.currentStep || incomingStateCleaned.currentStep;
           if (incomingStateCleaned.currentStep && dbState?.currentStep) {
             if (
-              !isRepeatableReportAction &&
+              !isExemptFromStaleDuplicate &&
               isStepAlreadySatisfied(incomingStateCleaned.currentStep, dbState)
             ) {
               case3AuthoritativeStep = dbState.currentStep;
@@ -1492,7 +1500,7 @@ class V1Service {
           // Note: We check dbState, NOT merged state, because merged state contains the client's current submission for currentStep.
           // Checking merged state caused premature step advancement before onboardingService.chat executed, causing the Blood Group answer
           // to be executed against ASK_ALLERGIES.
-          if (!isRepeatableReportAction && isStepAlreadySatisfied(state.currentStep, dbState)) {
+          if (!isExemptFromStaleDuplicate && isStepAlreadySatisfied(state.currentStep, dbState)) {
             isStaleDuplicateSubmission = true;
             state.currentStep = getNextRequiredOrOptionalStep(state);
           }
@@ -1538,7 +1546,7 @@ class V1Service {
 
         let effectiveMessage = message;
         let effectiveDisplayLabel = displayLabel;
-        if (isStaleDuplicateSubmission && !isRepeatableReportAction) {
+        if (isStaleDuplicateSubmission && !isExemptFromStaleDuplicate) {
           effectiveMessage = null;
           effectiveDisplayLabel = null;
           if (dbState && Object.keys(dbState).length > 0) {
@@ -1561,6 +1569,12 @@ class V1Service {
         if (isRepeatableReportAction && !effectiveMessage) {
           effectiveMessage = actionType || "ASK_REPORT";
         }
+        if (isTerminalNavigationAction && !effectiveMessage) {
+          effectiveMessage = actionType || "DASHBOARD";
+        }
+        if (isTerminalNavigationAction && !effectiveDisplayLabel && displayLabel) {
+          effectiveDisplayLabel = displayLabel;
+        }
 
         if (
           effectiveSessionId &&
@@ -1576,6 +1590,7 @@ class V1Service {
           userId,
           effectiveSessionId,
           effectiveDisplayLabel,
+          clientMessageId,
         );
 
         const replyText =

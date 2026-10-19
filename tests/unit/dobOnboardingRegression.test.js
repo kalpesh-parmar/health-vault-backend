@@ -71,7 +71,7 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
     expect(res.state.currentStep).toBe("ASK_GENDER");
   });
 
-  test("2. Valid DOB with gender already present bypasses RESOLVE_PROFILE_SOURCE and progresses to ASK_BLOOD_GROUP", async () => {
+  test("2. Valid DOB with gender already present progresses to RESOLVE_PROFILE_SOURCE with mode: 'CONFIRM'", async () => {
     const state = {
       flowMode: "MANUAL",
       preferredLanguage: "english",
@@ -89,14 +89,25 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
       ...state,
       existingUserData: { ...state.existingUserData, dateOfBirth: "1998-07-15" },
     });
-    expect(nextStep).toBe("ASK_BLOOD_GROUP");
-    expect(nextStep).not.toBe("RESOLVE_PROFILE_SOURCE");
+    expect(nextStep).toBe("RESOLVE_PROFILE_SOURCE");
 
     // Full service execution
     const res = await onboardingService.chat("1998-07-15", [], state, testUserId);
-    expect(res.action).toBe("ASK_BLOOD_GROUP");
-    expect(res.state.currentStep).toBe("ASK_BLOOD_GROUP");
-    expect(res.state.profileConfirmed).toBe(true);
+    expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(res.mode).toBe("CONFIRM");
+    expect(res.state.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(res.state.profileConfirmed).toBe(false);
+
+    // Explicit confirmation advances to ASK_BLOOD_GROUP
+    const confirmRes = await onboardingService.chat(
+      JSON.stringify({ confirmed: true }),
+      [],
+      res.state,
+      testUserId,
+    );
+    expect(confirmRes.action).toBe("ASK_BLOOD_GROUP");
+    expect(confirmRes.state.currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(confirmRes.state.profileConfirmed).toBe(true);
   });
 
   test("3. Invalid DOB and retry: rejects current/future date, stays on ASK_DOB, then succeeds on retry", async () => {
@@ -127,7 +138,7 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
     expect(validRes.state.currentStep).toBe("ASK_GENDER");
   });
 
-  test("4. Manual onboarding without documents progresses through demographic flow without triggering RESOLVE_PROFILE_SOURCE", () => {
+  test("4. Manual onboarding without documents has no source conflict and requires explicit profile confirmation before ASK_BLOOD_GROUP", () => {
     const state = {
       flowMode: "MANUAL",
       documentUploaded: false,
@@ -138,10 +149,16 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
         dateOfBirth: "2000-01-01",
         gender: "male",
       },
+      profileConfirmed: false,
     };
 
     expect(hasGenuineProfileConflict(state)).toBe(false);
-    expect(getNextRequiredOrOptionalStep(state)).toBe("ASK_BLOOD_GROUP");
+    expect(getNextRequiredOrOptionalStep(state)).toBe("RESOLVE_PROFILE_SOURCE");
+
+    // Once profile is confirmed, advances to ASK_BLOOD_GROUP
+    expect(getNextRequiredOrOptionalStep({ ...state, profileConfirmed: true })).toBe(
+      "ASK_BLOOD_GROUP",
+    );
   });
 
   test("5. Actual document/profile conflict resolution: UPLOAD flow with extracted document triggers RESOLVE_PROFILE_SOURCE", () => {
@@ -174,6 +191,7 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
       flowMode: "MANUAL",
       preferredLanguage: "english",
       currentStep: "ASK_DOB",
+      profileConfirmed: false,
       existingUserData: {
         firstName: "Shradha",
         lastName: "Chauhan",
@@ -181,17 +199,31 @@ describe("Pre-Onboarding DOB Regression & Progression Tests", () => {
       },
     };
 
-    await onboardingService.chat("1995-10-10", [], state, testUserId);
+    const res = await onboardingService.chat("1995-10-10", [], state, testUserId);
+    expect(res.action).toBe("RESOLVE_PROFILE_SOURCE");
 
-    // Verify DB received updated state
+    // Verify DB received updated state with pending confirmation
     expect(dbStates[testUserId]).toBeDefined();
     expect(dbStates[testUserId].existingUserData.dateOfBirth).toBe("1995-10-10");
-    expect(dbStates[testUserId].currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(dbStates[testUserId].currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(dbStates[testUserId].profileConfirmed).toBe(false);
 
-    // Simulate session resume
+    // Simulate session resume: remains on RESOLVE_PROFILE_SOURCE
     const resumedRecord = await userOnboardingRepository.findByUserId(testUserId);
     expect(resumedRecord.data.existingUserData.dateOfBirth).toBe("1995-10-10");
-    expect(resumedRecord.data.currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(resumedRecord.data.currentStep).toBe("RESOLVE_PROFILE_SOURCE");
+    expect(resumedRecord.data.profileConfirmed).toBe(false);
+
+    // After explicit confirmation on resumed session, advances to ASK_BLOOD_GROUP
+    const confirmRes = await onboardingService.chat(
+      JSON.stringify({ confirmed: true }),
+      [],
+      resumedRecord.data,
+      testUserId,
+    );
+    expect(confirmRes.action).toBe("ASK_BLOOD_GROUP");
+    expect(dbStates[testUserId].currentStep).toBe("ASK_BLOOD_GROUP");
+    expect(dbStates[testUserId].profileConfirmed).toBe(true);
   });
 
   test("7. Duplicate assistant responses: duplicate suppression exempts validation rejections and interactive prompts", () => {

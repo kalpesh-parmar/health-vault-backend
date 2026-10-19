@@ -187,6 +187,22 @@ class ChatSessionRepository {
       // Lock the parent session row to prevent race conditions on sequence generation
       await tx.execute(sql`SELECT 1 FROM chat_sessions WHERE id = ${sessionId} FOR UPDATE`);
 
+      if (metadata && metadata.clientMessageId) {
+        const [existing] = await tx
+          .select()
+          .from(chatMessage)
+          .where(
+            and(
+              eq(chatMessage.sessionId, sessionId),
+              sql`${chatMessage.metadata}->>'clientMessageId' = ${String(metadata.clientMessageId)}`,
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          return existing;
+        }
+      }
+
       const [row] = await tx
         .select({ maxSeq: sql`coalesce(max(${chatMessage.seq}), 0)` })
         .from(chatMessage)

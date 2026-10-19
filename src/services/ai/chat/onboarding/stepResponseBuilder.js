@@ -96,7 +96,9 @@ async function getLocalizedResponse(step, state) {
         !!state.documentData;
 
       const { hasMismatch, fields, sourceComparison } = getProfileMismatches(state);
-      const mode = useDoc && hasMismatch && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
+      const hasConflict =
+        (useDoc || Boolean(state.hasSocialData && state.socialData)) && hasMismatch;
+      const mode = hasConflict && !state.profileManuallyEdited ? "CONFLICT" : "CONFIRM";
 
       const compareData = useDoc ? state.documentData || {} : state.existingUserData || {};
 

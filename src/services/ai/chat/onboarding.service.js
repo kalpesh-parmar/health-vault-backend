@@ -14,6 +14,7 @@ const { bloodGroupTypeValues } = require("../../../enums/bloodGroupType");
 const { medicationTypeValues } = require("../../../enums/medicationType");
 const { frequencyTypeValues } = require("../../../enums/frequencyType");
 const { chatService } = require("./chat.service");
+const chatSessionRepository = require("../../../repositories/chatSessionRepository");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc } = require("drizzle-orm");
@@ -874,10 +875,7 @@ async function updateStateFromMessage(state, message, userId = null) {
           }
         }
 
-        const isSocial =
-          state.hasSocialData === true ||
-          ["google", "facebook", "microsoft", "apple"].includes(state.loginProvider);
-        state.profileConfirmed = !isSocial;
+        state.profileConfirmed = Boolean(state.profileConfirmed);
         state.currentStep = computeCurrentStep(state);
       } else if (answer === "NO") {
         state.documentOwnershipConfirmed = false;
@@ -1898,6 +1896,7 @@ async function updateStateFromMessage(state, message, userId = null) {
         state.isOnboardingCompleted = true;
         state.medicinesConfirmed = true;
         state.currentStep = "COMPLETE";
+        state.selectedOption = "DASHBOARD";
       } else if (key === "ASK_REPORT") {
         state.medicationFlowDone = true;
         state.isOnboardingCompleted = false;
@@ -1920,6 +1919,7 @@ async function updateStateFromMessage(state, message, userId = null) {
       } else if (msg === "GO_TO_DASHBOARD" || msg === "DASHBOARD") {
         state.isOnboardingCompleted = true;
         state.currentStep = "COMPLETE";
+        state.selectedOption = "DASHBOARD";
         break;
       }
 
@@ -2092,6 +2092,10 @@ async function saveOnboardingState(userId, state) {
       state.medicationFlowDone !== undefined
         ? state.medicationFlowDone
         : existingData.medicationFlowDone,
+    selectedOption:
+      state.selectedOption !== undefined
+        ? state.selectedOption
+        : existingData.selectedOption || null,
   };
 
   if (existingRecord) {
@@ -2117,6 +2121,7 @@ class OnboardingService {
     userId = null,
     sessionId = null,
     displayLabel = null,
+    clientMessageId = null,
   ) {
     if (!state) {
       state = {};
@@ -2555,6 +2560,9 @@ class OnboardingService {
         msg.toLowerCase().includes("add more medicines") ||
         msg === "ASK_REPORT" ||
         msg === "ASK_ABOUT_REPORT" ||
+        msg === "DASHBOARD" ||
+        msg === "GO_TO_DASHBOARD" ||
+        (typeof msg === "string" && msg.trim().toUpperCase() === "DASHBOARD") ||
         state.currentStep === "ASK_REPORT"
       ) {
         // Let it pass through to updateStateFromMessage
@@ -2596,7 +2604,11 @@ class OnboardingService {
       msg === "GO_TO_DASHBOARD" ||
       (typeof msg === "string" && msg.trim().toUpperCase() === "DASHBOARD");
 
-    if (!isInitCall && !isSilentCall && !isNavigationOnly && state.chatSessionId) {
+    if (isNavigationOnly) {
+      state.selectedOption = "DASHBOARD";
+    }
+
+    if (!isInitCall && !isSilentCall && state.chatSessionId) {
       let resolvedLabel = null;
       if (state.currentStep && msg !== undefined && msg !== null) {
         try {
@@ -2638,16 +2650,84 @@ class OnboardingService {
               );
       }
 
-      await chatService.appendChatMessage({
-        sessionId: state.chatSessionId,
-        userId,
-        role: "user",
-        content: userContent,
-        metadata: {
-          rawValue: msg !== undefined && msg !== null ? msg : "",
-          stepKey: state.currentStep || null,
-        },
-      });
+      if (
+        isNavigationOnly &&
+        (!userContent ||
+          userContent === "DASHBOARD" ||
+          userContent === "GO_TO_DASHBOARD" ||
+          (typeof userContent === "string" && userContent.trim().toUpperCase() === "DASHBOARD"))
+      ) {
+        const userLang = (state?.preferredLanguage || "english").toLowerCase();
+        userContent =
+          userLang === "gujarati" || userLang === "gu"
+            ? "ડેશબોર્ડ પર જાઓ"
+            : userLang === "hindi" || userLang === "hi"
+              ? "डैशबोर्ड पर जाएं"
+              : userLang === "marathi" || userLang === "mr"
+                ? "डॅशबोर्डवर जा"
+                : userLang === "tamil" || userLang === "ta"
+                  ? "டாஷ்போர்டுக்குச் செல்லவும்"
+                  : "Go to Dashboard";
+      }
+
+      const effectiveClientMsgId =
+        clientMessageId ||
+        state?.clientMessageId ||
+        (isNavigationOnly
+          ? `dashboard-nav-${state.chatSessionId}-${state.currentStep || "MEDICINE_OPTIONS"}`
+          : null);
+
+      let shouldAppendUserMsg = true;
+      if (isNavigationOnly) {
+        try {
+          const recent = await chatSessionRepository.listMessages({
+            sessionId: state.chatSessionId,
+            userId,
+            limit: 5,
+            direction: "before",
+          });
+          const alreadyHasDashboard = (recent?.items || []).some(
+            (m) =>
+              m.role === "user" &&
+              (m.metadata?.clientMessageId === effectiveClientMsgId ||
+                m.metadata?.selectedOption === "DASHBOARD" ||
+                m.metadata?.action === "DASHBOARD" ||
+                m.metadata?.rawValue === "DASHBOARD" ||
+                m.metadata?.rawValue === "GO_TO_DASHBOARD"),
+          );
+          if (alreadyHasDashboard) {
+            shouldAppendUserMsg = false;
+          }
+        } catch (checkErr) {
+          console.warn(
+            "[OnboardingService] Failed checking dashboard message idempotency:",
+            checkErr.message,
+          );
+        }
+      }
+
+      if (shouldAppendUserMsg) {
+        await chatService.appendChatMessage({
+          sessionId: state.chatSessionId,
+          userId,
+          role: "user",
+          content: userContent,
+          metadata: {
+            rawValue: msg !== undefined && msg !== null ? msg : "",
+            stepKey: state.currentStep || null,
+            ...(isNavigationOnly
+              ? {
+                  action: "DASHBOARD",
+                  actionType: "DASHBOARD",
+                  selectedOption: "DASHBOARD",
+                  clientMessageId: effectiveClientMsgId || undefined,
+                }
+              : effectiveClientMsgId
+                ? { clientMessageId: effectiveClientMsgId }
+                : {}),
+          },
+        });
+      }
     }
     // 2. If Medical Document uploaded in UPLOAD flow, fetch extracted data from DB BEFORE updating state from message
     if (
