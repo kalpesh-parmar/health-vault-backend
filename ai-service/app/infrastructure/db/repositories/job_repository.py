@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import json
 import logging
+import re
 from typing import Any, NamedTuple
 from uuid import UUID
 
@@ -11,6 +12,179 @@ from sqlalchemy import text
 from app.infrastructure.db.session import Database
 
 logger = logging.getLogger(__name__)
+
+CANONICAL_DOCUMENT_TYPES = {
+    "PRESCRIPTION",
+    "LAB_REPORT",
+    "IMAGING_REPORT",
+    "DISCHARGE_SUMMARY",
+    "CONSULTATION_REPORT",
+    "SURGERY_PROCEDURE_REPORT",
+    "VACCINATION_RECORD",
+    "MEDICAL_CERTIFICATE",
+    "OTHER_MEDICAL_DOCUMENT",
+}
+
+DOCUMENT_TYPE_ALIAS_MAP = {
+    # Prescription
+    "prescription": "PRESCRIPTION",
+    "prescriptions": "PRESCRIPTION",
+    "rx": "PRESCRIPTION",
+    "prescription slip": "PRESCRIPTION",
+    "prescription slips": "PRESCRIPTION",
+    "presceription": "PRESCRIPTION",
+    # Lab report
+    "lab": "LAB_REPORT",
+    "lab report": "LAB_REPORT",
+    "lab_report": "LAB_REPORT",
+    "laboratory": "LAB_REPORT",
+    "laboratory report": "LAB_REPORT",
+    "laboratory_report": "LAB_REPORT",
+    "lab test": "LAB_REPORT",
+    "lab_test": "LAB_REPORT",
+    "test report": "LAB_REPORT",
+    "test_report": "LAB_REPORT",
+    "blood test": "LAB_REPORT",
+    "blood_test": "LAB_REPORT",
+    "blood report": "LAB_REPORT",
+    "blood_report": "LAB_REPORT",
+    "cbc": "LAB_REPORT",
+    "cbc report": "LAB_REPORT",
+    "cbc_report": "LAB_REPORT",
+    "pathology": "LAB_REPORT",
+    "pathology report": "LAB_REPORT",
+    "pathology_report": "LAB_REPORT",
+    "biochemistry": "LAB_REPORT",
+    "biochemistry report": "LAB_REPORT",
+    "biochemistry_report": "LAB_REPORT",
+    "lipid profile": "LAB_REPORT",
+    "lipid_profile": "LAB_REPORT",
+    "metabolic panel": "LAB_REPORT",
+    # Imaging report
+    "imaging": "IMAGING_REPORT",
+    "imaging report": "IMAGING_REPORT",
+    "imaging_report": "IMAGING_REPORT",
+    "diagnostic imaging": "IMAGING_REPORT",
+    "diagnostic_imaging": "IMAGING_REPORT",
+    "radiology": "IMAGING_REPORT",
+    "radiology report": "IMAGING_REPORT",
+    "x-ray": "IMAGING_REPORT",
+    "xray": "IMAGING_REPORT",
+    "x_ray": "IMAGING_REPORT",
+    "mri": "IMAGING_REPORT",
+    "mri scan": "IMAGING_REPORT",
+    "ct": "IMAGING_REPORT",
+    "ct scan": "IMAGING_REPORT",
+    "ultrasound": "IMAGING_REPORT",
+    "sonography": "IMAGING_REPORT",
+    "usg": "IMAGING_REPORT",
+    "usg scan": "IMAGING_REPORT",
+    "echocardiogram": "IMAGING_REPORT",
+    "echo": "IMAGING_REPORT",
+    "ecg": "IMAGING_REPORT",
+    # Discharge summary
+    "discharge": "DISCHARGE_SUMMARY",
+    "discharge summary": "DISCHARGE_SUMMARY",
+    "discharge_summary": "DISCHARGE_SUMMARY",
+    "discharge card": "DISCHARGE_SUMMARY",
+    "discharge slip": "DISCHARGE_SUMMARY",
+    "discharge report": "DISCHARGE_SUMMARY",
+    # Consultation report
+    "consultation": "CONSULTATION_REPORT",
+    "consultation report": "CONSULTATION_REPORT",
+    "consultation_report": "CONSULTATION_REPORT",
+    "consultation note": "CONSULTATION_REPORT",
+    "consultation_note": "CONSULTATION_REPORT",
+    "doctor note": "CONSULTATION_REPORT",
+    "doctor_note": "CONSULTATION_REPORT",
+    "clinical note": "CONSULTATION_REPORT",
+    "clinical_note": "CONSULTATION_REPORT",
+    "opd note": "CONSULTATION_REPORT",
+    "opd_note": "CONSULTATION_REPORT",
+    "referral letter": "CONSULTATION_REPORT",
+    # Surgery / Procedure report
+    "surgery": "SURGERY_PROCEDURE_REPORT",
+    "surgery report": "SURGERY_PROCEDURE_REPORT",
+    "surgery procedure report": "SURGERY_PROCEDURE_REPORT",
+    "surgery_procedure_report": "SURGERY_PROCEDURE_REPORT",
+    "procedure": "SURGERY_PROCEDURE_REPORT",
+    "procedure report": "SURGERY_PROCEDURE_REPORT",
+    "operation": "SURGERY_PROCEDURE_REPORT",
+    "operative note": "SURGERY_PROCEDURE_REPORT",
+    "surgical note": "SURGERY_PROCEDURE_REPORT",
+    # Vaccination record
+    "vaccination": "VACCINATION_RECORD",
+    "vaccination record": "VACCINATION_RECORD",
+    "vaccination_record": "VACCINATION_RECORD",
+    "vaccine": "VACCINATION_RECORD",
+    "vaccine card": "VACCINATION_RECORD",
+    "immunization": "VACCINATION_RECORD",
+    "immunization record": "VACCINATION_RECORD",
+    # Medical certificate
+    "medical certificate": "MEDICAL_CERTIFICATE",
+    "medical_certificate": "MEDICAL_CERTIFICATE",
+    "certificate": "MEDICAL_CERTIFICATE",
+    "fitness certificate": "MEDICAL_CERTIFICATE",
+    # Explicit other
+    "other": "OTHER_MEDICAL_DOCUMENT",
+    "other medical document": "OTHER_MEDICAL_DOCUMENT",
+    "other_medical_document": "OTHER_MEDICAL_DOCUMENT",
+}
+
+
+def normalize_document_type(raw_type: Any) -> str | None:
+    """Normalize raw document type string to one of the 9 canonical PostgreSQL enum values.
+
+    Returns:
+        The canonical uppercase string if valid or mapped.
+        None if missing or invalid/unrecognized (to preserve existing DB value).
+        'OTHER_MEDICAL_DOCUMENT' only when explicitly requested.
+    """
+    if not raw_type or not isinstance(raw_type, str):
+        return None
+
+    cleaned = raw_type.strip()
+    if not cleaned:
+        return None
+
+    upper = cleaned.upper().replace("-", "_").replace(" ", "_")
+    if upper in CANONICAL_DOCUMENT_TYPES:
+        return upper
+
+    lower = cleaned.lower()
+    if lower in DOCUMENT_TYPE_ALIAS_MAP:
+        return DOCUMENT_TYPE_ALIAS_MAP[lower]
+
+    spaced = re.sub(r"[\s\-_/.]+", " ", lower).strip()
+    if spaced in DOCUMENT_TYPE_ALIAS_MAP:
+        return DOCUMENT_TYPE_ALIAS_MAP[spaced]
+
+    underscored = re.sub(r"[\s\-_/.]+", "_", lower).strip()
+    if underscored in DOCUMENT_TYPE_ALIAS_MAP:
+        return DOCUMENT_TYPE_ALIAS_MAP[underscored]
+
+    # Regex patterns for clinical documents
+    if re.search(r"\b(x[\-_]?ray|mri|ct(\s*scan)?|ultrasound|sonograph(y|ic)|usg|radiolog(y|ic)|imaging|echo(cardiogram)?)\b", lower):
+        return "IMAGING_REPORT"
+    if re.search(r"\b(blood|cbc|lab|labs|laboratory|pathology|biochemistry|hematology|urine\s*test|lipid|thyroid|test\s*report)\b", lower):
+        return "LAB_REPORT"
+    if re.search(r"\b(prescription|prescriptions|presceription|rx)\b", lower):
+        return "PRESCRIPTION"
+    if re.search(r"\b(discharge(\s*summary|\s*card|\s*slip|\s*report)?)\b", lower):
+        return "DISCHARGE_SUMMARY"
+    if re.search(r"\b(consultation|doctor\s*note|clinical\s*note|opd\s*note)\b", lower):
+        return "CONSULTATION_REPORT"
+    if re.search(r"\b(surgery|procedure|operation|operative)\b", lower):
+        return "SURGERY_PROCEDURE_REPORT"
+    if re.search(r"\b(vaccin(e|ation)?|immuniz(e|ation)?)\b", lower):
+        return "VACCINATION_RECORD"
+    if re.search(r"\b(certificate|fitness\s*cert)\b", lower):
+        return "MEDICAL_CERTIFICATE"
+
+    if lower in ("other", "other medical document", "other_medical_document", "other medical"):
+        return "OTHER_MEDICAL_DOCUMENT"
+
+    return None
 
 
 class ReconcileResult(NamedTuple):
@@ -243,11 +417,24 @@ class JobRepository:
         doctor_name: str | None = None
         hospital_name: str | None = None
         doc_ocr_status = "completed"
+        doc_type: str | None = None
 
         if extracted_structured_data and isinstance(extracted_structured_data, dict):
             summary_english = extracted_structured_data.get("summaryEnglish")
             if extracted_structured_data.get("status") == "partial":
                 doc_ocr_status = "partial"
+
+            raw_doc_type = (
+                (extracted_structured_data.get("documentInfo") or {}).get("documentType")
+                or (extracted_structured_data.get("documentInfo") or {}).get("rawClassification")
+                or extracted_structured_data.get("documentType")
+                or extracted_structured_data.get("reportType")
+            )
+            doc_type = normalize_document_type(raw_doc_type)
+
+            # Ensure retry and partial OCR processing cannot overwrite a valid classified type with an unknown fallback
+            if doc_ocr_status == "partial" and doc_type == "OTHER_MEDICAL_DOCUMENT":
+                doc_type = None
 
             raw_date = (
                 extracted_structured_data.get("reportDate")
@@ -286,6 +473,7 @@ class JobRepository:
             """
             UPDATE documents
             SET ocr_status = :doc_ocr_status,
+                document_type = COALESCE(CAST(:doc_type AS document_type), document_type),
                 structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
                 ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
                 summary_english = COALESCE(:summary_english, summary_english),
@@ -299,6 +487,7 @@ class JobRepository:
         params = {
             "document_id": document_id,
             "doc_ocr_status": doc_ocr_status,
+            "doc_type": doc_type,
             "extracted_structured_data": json.dumps(extracted_structured_data) if extracted_structured_data is not None else None,
             "raw_text": raw_text,
             "summary_english": summary_english,

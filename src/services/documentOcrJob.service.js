@@ -409,7 +409,10 @@ class DocumentOcrJobService {
         rawOcrData,
       });
       const analyzedDocumentType = normalizeDocumentType(
-        ocrResponse?.documentType || structured?.documentType || structured?.reportType,
+        ocrResponse?.documentType ||
+          structured?.documentInfo?.documentType ||
+          structured?.documentType ||
+          structured?.reportType,
       );
 
       // eslint-disable-next-line no-console
