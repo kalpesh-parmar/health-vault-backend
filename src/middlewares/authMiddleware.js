@@ -5,7 +5,8 @@ const JwtUtils = require("../utils/jwtUtils");
 
 async function verifyToken(req, _res, next) {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader =
+      req.headers.authorization || (req.query?.token ? `Bearer ${req.query.token}` : null);
     if (!authHeader) {
       throw new SessionExpiredException("User not found or session expired");
     }

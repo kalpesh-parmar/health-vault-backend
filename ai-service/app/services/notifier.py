@@ -59,6 +59,7 @@ class ProgressNotifier:
         current_step: str | None = None,
         completed_steps: int | None = None,
         total_steps: int | None = 9,
+        **kwargs: Any,
     ) -> SseWireEnvelope:
         # Zero-PHI safety check: ensure no extra fields leak PHI
         if extra_fields:
@@ -83,11 +84,11 @@ class ProgressNotifier:
             if attempt_count is None:
                 attempt_count = extra_fields.get("attemptCount")
             if current_step is None:
-                current_step = extra_fields.get("currentStep")
+                current_step = extra_fields.get("currentStep") or extra_fields.get("current_step")
             if completed_steps is None:
-                completed_steps = extra_fields.get("completedSteps")
+                completed_steps = extra_fields.get("completedSteps") or extra_fields.get("completed_steps")
             if total_steps is None:
-                total_steps = extra_fields.get("totalSteps", 9)
+                total_steps = extra_fields.get("totalSteps") or extra_fields.get("total_steps") or 9
 
         event = InnerProgressEvent(
             jobId=str(job_id),
@@ -102,7 +103,7 @@ class ProgressNotifier:
             message=message,
             currentStep=current_step,
             completedSteps=completed_steps,
-            totalSteps=total_steps,
+            totalSteps=total_steps or 9,
             errorCode=error_code,
             failedStage=failed_stage,
             retryable=retryable,
@@ -112,6 +113,7 @@ class ProgressNotifier:
             detectedLanguages=detected_languages or [],
             timestamp=now_iso,
         )
+
         return SseWireEnvelope(channelKey=file_key, event=event)
 
     def serialize_and_truncate(self, envelope: SseWireEnvelope) -> str:
@@ -121,7 +123,6 @@ class ProgressNotifier:
 
         if len(raw_bytes) <= MAX_PG_NOTIFY_BYTES:
             return raw_json
-
 
         # Truncate message field to fit within the 7500 byte limit
         excess = len(raw_bytes) - MAX_PG_NOTIFY_BYTES + 32
@@ -165,8 +166,8 @@ class ProgressNotifier:
         current_step: str | None = None,
         completed_steps: int | None = None,
         total_steps: int | None = 9,
+        **kwargs: Any,
     ) -> str:
-        
         envelope = self.build_envelope(
             job_id=job_id,
             file_key=file_key,
@@ -189,25 +190,14 @@ class ProgressNotifier:
             current_step=current_step,
             completed_steps=completed_steps,
             total_steps=total_steps,
+            **kwargs,
         )
 
         serialized = self.serialize_and_truncate(envelope)
-        byte_len = len(serialized.encode("utf-8"))
 
         notify_query = text("SELECT pg_notify(:channel, :payload)")
-        try:
-            async for session in self.db.session():
-                await session.execute(notify_query, {"channel": self.channel, "payload": serialized})
-                await session.commit()
-        
-        except Exception as exc:
-            logger.error(
-                "[ProgressNotifier] [PUBLISH_FAILED] pg_notify execution error on channel '%s' for job=%s: %s",
-                self.channel,
-                job_id,
-                exc,
-                exc_info=True,
-            )
-            raise
+        async for session in self.db.session():
+            await session.execute(notify_query, {"channel": self.channel, "payload": serialized})
+            await session.commit()
 
         return serialized
