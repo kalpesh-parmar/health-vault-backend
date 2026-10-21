@@ -54,6 +54,9 @@ const aliasMap = {
   ct_scan_report: documentType.IMAGING_REPORT,
   ultrasound: documentType.IMAGING_REPORT,
   sonography: documentType.IMAGING_REPORT,
+  usg: documentType.IMAGING_REPORT,
+  usg_scan: documentType.IMAGING_REPORT,
+  diagnostic_imaging: documentType.IMAGING_REPORT,
   radiograph: documentType.IMAGING_REPORT,
   radiology: documentType.IMAGING_REPORT,
   scan: documentType.IMAGING_REPORT,
@@ -152,13 +155,13 @@ function normalizeDocumentType(rawType) {
   }
 
   if (
-    /\b(x-ray|xray|mri|ct|ct scan|ultrasound|sonography|imaging|radiology|radiograph)\b/i.test(
+    /\b(x-ray|xray|mri|ct|ct scan|ultrasound|sonography|usg|imaging|radiology|radiograph)\b/i.test(
       lower,
     )
   ) {
     return documentType.IMAGING_REPORT;
   }
-  if (/\b(blood|cbc|lab|labs|laboratory|pathology|biochemistry)\b/i.test(lower)) {
+  if (/\b(blood|cbc|lab|labs|laboratory|pathology|biochemistry|test report)\b/i.test(lower)) {
     return documentType.LAB_REPORT;
   }
   if (/\b(prescription|prescriptions|presceription|rx)\b/i.test(lower)) {
