@@ -1,7 +1,44 @@
 const express = require("express");
 const router = express.Router();
 const medicationReminderController = require("../controllers/medicationReminder.controller");
+const medicationAdherenceController = require("../controllers/medicationAdherence.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const { validateRequest } = require("../middlewares/validateRequest");
+const {
+  weeklyDashboardQuerySchema,
+  monthlyDashboardQuerySchema,
+  dailyDetailsQuerySchema,
+  refillsDashboardQuerySchema,
+} = require("../validations");
+
+// DASHBOARD ADHERENCE & REFILL INTELLIGENCE
+router.get(
+  "/dashboard/weekly",
+  verifyToken,
+  validateRequest({ query: weeklyDashboardQuerySchema }),
+  medicationAdherenceController.getWeeklyAdherence,
+);
+
+router.get(
+  "/dashboard/monthly",
+  verifyToken,
+  validateRequest({ query: monthlyDashboardQuerySchema }),
+  medicationAdherenceController.getMonthlyAdherence,
+);
+
+router.get(
+  "/dashboard/daily-details",
+  verifyToken,
+  validateRequest({ query: dailyDetailsQuerySchema }),
+  medicationAdherenceController.getDailyDetails,
+);
+
+router.get(
+  "/dashboard/refills",
+  verifyToken,
+  validateRequest({ query: refillsDashboardQuerySchema }),
+  medicationAdherenceController.getRefillAlerts,
+);
 
 // CREATE
 router.post("/create", verifyToken, medicationReminderController.createReminder);

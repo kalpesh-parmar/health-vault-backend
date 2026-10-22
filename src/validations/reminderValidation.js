@@ -12,7 +12,29 @@ const createReminderSchema = z
 
 const updateOccurrenceSchema = z
   .object({
-    status: z.literal(reminderOccurrenceStatus.COMPLETED).optional(),
+    status: z
+      .enum([
+        reminderOccurrenceStatus.COMPLETED,
+        reminderOccurrenceStatus.SKIPPED,
+        reminderOccurrenceStatus.CANCELLED,
+      ])
+      .optional(),
+    completedAt: z
+      .string()
+      .datetime({
+        offset: true,
+        message: "completedAt must be a valid ISO 8601 datetime string",
+      })
+      .optional(),
+    takenAt: z
+      .string()
+      .datetime({
+        offset: true,
+        message: "takenAt must be a valid ISO 8601 datetime string",
+      })
+      .optional(),
+    notes: z.string().max(500).optional(),
+    skipReason: z.string().max(255).optional(),
   })
   .strict();
 

@@ -67,6 +67,25 @@ class ChatSessionRepository {
     return row || null;
   }
 
+  async updateSessionMetadata(sessionId, userId, newMetadata) {
+    if (!sessionId) return null;
+    const conditions = [eq(chatSession.id, sessionId)];
+    if (userId) {
+      conditions.push(eq(chatSession.userId, userId));
+    }
+
+    const [updated] = await this.client
+      .update(chatSession)
+      .set({
+        metadata: sql`coalesce(${chatSession.metadata}, '{}'::jsonb) || ${JSON.stringify(newMetadata || {})}::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning();
+
+    return updated || null;
+  }
+
   /**
    * Find the user's primary/canonical session.
    */
@@ -87,7 +106,29 @@ class ChatSessionRepository {
       .limit(1);
     if (canonical) return canonical;
 
-    // 2. Existing ONBOARDING typed session
+    // 2. Fall back to oldest active non-onboarding session for the patient
+    const [oldest] = await this.client
+      .select()
+      .from(chatSession)
+      .where(
+        and(
+          eq(chatSession.userId, userId),
+          eq(chatSession.softDelete, false),
+          sql`coalesce(${chatSession.metadata}->>'type', '') != 'ONBOARDING'`,
+        ),
+      )
+      .orderBy(asc(chatSession.createdAt))
+      .limit(1);
+
+    return oldest || null;
+  }
+
+  /**
+   * Find the user's active onboarding session.
+   */
+  async findOnboardingSession(userId) {
+    if (!userId) return null;
+
     const [onboardingSession] = await this.client
       .select()
       .from(chatSession)
@@ -98,19 +139,10 @@ class ChatSessionRepository {
           sql`${chatSession.metadata}->>'type' = 'ONBOARDING'`,
         ),
       )
-      .orderBy(asc(chatSession.createdAt))
-      .limit(1);
-    if (onboardingSession) return onboardingSession;
-
-    // 3. Fall back to oldest active session for the patient
-    const [oldest] = await this.client
-      .select()
-      .from(chatSession)
-      .where(and(eq(chatSession.userId, userId), eq(chatSession.softDelete, false)))
-      .orderBy(asc(chatSession.createdAt))
+      .orderBy(desc(chatSession.createdAt))
       .limit(1);
 
-    return oldest || null;
+    return onboardingSession || null;
   }
 
   /**
@@ -141,11 +173,22 @@ class ChatSessionRepository {
   /**
    * List sessions ordered by recent activity. Used by the FE sidebar.
    */
-  async listSessions({ userId, limit = DEFAULT_PAGE_SIZE, cursor }) {
+  async listSessions({
+    userId,
+    limit = DEFAULT_PAGE_SIZE,
+    cursor,
+    type,
+    excludeOnboarding = false,
+  }) {
     const pageSize = Math.min(limit, MAX_PAGE_SIZE);
     const cur = decodeCursor(cursor);
 
     const conditions = [eq(chatSession.userId, userId), eq(chatSession.softDelete, false)];
+    if (type) {
+      conditions.push(sql`${chatSession.metadata}->>'type' = ${type}`);
+    } else if (excludeOnboarding) {
+      conditions.push(sql`coalesce(${chatSession.metadata}->>'type', '') != 'ONBOARDING'`);
+    }
     if (cur) {
       conditions.push(
         or(

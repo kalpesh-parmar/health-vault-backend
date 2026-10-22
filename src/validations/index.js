@@ -38,6 +38,13 @@ const {
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 } = require("./reminderValidation");
+const {
+  isValidTimezone,
+  weeklyDashboardQuerySchema,
+  monthlyDashboardQuerySchema,
+  dailyDetailsQuerySchema,
+  refillsDashboardQuerySchema,
+} = require("./adherenceDashboardValidation");
 const { createSessionSchema } = require("./sessionValidation");
 const {
   patientIdParamSchema,
@@ -114,4 +121,9 @@ module.exports = {
   documentRetryUploadMulter,
   validateDocumentRetry,
   retryDocumentSchema,
+  isValidTimezone,
+  weeklyDashboardQuerySchema,
+  monthlyDashboardQuerySchema,
+  dailyDetailsQuerySchema,
+  refillsDashboardQuerySchema,
 };

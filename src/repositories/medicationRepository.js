@@ -231,6 +231,13 @@ class MedicationRepository {
       .where(and(...conditions))
       .returning();
   }
+
+  async findActiveInventoryMedications(userId) {
+    return db
+      .select()
+      .from(medication)
+      .where(and(eq(medication.userId, String(userId)), eq(medication.softDelete, false)));
+  }
 }
 
 module.exports = new MedicationRepository();

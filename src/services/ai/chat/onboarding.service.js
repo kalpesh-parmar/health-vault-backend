@@ -36,6 +36,7 @@ const {
   splitName,
   normalizeName,
   getLocalizedText,
+  normalizeLanguageLocally,
 } = require("../../../helpers/onboarding.helper");
 
 const {
@@ -432,13 +433,15 @@ async function updateStateFromMessage(state, message, userId = null) {
 
   switch (state.currentStep) {
     case "ASK_LANGUAGE": {
-      const langVal = msg.toLowerCase();
-      if (languageTypeValues.includes(langVal)) {
-        state.preferredLanguage = langVal;
+      const langNorm =
+        normalizeLanguageLocally(msg) ||
+        (languageTypeValues.includes(msg.toLowerCase()) ? msg.toLowerCase() : null);
+      if (langNorm && languageTypeValues.includes(langNorm)) {
+        state.preferredLanguage = langNorm;
         state.currentStep = "ASK_UPLOAD_OR_SKIP";
         if (userId) {
           try {
-            await patientRepository.updateById(userId, { preferredLanguage: langVal });
+            await patientRepository.updateById(userId, { preferredLanguage: langNorm });
           } catch (err) {
             console.warn(
               "[OnboardingService] Immediate DB update for preferredLanguage failed:",
@@ -449,13 +452,14 @@ async function updateStateFromMessage(state, message, userId = null) {
       } else {
         const extractedLang = await extractFieldFromMessage("preferredLanguage", msg, "english");
         if (extractedLang && typeof extractedLang === "string") {
-          const langNorm = extractedLang.toLowerCase();
-          if (languageTypeValues.includes(langNorm)) {
-            state.preferredLanguage = langNorm;
+          const fallbackNorm =
+            normalizeLanguageLocally(extractedLang) || extractedLang.toLowerCase();
+          if (languageTypeValues.includes(fallbackNorm)) {
+            state.preferredLanguage = fallbackNorm;
             state.currentStep = "ASK_UPLOAD_OR_SKIP";
             if (userId) {
               try {
-                await patientRepository.updateById(userId, { preferredLanguage: langNorm });
+                await patientRepository.updateById(userId, { preferredLanguage: fallbackNorm });
               } catch (err) {
                 console.warn(
                   "[OnboardingService] Immediate DB update for preferredLanguage failed:",

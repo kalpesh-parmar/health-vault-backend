@@ -204,6 +204,27 @@
       "when": 1788931125615,
       "tag": "0027_smiling_marauders",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788931200000,
+      "tag": "0028_drop_duplicate_ai_summary_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788931300000,
+      "tag": "0029_create_patient_lab_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788931400000,
+      "tag": "0030_medication_adherence_and_late_completion",
+      "breakpoints": true
     }
   ]
 }

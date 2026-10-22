@@ -41,6 +41,12 @@ const {
 const { and, eq, desc } = require("drizzle-orm");
 const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
 const { ToWords } = require("to-words");
+const { documentAuthorizationService } = require("./ai/chat/documentAuthorization.service");
+const { chatClassifier } = require("./ai/chat/chatClassifier.service");
+const {
+  REPORT_QUESTIONS_I18N,
+  GENERAL_DOC_QUESTIONS_I18N,
+} = require("../helpers/reportPayload.helper");
 
 function isStepAlreadySatisfied(stepName, state) {
   if (!stepName || !state) return false;
@@ -76,6 +82,167 @@ function isStepAlreadySatisfied(stepName, state) {
   if (["MEDICINE_OPTIONS", "REVIEW_MEDICINES_LIST"].includes(stepName)) {
     return state.medicationFlowDone === true;
   }
+  return false;
+}
+
+function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage }) {
+  if (!message || typeof message !== "string") return false;
+  const trimmed = message.trim();
+  if (trimmed.length < 2) return false;
+
+  const explicitOnboardingActions = [
+    "DASHBOARD",
+    "GO_TO_DASHBOARD",
+    "ADD_MEDICINE",
+    "EDIT_MEDICINE",
+    "CONFIRM_MEDICINES",
+    "CONFIRM_MEDICINE",
+    "SAVE_AND_REVIEW",
+    "SKIP_MEDICINES",
+    "SKIP_ONBOARDING",
+    "SKIP",
+    "CONFIRM",
+    "CANCEL",
+    "ASK_LANGUAGE",
+    "ASK_GENDER",
+    "ASK_DOB",
+    "ASK_BLOOD_GROUP",
+    "ASK_ALLERGIES",
+    "MEDICINE_OPTIONS",
+  ];
+  if (actionType && explicitOnboardingActions.includes(actionType.toUpperCase())) {
+    return false;
+  }
+  if (explicitOnboardingActions.includes(trimmed.toUpperCase())) {
+    return false;
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        if (
+          parsed.action ||
+          parsed.confirmed !== undefined ||
+          parsed.selected !== undefined ||
+          parsed.saveAndReview ||
+          parsed.skipAll ||
+          parsed.allergies
+        ) {
+          return false;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const cleanMsg = trimmed
+    .toLowerCase()
+    .replace(/[?.,!]/g, "")
+    .trim();
+
+  // Known onboarding field answers
+  if (
+    [
+      "b+",
+      "a+",
+      "o+",
+      "ab+",
+      "b-",
+      "a-",
+      "o-",
+      "ab-",
+      "male",
+      "female",
+      "other",
+      "yes",
+      "no",
+      "હા",
+      "ના",
+      "हाँ",
+      "नहीं",
+      "होय",
+      "नाही",
+      "ஆம்",
+      "இல்லை",
+      "gujarati",
+      "english",
+      "hindi",
+      "marathi",
+      "tamil",
+      "ગુજરાતી",
+      "हिन्दी",
+      "मराठी",
+      "தமிழ்",
+      "manual entry",
+      "manual",
+      "upload",
+      "અપલોડ",
+      "મેન્યુઅલ",
+    ].includes(cleanMsg)
+  ) {
+    return false;
+  }
+
+  if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(trimmed)) {
+    return false;
+  }
+
+  // Check known suggested report questions in all languages
+  const allSuggested = [
+    ...(REPORT_QUESTIONS_I18N.english || []),
+    ...(REPORT_QUESTIONS_I18N.gujarati || []),
+    ...(REPORT_QUESTIONS_I18N.hindi || []),
+    ...(REPORT_QUESTIONS_I18N.marathi || []),
+    ...(REPORT_QUESTIONS_I18N.tamil || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.english || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.gujarati || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.hindi || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.marathi || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.tamil || []),
+  ].map((q) =>
+    q
+      .toLowerCase()
+      .replace(/[?.,!]/g, "")
+      .trim(),
+  );
+
+  if (allSuggested.includes(cleanMsg)) {
+    return true;
+  }
+
+  // Classify intent via chatClassifier
+  try {
+    const classification = chatClassifier.classify({
+      rawQuestion: trimmed,
+      detectedLanguage: preferredLanguage || "english",
+    });
+
+    const hasMedicalKeywords =
+      /(?:રિપોર્ટ|દસ્તાવેજ|અર્થ|સમજાવો|હિમોગ્લોબિન|દવા|બીમારી|સારવાર|લક્ષણો|ટેસ્ટ|પરિણામ|report|document|summary|explain|treatment|medicine|hemoglobin|normal|abnormal|su\s+lakhyu|kya\s+likha|bimari|sarvar|doctor|hospital|diagnosis|prescription|lab)/i.test(
+        trimmed,
+      );
+
+    if (classification.primaryDomain === "PROFILE" && !hasMedicalKeywords) {
+      return false;
+    }
+
+    if (hasMedicalKeywords) {
+      return true;
+    }
+
+    const isDocDomain =
+      classification.primaryDomain === "DOCUMENTS" ||
+      classification.primaryDomain === "MEDICATIONS";
+
+    if (isDocDomain && hasMedicalKeywords) {
+      return true;
+    }
+  } catch (err) {
+    console.warn("[OcrService] chatClassifier error in isOnboardingMedicalQuestion:", err.message);
+  }
+
   return false;
 }
 
@@ -261,6 +428,7 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
+        fromScreen,
         clientMessageId,
       } = normalizedInput;
       console.log("[MEDICINES]===", normalizedInput.message);
@@ -283,17 +451,41 @@ class V1Service {
         `[ONBOARDING PROFILE LOG] User ID: ${userId} | Patient DB Record: firstName="${patient?.firstName || ""}", lastName="${patient?.lastName || ""}", email="${patient?.email || ""}"`,
       );
 
-      // Resolve canonical session ID for the patient
+      // Resolve session ID for the patient (strictly isolating onboarding vs canonical QA)
       let effectiveSessionId =
         sessionId || inputState?.chatSessionId || dbState?.chatSessionId || null;
+
+      const isPreOnboardingRequest = fromScreen === "Onboarding" || !isOnboardingCompleted;
+
+      if (effectiveSessionId && userId && isPreOnboardingRequest) {
+        try {
+          const sessionMeta = await chatSessionRepository.findSessionById(
+            effectiveSessionId,
+            userId,
+          );
+          if (sessionMeta?.metadata?.isCanonical && sessionMeta?.metadata?.type !== "ONBOARDING") {
+            effectiveSessionId = null;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       if (!effectiveSessionId && userId) {
         try {
-          if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
-            const canonical = await chatService.getOrCreateCanonicalSession({ userId });
-            effectiveSessionId = canonical?.id || null;
+          if (isPreOnboardingRequest) {
+            if (chatService && typeof chatService.createOnboardingSession === "function") {
+              const onboarding = await chatService.createOnboardingSession({ userId });
+              effectiveSessionId = onboarding?.id || null;
+            }
+          } else {
+            if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+              const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+              effectiveSessionId = canonical?.id || null;
+            }
           }
         } catch (sErr) {
-          console.warn("[UnifiedChat] Failed to get or create canonical session:", sErr.message);
+          console.warn("[UnifiedChat] Failed to resolve session:", sErr.message);
         }
       }
 
@@ -1302,6 +1494,7 @@ class V1Service {
         dbState?.currentStep === "MEDICINE_OPTIONS";
 
       const isNormalChat =
+        fromScreen !== "Onboarding" &&
         !isMedicineAction &&
         !isForcedOnboardingAction &&
         !isIncomingOnboardingStep &&
@@ -1322,6 +1515,191 @@ class V1Service {
               dbState?.currentStep === "ASK_REPORT" ||
               inputState?.currentStep === "ASK_REPORT") &&
             actionType !== "OTHER_ACTIONS"));
+
+      // CASE 2.5: ONBOARDING DOCUMENT QA (Medical Question Answering During Pre-Onboarding)
+      const isPreOnboardingContext = fromScreen === "Onboarding" || !isOnboardingCompleted;
+      const userLangForQA =
+        preferredLanguage ||
+        inputState?.preferredLanguage ||
+        dbState?.preferredLanguage ||
+        patient?.preferredLanguage ||
+        "english";
+
+      const isOnboardingDocQA =
+        isPreOnboardingContext &&
+        isOnboardingMedicalQuestion({
+          message,
+          actionType,
+          state: inputState || dbState,
+          dbState,
+          preferredLanguage: userLangForQA,
+        });
+
+      if (isOnboardingDocQA) {
+        console.log(
+          `[UnifiedChat] Executing Onboarding Document QA for userId=${userId}, question="${message}"`,
+        );
+        let state = inputState || dbState || {};
+        if (!state.currentStep && dbState?.currentStep) {
+          state.currentStep = dbState.currentStep;
+        }
+        if (!state.currentStep) {
+          state.currentStep = "ASK_REPORT";
+        }
+
+        let targetDocId = documentId || state.documentId || dbState?.documentId;
+        if (Array.isArray(targetDocId)) {
+          targetDocId = targetDocId[0];
+        }
+
+        let targetDoc = null;
+        if (targetDocId) {
+          try {
+            const authRes = await documentAuthorizationService.authorizeDocumentIds(userId, [
+              targetDocId,
+            ]);
+            if (authRes.documents && authRes.documents.length > 0) {
+              targetDoc = authRes.documents[0];
+            }
+          } catch (authErr) {
+            console.warn(
+              `[UnifiedChat] Document authorization warning for docId=${targetDocId}:`,
+              authErr.message,
+            );
+          }
+        }
+
+        if (!targetDoc && userId) {
+          try {
+            const userDocs = await db
+              .select()
+              .from(document)
+              .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+              .orderBy(desc(document.createdAt))
+              .limit(1);
+            if (userDocs && userDocs.length > 0) {
+              targetDoc = userDocs[0];
+              targetDocId = targetDoc.id;
+            }
+          } catch (dbDocErr) {
+            console.warn("[UnifiedChat] Error looking up user document:", dbDocErr.message);
+          }
+        }
+
+        if (!targetDoc) {
+          const noDocReply =
+            {
+              english: "No uploaded medical document was found. Please upload a report to discuss.",
+              gujarati:
+                "કોઈ અપલોડ કરેલ તબીબી દસ્તાવેજ મળ્યો નથી. કૃપા કરીને ચર્ચા કરવા માટે રિપોર્ટ અપલોડ કરો.",
+              hindi:
+                "कोई अपलोड किया गया मेडिकल दस्तावेज़ नहीं मिला। कृपया चर्चा के लिए रिपोर्ट अपलोड करें।",
+              marathi:
+                "कोणताही अपलोड केलेला वैद्यकीय दस्तऐवज आढळला नाही. कृपया चर्चा करण्यासाठी अहवाल अपलोड करा.",
+              tamil:
+                "பதிவேற்றப்பட்ட மருத்துவ ஆவணம் எதுவும் கிடைக்கவில்லை. விவாதிக்க அறிக்கையைப் பதிவேற்றவும்.",
+            }[userLangForQA] ||
+            "No uploaded medical document was found. Please upload a report to discuss.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: noDocReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: null,
+            options: [],
+          });
+        }
+
+        const ocrStat = String(targetDoc.ocrStatus || "").toLowerCase();
+        if (ocrStat === "failed") {
+          const failedReply =
+            {
+              english:
+                "Processing failed for this document. Please upload a clearer image or document.",
+              gujarati:
+                "આ દસ્તાવેજની પ્રક્રિયા નિષ્ફળ રહી છે. કૃપા કરીને વધુ સ્પષ્ટ છબી અથવા દસ્તાવેજ અપલોડ કરો.",
+              hindi:
+                "इस दस्तावेज़ का प्रसंस्करण विफल रहा। कृपया एक स्पष्ट छवि या दस्तावेज़ अपलोड करें।",
+              marathi:
+                "या दस्तऐवजाची प्रक्रिया अयशस्वी झाली. कृपया अधिक स्पष्ट प्रतिमा किंवा दस्तऐवज अपलोड करा.",
+              tamil:
+                "இந்த ஆவணத்தின் செயலாக்கம் தோல்வியடைந்தது. தெளிவான படம் அல்லது ஆவணத்தைப் பதிவேற்றவும்.",
+            }[userLangForQA] ||
+            "Processing failed for this document. Please upload a clearer image or document.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: failedReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: targetDoc,
+            options: [],
+          });
+        }
+
+        if (ocrStat === "pending" || ocrStat === "processing") {
+          const pendingReply =
+            {
+              english:
+                "Your document is currently being analyzed. Please wait a moment for processing to complete.",
+              gujarati:
+                "તમારો દસ્તાવેજ હાલમાં વિશ્લેષિત થઈ રહ્યો છે. કૃપા કરીને પ્રક્રિયા પૂર્ણ થાય ત્યાં સુધી થોડીવાર રાહ જુઓ.",
+              hindi:
+                "आपके दस्तावेज़ का विश्लेषण किया जा रहा है। कृपया प्रक्रिया पूरी होने तक प्रतीक्षा करें।",
+              marathi:
+                "तुमच्या दस्तऐवजाचे विश्लेषण सुरू आहे. कृपया प्रक्रिया पूर्ण होईपर्यंत થોડા वेळ थांबा.",
+              tamil:
+                "உங்கள் ஆவணம் தற்போது பகுப்பாய்வு செய்யப்படுகிறது. செயலாக்கம் முடியும் வரை காத்திருக்கவும்.",
+            }[userLangForQA] ||
+            "Your document is currently being analyzed. Please wait a moment for processing to complete.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: pendingReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: targetDoc,
+            options: [],
+          });
+        }
+
+        const chatResult = await chatService.sendMessage({
+          userId,
+          question: message,
+          sessionId: effectiveSessionId,
+          documentId: [targetDocId],
+          scopeMode: "SINGLE_DOCUMENT",
+          preferredLanguage: userLangForQA,
+          onChunk,
+          abortSignal,
+        });
+
+        state.documentId = targetDocId;
+        state.chatSessionId = effectiveSessionId;
+        await saveOnboardingState(userId, state);
+
+        const responsePayload = buildUnifiedResponse({
+          mode: "ONBOARDING_DOCUMENT_QA",
+          actionType: "ONBOARDING_DOCUMENT_QA",
+          reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
+          sessionId: effectiveSessionId,
+          citations: chatResult?.citations || [],
+          onboardingState: state,
+          options: chatResult?.options || [],
+          document: targetDoc,
+          chart: chatResult?.chart || null,
+        });
+        responsePayload.action = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.actionType = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.mode = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.state = state;
+        responsePayload.canSkip = canSkipOnboarding(state);
+        return responsePayload;
+      }
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
@@ -1670,8 +2048,12 @@ class V1Service {
       });
 
       return buildUnifiedResponse({
-        mode: "NORMAL_CHAT",
-        actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
+        mode: chatResult?.mode || "NORMAL_CHAT",
+        actionType: chatResult?.requireSelection
+          ? "REQUIRE_DOCUMENT_SELECTION"
+          : chatResult?.chart
+            ? "MEDICAL_TREND_CHART"
+            : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
         sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || effectiveSessionId,
         citations: chatResult?.citations || [],
@@ -1683,6 +2065,7 @@ class V1Service {
         reports: chatResult?.reports || [],
         allowMultiSelect: chatResult?.allowMultiSelect || false,
         selectionType: chatResult?.selectionType || null,
+        chart: chatResult?.chart || null,
       });
     } catch (error) {
       console.error(`[UnifiedChat] Unified chat processing error for userId=${userId}:`, error);
@@ -1786,6 +2169,9 @@ class V1Service {
   }
 
   async getOnboardingHistory(userId) {
+    if (typeof userId === "object" && userId !== null && userId.userId) {
+      userId = userId.userId;
+    }
     if (!userId) {
       throw new UnauthorizedException("Unauthorized access");
     }
@@ -1861,11 +2247,29 @@ class V1Service {
       }
     }
     let chatSessionId = resumableState?.chatSessionId || null;
+    if (chatSessionId && userId) {
+      // Defensive guard: Ensure session is not a canonical Smart QA session
+      try {
+        const sessionMeta = await chatSessionRepository.findSessionById(chatSessionId, userId);
+        if (sessionMeta?.metadata?.isCanonical && sessionMeta?.metadata?.type !== "ONBOARDING") {
+          chatSessionId = null;
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (!chatSessionId && userId) {
       try {
-        if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
-          const canonical = await chatService.getOrCreateCanonicalSession({ userId });
-          chatSessionId = canonical?.id || null;
+        const existingOnboarding = await chatSessionRepository.findOnboardingSession(userId);
+        if (existingOnboarding) {
+          chatSessionId = existingOnboarding.id;
+        } else if (
+          !patient?.onboardingCompleted &&
+          chatService &&
+          typeof chatService.createOnboardingSession === "function"
+        ) {
+          const onboarding = await chatService.createOnboardingSession({ userId });
+          chatSessionId = onboarding?.id || null;
         }
       } catch {
         // ignore
@@ -1960,4 +2364,8 @@ class V1Service {
     };
   }
 }
-module.exports = new V1Service();
+
+const serviceInstance = new V1Service();
+serviceInstance.isOnboardingMedicalQuestion = isOnboardingMedicalQuestion;
+serviceInstance.v1Service = serviceInstance;
+module.exports = serviceInstance;
