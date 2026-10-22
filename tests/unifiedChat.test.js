@@ -77,7 +77,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
     expect(normalized.dosePerIntake).toBe(1);
     expect(normalized.frequency).toBe("Three Times Daily");
     expect(normalized.medicationSchedule.Morning).toBe("09:00:00");
-    expect(normalized.totalQuantity).toBe(10);
+    expect(normalized.totalQuantity).toBe(30);
   });
 
   describe("normalizeCreateMedicationInput Frequency, Dose & Schedule Slot Normalization", () => {
@@ -2871,7 +2871,7 @@ describe("UnifiedChat Helper & Intent Unit Tests", () => {
       expect(normalized.totalQuantity).toBe(20);
       expect(normalized.isSaved).toBeUndefined();
       expect(normalized.dbId).toBeUndefined();
-      expect(normalized.refillAlert).toBeUndefined();
+      expect(normalized.refillAlert).toBe(true);
       expect(normalized.dosage).toBeUndefined();
     });
 

@@ -3,8 +3,16 @@ const router = express.Router();
 const medicationReminderController = require("../controllers/medicationReminder.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
+const { validateRequest } = require("../middlewares/validateRequest");
+const { createReminderSchema } = require("../validations");
+
 // CREATE
-router.post("/create", verifyToken, medicationReminderController.createReminder);
+router.post(
+  "/create",
+  verifyToken,
+  validateRequest({ body: createReminderSchema }),
+  medicationReminderController.createReminder,
+);
 
 // GET ALL MAIN REMINDERS
 router.get("/", verifyToken, medicationReminderController.getAllReminders);

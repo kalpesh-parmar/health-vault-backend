@@ -1,5 +1,6 @@
 const { onboardingService } = require("../../src/services/ai/chat/onboarding.service");
 const { chatService } = require("../../src/services/ai/chat/chat.service");
+const ocrService = require("../../src/services/ocr.service");
 
 const documentIdentityService = require("../../src/services/documentIdentity.service");
 
@@ -386,6 +387,53 @@ describe("ASK_REPORT Persistence & Dashboard Navigation Regression Suite", () =>
       expect(mapped.text).toBe("Legacy medical summary text without structured document metadata.");
       expect(mapped.action).toBe("ASK_REPORT");
       expect(mapped.document).toBeNull();
+    });
+  });
+
+  describe("5. Suggested Questions on ASK_REPORT Card Routing", () => {
+    test("routes suggested report question to chatService.sendMessage and returns clinical response with navigation options", async () => {
+      const sendSpy = jest.spyOn(chatService, "sendMessage").mockResolvedValueOnce({
+        reply: "આ દસ્તાવેજ દર્શાવે છે કે દર્દીને નેફ્રોટિક સિન્ડ્રોમ છે.",
+        options: [],
+      });
+
+      const body = {
+        sessionId: "sess-test-report-q",
+        message: "આ દસ્તાવેજનો અર્થ શું છે?",
+        documentId: ["doc-uuid-123"],
+        preferredLanguage: "gujarati",
+        state: {
+          chatSessionId: "sess-test-report-q",
+          currentStep: "ASK_REPORT",
+          isOnboardingCompleted: false,
+          documentId: "doc-uuid-123",
+          preferredLanguage: "gujarati",
+          medicationFlowDone: true,
+          medicinesConfirmed: true,
+          medicinesSavedToDb: true,
+          bloodGroupSkipped: false,
+          allergiesSkipped: true,
+        },
+      };
+
+      const result = await ocrService.onboardingChat("patient-1", body);
+
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "patient-1",
+          question: "આ દસ્તાવેજનો અર્થ શું છે?",
+          documentId: ["doc-uuid-123"],
+          preferredLanguage: "gujarati",
+        }),
+      );
+
+      expect(result.mode).toBe("NORMAL_CHAT");
+      expect(result.actionType).toBe("NORMAL_CHAT");
+      expect(result.reply).toBe("આ દસ્તાવેજ દર્શાવે છે કે દર્દીને નેફ્રોટિક સિન્ડ્રોમ છે.");
+      expect(result.onboardingState.currentStep).toBe("ASK_REPORT");
+      expect(result.onboardingState.canSkip).toBe(true);
+      expect(result.options).toEqual([]);
     });
   });
 });

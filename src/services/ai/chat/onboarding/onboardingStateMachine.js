@@ -325,6 +325,10 @@ function canSkipOnboarding(state) {
     return false;
   }
 
+  if (state.hasSkipped === true) {
+    return true;
+  }
+
   if (state.pendingProfileConflict === true) {
     return false;
   }
@@ -644,6 +648,9 @@ function mergeAndApplyProfile(state, sourceChoice = null, editedData = null) {
  * @returns {string} Step name
  */
 function computeCurrentStep(state) {
+  if (state.hasSkipped) {
+    return state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
+  }
   if (state.isOnboardingCompleted && state.medicationFlowDone) {
     if (state.currentStep === "COMPLETE" || state.currentStep === "POST_ONBOARDING") {
       return state.currentStep;

@@ -96,23 +96,26 @@ function formatMedicationSchedule(sched, lang = "english") {
     const entries = Object.entries(obj).filter(([, v]) => v);
     if (!entries.length) return "";
     return entries
-      .map(([slot, time]) => {
-        let displayTime = time;
-        if (typeof time === "string" && /^\d{1,2}:\d{2}(:\d{2})?$/.test(time)) {
-          const parts = time.split(":");
-          const h = parseInt(parts[0], 10);
-          const m = parts[1];
-          const ampm = h >= 12 ? "PM" : "AM";
-          const h12 = h % 12 || 12;
-          displayTime = `${String(h12).padStart(2, "0")}:${m} ${ampm}`;
-        }
-        const sKey = String(slot || "").toLowerCase();
-        const localizedSlot = slotMap[sKey]
-          ? slotMap[sKey][lang] || slotMap[sKey].english
-          : slot
-            ? slot.charAt(0).toUpperCase() + slot.slice(1)
-            : "";
-        return `${localizedSlot}: ${displayTime}`;
+      .flatMap(([slot, time]) => {
+        const timeArray = Array.isArray(time) ? time : [time];
+        return timeArray.map((singleTime) => {
+          let displayTime = singleTime;
+          if (typeof singleTime === "string" && /^\d{1,2}:\d{2}(:\d{2})?$/.test(singleTime)) {
+            const parts = singleTime.split(":");
+            const h = parseInt(parts[0], 10);
+            const m = parts[1];
+            const ampm = h >= 12 ? "PM" : "AM";
+            const h12 = h % 12 || 12;
+            displayTime = `${String(h12).padStart(2, "0")}:${m} ${ampm}`;
+          }
+          const sKey = String(slot || "").toLowerCase();
+          const localizedSlot = slotMap[sKey]
+            ? slotMap[sKey][lang] || slotMap[sKey].english
+            : slot
+              ? slot.charAt(0).toUpperCase() + slot.slice(1)
+              : "";
+          return `${localizedSlot}: ${displayTime}`;
+        });
       })
       .join(", ");
   }

@@ -1,13 +1,28 @@
 const express = require("express");
 const medicationController = require("../controllers/medication.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
+const { validateRequest } = require("../middlewares/validateRequest");
+const { batchCreateMedicationSchema, createMedicationSchema } = require("../validations");
 const router = express.Router();
 
 // check duplicate
 router.post("/check-duplicate", verifyToken, medicationController.checkDuplicateMedication);
 
 // create
-router.post("/create", verifyToken, medicationController.createMedication);
+router.post(
+  "/create",
+  verifyToken,
+  validateRequest({ body: createMedicationSchema }),
+  medicationController.createMedication,
+);
+
+// batch create
+router.post(
+  "/batch-create",
+  verifyToken,
+  validateRequest({ body: batchCreateMedicationSchema }),
+  medicationController.batchCreateMedications,
+);
 
 // list of all data
 router.get("/list", verifyToken, medicationController.getMedicationList);

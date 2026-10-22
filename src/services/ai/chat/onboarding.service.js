@@ -3010,7 +3010,17 @@ class OnboardingService {
     const canSkipNow = canSkipOnboarding(state);
     let completionMessage = null;
     let completionMessageId = null;
-    if (canSkipNow && !state.completionMessageSent) {
+    const shouldSendCompletionNotice =
+      canSkipNow &&
+      !state.completionMessageSent &&
+      !state.hasSkipped &&
+      !isNavigationOnly &&
+      !isSilentCall &&
+      state.selectedOption !== "DASHBOARD" &&
+      state.currentStep !== "COMPLETE" &&
+      state.currentStep !== "POST_ONBOARDING" &&
+      state.currentStep !== "REGISTER_USER";
+    if (shouldSendCompletionNotice) {
       state.completionMessageSent = true;
       completionMessage = await getLocalizedText(
         "onboarding.canSkip.message",

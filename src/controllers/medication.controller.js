@@ -84,8 +84,21 @@ async function batchDeleteMedications(req, res) {
   return successResponse(res, result, messageConstants.MEDICATIONS_BATCH_DELETED);
 }
 
+// batch create medications
+async function batchCreateMedications(req, res) {
+  const result = await medicationService.bulkCreate(req.auth.userId, req.body);
+
+  return successResponse(
+    res,
+    result,
+    messageConstants.MEDICATIONS_BATCH_CREATED,
+    StatusCodes.CREATED,
+  );
+}
+
 module.exports = {
   createMedication,
+  batchCreateMedications,
   updateMedication,
   deleteMedication,
   batchDeleteMedications,

@@ -491,7 +491,8 @@ class V1Service {
         !isOnboardingCompleted &&
         ((Boolean(currentOnboardingStep) &&
           currentOnboardingStep !== "COMPLETE" &&
-          currentOnboardingStep !== "POST_ONBOARDING") ||
+          currentOnboardingStep !== "POST_ONBOARDING" &&
+          currentOnboardingStep !== "ASK_REPORT") ||
           isMedicineAction ||
           isAddMedicineMsg ||
           hasUnconfirmedMedicines);
@@ -1282,7 +1283,6 @@ class V1Service {
         message === "DASHBOARD" ||
         message === "GO_TO_DASHBOARD" ||
         actionType === "DASHBOARD" ||
-        inputState?.currentStep === "ASK_REPORT" ||
         actionType === "ASK_ALLERGIES" ||
         actionType === "ASK_BLOOD_GROUP" ||
         actionType === "MEDICINE_OPTIONS";
@@ -1301,27 +1301,42 @@ class V1Service {
         dbState?.currentStep === "ASK_BLOOD_GROUP" ||
         dbState?.currentStep === "MEDICINE_OPTIONS";
 
-      const isNormalChat =
-        !isMedicineAction &&
-        !isForcedOnboardingAction &&
-        !isIncomingOnboardingStep &&
+      const isAskingReportQuestion =
+        (dbState?.currentStep === "ASK_REPORT" ||
+          inputState?.currentStep === "ASK_REPORT" ||
+          effectiveState?.currentStep === "ASK_REPORT") &&
+        message !== "ASK_REPORT" &&
+        message !== "ASK_ABOUT_REPORT" &&
+        actionType !== "ASK_REPORT" &&
+        message !== "DASHBOARD" &&
+        message !== "GO_TO_DASHBOARD" &&
+        actionType !== "DASHBOARD" &&
+        actionType !== "ADD_MEDICINE" &&
         actionType !== "SKIP_ONBOARDING" &&
-        !hasUnansweredOptional &&
-        !isMedicationFlowPending &&
-        (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted ||
-            isCompletedStep ||
-            isSkippedValid ||
-            dbState?.currentStep === "ASK_REPORT" ||
-            inputState?.currentStep === "ASK_REPORT") &&
-            !isActiveOnboardingStep &&
-            message !== "ASK_REPORT" &&
-            (actionType !== "ONBOARDING" ||
+        !isMedicineAction;
+
+      const isNormalChat =
+        isAskingReportQuestion ||
+        (!isMedicineAction &&
+          !isForcedOnboardingAction &&
+          !isIncomingOnboardingStep &&
+          actionType !== "SKIP_ONBOARDING" &&
+          !hasUnansweredOptional &&
+          !isMedicationFlowPending &&
+          (actionType === "NORMAL_CHAT" ||
+            ((isOnboardingCompleted ||
               isCompletedStep ||
               isSkippedValid ||
               dbState?.currentStep === "ASK_REPORT" ||
               inputState?.currentStep === "ASK_REPORT") &&
-            actionType !== "OTHER_ACTIONS"));
+              !isActiveOnboardingStep &&
+              message !== "ASK_REPORT" &&
+              (actionType !== "ONBOARDING" ||
+                isCompletedStep ||
+                isSkippedValid ||
+                dbState?.currentStep === "ASK_REPORT" ||
+                inputState?.currentStep === "ASK_REPORT") &&
+              actionType !== "OTHER_ACTIONS")));
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
@@ -1516,6 +1531,10 @@ class V1Service {
           }
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
+          state.medicationFlowDone = true;
+          state.medicinesConfirmed = true;
+          state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
+
           if (userId) {
             try {
               await patientRepository.updateById(userId, { onboardingCompleted: true });
@@ -1525,9 +1544,6 @@ class V1Service {
                 err.message,
               );
             }
-          }
-          if (!state.currentStep && dbState && dbState.currentStep) {
-            state.currentStep = dbState.currentStep;
           }
 
           await saveOnboardingState(userId, state);
@@ -1541,6 +1557,7 @@ class V1Service {
             medicines: [],
           });
           responsePayload.canSkip = true;
+          responsePayload.isOnboardingCompleted = true;
           return responsePayload;
         }
 
@@ -1659,26 +1676,60 @@ class V1Service {
 
       const intentResult = detectActionIntent(promptText, userLang);
 
+      let targetDocIds = documentId;
+      if (!targetDocIds || (Array.isArray(targetDocIds) && targetDocIds.length === 0)) {
+        const fallbackDocId =
+          effectiveState?.documentId ||
+          effectiveState?.loadedDocumentId ||
+          dbState?.documentId ||
+          dbState?.loadedDocumentId;
+        if (fallbackDocId) {
+          targetDocIds = Array.isArray(fallbackDocId) ? fallbackDocId : [fallbackDocId];
+        }
+      } else if (!Array.isArray(targetDocIds)) {
+        targetDocIds = [targetDocIds];
+      }
+
       const chatResult = await chatService.sendMessage({
         userId,
         question: promptText,
         sessionId: effectiveSessionId,
-        documentId,
+        documentId: targetDocIds,
         preferredLanguage: userLang,
         onChunk,
         abortSignal,
       });
+
+      const isReportContext =
+        isAskingReportQuestion ||
+        effectiveState?.currentStep === "ASK_REPORT" ||
+        inputState?.currentStep === "ASK_REPORT" ||
+        dbState?.currentStep === "ASK_REPORT";
+
+      const resolvedOptions =
+        intentResult.options.length > 0
+          ? intentResult.options
+          : isReportContext
+            ? []
+            : chatResult?.options || [];
 
       return buildUnifiedResponse({
         mode: "NORMAL_CHAT",
         actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
         sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || effectiveSessionId,
+        onboardingState: effectiveState
+          ? {
+              ...effectiveState,
+              currentStep: "ASK_REPORT",
+              canSkip: true,
+            }
+          : null,
         citations: chatResult?.citations || [],
         suggestedAction: chatResult?.requireSelection
           ? "REQUIRE_DOCUMENT_SELECTION"
           : intentResult.suggestedAction,
-        options: intentResult.options.length > 0 ? intentResult.options : chatResult?.options || [],
+        options: resolvedOptions,
         requireSelection: chatResult?.requireSelection || false,
         reports: chatResult?.reports || [],
         allowMultiSelect: chatResult?.allowMultiSelect || false,
@@ -1723,7 +1774,11 @@ class V1Service {
 
     // If we have an onboarding record, trust its completion status
     if (resumableState) {
-      isOnboardingCompleted = patient.onboardingCompleted || isStateCompleted;
+      isOnboardingCompleted =
+        patient.onboardingCompleted ||
+        isStateCompleted ||
+        resumableState?.hasSkipped === true ||
+        resumableState?.isOnboardingCompleted === true;
     } else {
       // Fallback for users without an onboarding record (legacy)
       isOnboardingCompleted = patient.onboardingCompleted || isBasicProfileComplete;
@@ -1740,27 +1795,29 @@ class V1Service {
       const allergiesSkipped = resumableState?.allergiesSkipped === true;
 
       let effectivePendingStep = "COMPLETE";
-      if (!bloodGroup && !bloodGroupSkipped) {
-        effectivePendingStep = "ASK_BLOOD_GROUP";
-      } else if (
-        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
-        !allergiesSkipped
-      ) {
-        effectivePendingStep = "ASK_ALLERGIES";
-      } else if (
-        resumableState?.medicationFlowDone !== true &&
-        resumableState?.hasSkipped !== true &&
-        resumableState?.medicinesConfirmed !== true
-      ) {
-        const hasExtractedMedicines =
-          (Array.isArray(resumableState?.foundMedicines) &&
-            resumableState.foundMedicines.length > 0) ||
-          (Array.isArray(resumableState?.medicinesToAdd) &&
-            resumableState.medicinesToAdd.length > 0);
-        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
-          effectivePendingStep = "REVIEW_MEDICINES_LIST";
-        } else {
-          effectivePendingStep = "MEDICINE_OPTIONS";
+      if (!resumableState?.hasSkipped) {
+        if (!bloodGroup && !bloodGroupSkipped) {
+          effectivePendingStep = "ASK_BLOOD_GROUP";
+        } else if (
+          (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+          !allergiesSkipped
+        ) {
+          effectivePendingStep = "ASK_ALLERGIES";
+        } else if (
+          resumableState?.medicationFlowDone !== true &&
+          resumableState?.hasSkipped !== true &&
+          resumableState?.medicinesConfirmed !== true
+        ) {
+          const hasExtractedMedicines =
+            (Array.isArray(resumableState?.foundMedicines) &&
+              resumableState.foundMedicines.length > 0) ||
+            (Array.isArray(resumableState?.medicinesToAdd) &&
+              resumableState.medicinesToAdd.length > 0);
+          if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+            effectivePendingStep = "REVIEW_MEDICINES_LIST";
+          } else {
+            effectivePendingStep = "MEDICINE_OPTIONS";
+          }
         }
       }
 
@@ -1800,7 +1857,13 @@ class V1Service {
       // ignore
     }
 
-    if (patient?.onboardingCompleted) {
+    const isCompleted = Boolean(
+      patient?.onboardingCompleted ||
+      resumableState?.isOnboardingCompleted === true ||
+      resumableState?.hasSkipped === true,
+    );
+
+    if (isCompleted) {
       const data = resumableState?.existingUserData || {};
       const bloodGroup = patient?.bloodGroup || data?.bloodGroup;
       const allergies = patient?.allergies || data?.allergies;
@@ -1808,27 +1871,29 @@ class V1Service {
       const allergiesSkipped = resumableState?.allergiesSkipped === true;
 
       let effectivePendingStep = "COMPLETE";
-      if (!bloodGroup && !bloodGroupSkipped) {
-        effectivePendingStep = "ASK_BLOOD_GROUP";
-      } else if (
-        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
-        !allergiesSkipped
-      ) {
-        effectivePendingStep = "ASK_ALLERGIES";
-      } else if (
-        resumableState?.medicationFlowDone !== true &&
-        resumableState?.hasSkipped !== true &&
-        resumableState?.medicinesConfirmed !== true
-      ) {
-        const hasExtractedMedicines =
-          (Array.isArray(resumableState?.foundMedicines) &&
-            resumableState.foundMedicines.length > 0) ||
-          (Array.isArray(resumableState?.medicinesToAdd) &&
-            resumableState.medicinesToAdd.length > 0);
-        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
-          effectivePendingStep = "REVIEW_MEDICINES_LIST";
-        } else {
-          effectivePendingStep = "MEDICINE_OPTIONS";
+      if (!resumableState?.hasSkipped) {
+        if (!bloodGroup && !bloodGroupSkipped) {
+          effectivePendingStep = "ASK_BLOOD_GROUP";
+        } else if (
+          (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+          !allergiesSkipped
+        ) {
+          effectivePendingStep = "ASK_ALLERGIES";
+        } else if (
+          resumableState?.medicationFlowDone !== true &&
+          resumableState?.hasSkipped !== true &&
+          resumableState?.medicinesConfirmed !== true
+        ) {
+          const hasExtractedMedicines =
+            (Array.isArray(resumableState?.foundMedicines) &&
+              resumableState.foundMedicines.length > 0) ||
+            (Array.isArray(resumableState?.medicinesToAdd) &&
+              resumableState.medicinesToAdd.length > 0);
+          if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+            effectivePendingStep = "REVIEW_MEDICINES_LIST";
+          } else {
+            effectivePendingStep = "MEDICINE_OPTIONS";
+          }
         }
       }
 

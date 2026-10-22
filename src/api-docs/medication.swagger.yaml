@@ -234,6 +234,8 @@ components:
             - REPLACE
             - KEEP_EXISTING
             - EDIT
+            - KEEP_NEW
+            - REMOVE_NEW
           example: REPLACE
 
         replaceMedicationId:
@@ -296,6 +298,8 @@ components:
             - REPLACE
             - KEEP_EXISTING
             - EDIT
+            - KEEP_NEW
+            - REMOVE_NEW
           example: REPLACE
 
         replaceMedicationId:
@@ -448,6 +452,19 @@ components:
           example:
             - "123e4567-e89b-12d3-a456-426614174000"
             - "987fc53b-140b-486b-8588-e24a49c259bb"
+    BatchCreateMedicationRequest:
+      oneOf:
+        - type: array
+          items:
+            $ref: "#/components/schemas/CreateMedicationRequest"
+        - type: object
+          required:
+            - medications
+          properties:
+            medications:
+              type: array
+              items:
+                $ref: "#/components/schemas/CreateMedicationRequest"
 
 paths:
   /medications/check-duplicate:
@@ -509,6 +526,34 @@ paths:
 
         "404":
           description: Patient not found
+
+  /medications/batch-create:
+    post:
+      tags:
+        - Medication
+      summary: Batch create multiple medications
+      description: >
+        Creates multiple medications in a single request, resolves duplicates,
+        and automatically sets up medication reminders and scheduled occurrences.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchCreateMedicationRequest"
+      responses:
+        "201":
+          description: Medications batch created successfully
+        "400":
+          description: Bad request / validation error
+        "401":
+          description: Unauthorized
+        "404":
+          description: Patient not found
+        "409":
+          description: Conflict - duplicate medication detected
 
   /medications/{id}:
     get:

@@ -842,8 +842,11 @@ ${chunksContent}`;
 
       let finalDocumentIds = [];
       if (intent === "DOCUMENT" || intent === "COMPARE") {
-        if (documentId && documentId.length > 0) {
-          finalDocumentIds = documentId;
+        if (
+          documentId &&
+          (Array.isArray(documentId) ? documentId.length > 0 : Boolean(documentId))
+        ) {
+          finalDocumentIds = Array.isArray(documentId) ? documentId : [documentId];
         } else {
           const recentDocs = await db
             .select({

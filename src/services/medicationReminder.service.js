@@ -12,12 +12,10 @@ const {
   listOccurrencesQuerySchema,
 } = require("../validations");
 class MedicationReminderService {
-  //create
-  async createReminder(userId, data) {
-    // VALIDATE REQUEST
-    const validData = await validateSchema(createReminderSchema, data);
+  // Helper: create a single medication reminder
+  async _createSingleReminder(userId, medicationId) {
     // VALIDATE MEDICATION OWNERSHIP
-    const medication = await this.validateMedicationOwnership(validData.medicationId, userId);
+    const medication = await this.validateMedicationOwnership(medicationId, userId);
 
     // CHECK EXISTING REMINDER (IDEMPOTENCY)
     const existingReminder = await medicationReminderRepository.findByMedicationId(medication.id);
@@ -31,8 +29,6 @@ class MedicationReminderService {
       medicationId: medication.id,
       reminderBeforeMinutes: medication.reminderBeforeMinutes,
       dosePerIntake: medication.dosePerIntake,
-      // routineBase: medication.frequency,
-      // medicationTime: medication.medicationTime,
     });
 
     // GENERATE OCCURRENCES (with skipPastOccurrences: true)
@@ -46,19 +42,32 @@ class MedicationReminderService {
 
       // Recalculate end date and refill reminder time based on the actual generated occurrences
       const recalculatedEndDate = occurrences[occurrences.length - 1].actualMedicationTime;
-      // const endDateOnly = recalculatedEndDate.toISOString().split("T")[0];
       await medicationRepository.updateById(medication.id, {
         endDate: recalculatedEndDate,
       });
-
-      // const finalRefillTime = refillTime(recalculatedEndDate);
-      // await medicationReminderRepository.updateById(reminder.id, {
-      //   refillReminderTime: finalRefillTime,
-      // });
-      // reminder.refillReminderTime = finalRefillTime;
     }
 
     return reminder;
+  }
+
+  //create
+  async createReminder(userId, data) {
+    // VALIDATE REQUEST
+    const validData = await validateSchema(createReminderSchema, data);
+
+    if (Array.isArray(validData)) {
+      const reminders = [];
+      for (const item of validData) {
+        const medId = typeof item === "string" ? item : item?.medicationId;
+        if (medId) {
+          const rem = await this._createSingleReminder(userId, medId);
+          reminders.push(rem);
+        }
+      }
+      return reminders;
+    }
+
+    return await this._createSingleReminder(userId, validData.medicationId);
   }
   //get all reminders
   async getAllReminders(userId) {

@@ -2,7 +2,6 @@ const { errorConstants } = require("../constants/errorConstants");
 const { NotFoundException } = require("../exceptions/appError");
 const medicationRepository = require("../repositories/medicationRepository");
 const patientRepository = require("../repositories/patientRepository");
-// const medicationReminderService = require("./medicationReminder.service");
 const medicationReminderRepository = require("../repositories/medicationReminderRepository");
 const medicationReminderOccurrenceRepository = require("../repositories/medicationReminderOccurrenceRepository");
 const {
@@ -25,10 +24,12 @@ const {
 } = require("../helpers/medicineNormalize.helper");
 const medicationReminderService = require("./medicationReminder.service");
 const {
+  SUGGESTED_ACTIONS,
   findMedicationDuplicates,
   mapOnboardingMedicationToDb,
-  normalizeMedicationName,
   throwDuplicateConflict,
+  mapFrequencyToDb,
+  getFrequencyCount,
 } = require("../helpers/medication.helper");
 
 class MedicationService {
@@ -40,15 +41,29 @@ class MedicationService {
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
     }
+    const rawRes = validData.resolution || payload.action || payload.resolution || "KEEP_NEW";
+    const res = String(rawRes).trim().toUpperCase().replace(/\s+/g, "_");
+
+    // If Keep Existing or Remove New, strictly DO NOT CREATE in DB
+    if (res === "KEEP_EXISTING" || res === "REMOVE_NEW") {
+      const dupCheck = await this.checkDuplicateMedication(userId, validData);
+      return (
+        dupCheck.matchedMedication ||
+        dupCheck.matchedMedications?.[0] || {
+          keptExisting: true,
+          medicationName: validData.medicationName,
+        }
+      );
+    }
+
     if (!options.skipDuplicateCheck) {
-      const { resolution } = validData;
       const targetId =
         validData.replaceMedicationId ||
         validData.targetMedicationId ||
         validData.duplicateInfo?.matchedMedication?.id ||
         validData.matchedMedicationId;
 
-      if (resolution === "REPLACE" && targetId) {
+      if (res === "REPLACE" && targetId) {
         try {
           await this.deleteMedication(targetId, userId);
         } catch (delErr) {
@@ -60,17 +75,20 @@ class MedicationService {
       } else {
         const dupCheck = await this.checkDuplicateMedication(userId, validData);
         if (dupCheck.hasDuplicate) {
-          if (resolution === "KEEP_EXISTING" && dupCheck.matchedMedication) {
-            return dupCheck.matchedMedication;
-          }
           throwDuplicateConflict(dupCheck);
         }
       }
     }
-    const { resolution, replaceMedicationId, refillAlert, ...medicationPayload } = validData;
-    console.log("resolution", resolution);
-    console.log("refillAlert", refillAlert);
-    console.log("replaceMedicationId", replaceMedicationId);
+    const {
+      resolution: _resolution,
+      replaceMedicationId: _replaceMedicationId,
+      targetMedicationId: _targetMedicationId,
+      matchedMedicationId: _matchedMedicationId,
+      selected: _selected,
+      clientMedId: _clientMedId,
+      refillAlert: _refillAlert,
+      ...medicationPayload
+    } = validData;
 
     const { endDate, dailyConsumption, unit, startDate } =
       calculateMedicationValues(medicationPayload);
@@ -138,9 +156,11 @@ class MedicationService {
         }
       }
     }
-    const { resolution, replaceMedicationId, ...updatePayload } = validData;
-    console.log("resolution", resolution);
-    console.log("replaceMedicationId", replaceMedicationId);
+    const {
+      resolution: _resolution,
+      replaceMedicationId: _replaceMedicationId,
+      ...updatePayload
+    } = validData;
 
     // Find reminder
     const reminder = await medicationReminderRepository.findByMedicationId(id);
@@ -337,7 +357,7 @@ class MedicationService {
         await this.deleteMedication(id, userId);
         deletedIds.push(id);
       } catch (err) {
-        console.log(err);
+        console.error(`[MedicationService] Error deleting medication ${id}:`, err.message);
 
         notFoundIds.push(id);
       }
@@ -456,42 +476,11 @@ class MedicationService {
   }
 
   _mapFrequencyToDb(frequency) {
-    if (!frequency || typeof frequency !== "string") return "Once Daily";
-    const upper = frequency.trim().toUpperCase().replace(/\s+/g, "_");
-    const map = {
-      ONCE: "Once Daily",
-      ONCE_DAILY: "Once Daily",
-      TWICE: "Twice Daily",
-      TWICE_DAILY: "Twice Daily",
-      THRICE: "Three Times Daily",
-      THREE_TIMES_DAILY: "Three Times Daily",
-      AS_NEEDED: "As Needed",
-      "ONCE DAILY": "Once Daily",
-      "TWICE DAILY": "Twice Daily",
-      "THREE TIMES DAILY": "Three Times Daily",
-      "AS NEEDED": "As Needed",
-    };
-    if (map[frequency]) return map[frequency];
-    if (map[upper]) return map[upper];
-    if (upper.includes("THREE") || upper.includes("THRICE") || upper.includes("TID"))
-      return "Three Times Daily";
-    if (upper.includes("TWICE") || upper.includes("BID") || upper.includes("BD"))
-      return "Twice Daily";
-    if (upper.includes("ONCE") || upper.includes("QD") || upper.includes("OD")) return "Once Daily";
-    if (upper.includes("NEED")) return "As Needed";
-    return "Once Daily";
+    return mapFrequencyToDb(frequency);
   }
 
   _getFrequencyCount(frequency) {
-    if (!frequency || typeof frequency !== "string") return 1;
-    const dbFreq = this._mapFrequencyToDb(frequency);
-    const map = {
-      "Once Daily": 1,
-      "Twice Daily": 2,
-      "Three Times Daily": 3,
-      "As Needed": 1,
-    };
-    return map[dbFreq] || 1;
+    return getFrequencyCount(frequency);
   }
 
   // Onboarding Helper: map fields and save single medication
@@ -510,10 +499,44 @@ class MedicationService {
   }
 
   // Canonical Helper: map, validate, and bulk save multiple medications supporting KEEP_NEW, KEEP_EXISTING, REPLACE, and EDIT
-  async bulkCreate(userId, payloadList = [], _options = {}) {
+  async bulkCreate(userId, payload = [], options = {}) {
     const patient = await patientRepository.findById(userId);
     if (!patient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const payloadList = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.medications)
+        ? payload.medications
+        : [];
+
+    if (!payloadList.length) {
+      return [];
+    }
+
+    // Check duplicate medications if not explicitly skipped
+    if (!options.skipDuplicateCheck) {
+      const duplicateChecks = await this.checkDuplicateMedicationsBatch(userId, payloadList);
+      for (const item of duplicateChecks) {
+        if (!item || !item.duplicateInfo?.hasDuplicate) continue;
+
+        const rawRes = item.resolution || item.action || "";
+        const res = String(rawRes).trim().toUpperCase().replace(/\s+/g, "_");
+        if (
+          item.selected === false ||
+          res === "KEEP_EXISTING" ||
+          res === "REMOVE_NEW" ||
+          res === "REPLACE" ||
+          res === "EDIT" ||
+          res === "KEEP_NEW" ||
+          res === "KEEP_BOTH"
+        ) {
+          continue;
+        }
+
+        throwDuplicateConflict(item.duplicateInfo);
+      }
     }
 
     const created = [];
@@ -528,20 +551,26 @@ class MedicationService {
           ? { ...rawItem }
           : { id: rawItem, selected: true };
 
-      if (
-        medData.selected === false ||
-        medData.resolution === "KEEP_EXISTING" ||
-        medData.resolution === "REMOVE_NEW"
-      ) {
-        kept.push(medData);
+      const itemRes = String(medData.resolution || medData.action || "")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "_");
+
+      if (medData.selected === false || itemRes === "KEEP_EXISTING" || itemRes === "REMOVE_NEW") {
+        kept.push(medData.duplicateInfo?.matchedMedication || medData);
         continue;
       }
 
       const normalized = normalizeCreateMedicationInput(medData);
-      const res = normalized.resolution || "KEEP_NEW";
+      const res = String(
+        normalized.resolution || medData.resolution || medData.action || "KEEP_NEW",
+      )
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "_");
 
-      if (res === "KEEP_EXISTING") {
-        kept.push(medData);
+      if (res === "KEEP_EXISTING" || res === "REMOVE_NEW") {
+        kept.push(medData.duplicateInfo?.matchedMedication || medData);
         continue;
       }
 
@@ -579,6 +608,9 @@ class MedicationService {
           }
         } catch (cErr) {
           console.error("[MedicationService] Error creating replaced medication:", cErr.message);
+          if (!options.skipDuplicateCheck) {
+            throw cErr;
+          }
         }
         continue;
       }
@@ -622,6 +654,9 @@ class MedicationService {
               }
             } catch (fbErr) {
               console.error("[MedicationService] Fallback create failed:", fbErr.message);
+              if (!options.skipDuplicateCheck) {
+                throw fbErr;
+              }
             }
           }
         } else {
@@ -642,6 +677,9 @@ class MedicationService {
             }
           } catch (cErr) {
             console.error("[MedicationService] Error creating medication:", cErr.message);
+            if (!options.skipDuplicateCheck) {
+              throw cErr;
+            }
           }
         }
         continue;
@@ -665,6 +703,9 @@ class MedicationService {
         console.error(
           `[MedicationService] Error creating new medication for userId=${userId}: ${cErr.message}`,
         );
+        if (!options.skipDuplicateCheck) {
+          throw cErr;
+        }
         // Idempotency check: if medication was already created in DB for this user, treat as kept/existing
         try {
           const dupCheck = await this.checkDuplicateMedication(userId, normalized);
@@ -701,15 +742,16 @@ class MedicationService {
   }
 
   // CHECK DUPLICATE MEDICATIONS BATCH
-  async checkDuplicateMedicationsBatch(userId, medicineList = []) {
+  async checkDuplicateMedicationsBatch(userId, medicineList = [], options = {}) {
     if (!Array.isArray(medicineList) || medicineList.length === 0) {
       return [];
     }
 
     let activeMedications = [];
-    if (userId) {
+    if (userId && !options.skipDbCheck && !options.inBatchOnly) {
       try {
-        activeMedications = await medicationRepository.findAll(userId);
+        const meds = await medicationRepository.findAll(userId);
+        activeMedications = Array.isArray(meds) ? meds : [];
       } catch (err) {
         console.warn(
           "[MedicationService] Active medications DB query failed in batch duplicate check:",
@@ -722,42 +764,26 @@ class MedicationService {
     const results = medicineList.map((item, index) => {
       const incomingRaw =
         item.medicationName || item.name || item.medicine_name || item.medicineName || "";
-      const incomingNorm = normalizeMedicationName(incomingRaw);
 
       const exactMatches = [];
       const similarMatches = [];
 
-      if (incomingNorm || incomingRaw) {
-        // Check against active DB medications
-        for (const med of activeMedications) {
-          if (
-            (item.isSaved || item.dbId) &&
-            med.id &&
-            (String(med.id) === String(item.dbId) || String(med.id) === String(item.id))
-          ) {
-            continue;
-          }
-
-          const existingRaw = med.medicationName || "";
-          const existingNorm = normalizeMedicationName(existingRaw);
-
-          if (!existingNorm && !existingRaw) continue;
-
-          if (
-            incomingNorm === existingNorm ||
-            incomingRaw.toLowerCase().trim() === existingRaw.toLowerCase().trim()
-          ) {
-            exactMatches.push(med);
-          } else if (
-            incomingNorm.length >= 3 &&
-            existingNorm.length >= 3 &&
-            (incomingNorm.includes(existingNorm) || existingNorm.includes(incomingNorm))
-          ) {
-            similarMatches.push(med);
+      if (incomingRaw && typeof incomingRaw === "string" && incomingRaw.trim()) {
+        // 1. Check against active DB medications using existing findMedicationDuplicates
+        const dbDup = findMedicationDuplicates(
+          activeMedications,
+          incomingRaw,
+          item.isSaved || item.dbId ? item.dbId || item.id : null,
+        );
+        if (dbDup.matchedMedications?.length) {
+          if (dbDup.conflictType === "EXACT_DUPLICATE") {
+            exactMatches.push(...dbDup.matchedMedications);
+          } else {
+            similarMatches.push(...dbDup.matchedMedications);
           }
         }
 
-        // Check against in-batch items (other extracted medicines in same request)
+        // 2. Check against in-batch items (other extracted medicines in same request)
         medicineList.forEach((otherItem, otherIdx) => {
           if (otherIdx === index) return;
           if (item.isSaved || item.dbId) return;
@@ -768,20 +794,32 @@ class MedicationService {
             otherItem.medicine_name ||
             otherItem.medicineName ||
             "";
-          const otherNorm = normalizeMedicationName(otherRaw);
-          if (!otherNorm && !otherRaw) return;
+          if (!otherRaw) return;
 
-          if (
-            incomingNorm === otherNorm ||
-            incomingRaw.toLowerCase().trim() === otherRaw.toLowerCase().trim()
-          ) {
-            if (!exactMatches.some((m) => m.client_med_id === otherItem.client_med_id)) {
-              exactMatches.push({
+          const inBatchDup = findMedicationDuplicates(
+            [{ id: otherItem.id || otherItem.clientMedId, medicationName: otherRaw }],
+            incomingRaw,
+          );
+          if (inBatchDup.hasDuplicate) {
+            const clientMedId = otherItem.clientMedId || otherItem.client_med_id;
+            const alreadyAdded = exactMatches
+              .concat(similarMatches)
+              .some(
+                (m) =>
+                  (clientMedId && m.client_med_id === clientMedId) || m.medicationName === otherRaw,
+              );
+            if (!alreadyAdded) {
+              const matchedEntry = {
                 medicationName: otherRaw,
                 medicationType: otherItem.type || otherItem.medicationType || "TABLET",
                 inBatch: true,
                 index: otherIdx,
-              });
+              };
+              if (inBatchDup.conflictType === "EXACT_DUPLICATE") {
+                exactMatches.push(matchedEntry);
+              } else {
+                similarMatches.push(matchedEntry);
+              }
             }
           }
         });
@@ -799,27 +837,6 @@ class MedicationService {
         matchedMedications = similarMatches;
       }
 
-      const suggestedActions = hasDuplicate
-        ? [
-            {
-              action: "KEEP EXISTING",
-              label: "keep previous medication",
-            },
-            {
-              action: "REPLACE",
-              label: "replace previous medication",
-            },
-            {
-              action: "EDIT",
-              label: "edit previous medication",
-            },
-            {
-              action: "REMOVE NEW",
-              label: "remove incoming new medication",
-            },
-          ]
-        : [];
-
       return {
         ...item,
         duplicateInfo: {
@@ -827,7 +844,7 @@ class MedicationService {
           conflictType,
           matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
           matchedMedications,
-          suggestedActions,
+          suggestedActions: hasDuplicate ? [...SUGGESTED_ACTIONS] : [],
         },
       };
     });

@@ -22,7 +22,19 @@ function getUnitByMedicationType(type) {
   }
 }
 function calculateMedicationValues(data, baseDate = null) {
-  const timesPerDay = Object.keys(data.medicationSchedule || {}).length || 1;
+  let timesPerDay = 0;
+  if (data.medicationSchedule && typeof data.medicationSchedule === "object") {
+    Object.values(data.medicationSchedule).forEach((val) => {
+      if (Array.isArray(val)) {
+        timesPerDay += val.length;
+      } else if (val) {
+        timesPerDay += 1;
+      }
+    });
+  }
+  if (!timesPerDay) {
+    timesPerDay = 1;
+  }
   const dailyConsumption = Math.ceil((data.dosePerIntake || 1) * timesPerDay);
   const quantity = data.remainingQuantity ?? data.totalQuantity;
   const totalDays = Math.ceil(quantity / dailyConsumption);

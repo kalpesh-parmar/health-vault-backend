@@ -50,6 +50,7 @@ const messageConstants = Object.freeze({
   MEDICATION_UPDATED: "Medication updated successfully",
   MEDICATION_DELETED: "Medication deleted successfully",
   MEDICATIONS_BATCH_DELETED: "Medications batch deleted successfully",
+  MEDICATIONS_BATCH_CREATED: "Medications batch created successfully",
   MEDICATION_FETCHED: "Medication fetched successfully",
   MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",

@@ -4,11 +4,31 @@ const {
   reminderOccurrenceStatusValues,
 } = require("../enums/reminderOccurrenceStatus");
 
-const createReminderSchema = z
+const singleReminderObjectSchema = z
   .object({
     medicationId: z.string().uuid(),
   })
-  .strict();
+  .passthrough();
+
+const createReminderSchema = z.union([
+  singleReminderObjectSchema,
+  z.array(z.string().uuid()).min(1),
+  z.array(singleReminderObjectSchema).min(1),
+  z
+    .object({
+      medicationIds: z.array(z.string().uuid()).min(1),
+    })
+    .transform((val) => val.medicationIds),
+  z
+    .object({
+      ids: z.array(z.string().uuid()).min(1),
+    })
+    .transform((val) => val.ids),
+  z
+    .string()
+    .uuid()
+    .transform((val) => ({ medicationId: val })),
+]);
 
 const updateOccurrenceSchema = z
   .object({

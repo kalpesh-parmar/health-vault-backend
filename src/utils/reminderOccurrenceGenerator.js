@@ -59,11 +59,18 @@ function parseTime(t) {
 
 function extractScheduleTimes(schedule = {}) {
   let timesList = [];
-  if (schedule.Morning) timesList.push(schedule.Morning);
-  if (schedule.Noon) timesList.push(schedule.Noon);
-  if (schedule.Night) timesList.push(schedule.Night);
-  if (Array.isArray(schedule.Custom)) {
-    timesList.push(...schedule.Custom);
+  const morningVal = schedule.Morning || schedule.morning;
+  const noonVal = schedule.Noon || schedule.noon;
+  const nightVal = schedule.Night || schedule.night;
+  const customVal = schedule.Custom || schedule.custom;
+
+  if (morningVal) timesList.push(morningVal);
+  if (noonVal) timesList.push(noonVal);
+  if (nightVal) timesList.push(nightVal);
+  if (Array.isArray(customVal)) {
+    timesList.push(...customVal);
+  } else if (customVal) {
+    timesList.push(customVal);
   }
 
   if (timesList.length === 0) {
