@@ -64,6 +64,7 @@ const env = Object.freeze({
   appUrl: process.env.APP_URL || "http://localhost:3000",
   port: numberFromEnv("PORT", 3000),
   nodeEnv: process.env.NODE_ENV || "development",
+  timezone: stringFromEnv("TIMEZONE", "Asia/Kolkata"),
 
   // Database
   databaseUrl: stringFromEnv("DATABASE_URL"),

@@ -788,6 +788,18 @@ class MedicationService {
           if (otherIdx === index) return;
           if (item.isSaved || item.dbId) return;
 
+          const itemKey = item.clientMedId || item.client_med_id || item.id;
+          const otherKey = otherItem.clientMedId || otherItem.client_med_id || otherItem.id;
+          if (itemKey && otherKey && itemKey === otherKey) return;
+
+          if (
+            item.documentId &&
+            otherItem.documentId &&
+            String(item.documentId) === String(otherItem.documentId)
+          ) {
+            return;
+          }
+
           const otherRaw =
             otherItem.medicationName ||
             otherItem.name ||

@@ -14,6 +14,19 @@ const REQUIRE_SELECTION_I18N = {
   tamil: "நிச்சயமாக, தயவுசெய்து நீங்கள் ஒப்பிட வேண்டிய உங்கள் ஆவணத்தைத் தேர்ந்தெடுக்கவும்.",
 };
 
+const REQUIRE_SELECTION_REPORT_I18N = {
+  english:
+    "You have multiple reports in your profile. Please select which report you would like to discuss:",
+  gujarati:
+    "તમારા પ્રોફાઇલમાં એક કરતાં વધુ રિપોર્ટ છે. કૃપા કરીને તમે જે રિપોર્ટ વિશે ચર્ચા કરવા માંગો છો તે પસંદ કરો:",
+  hindi:
+    "आपके प्रोफ़ाइल में कई रिपोर्ट हैं। कृपया वह रिपोर्ट चुनें जिसके बारे में आप चर्चा करना चाहते हैं:",
+  marathi:
+    "तुमच्या प्रोफाइलमध्ये अनेक अहवाल आहेत. कृपया तुम्हाला ज्या अहवालाबद्दल चर्चा करायची आहे तो निवडा:",
+  tamil:
+    "உங்கள் சுயவிவரத்தில் பல அறிக்கைகள் உள்ளன. நீங்கள் விவாதிக்க விரும்பும் அறிக்கையைத் தேர்ந்தெடுக்கவும்:",
+};
+
 const AGE_REPLY_I18N = {
   english: {
     success: (dobStr, age) => `Based on your date of birth (${dobStr}), you are ${age} years old.`,
@@ -129,34 +142,84 @@ const SUMMARY_KEYWORDS = [
   "explain my report",
   "tell me about report",
   "give me report summary",
-  // Gujarati
+  "give report summary",
+  // Gujarati Native
   "રિપોર્ટ નો સારાંશ",
   "મને મારા રિપોર્ટ વિશે કહો",
   "મારો રિપોર્ટ સમજાવો",
   "રિપોર્ટ સમજાવો",
   "રિપોર્ટ નો સારાંશ આપો",
   "મારા રિપોર્ટ વિશે જણાવો",
-  // Hindi
+  "મારા રિપોર્ટમાં શું લખેલું છે",
+  "રિપોર્ટમાં શું છે",
+  // Gujarati Romanized (Gujlish)
+  "mara report ni summary aapo",
+  "mara report ni summary apo",
+  "mara report ni summary aapom",
+  "mara report ni summary",
+  "report ni summary aapo",
+  "report ni summary apo",
+  "report ni summary",
+  "report summary aapo",
+  "report summary apo",
+  "mara report no saransh aapo",
+  "mara report no saransh apo",
+  "mara report no saransh",
+  "report no saransh aapo",
+  "report no saransh apo",
+  "report no saransh",
+  "maro report samjhavo",
+  "maro report samjhao",
+  "report samjhavo",
+  "report samjhao",
+  "mara report vishe kaho",
+  "mara report vishe janavo",
+  "mara report ma su chhe",
+  "mara report ma shu chhe",
+  // Hindi Native
   "मेरी रिपोर्ट का सारांश",
   "मुझे मेरी रिपोर्ट के बारे में बताएं",
   "रिपोर्ट का सारांश",
   "मेरी रिपोर्ट समझाएं",
   "मेरी रिपोर्ट का सारांश दें",
   "मुझे रिपोर्ट के बारे में बताएं",
-  // Marathi
-  "માझ्या અહવાલાચા સારાંશ",
+  // Hindi Romanized (Hinglish)
+  "meri report ki summary do",
+  "meri report ki summary",
+  "report ki summary do",
+  "report ki summary",
+  "meri report samjhao",
+  "meri report samjhaiye",
+  "report samjhao",
+  "report samjhaiye",
+  "meri report ke bare me batao",
+  "meri report ke bare me bataiye",
+  // Marathi Native
+  "माझ्या अहवालाचा सारांश",
   "मला माझ्या अहवालाबद्दल सांगा",
-  "અહવાલાચા સારાંશ",
-  "માઝા અહવાલ સ્પષ્ટ કરા",
-  "માझ्या અહવાલાચા સારાંશ દ્યા",
+  "अहवालाचा सारांश",
   "माझा अहवाल स्पष्ट करा",
   "माझ्या अहवालाचा सारांश द्या",
-  // Tamil
+  // Marathi Romanized
+  "majhya report chi summary dya",
+  "majhya report chi summary",
+  "report chi summary dya",
+  "report chi summary",
+  "majhya report cha saransh dya",
+  "majha report sanga",
+  "majha report samjun sanga",
+  // Tamil Native
   "என் அறிக்கையின் சுருக்கம்",
   "என் அறிக்கை பற்றி சொல்லுங்கள்",
   "அறிக்கையின் சுருக்கம்",
   "என் அறிக்கையை விளக்குங்கள்",
   "என் அறிக்கையின் சுருக்கத்தை கொடுங்கள்",
+  // Tamil Romanized
+  "en report summary kudu",
+  "en report summary",
+  "report summary kudu",
+  "en report pathi sollu",
+  "en report pathi sollunga",
 ];
 
 const PREDEFINED_QUESTIONS_I18N = {
@@ -876,6 +939,7 @@ const DOCUMENT_REPLY_I18N = {
 module.exports = {
   NO_CONTEXT_REPLY_I18N,
   REQUIRE_SELECTION_I18N,
+  REQUIRE_SELECTION_REPORT_I18N,
   AGE_REPLY_I18N,
   AGE_KEYWORDS,
   SUMMARY_KEYWORDS,

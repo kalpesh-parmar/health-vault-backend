@@ -436,4 +436,62 @@ describe("ASK_REPORT Persistence & Dashboard Navigation Regression Suite", () =>
       expect(result.options).toEqual([]);
     });
   });
+
+  describe("6. ASK_REPORT Button Selection Routing Isolation", () => {
+    test("routes ASK_REPORT action to state machine and returns report summary card instead of RAG QA", async () => {
+      const sendSpy = jest.spyOn(chatService, "sendMessage");
+
+      const syntheticDoc = {
+        id: "doc-uuid-card-1",
+        fileName: "Blood_Test_Report.pdf",
+        documentType: "LAB_REPORT",
+        reportDate: "2026-03-15",
+        hospitalName: "Apollo Hospital",
+        doctorName: "Dr. Sharma",
+        summary: "Hemoglobin is 13.5 g/dL (normal). Blood glucose fasting is 95 mg/dL (normal).",
+        patientName: "John Doe",
+        structuredExtractedData: {
+          patientInfo: { name: "John Doe", fullName: "John Doe", age: 45, gender: "Male" },
+        },
+        abnormalResults: [],
+        normalResults: [{ testName: "Hemoglobin", value: "13.5", unit: "g/dL", range: "12-16" }],
+      };
+
+      documentIdentityService.resolveCanonicalDocument.mockResolvedValue(syntheticDoc);
+
+      const body = {
+        sessionId: "sess-ask-report-btn",
+        message: "ASK_REPORT",
+        actionType: "ASK_REPORT",
+        displayLabel: "Ask About My Report",
+        documentId: ["doc-uuid-card-1"],
+        preferredLanguage: "english",
+        state: {
+          userId: "patient-1",
+          chatSessionId: "sess-ask-report-btn",
+          currentStep: "MEDICINE_OPTIONS",
+          documentId: "doc-uuid-card-1",
+          documentRecord: syntheticDoc,
+          documentData: syntheticDoc,
+          preferredLanguage: "english",
+          medicationFlowDone: true,
+          medicinesConfirmed: true,
+          medicinesSavedToDb: true,
+        },
+      };
+
+      const result = await ocrService.onboardingChat("patient-1", body);
+
+      // Must NOT route to RAG sendMessage for ASK_REPORT button selection
+      expect(sendSpy).not.toHaveBeenCalled();
+
+      // Must return ASK_REPORT action and summary card document payload
+      expect(result.action).toBe("ASK_REPORT");
+      expect(result.actionType).toBe("ASK_REPORT");
+      expect(result.document).toBeDefined();
+      expect(result.document.id).toBe("doc-uuid-card-1");
+      expect(result.reportSummary).toBe(syntheticDoc.summary);
+      expect(Array.isArray(result.suggestedQuestions)).toBe(true);
+    });
+  });
 });
