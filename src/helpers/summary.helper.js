@@ -164,8 +164,22 @@ function extractKeyPoints(structuredData = {}, summaryText = "", _language = "en
     }
   }
 
-  // 4. Fallback to summary bullet points if structured items yielded few findings
-  if (points.length === 0 && summaryText && typeof summaryText === "string") {
+  // 4. Fallback to summary bullet points if structured items yielded few findings (skip for image-only documents)
+  const isNoText = Boolean(
+    structuredData?.isNoText === true ||
+    structuredData?.additionalInformation?.isNoText === true ||
+    String(
+      structuredData?.subType ||
+        structuredData?.documentSubtype ||
+        structuredData?.documentInfo?.documentSubtype ||
+        "",
+    )
+      .toLowerCase()
+      .startsWith("image_only") ||
+    structuredData?.imagingOverview,
+  );
+
+  if (!isNoText && points.length === 0 && summaryText && typeof summaryText === "string") {
     const sentences = summaryText
       .split(/(?<=[.!?])\s+|\n+/)
       .map((s) => s.trim())
@@ -340,10 +354,21 @@ async function synthesizeClinicalSummary({
   };
 }
 
+const {
+  resolveDocumentSummary,
+  isFallbackDisclosureText,
+  getLocalizedFallbackDisclosure,
+  PIPELINE_VERSION,
+} = require("./reportPayload.helper");
+
 module.exports = {
   SUPPORTED_LANGUAGES,
   normalizeLanguage,
   buildSummaryPrompt,
   extractKeyPoints,
   synthesizeClinicalSummary,
+  resolveDocumentSummary,
+  isFallbackDisclosureText,
+  getLocalizedFallbackDisclosure,
+  PIPELINE_VERSION,
 };
