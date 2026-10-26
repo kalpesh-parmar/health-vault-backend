@@ -228,8 +228,8 @@ class VisionModelService:
         max_inline_bytes: int,
         page_concurrency: int = 4,
         max_image_side: int = 1500,
-        num_ctx: int = 4096,
-        num_predict: int = 1536,
+        num_ctx: int = 8192,
+        num_predict: int = 4096,
     ) -> None:
         self.api_key = (api_key or "").strip()
         self.base_url = (base_url or "").rstrip("/")
@@ -317,6 +317,8 @@ class VisionModelService:
         max_pages: int = 1,
         prompt: str | None = None,
         script_hint: str | None = None,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         del filename, max_pages, kwargs
@@ -326,9 +328,23 @@ class VisionModelService:
         if resolved == "image/tiff":
             raise VisionModelRequestError("TIFF is not supported by the configured single-model OCR path")
         effective_prompt = prompt or (build_ocr_prompt(script_hint) if script_hint else None)
-        return await self._extract(image_bytes, mime_type=resolved, prompt=effective_prompt)
+        return await self._extract(
+            image_bytes,
+            mime_type=resolved,
+            prompt=effective_prompt,
+            num_predict=num_predict,
+            num_ctx=num_ctx,
+        )
 
-    async def _extract(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> dict[str, Any]:
+    async def _extract(
+        self,
+        data: bytes,
+        *,
+        mime_type: str,
+        prompt: str | None = None,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+    ) -> dict[str, Any]:
         started = time.monotonic()
         if len(data) > self.max_inline_bytes:
             raise VisionModelRequestError(
@@ -351,7 +367,8 @@ class VisionModelService:
                 processed_mime = "image/jpeg"
 
         prompt_hash = hashlib.sha256((prompt or "").encode("utf-8")).hexdigest()[:8] if prompt else "default"
-        cache_key = f"{self.model}:{processed_mime}:{hashlib.sha256(processed_data).hexdigest()}:{prompt_hash}"
+        opts_suffix = f":{num_predict}:{num_ctx}" if (num_predict or num_ctx) else ""
+        cache_key = f"{self.model}:{processed_mime}:{hashlib.sha256(processed_data).hexdigest()}:{prompt_hash}{opts_suffix}"
         cached = self._cache.get(cache_key)
         if cached is not None:
             payload = json.loads(json.dumps(cached))
@@ -364,7 +381,13 @@ class VisionModelService:
             return payload
 
         request_started = time.monotonic()
-        raw, finish_reason = await self._generate(processed_data, mime_type=processed_mime, prompt=prompt)
+        raw, finish_reason = await self._generate(
+            processed_data,
+            mime_type=processed_mime,
+            prompt=prompt,
+            num_predict=num_predict,
+            num_ctx=num_ctx,
+        )
         request_ms = int((time.monotonic() - request_started) * 1000)
         parse_started = time.monotonic()
         _log_raw_ai_response(raw, model=self.model, mime_type=processed_mime)
@@ -420,7 +443,7 @@ class VisionModelService:
             vision_summary=vision_summary,
             started=started,
             request_ms=request_ms,
-            truncated=finish_reason == "MAX_TOKENS",
+            truncated=finish_reason in {"length", "MAX_TOKENS"},
             model=self.model,
             telemetry=telemetry,
             downscale_info=downscale_info,
@@ -600,7 +623,15 @@ class VisionModelService:
         payload["metrics"]["page_concurrency"] = self.page_concurrency
         return payload
 
-    async def _generate(self, data: bytes, *, mime_type: str, prompt: str | None = None) -> tuple[str, str | None]:
+    async def _generate(
+        self,
+        data: bytes,
+        *,
+        mime_type: str,
+        prompt: str | None = None,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+    ) -> tuple[str, str | None]:
         actual_prompt = prompt or _OCR_PROMPT
         try:
             client = self._ensure_client()
@@ -610,6 +641,8 @@ class VisionModelService:
                     mime_type=mime_type,
                     prompt=actual_prompt,
                     json_only=False,
+                    num_predict=num_predict,
+                    num_ctx=num_ctx,
                 )
             except TypeError:
                 return await client.generate_json_from_bytes(

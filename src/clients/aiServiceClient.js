@@ -92,7 +92,7 @@ class AiServiceClient {
     );
   }
 
-  async validateMedicalDocument({ file, fileName, mimeType, maxPages = 1, timeout }) {
+  async validateMedicalDocument({ file, fileName, mimeType, maxPages, timeout }) {
     const tFormBuildStart = Date.now();
     const formData = new FormData();
 

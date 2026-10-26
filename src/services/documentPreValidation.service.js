@@ -267,7 +267,6 @@ async function validatePreUploadDocument(file, options = {}) {
         },
         fileName: originalName,
         mimeType: payloadMime,
-        maxPages: 1, // evaluate first page only for rapid validation
         timeout: env.validationTimeoutMs || 30000,
       });
     });

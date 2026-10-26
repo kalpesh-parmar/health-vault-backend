@@ -50,6 +50,9 @@ class AiClient:
         prompt: str,
         temperature: float = 0,
         json_only: bool = True,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+        **kwargs: Any,
     ) -> tuple[str, str | None]:
         raise NotImplementedError
 
@@ -146,6 +149,9 @@ class GoogleGenAiClient(AiClient):
         prompt: str,
         temperature: float = 0,
         json_only: bool = True,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+        **kwargs: Any,
     ) -> tuple[str, str | None]:
         from google.genai import types
 
@@ -286,6 +292,9 @@ class ChatCompletionsClient(AiClient):
         prompt: str,
         temperature: float = 0,
         json_only: bool = True,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+        **kwargs: Any,
     ) -> tuple[str, str | None]:
         """Extract structured JSON/text from image bytes.
 
@@ -306,12 +315,15 @@ class ChatCompletionsClient(AiClient):
         actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         encode_ms = int((time.monotonic() - t_enc_start) * 1000)
 
+        effective_num_predict = int(num_predict or self.config.num_predict or 4096)
+        effective_num_ctx = int(num_ctx or self.config.num_ctx or 8192)
+
         options: dict[str, Any] = {
             "temperature": temperature,
-            "num_predict": self.config.num_predict or 4096,
+            "num_predict": effective_num_predict,
         }
-        if self.config.num_ctx:
-            options["num_ctx"] = self.config.num_ctx
+        if effective_num_ctx:
+            options["num_ctx"] = effective_num_ctx
 
         messages: list[dict[str, Any]] = [
             {
@@ -502,6 +514,10 @@ class ChatCompletionsClient(AiClient):
                 "ollama_eval_count": eval_count,
                 "ollama_eval_ms": ollama_eval_ms,
                 "tokens_per_sec": tokens_per_sec,
+                "effective_num_ctx": payload.get("options", {}).get("num_ctx"),
+                "effective_num_predict": payload.get("options", {}).get("num_predict"),
+                "done_reason": parsed.get("done_reason"),
+                "eval_duration": eval_dur,
             }
             parsed["_telemetry"] = telemetry
 
@@ -715,6 +731,9 @@ class AnthropicMessagesClient(AiClient):
         prompt: str,
         temperature: float = 0,
         json_only: bool = True,
+        num_predict: int | None = None,
+        num_ctx: int | None = None,
+        **kwargs: Any,
     ) -> tuple[str, str | None]:
         actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         payload = {

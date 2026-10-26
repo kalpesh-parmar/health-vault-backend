@@ -1308,6 +1308,27 @@ class OcrStageHandler:
                     has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_text, flags=re.IGNORECASE))
                     cleaned_check = strip_think_tokens(raw_text)
 
+                    t1_info = (res.get("metrics") or {}).get("telemetry") or {}
+                    f1_reason = (
+                        res.get("finish_reason")
+                        or (res.get("metrics") or {}).get("finish_reason")
+                        or (res.get("pages") and res["pages"][0].get("finish_reason"))
+                    )
+                    logger.info(
+                        "vlm_page_ocr_diagnostic",
+                        extra={
+                            "model": getattr(self.vision, "model", "qwen3-vl:latest"),
+                            "page": page_num,
+                            "attempt": 1,
+                            "effective_num_ctx": t1_info.get("effective_num_ctx") or getattr(self.vision, "num_ctx", 8192),
+                            "effective_num_predict": t1_info.get("effective_num_predict") or getattr(self.vision, "num_predict", 4096),
+                            "done_reason": t1_info.get("done_reason") or f1_reason,
+                            "prompt_eval_count": t1_info.get("ollama_prompt_eval_count"),
+                            "eval_count": t1_info.get("ollama_eval_count"),
+                            "eval_duration": t1_info.get("eval_duration"),
+                        },
+                    )
+
                     if not raw_text or has_unclosed_think or not cleaned_check:
                         retry_reason = "unclosed think block" if has_unclosed_think else "empty response"
                         logger.info("Page %d VLM returned %s; attempting direct transcription retry", page_num, retry_reason)
@@ -1330,9 +1351,105 @@ class OcrStageHandler:
                         except Exception as retry_err:
                             logger.warning("Page %d VLM retry failed: %s", page_num, retry_err)
 
+                    elif f1_reason in {"length", "MAX_TOKENS"}:
+                        initial_finish_reason = str(f1_reason)
+                        retry_finish_reason: str | None = None
+                        retry_error: str | None = None
+
+                        base_predict = int(getattr(self.vision, "num_predict", 4096) or 4096)
+                        base_ctx = int(getattr(self.vision, "num_ctx", 8192) or 8192)
+                        prev_eval = t1_info.get("ollama_eval_count") or base_predict
+                        prompt_tokens = t1_info.get("ollama_prompt_eval_count") or 1500
+
+                        escalated_predict = min(8192, max(base_predict + 2048, int(prev_eval) + 2048))
+                        escalated_ctx = max(base_ctx, min(16384, int(prompt_tokens) + escalated_predict + 512))
+
+                        logger.info(
+                            "Page %d VLM output truncated with finish_reason=%s (eval_count=%s, limit=%s); initiating single bounded escalation retry (predict=%d, ctx=%d)",
+                            page_num,
+                            f1_reason,
+                            prev_eval,
+                            base_predict,
+                            escalated_predict,
+                            escalated_ctx,
+                        )
+                        try:
+                            retry_res = await self.vision.extract_image(
+                                img_bytes,
+                                filename=f"page_{page_num}.jpg",
+                                mime_type=mime,
+                                max_pages=1,
+                                script_hint=detected_script,
+                                num_predict=escalated_predict,
+                                num_ctx=escalated_ctx,
+                            )
+                            t2_info = (retry_res.get("metrics") or {}).get("telemetry") or {}
+                            f2_reason = (
+                                retry_res.get("finish_reason")
+                                or (retry_res.get("metrics") or {}).get("finish_reason")
+                                or (retry_res.get("pages") and retry_res["pages"][0].get("finish_reason"))
+                            )
+                            retry_finish_reason = str(f2_reason) if f2_reason is not None else None
+                            logger.info(
+                                "vlm_page_ocr_diagnostic",
+                                extra={
+                                    "model": getattr(self.vision, "model", "qwen3-vl:latest"),
+                                    "page": page_num,
+                                    "attempt": 2,
+                                    "effective_num_ctx": t2_info.get("effective_num_ctx") or escalated_ctx,
+                                    "effective_num_predict": t2_info.get("effective_num_predict") or escalated_predict,
+                                    "done_reason": t2_info.get("done_reason") or f2_reason,
+                                    "prompt_eval_count": t2_info.get("ollama_prompt_eval_count"),
+                                    "eval_count": t2_info.get("ollama_eval_count"),
+                                    "eval_duration": t2_info.get("eval_duration"),
+                                },
+                            )
+                            retry_text = (retry_res.get("text") or "").strip()
+                            if retry_text and f2_reason not in {"length", "MAX_TOKENS"}:
+                                logger.info(
+                                    "Page %d VLM escalation retry succeeded: %d chars, finish_reason=%s",
+                                    page_num,
+                                    len(retry_text),
+                                    f2_reason,
+                                )
+                                res = retry_res
+                            elif retry_text and f2_reason in {"length", "MAX_TOKENS"}:
+                                logger.warning(
+                                    "Page %d VLM escalation retry also truncated on length: %d chars, finish_reason=%s",
+                                    page_num,
+                                    len(retry_text),
+                                    f2_reason,
+                                )
+                                res = retry_res
+                            else:
+                                # M-1 FIX: Attempt 2 produced empty/unusable output.
+                                # Preserve Attempt 1 non-empty result and length finish reason so that
+                                # PREMATURE_LENGTH_TERMINATION is retained rather than masked as EMPTY_OUTPUT.
+                                logger.warning(
+                                    "Page %d VLM escalation retry produced empty/unusable output (chars=%d, finish_reason=%s); preserving Attempt 1 length termination",
+                                    page_num,
+                                    len(retry_text),
+                                    f2_reason,
+                                )
+                        except Exception as retry_err:
+                            retry_error = str(retry_err)
+                            logger.warning("Page %d VLM escalation retry failed with error: %s", page_num, retry_err)
+
+                        # Attach 2-attempt diagnostic tracking to res metrics
+                        res_metrics = res.setdefault("metrics", {})
+                        res_metrics["initial_finish_reason"] = initial_finish_reason
+                        res_metrics["retry_finish_reason"] = retry_finish_reason
+                        if retry_error:
+                            res_metrics["retry_error"] = retry_error
+
                 stage_timings["vlm_call_ms"] = round((time.perf_counter() - t_vlm) * 1000, 2)
                 stage_timings["ocr_infer_ms"] = stage_timings["vlm_call_ms"]
                 page_telemetry = (res.get("metrics") or {}).get("telemetry") or {}
+                if f1_reason in {"length", "MAX_TOKENS"}:
+                    page_telemetry["initial_finish_reason"] = initial_finish_reason
+                    page_telemetry["retry_finish_reason"] = retry_finish_reason
+                    if retry_error:
+                        page_telemetry["retry_error"] = retry_error
                 t_post_vlm = time.perf_counter()
                 with ocr_timer("postprocess_ms", engine="qwen_vl", page=page_num):
                     page_text, confidence, lines, engine_used, status = self._apply_vision_result(

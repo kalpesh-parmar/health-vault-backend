@@ -182,7 +182,7 @@ class MedicalValidationService:
         raise InvalidDocumentFileError("Unsupported or unreadable document format")
 
     def _select_pages_to_evaluate(self, total_pages: int, max_pages_cap: int = 5) -> list[int]:
-        """Select pages 1-3 plus the last page, deduplicated and capped at max_pages_cap (0-indexed)."""
+        """[Deprecated] Retained for backwards compatibility with tests; not used in sequential traversal."""
         if total_pages <= 0:
             return []
         if total_pages <= 3:
@@ -230,11 +230,13 @@ class MedicalValidationService:
                     p_good=p_good,
                 )
 
-        # 3. Quality head degradation check (< 0.30)
-        if p_good < 0.30:
+        # 3. Explicit non-medical category guard (ID cards, credentials, headshots)
+        # Evaluated before quality and medical criteria to prevent non-medical identity
+        # documents from ever bypassing quality or achieving a medical classification.
+        if l2_key in EXPLICIT_NON_MEDICAL_L2_KEYS:
             return EvaluatedPage(
                 page_number=page_number,
-                label="UNKNOWN",
+                label="NON_MEDICAL",
                 p_medical=p_medical,
                 l2_key=l2_key,
                 p_good=p_good,
@@ -251,7 +253,20 @@ class MedicalValidationService:
                     p_good=p_good,
                 )
 
-        # 5. Medical detection criteria
+        # 5. Quality head degradation check (< 0.30)
+        # Assigns UNKNOWN to low-quality images unless both independent heads
+        # corroborate genuine clinical identity (P_medical >= 0.95 AND clinical L2).
+        is_strong_clinical = (p_medical >= 0.95) and (l2_key in CLINICAL_L2_KEYS)
+        if p_good < 0.30 and not is_strong_clinical:
+            return EvaluatedPage(
+                page_number=page_number,
+                label="UNKNOWN",
+                p_medical=p_medical,
+                l2_key=l2_key,
+                p_good=p_good,
+            )
+
+        # 6. Standard medical detection criteria
         if p_medical >= 0.60 or (p_medical >= 0.50 and l2_key in CLINICAL_L2_KEYS):
             label = "MEDICAL"
         elif p_medical < 0.40 or l2_key in EXPLICIT_NON_MEDICAL_L2_KEYS:
@@ -270,7 +285,7 @@ class MedicalValidationService:
         )
 
     def _apply_ordered_decision_rules(self, pages: list[EvaluatedPage]) -> tuple[bool, float, str]:
-        """Evaluate First-Match-Wins ordered document-level decision rules."""
+        """Evaluate First-Match-Wins ordered document-level decision rules without majority voting or dilution."""
         active_pages = [p for p in pages if p.label != "BLANK"]
         n_active = len(active_pages)
 
@@ -278,34 +293,22 @@ class MedicalValidationService:
         if n_active == 0:
             return False, 0.99, "Document is empty or blank"
 
-        max_p_med = max((p.p_medical for p in active_pages if p.label == "MEDICAL"), default=0.0)
+        # Positive medical determination: Any active page labeled MEDICAL immediately qualifies
+        for p in active_pages:
+            if p.label == "MEDICAL":
+                return True, round(p.p_medical, 4), "Document contains verified clinical records"
+
         max_p_any = max((p.p_medical for p in active_pages), default=0.0)
-        n_medical = sum(1 for p in active_pages if p.label == "MEDICAL")
         n_non_med = sum(1 for p in active_pages if p.label == "NON_MEDICAL")
         n_ad = sum(1 for p in active_pages if p.label == "ADVERTISEMENT")
 
-        # Rule 2 [Anchor Medical Page]
-        # A single high-confidence clinical page takes precedence; never rejected due to ads/bills
-        if any(p.label == "MEDICAL" and p.p_medical >= 0.90 for p in active_pages):
-            return True, round(max_p_med, 4), "Document contains verified clinical records"
+        # Non-Medical rules (when zero medical pages exist)
+        if n_ad == n_active:
+            return False, round(1.0 - max_p_any, 4), "Document contains commercial advertisements or marketing flyers"
+        if n_non_med == n_active or (n_ad + n_non_med) == n_active:
+            return False, round(1.0 - max_p_any, 4), "Document does not contain clinical healthcare records"
 
-        # Rule 3 [Predominantly Non-Medical - Gated Dilution]
-        # Applies ONLY when no strong clinical page exists
-        if (not any(p.label == "MEDICAL" and p.p_medical >= 0.90 for p in active_pages)) and n_non_med >= 2 and ((n_medical / n_active) < 0.33):
-            return False, round(1.0 - max_p_any, 4), "Document is predominantly non-medical"
-
-        # Rule 4 [Pure Non-Medical / Pure Advertisement]
-        if n_medical == 0:
-            if n_ad == n_active:
-                return False, round(1.0 - max_p_any, 4), "Document contains commercial advertisements or marketing flyers"
-            if n_non_med == n_active or (n_ad + n_non_med) == n_active:
-                return False, round(1.0 - max_p_any, 4), "Document does not contain clinical healthcare records"
-
-        # Rule 5 [Majority / Balanced Clinical Content]
-        if n_medical >= 1 and ((n_medical / n_active) >= 0.50):
-            return True, round(max_p_med, 4), "Document contains valid medical records"
-
-        # Rule 6 [Default Fallback - Fail-Closed / Low Confidence]
+        # Default fallback for UNKNOWN pages (fail-closed / low confidence)
         return False, round(1.0 - max_p_any, 4), "Unable to verify document authenticity with sufficient confidence"
 
     def _normalize_document_type(self, raw_type: str | None, is_medical: bool) -> str | None:
@@ -380,6 +383,9 @@ class MedicalValidationService:
         )
 
         evaluated_pages: list[EvaluatedPage] = []
+        is_medical: bool | None = None
+        confidence: float = 0.0
+        reason: str = ""
 
         if is_pdf:
             try:
@@ -390,10 +396,7 @@ class MedicalValidationService:
                     if total_pages == 0:
                         raise InvalidDocumentFileError("No usable pages extracted from PDF")
 
-                    cap = max_pages if (max_pages is not None and max_pages > 0) else 5
-                    page_indices = self._select_pages_to_evaluate(total_pages, max_pages_cap=cap)
-                    print(f"  [PYTHON TIMING] pages selected for evaluation: {page_indices}", flush=True)
-                    for p_idx in page_indices:
+                    for p_idx in range(total_pages):
                         t_page_start = time.perf_counter()
                         page = doc.load_page(p_idx)
                         page_text = page.get_text()
@@ -402,6 +405,7 @@ class MedicalValidationService:
                         t_pix_elapsed = (time.perf_counter() - t_pix_start) * 1000
                         t_pil_start = time.perf_counter()
                         pil_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        del pix
                         t_pil_elapsed = (time.perf_counter() - t_pil_start) * 1000
 
                         t_eval_start = time.perf_counter()
@@ -416,12 +420,15 @@ class MedicalValidationService:
 
                         print(f"  [PYTHON TIMING] Page {p_idx+1}: pixmap(dpi=150)={t_pix_elapsed:.2f}ms, Image.frombytes={t_pil_elapsed:.2f}ms, eval={t_eval_elapsed:.2f}ms | Page Total={t_page_total:.2f}ms (label={ev_page.label}, p_med={ev_page.p_medical:.4f})", flush=True)
 
-                        # Adaptive exit: if anchor medical page found with P(medical) >= 0.95 on Page 1, proceed
-                        if ev_page.p_medical >= 0.95 and p_idx == 0 and total_pages > 3:
+                        # Immediate positive early exit on first MEDICAL page
+                        if ev_page.label == "MEDICAL":
                             logger.info(
-                                "medical_validation_high_confidence_anchor_page1",
-                                extra={"trace_id": trace, "p_medical": ev_page.p_medical},
+                                "medical_validation_positive_early_exit",
+                                extra={"trace_id": trace, "page": p_idx + 1, "p_medical": ev_page.p_medical},
                             )
+                            is_medical = True
+                            confidence = round(ev_page.p_medical, 4)
+                            reason = "Document contains verified clinical records"
                             break
             except InvalidDocumentFileError:
                 raise
@@ -441,16 +448,21 @@ class MedicalValidationService:
                         page_text=None,
                     )
                     evaluated_pages.append(ev_page)
+                    if ev_page.label == "MEDICAL":
+                        is_medical = True
+                        confidence = round(ev_page.p_medical, 4)
+                        reason = "Document contains verified clinical records"
             except ClassifierUnavailableError:
                 raise
             except Exception as exc:
                 logger.error("medical_validation_image_open_failed", extra={"trace_id": trace, "error": str(exc)})
                 raise InvalidDocumentFileError(f"Failed to open image file: {exc}") from exc
 
-        # Apply First-Match-Wins decision rules
-        t_rules_start = time.perf_counter()
-        is_medical, confidence, reason = self._apply_ordered_decision_rules(evaluated_pages)
-        print(f"  [PYTHON TIMING] _apply_ordered_decision_rules took {(time.perf_counter() - t_rules_start)*1000:.2f}ms", flush=True)
+        # If no page triggered positive early exit, resolve non-medical decision rules
+        if is_medical is None:
+            t_rules_start = time.perf_counter()
+            is_medical, confidence, reason = self._apply_ordered_decision_rules(evaluated_pages)
+            print(f"  [PYTHON TIMING] _apply_ordered_decision_rules took {(time.perf_counter() - t_rules_start)*1000:.2f}ms", flush=True)
 
         elapsed = round(time.monotonic() - started, 3)
 

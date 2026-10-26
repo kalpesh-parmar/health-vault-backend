@@ -186,7 +186,7 @@ class Settings(BaseSettings):
         description="Maximum image dimension (width or height) before proportional downscaling for vision model fallback.",
     )
     vlm_num_ctx: int = Field(
-        default=4096,
+        default=8192,
         alias="VLM_NUM_CTX",
         description="Explicit context window size in tokens allocated for Ollama vision model evaluation.",
     )

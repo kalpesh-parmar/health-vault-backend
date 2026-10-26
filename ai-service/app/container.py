@@ -79,8 +79,8 @@ class Container:
             max_inline_bytes=settings.ai_max_inline_bytes,
             page_concurrency=settings.ai_page_concurrency,
             max_image_side=getattr(settings, "vlm_max_image_side", 1500),
-            num_ctx=getattr(settings, "vlm_num_ctx", 4096),
-            num_predict=getattr(settings, "vlm_num_predict", 1536),
+            num_ctx=getattr(settings, "vlm_num_ctx", 8192),
+            num_predict=getattr(settings, "vlm_num_predict", 4096),
         )
 
         self.ocr = OcrService(
