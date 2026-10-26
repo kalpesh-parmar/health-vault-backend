@@ -110,8 +110,6 @@ class SlotContextService {
     sessionMetadata = {},
     userQuestion = "",
     availableDocuments = [],
-    _authenticatedUserId,
-    _activePatientId,
   } = {}) {
     const existingSlots = sessionMetadata.slots || sessionMetadata.conversationSlots || {};
     let resolvedScopeMode = "AUTHORIZED_HISTORY";

@@ -44,6 +44,7 @@ class AiClient:
     async def generate_json_from_bytes(
         self,
         *,
+        model: str | None = None,
         data: bytes,
         mime_type: str,
         prompt: str,
@@ -139,6 +140,7 @@ class GoogleGenAiClient(AiClient):
     async def generate_json_from_bytes(
         self,
         *,
+        model: str | None = None,
         data: bytes,
         mime_type: str,
         prompt: str,
@@ -147,6 +149,7 @@ class GoogleGenAiClient(AiClient):
     ) -> tuple[str, str | None]:
         from google.genai import types
 
+        effective_model = model or self.config.model
         config_kwargs: dict[str, Any] = {
             "temperature": temperature,
             "max_output_tokens": self.config.num_predict or self.config.max_output_tokens,
@@ -158,7 +161,7 @@ class GoogleGenAiClient(AiClient):
         actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         response = await _with_retry(
             lambda: self._ensure_client().aio.models.generate_content(
-                model=self.config.model,
+                model=effective_model,
                 contents=[types.Part.from_bytes(data=data, mime_type=mime_type), actual_prompt],
                 config=config,
             ),
@@ -277,6 +280,7 @@ class ChatCompletionsClient(AiClient):
     async def generate_json_from_bytes(
         self,
         *,
+        model: str | None = None,
         data: bytes,
         mime_type: str,
         prompt: str,
@@ -297,6 +301,7 @@ class ChatCompletionsClient(AiClient):
                 status_code=400,
             )
 
+        effective_model = (model or self.config.model).strip()
         t_enc_start = time.monotonic()
         actual_prompt = _json_only_prompt(prompt) if json_only else prompt
         encode_ms = int((time.monotonic() - t_enc_start) * 1000)
@@ -308,20 +313,21 @@ class ChatCompletionsClient(AiClient):
         if self.config.num_ctx:
             options["num_ctx"] = self.config.num_ctx
 
-        messages = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "user",
                 "content": actual_prompt,
                 "images": [base64.b64encode(data).decode("ascii")],
             },
-            {
+        ]
+        if any(marker in effective_model.lower() for marker in ("qwen", "deepseek")):
+            messages.append({
                 "role": "assistant",
                 "content": "</think>",
-            },
-        ]
+            })
 
         payload = {
-            "model": self.config.model,
+            "model": effective_model,
             "messages": messages,
             "stream": False,
             "think": False,
@@ -344,7 +350,7 @@ class ChatCompletionsClient(AiClient):
                     "ollama_vision_empty_load_retry",
                     extra={
                         "engine": self.engine,
-                        "model": self.config.model,
+                        "model": effective_model,
                         "attempt": attempt + 1,
                         "finish_reason": finish_reason,
                     },
@@ -367,7 +373,7 @@ class ChatCompletionsClient(AiClient):
             "ollama_vision_finish",
             extra={
                 "engine": self.engine,
-                "model": self.config.model,
+                "model": effective_model,
                 "finish_reason": finish_reason,
                 "content_chars": len(content or ""),
                 "encode_ms": encode_ms,
@@ -398,11 +404,12 @@ class ChatCompletionsClient(AiClient):
             endpoint = "/api/generate" if "prompt" in payload else "/api/chat"
             url = f"{_ollama_base_url(self.base_url)}{endpoint}"
             safe_payload = _sanitize_payload(payload)
+            model_name = str(payload.get("model") or self.config.model)
             logger.info(
                 "ollama_vision_request",
                 extra={
                     "engine": self.engine,
-                    "model": self.config.model,
+                    "model": model_name,
                     "url": url,
                     "endpoint": endpoint,
                     "mime_type": mime_type,
@@ -420,7 +427,7 @@ class ChatCompletionsClient(AiClient):
                     "ollama_vision_transport_error",
                     extra={
                         "engine": self.engine,
-                        "model": self.config.model,
+                        "model": model_name,
                         "url": url,
                         "endpoint": endpoint,
                         "mime_type": mime_type,
@@ -440,7 +447,7 @@ class ChatCompletionsClient(AiClient):
                     "ollama_vision_http_error",
                     extra={
                         "engine": self.engine,
-                        "model": self.config.model,
+                        "model": model_name,
                         "url": url,
                         "endpoint": "/api/chat",
                         "mime_type": mime_type,
@@ -925,7 +932,14 @@ def _ollama_response_text(response: dict[str, Any]) -> str:
 def _ollama_finish_reason(response: dict[str, Any]) -> str | None:
     if not isinstance(response, dict):
         return None
-    return response.get("done_reason") or response.get("finish_reason") or ("done" if response.get("done") is True else None)
+    choices = response.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    return (
+        choice.get("finish_reason")
+        or response.get("done_reason")
+        or response.get("finish_reason")
+        or ("done" if response.get("done") is True else None)
+    )
 
 
 def _validate_chat_completions_payload(payload: dict[str, Any]) -> None:

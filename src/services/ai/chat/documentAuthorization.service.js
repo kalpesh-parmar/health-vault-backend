@@ -1,6 +1,7 @@
-const { and, eq, inArray } = require("drizzle-orm");
+const { and, eq, inArray, or } = require("drizzle-orm");
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
+const { documentProcessingJob } = require("../../../models/documentProcessingJob");
 const { NotFoundException, UnauthorizedException } = require("../../../exceptions/appError");
 
 class DocumentAuthorizationService {
@@ -60,12 +61,24 @@ class DocumentAuthorizationService {
         return true;
       });
     } else {
-      // Query active documents belonging to this user
-      const conditions = [
-        inArray(document.id, uniqueIds),
-        eq(document.userId, userId),
-        eq(document.softDelete, false),
-      ];
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const validUuids = uniqueIds.filter((id) => uuidRegex.test(id));
+      const nonUuids = uniqueIds.filter((id) => !uuidRegex.test(id));
+
+      const idOrKeyConditions = [];
+      if (validUuids.length > 0) {
+        idOrKeyConditions.push(inArray(document.id, validUuids));
+      }
+      if (nonUuids.length > 0) {
+        idOrKeyConditions.push(inArray(document.s3Key, nonUuids));
+      }
+
+      if (idOrKeyConditions.length === 0) {
+        return { authorizedDocumentIds: [], documents: [] };
+      }
+
+      const matchCondition =
+        idOrKeyConditions.length === 1 ? idOrKeyConditions[0] : or(...idOrKeyConditions);
 
       authorizedRows = await database
         .select({
@@ -80,13 +93,135 @@ class DocumentAuthorizationService {
           summaryEnglish: document.summaryEnglish,
           ocrStatus: document.ocrStatus,
           createdAt: document.createdAt,
+          s3Key: document.s3Key,
         })
         .from(document)
-        .where(and(...conditions));
+        .where(and(matchCondition, eq(document.userId, userId), eq(document.softDelete, false)));
     }
 
-    const foundIdSet = new Set(authorizedRows.map((doc) => String(doc.id)));
-    const missingIds = uniqueIds.filter((id) => !foundIdSet.has(String(id)));
+    const foundIdSet = new Set([
+      ...authorizedRows.map((doc) => String(doc.id)),
+      ...authorizedRows.map((doc) => String(doc.s3Key || "")).filter(Boolean),
+    ]);
+    let missingIds = uniqueIds.filter((id) => !foundIdSet.has(String(id)));
+
+    // Fallback ONLY for legacy chat messages that stored a Job ID instead of documents.id
+    if (missingIds.length > 0) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const validMissingUuids = missingIds.filter((id) => uuidRegex.test(id));
+
+      if (validMissingUuids.length > 0) {
+        let matchingJobs = [];
+        if (database.query?.documentProcessingJobs?.findMany) {
+          const allUserJobs = await database.query.documentProcessingJobs.findMany({
+            where: { userId },
+          });
+          matchingJobs = allUserJobs.filter(
+            (j) => validMissingUuids.includes(j.id) && j.userId === userId,
+          );
+        } else {
+          try {
+            matchingJobs = await database
+              .select({
+                id: documentProcessingJob.id,
+                userId: documentProcessingJob.userId,
+                status: documentProcessingJob.status,
+                fileKey: documentProcessingJob.fileKey,
+                metadata: documentProcessingJob.metadata,
+              })
+              .from(documentProcessingJob)
+              .where(
+                and(
+                  inArray(documentProcessingJob.id, validMissingUuids),
+                  eq(documentProcessingJob.userId, userId),
+                ),
+              );
+          } catch (jobErr) {
+            console.warn(
+              "[DocumentAuthorization] Failed to query document_processing_jobs fallback:",
+              jobErr.message,
+            );
+            matchingJobs = [];
+          }
+        }
+
+        // If any matching job is currently in progress / processing, return friendly status indicator
+        const processingJob = matchingJobs.find((j) => {
+          const st = String(j.status || "").toUpperCase();
+          return (
+            st === "QUEUED" ||
+            st === "PROCESSING" ||
+            st === "RUNNING" ||
+            st === "IN_PROGRESS" ||
+            st === "PENDING"
+          );
+        });
+
+        if (processingJob) {
+          return {
+            authorizedDocumentIds: [],
+            documents: [],
+            isProcessing: true,
+            processingJobId: processingJob.id,
+          };
+        }
+
+        // For completed jobs, resolve to their persisted document record
+        const resolvedDocIds = matchingJobs
+          .map((j) => j.metadata?.documentId)
+          .filter((id) => id && uuidRegex.test(String(id)));
+        const resolvedFileKeys = matchingJobs
+          .map((j) => j.metadata?.s3Key || j.metadata?.key || j.fileKey)
+          .filter(Boolean);
+
+        const fallbackConds = [];
+        if (resolvedDocIds.length > 0) fallbackConds.push(inArray(document.id, resolvedDocIds));
+        if (resolvedFileKeys.length > 0)
+          fallbackConds.push(inArray(document.s3Key, resolvedFileKeys));
+
+        if (fallbackConds.length > 0) {
+          const matchCond = fallbackConds.length === 1 ? fallbackConds[0] : or(...fallbackConds);
+          const resolvedDocs = await database
+            .select({
+              id: document.id,
+              userId: document.userId,
+              fileName: document.fileName,
+              documentType: document.documentType,
+              reportDate: document.reportDate,
+              hospitalName: document.hospitalName,
+              doctorName: document.doctorName,
+              structuredExtractedData: document.structuredExtractedData,
+              summaryEnglish: document.summaryEnglish,
+              ocrStatus: document.ocrStatus,
+              createdAt: document.createdAt,
+              s3Key: document.s3Key,
+            })
+            .from(document)
+            .where(and(matchCond, eq(document.userId, userId), eq(document.softDelete, false)));
+
+          for (const job of matchingJobs) {
+            const matchedDoc = resolvedDocs.find(
+              (d) =>
+                d.id === job.metadata?.documentId ||
+                d.s3Key === job.fileKey ||
+                d.s3Key === job.metadata?.s3Key ||
+                d.s3Key === job.metadata?.key,
+            );
+            if (matchedDoc) {
+              console.warn(
+                `[DocumentAuthorization] Resolved legacy job ID ${job.id} to document ${matchedDoc.id} for userId=${userId}`,
+              );
+              foundIdSet.add(String(job.id));
+              if (!authorizedRows.some((d) => d.id === matchedDoc.id)) {
+                authorizedRows.push(matchedDoc);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    missingIds = uniqueIds.filter((id) => !foundIdSet.has(String(id)));
 
     if (missingIds.length > 0) {
       const err = new NotFoundException(
@@ -99,6 +234,7 @@ class DocumentAuthorizationService {
     return {
       authorizedDocumentIds: authorizedRows.map((doc) => doc.id),
       documents: authorizedRows,
+      isProcessing: false,
     };
   }
 

@@ -3,9 +3,16 @@ const { StatusCodes } = require("http-status-codes");
 const { env } = require("../configs/env");
 const { messageConstants } = require("../constants/messageConstants");
 const { successResponse } = require("../helpers/generalResponse");
-const { InvalidRequestException, NonMedicalDocumentException } = require("../exceptions/appError");
+const {
+  InvalidRequestException,
+  NonMedicalDocumentException,
+  NotFoundException,
+  UnauthorizedException,
+} = require("../exceptions/appError");
 const patientRepository = require("../repositories/patientRepository");
 const uploadFileService = require("../services/file.service");
+const documentRepository = require("../repositories/documentRepository");
+const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 
 async function uploadFile(req, res) {
   let patientId = req.body.patientId || req.auth?.userId;
@@ -126,20 +133,78 @@ async function uploadFile(req, res) {
   }
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function viewFile(req, res) {
-  const { fileKey } = req.query;
-  if (!fileKey) {
-    throw new InvalidRequestException(messageConstants.FILEKEY_REQUIRED || "fileKey is required");
+  const userId = req.auth?.userId;
+  if (!userId) {
+    throw new UnauthorizedException("Unauthorized");
   }
 
-  const { stream, contentType, contentLength } = await uploadFileService.getFileStream(fileKey);
+  const { fileKey: rawFileKey, documentId: rawDocumentId } = req.query;
+  const inputKey = (rawFileKey || "").trim();
+  const inputDocId = (rawDocumentId || "").trim();
 
-  const filename = fileKey.split("/").pop() || "file";
+  if (!inputKey && !inputDocId) {
+    throw new InvalidRequestException(
+      messageConstants.FILEKEY_REQUIRED || "fileKey or documentId is required",
+    );
+  }
+
+  // Reject invalid object serialization
+  if (inputKey === "[object Object]") {
+    throw new InvalidRequestException("Invalid fileKey parameter");
+  }
+
+  let resolvedFileKey = null;
+
+  // 1. If explicit documentId is provided or inputKey is a UUID: check documents table
+  const candidateDocId = inputDocId || (UUID_REGEX.test(inputKey) ? inputKey : null);
+  if (candidateDocId) {
+    const doc = await documentRepository.findActiveDocumentById(candidateDocId, userId);
+    if (doc && doc.s3Key) {
+      resolvedFileKey = doc.s3Key;
+    }
+  }
+
+  // 2. If not resolved yet and inputKey was provided
+  if (!resolvedFileKey && inputKey) {
+    // Check if inputKey matches a document by s3Key owned by this user
+    const docByKey = await documentRepository.findByFileKey(inputKey, userId);
+    if (docByKey && docByKey.s3Key) {
+      resolvedFileKey = docByKey.s3Key;
+    } else {
+      // Check if inputKey matches an active/temporary processing job owned by this user (pre-onboarding upload)
+      const jobByKey = await documentProcessingJobRepository.findByFileKey(inputKey, userId);
+      if (jobByKey && jobByKey.fileKey) {
+        resolvedFileKey = jobByKey.fileKey;
+      } else if (
+        inputKey.startsWith(`PATIENT_DOCUMENT/${userId}/`) ||
+        inputKey.startsWith(`PATIENT_PROFILE/${userId}/`)
+      ) {
+        // Explicitly namespaced under the authenticated user's S3 folder
+        resolvedFileKey = inputKey;
+      }
+    }
+  }
+
+  if (!resolvedFileKey) {
+    throw new NotFoundException("Document not found or unauthorized");
+  }
+
+  const { stream, contentType, contentLength } =
+    await uploadFileService.getFileStream(resolvedFileKey);
+
+  const filename = resolvedFileKey.split("/").pop() || "file";
 
   res.setHeader("Content-Type", contentType || "application/octet-stream");
   if (contentLength) {
     res.setHeader("Content-Length", contentLength);
   }
+
+  // Security & browser caching headers
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cache-Control", "private, max-age=3600");
 
   const cleanMime = (contentType || "").toLowerCase();
   const inlineMimes = [
@@ -158,7 +223,7 @@ async function viewFile(req, res) {
   }
 
   stream.on("error", (err) => {
-    console.error("Stream error for fileKey:", fileKey, err);
+    console.error("Stream error for fileKey:", resolvedFileKey, err);
     if (!res.headersSent) {
       res.status(StatusCodes.INTERNAL_SERVER_ERROR).send("Stream error");
     }

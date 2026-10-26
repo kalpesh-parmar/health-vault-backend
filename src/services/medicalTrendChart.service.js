@@ -107,7 +107,6 @@ class MedicalTrendChartService {
     startDate = null,
     endDate = null,
     documentIds = null,
-    _scopeMode = null,
   }) {
     if (!userId || !canonicalKey) {
       throw new Error("userId and canonicalKey are required to generate medical chart.");

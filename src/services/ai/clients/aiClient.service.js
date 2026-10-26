@@ -11,6 +11,7 @@ const {
   generateTranslationCacheKey,
   sanitizeLLMOutput,
 } = require("../../../utils/textCleanUtils");
+const { detectChatLanguage } = require("../../../helpers/languageDetector.helper");
 
 class MemoryLRUCache {
   constructor(maxSize = 1000, ttlMs = 60 * 60 * 1000) {
@@ -421,15 +422,51 @@ ${text}
     }
   }
 
-  async detectLanguage(text) {
-    if (!text || !text.trim()) return "english";
+  async detectLanguage(text, userHint = null) {
+    if (!text || !text.trim()) {
+      return {
+        language: "english",
+        script: "Latn",
+        inputScript: "Latn",
+        detectionConfidence: 1.0,
+        responseLanguage: "english",
+        responseScript: "Latn",
+        isRomanized: false,
+        ambiguityFlag: false,
+        hasExplicitOverride: false,
+        cleanText: "",
+      };
+    }
+
+    const localResult = detectChatLanguage(text, userHint);
+    // If native Indic script, Romanized Indic tokens, or explicit language override matched:
+    if (
+      localResult.hasExplicitOverride ||
+      localResult.isRomanized ||
+      localResult.inputScript !== "Latn"
+    ) {
+      return localResult;
+    }
+
     try {
-      const response = await aiServiceClient.detectLanguage({ text });
-      return response?.language || "english";
+      const response = await aiServiceClient.detectLanguage({ text: localResult.cleanText });
+      const rawDetected = response?.language;
+      const { normalizeLanguage } = require("../../../utils/commonUtils");
+      const norm = rawDetected ? normalizeLanguage(rawDetected) : null;
+      if (norm && norm !== "english") {
+        return {
+          ...localResult,
+          language: norm,
+          responseLanguage: norm,
+          inputLanguage: norm,
+        };
+      }
+      return localResult;
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[AiClientService] Language detection failed:`, err.message);
-      return "english";
+      console.warn(
+        `[AiClientService] Language detection service unavailable (${err.message}), using offline fallback.`,
+      );
+      return localResult;
     }
   }
 }

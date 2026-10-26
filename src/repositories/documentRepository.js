@@ -322,6 +322,21 @@ class DocumentRepository {
 
     return docs;
   }
+
+  async findByFileKey(fileKey, userId = null) {
+    if (!fileKey) return null;
+    const conditions = [eq(document.s3Key, fileKey), eq(document.softDelete, false)];
+    if (userId) {
+      conditions.push(eq(document.userId, userId));
+    }
+    const result = await db
+      .select()
+      .from(document)
+      .where(and(...conditions))
+      .limit(1);
+
+    return result[0] || null;
+  }
 }
 
 module.exports = new DocumentRepository();

@@ -3,10 +3,10 @@ const { db } = require("../configs/db");
 const { document } = require("../models/document");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const medicationService = require("../services/medication.service");
-const aiClient = require("../services/ai/clients/aiClient.service");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const { normalizeMedicine } = require("./medicineNormalize.helper");
 const { getLocalizedText } = require("./onboarding.helper");
+const { resolveDocumentSummary } = require("./reportPayload.helper");
 
 /**
  * Normalizes input body for unified chat endpoint.
@@ -97,10 +97,12 @@ function buildUnifiedResponse({
   sourceComparison = null,
   isRejected = false,
   rejectionReason = null,
+  chart = null,
 }) {
   return {
     mode,
     actionType,
+    chart,
     reply,
     isRejected,
     rejectionReason,
@@ -299,15 +301,25 @@ async function executeAddDocumentAction({
         existingJob?.metadata?.originalName ||
         existingJob?.metadata?.fileName;
 
-      if (!rawExtractedName && userId) {
+      let existingDbDoc = null;
+      if (userId) {
         try {
-          const [dbDoc] = await db
-            .select({ fileName: document.fileName })
+          const [foundDoc] = await db
+            .select()
             .from(document)
-            .where(and(eq(document.s3Key, currentS3Key), eq(document.userId, userId)))
+            .where(
+              and(
+                eq(document.s3Key, currentS3Key),
+                eq(document.userId, userId),
+                eq(document.softDelete, false),
+              ),
+            )
             .limit(1);
-          if (dbDoc && dbDoc.fileName) {
-            rawExtractedName = dbDoc.fileName;
+          if (foundDoc) {
+            existingDbDoc = foundDoc;
+            if (foundDoc.fileName) {
+              rawExtractedName = foundDoc.fileName;
+            }
           }
         } catch {
           // ignore DB lookup error
@@ -329,11 +341,12 @@ async function executeAddDocumentAction({
           existingJob.status === "in_progress"
         ) {
           normStatus = ocrStatusEnum?.IN_PROGRESS || "in_progress";
-          // isExistingProcessing = true;
         } else {
           normStatus = String(existingJob.status || "in_progress").toLowerCase();
         }
         const jobError = existingJob.error || existingJob.message || null;
+        const structData =
+          existingJob.extractedStructuredData || existingDbDoc?.structuredExtractedData || null;
         createdDocs.push({
           id: existingJob.id,
           fileName,
@@ -345,10 +358,52 @@ async function executeAddDocumentAction({
           stageStatus: existingJob.stageStatus,
           ocrStatus: normStatus,
           retryable: existingJob.retryable,
-          extractedStructuredData: existingJob.extractedStructuredData || null,
+          extractedStructuredData: structData,
+          structuredExtractedData: structData,
+          summaryEnglish: existingDbDoc?.summaryEnglish || structData?.summaryEnglish || null,
+          summaryInPreferredLanguage: structData?.summaryInPreferredLanguage || null,
+          summaryLanguage: structData?.summaryLanguage || "english",
+          summariesByLanguage: structData?.summariesByLanguage || null,
+          summaryPipelineVersion: structData?.summaryPipelineVersion || "1.1.0",
           error: jobError,
         });
         createdJobs.push(existingJob);
+      } else if (
+        existingDbDoc &&
+        (existingDbDoc.ocrStatus === "completed" ||
+          existingDbDoc.ocrStatus === ocrStatusEnum?.COMPLETED)
+      ) {
+        isExistingCompleted = true;
+        const structData = existingDbDoc.structuredExtractedData || null;
+        createdDocs.push({
+          id: existingDbDoc.id,
+          fileName,
+          s3Key: currentS3Key,
+          currentStep: "Completed",
+          completedSteps: 9,
+          pendingSteps: 0,
+          status: "COMPLETED",
+          stageStatus: "COMPLETED",
+          ocrStatus: ocrStatusEnum?.COMPLETED || "completed",
+          retryable: false,
+          extractedStructuredData: structData,
+          structuredExtractedData: structData,
+          summaryEnglish: existingDbDoc.summaryEnglish || structData?.summaryEnglish || null,
+          summaryInPreferredLanguage: structData?.summaryInPreferredLanguage || null,
+          summaryLanguage: structData?.summaryLanguage || "english",
+          summariesByLanguage:
+            structData?.summariesByLanguage ||
+            (existingDbDoc.summaryEnglish ? { english: existingDbDoc.summaryEnglish } : null),
+          summaryPipelineVersion: structData?.summaryPipelineVersion || "1.1.0",
+          error: null,
+        });
+        createdJobs.push({
+          id: existingDbDoc.id,
+          status: "COMPLETED",
+          stage: "COMPLETED",
+          currentStep: "Completed",
+          extractedStructuredData: structData,
+        });
       } else {
         const ext = currentS3Key.includes(".") ? currentS3Key.split(".").pop().toLowerCase() : "";
         const inferredMime =
@@ -640,14 +695,44 @@ async function executeAddDocumentAction({
       const d = docsList[i];
       if (!d) continue;
       const struct = d.extractedStructuredData || d.structuredExtractedData || {};
-      const docSum =
-        struct.summary ||
-        struct.summaryInPreferredLanguage ||
-        d.summary ||
-        d.summaryEnglish ||
-        d.summaryGujarati ||
-        d.remarks ||
-        (d.error ? `Failed: ${d.error}` : null);
+      const resolved = await resolveDocumentSummary({
+        activeDoc: d,
+        structured: struct,
+        preferredLanguage,
+        patientName: struct.patientInfo?.fullName || struct.patientInfo?.name || null,
+        persistCache: true,
+      });
+
+      struct.summary = resolved.docSummary;
+      struct.summaryEnglish = resolved.summaryEnglish;
+      if (resolved.summaryInPreferredLanguage) {
+        struct.summaryInPreferredLanguage = resolved.summaryInPreferredLanguage;
+        d.summaryInPreferredLanguage = resolved.summaryInPreferredLanguage;
+      } else {
+        delete struct.summaryInPreferredLanguage;
+        delete d.summaryInPreferredLanguage;
+      }
+      struct.summaryLanguage = resolved.summaryLanguage;
+      struct.preferredLanguage = resolved.preferredLanguage || preferredLanguage;
+      struct.summariesByLanguage = resolved.summariesByLanguage || struct.summariesByLanguage;
+      struct.summaryPipelineVersion =
+        resolved.summaryPipelineVersion || struct.summaryPipelineVersion || "1.1.0";
+      struct.translationStatus = resolved.translationStatus;
+      struct.translationProvider = resolved.translationProvider;
+      d.summary = resolved.docSummary;
+      d.summaryEnglish = resolved.summaryEnglish;
+      d.summaryLanguage = resolved.summaryLanguage;
+      d.preferredLanguage = resolved.preferredLanguage || preferredLanguage;
+      d.summariesByLanguage = struct.summariesByLanguage;
+      d.summaryPipelineVersion = struct.summaryPipelineVersion;
+      d.translationStatus = resolved.translationStatus;
+      d.translationProvider = resolved.translationProvider;
+      d.keyPoints = resolved.keyPoints || struct.keyPoints || [];
+      d.keyFindings = resolved.keyFindings || struct.keyFindings || [];
+      if (d.extractedStructuredData) d.extractedStructuredData = struct;
+      if (d.structuredExtractedData) d.structuredExtractedData = struct;
+
+      const docSum = resolved.docSummary || (d.error ? `Failed: ${d.error}` : null);
 
       if (docSum && !mainDocumentSummaryText) {
         mainDocumentSummaryText = docSum;
@@ -705,26 +790,35 @@ async function executeAddDocumentAction({
   const primaryDocumentStatus =
     documentsStatusList[0] || (failedCount > 0 ? "FAILED" : "COMPLETED");
 
-  if (docResult?.document && preferredLanguage && preferredLanguage.toLowerCase() !== "english") {
-    const prefLang = preferredLanguage.toLowerCase();
+  if (docResult?.document) {
     const docs = Array.isArray(docResult.document) ? docResult.document : [docResult.document];
     for (const docItem of docs) {
       if (!docItem) continue;
-      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData;
-      if (struct && typeof struct === "object") {
-        if (struct.summaryInPreferredLanguage) {
-          struct.summary = struct.summaryInPreferredLanguage;
-        } else if (struct.summary) {
-          try {
-            const translated = await aiClient.translate(struct.summary, "english", prefLang);
-            if (translated) {
-              struct.summary = translated;
-            }
-          } catch (err) {
-            console.warn("[executeAddDocumentAction] Summary translation failed:", err.message);
-          }
-        }
+      const struct = docItem.extractedStructuredData || docItem.structuredExtractedData || {};
+      const resolved = await resolveDocumentSummary({
+        activeDoc: docItem,
+        structured: struct,
+        preferredLanguage,
+        patientName: struct.patientInfo?.fullName || struct.patientInfo?.name || null,
+        persistCache: true,
+      });
+
+      struct.summary = resolved.docSummary;
+      struct.summaryEnglish = resolved.summaryEnglish;
+      if (resolved.summaryInPreferredLanguage) {
+        struct.summaryInPreferredLanguage = resolved.summaryInPreferredLanguage;
+        docItem.summaryInPreferredLanguage = resolved.summaryInPreferredLanguage;
+      } else {
+        delete struct.summaryInPreferredLanguage;
+        delete docItem.summaryInPreferredLanguage;
       }
+      struct.translationStatus = resolved.translationStatus;
+      struct.translationProvider = resolved.translationProvider;
+      docItem.summary = resolved.docSummary;
+      docItem.summaryEnglish = resolved.summaryEnglish;
+      docItem.translationStatus = resolved.translationStatus;
+      if (docItem.extractedStructuredData) docItem.extractedStructuredData = struct;
+      if (docItem.structuredExtractedData) docItem.structuredExtractedData = struct;
     }
   }
   replyText = await getLocalizedText(

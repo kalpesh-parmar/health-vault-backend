@@ -29,7 +29,6 @@ async function onboardingChat(req, res) {
     // Optionally flush headers if a middleware like compression is used
     if (typeof res.flushHeaders === "function") res.flushHeaders();
 
-    // eslint-disable-next-line no-undef
     const abortController = new AbortController();
     req.on("close", () => {
       abortController.abort();
@@ -51,6 +50,10 @@ async function onboardingChat(req, res) {
         abortController.signal,
       );
       if (!res.writableEnded) {
+        if (result?.chart) {
+          res.write(`data: ${JSON.stringify({ type: "chart", data: result.chart })}\n\n`);
+          if (typeof res.flush === "function") res.flush();
+        }
         res.write(`data: ${JSON.stringify({ type: "final", data: result })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
       }

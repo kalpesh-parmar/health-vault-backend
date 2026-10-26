@@ -67,6 +67,19 @@ function isStepAlreadySatisfied(stepName, state) {
         state.existingUserData.allergies.length > 0)
     );
   }
+  if (stepName === "CONFIRM_DOCUMENT_OWNERSHIP") {
+    return (
+      state.profileConfirmed === true ||
+      (state.documentOwnershipConfirmed !== undefined && state.documentOwnershipConfirmed !== null)
+    );
+  }
+  if (stepName === "ASK_UPLOAD_DOCUMENT") {
+    return (
+      state.documentUploaded === true ||
+      state.uploadedMedicalDocument === true ||
+      state.profileConfirmed === true
+    );
+  }
   if (
     [
       "ASK_FIRST_NAME",
@@ -74,7 +87,6 @@ function isStepAlreadySatisfied(stepName, state) {
       "ASK_DOB",
       "ASK_GENDER",
       "RESOLVE_PROFILE_SOURCE",
-      "CONFIRM_DOCUMENT_OWNERSHIP",
       "ASK_UPLOAD_OR_SKIP",
     ].includes(stepName)
   ) {
@@ -86,7 +98,7 @@ function isStepAlreadySatisfied(stepName, state) {
   return false;
 }
 
-function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage }) {
+function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage, state }) {
   if (!message || typeof message !== "string") return false;
   const trimmed = message.trim();
   if (trimmed.length < 2) return false;
@@ -107,87 +119,64 @@ function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage })
     "ASK_LANGUAGE",
     "ASK_GENDER",
     "ASK_DOB",
+    "ASK_FIRST_NAME",
+    "ASK_LAST_NAME",
     "ASK_BLOOD_GROUP",
     "ASK_ALLERGIES",
     "MEDICINE_OPTIONS",
-    "DOCUMENT_UPLOADED",
-    "DOC_UPLOAD",
-    "UPLOAD",
-    "UPLOAD_DOCUMENT",
-    "ASK_UPLOAD_DOCUMENT",
-    "ASK_UPLOAD_OR_SKIP",
-    "ASK_UPLOAD_DOCUMENT_FAILED",
     "CONFIRM_DOCUMENT_OWNERSHIP",
     "RESOLVE_PROFILE_SOURCE",
-    "DOCUMENT",
-    "DOC",
-    "MEDICAL_DOCUMENT",
-    "USE_DOCUMENT",
-    "USE_DOCUMENT_DATA",
-    "DOCUMENT_DATA",
-    "USE_SOCIAL",
-    "USE_SOCIAL_LOGIN",
-    "SOCIAL",
-    "LOGIN",
-    "SOCIAL_LOGIN",
-    "LOGIN_DATA",
-    "SOCIAL_DATA",
-    "MANUAL",
-    "MANUAL_ENTRY",
-    "EDIT_MANUALLY",
-    "ASK_FIRST_NAME",
-    "ASK_LAST_NAME",
-    "REVIEW_MEDICINES_LIST",
-    "ASK_FOUND_MEDICINES",
-    "ASK_ON_MEDICINES",
-    "ASK_MEDICINE_DETAILS",
-    "REGISTER_USER",
-    "COMPLETE",
-    "POST_ONBOARDING",
-    "START_ONBOARDING",
-    "RESET_ONBOARDING",
-    "RETRY_ONBOARDING",
-    "SKIP_QUESTION",
-    "YES",
-    "NO",
-    "HA",
-    "NA",
-    "OWNER_SELF",
-    "OWNER_OTHER",
-    "SELF",
-    "OTHER",
+    "DOCUMENT_UPLOADED",
+    "ADD_DOCUMENT",
     "ASK_REPORT",
     "ASK_ABOUT_REPORT",
-    "REPORT_SUMMARY",
+    "YES",
+    "NO",
   ];
-
-  const upperTrimmed = trimmed.toUpperCase();
   if (actionType && explicitOnboardingActions.includes(actionType.toUpperCase())) {
     return false;
   }
-  if (explicitOnboardingActions.includes(upperTrimmed)) {
+  if (explicitOnboardingActions.includes(trimmed.toUpperCase())) {
     return false;
   }
-  if (
-    upperTrimmed === "ASK_REPORT" ||
-    upperTrimmed === "ASK_ABOUT_REPORT" ||
-    upperTrimmed === "REPORT_SUMMARY" ||
-    upperTrimmed === "ASK REPORT" ||
-    upperTrimmed === "ASK ABOUT REPORT" ||
-    upperTrimmed === "ASK ABOUT MY REPORT" ||
-    upperTrimmed === "VIEW REPORT" ||
-    upperTrimmed === "VIEW MY REPORT"
-  ) {
+
+  // Never consume upload completion events or report menu selections as QA
+  if (/^DOCUMENT_UPLOADED/i.test(trimmed) || /^Document Uploaded:/i.test(trimmed)) {
     return false;
   }
-  if (
-    upperTrimmed.includes("DOCUMENT_UPLOADED") ||
-    upperTrimmed.includes("DOCUMENT UPLOADED") ||
-    upperTrimmed.startsWith("DOCUMENT UPLOADED:") ||
-    upperTrimmed.includes("DOC_UPLOAD") ||
-    upperTrimmed === "DOC UPLOAD" ||
-    upperTrimmed === "UPLOAD DOCUMENT"
-  ) {
+  if (/^ASK_REPORT/i.test(trimmed) || /^ASK_ABOUT_REPORT/i.test(trimmed)) {
+    return false;
+  }
+
+  // Pre-onboarding invariant: If document is extracted but ownership is pending, DO NOT consume as QA
+  if (state?.flowMode === "UPLOAD") {
+    if (
+      state.documentExtracted &&
+      (state.documentOwnershipConfirmed === undefined || state.documentOwnershipConfirmed === null)
+    ) {
+      return false;
+    }
+  }
+
+  // Active onboarding steps prior to report discussion must never be hijacked
+  const currentStep = state?.currentStep;
+  const activeStepsBeforeReportQA = [
+    "ASK_LANGUAGE",
+    "ASK_UPLOAD_OR_SKIP",
+    "ASK_UPLOAD_DOCUMENT",
+    "ASK_UPLOAD_DOCUMENT_FAILED",
+    "CONFIRM_DOCUMENT_OWNERSHIP",
+    "ASK_FIRST_NAME",
+    "ASK_LAST_NAME",
+    "ASK_DOB",
+    "ASK_GENDER",
+    "RESOLVE_PROFILE_SOURCE",
+    "ASK_BLOOD_GROUP",
+    "ASK_ALLERGIES",
+    "REVIEW_MEDICINES_LIST",
+    "MEDICINE_OPTIONS",
+  ];
+  if (currentStep && activeStepsBeforeReportQA.includes(currentStep)) {
     return false;
   }
 
@@ -197,13 +186,11 @@ function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage })
       if (parsed && typeof parsed === "object") {
         if (
           parsed.action ||
-          parsed.source ||
           parsed.confirmed !== undefined ||
           parsed.selected !== undefined ||
           parsed.saveAndReview ||
           parsed.skipAll ||
-          parsed.allergies ||
-          parsed.edited
+          parsed.allergies
         ) {
           return false;
         }
@@ -218,7 +205,7 @@ function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage })
     .replace(/[?.,!]/g, "")
     .trim();
 
-  // Known onboarding field answers and choices
+  // Known onboarding field answers
   if (
     [
       "b+",
@@ -256,52 +243,22 @@ function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage })
       "upload",
       "અપલોડ",
       "મેન્યુઅલ",
-      "document_uploaded",
-      "document uploaded",
-      "doc_upload",
-      "use_document",
-      "use document",
-      "use_document_data",
-      "use document data",
-      "document_data",
-      "document data",
-      "medical_document",
-      "medical document",
-      "document",
-      "use_social",
-      "use social",
-      "use_social_login",
-      "use social login",
-      "social",
-      "login",
-      "social_data",
-      "login_data",
-      "edit manually",
-      "edit_manually",
-      "ask_report",
-      "ask report",
-      "ask about report",
-      "ask about my report",
-      "ask_about_report",
-      "report_summary",
-      "report summary",
-      "view report",
-      "view my report",
-      "મારા રિપોર્ટ વિશે પૂછો",
-      "મારી રિપોર્ટ વિશે પૂછો",
-      "મારા રીપોર્ટ વિશે પૂછો",
-      "રિપોર્ટ વિશે પૂછો",
-      "મેરે રિપોર્ટ કે બારે મેં પૂછો",
-      "મેરે રિપોર્ટ કે બારે મેં પૂછેં",
-      "मेरे रिपोर्ट के बारे में पूछें",
-      "मेरे रिपोर्ट के बारे में पूछो",
-      "મારા રિપોર્ટ વિશે",
     ].includes(cleanMsg)
   ) {
     return false;
   }
 
   if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(trimmed)) {
+    return false;
+  }
+
+  // If answering a name step and input is a standard name without question punctuation/words
+  if (
+    (currentStep === "ASK_FIRST_NAME" || currentStep === "ASK_LAST_NAME") &&
+    /^[A-Za-z\u0A80-\u0AFF\u0900-\u097F\s]{2,40}$/.test(trimmed) &&
+    !/[?.,!]/.test(trimmed) &&
+    !/(?:what|how|why|is|can|explain|report|શુ|કેમ|કઈ|શું|રિપોર્ટ|દસ્તાવેજ|दस्तावेज)/i.test(trimmed)
+  ) {
     return false;
   }
 
@@ -328,27 +285,29 @@ function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage })
     return true;
   }
 
-  // Classify intent via chatClassifier
+  // Classify intent via chatClassifier and linguistic patterns
   try {
     const classification = chatClassifier.classify({
       rawQuestion: trimmed,
       detectedLanguage: preferredLanguage || "english",
     });
 
+    const hasClinicalIntent = classification?.intents?.has("CLINICAL_ADVICE");
+    const isDocDomain =
+      classification?.primaryDomain === "DOCUMENTS" ||
+      classification?.primaryDomain === "MEDICATIONS";
+
     const hasMedicalKeywords =
       /(?:રિપોર્ટ|દસ્તાવેજ|અર્થ|સમજાવો|હિમોગ્લોબિન|દવા|બીમારી|સારવાર|લક્ષણો|ટેસ્ટ|પરિણામ|report|document|summary|explain|treatment|medicine|hemoglobin|normal|abnormal|su\s+lakhyu|kya\s+likha|bimari|sarvar|doctor|hospital|diagnosis|prescription|lab)/i.test(
         trimmed,
       );
 
-    if (classification.primaryDomain === "PROFILE" && !hasMedicalKeywords) {
-      return false;
-    }
+    const hasClinicalSeverityOrMeaning =
+      /(?:serious|severity|danger|dangerous|critical|worry|worried|concern|harmful|okay|risk|risky|understand|understanding|meaning|significance|implication|ગંભીર|જોખમ|ચિંતા|સમજ|સમજવું|ગંભીરતા|गंभीर|खतरा|चिंता|समझे|समझाएं|புரிந்து)/i.test(
+        trimmed,
+      );
 
-    const isDocDomain =
-      classification.primaryDomain === "DOCUMENTS" ||
-      classification.primaryDomain === "MEDICATIONS";
-
-    if (isDocDomain && hasMedicalKeywords) {
+    if (hasMedicalKeywords || hasClinicalIntent || hasClinicalSeverityOrMeaning || isDocDomain) {
       return true;
     }
   } catch (err) {
@@ -1813,6 +1772,7 @@ class V1Service {
             ]);
             if (authRes.documents && authRes.documents.length > 0) {
               targetDoc = authRes.documents[0];
+              targetDocId = targetDoc.id;
             }
           } catch (authErr) {
             console.warn(
@@ -1822,37 +1782,19 @@ class V1Service {
           }
         }
 
-        if (!targetDoc && userId) {
-          try {
-            const userDocs = await db
-              .select()
-              .from(document)
-              .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
-              .orderBy(desc(document.createdAt))
-              .limit(1);
-            if (userDocs && userDocs.length > 0) {
-              targetDoc = userDocs[0];
-              targetDocId = targetDoc.id;
-            }
-          } catch (dbDocErr) {
-            console.warn("[UnifiedChat] Error looking up user document:", dbDocErr.message);
-          }
-        }
-
+        // NOTE: Strictly fail-closed. Never silently substitute with arbitrary user documents from DB
+        // (which caused lab_1_.jpeg to be cited instead of report.pdf).
         if (!targetDoc) {
           const noDocReply =
             {
-              english: "No uploaded medical document was found. Please upload a report to discuss.",
-              gujarati:
-                "કોઈ અપલોડ કરેલ તબીબી દસ્તાવેજ મળ્યો નથી. કૃપા કરીને ચર્ચા કરવા માટે રિપોર્ટ અપલોડ કરો.",
-              hindi:
-                "कोई अपलोड किया गया मेडिकल दस्तावेज़ नहीं मिला। कृपया चर्चा के लिए रिपोर्ट अपलोड करें।",
-              marathi:
-                "कोणताही अपलोड केलेला वैद्यकीय दस्तऐवज आढळला नाही. कृपया चर्चा करण्यासाठी अहवाल अपलोड करा.",
-              tamil:
-                "பதிவேற்றப்பட்ட மருத்துவ ஆவணம் எதுவும் கிடைக்கவில்லை. விவாதிக்க அறிக்கையைப் பதிவேற்றவும்.",
+              english:
+                "No authorized uploaded medical document was found for this report discussion.",
+              gujarati: "આ ચર્ચા માટે કોઈ માન્ય અપલોડ કરેલ તબીબી દસ્તાવેજ મળ્યો નથી.",
+              hindi: "इस चर्चा के लिए कोई अधिकृत अपलोड किया गया मेडिकल दस्तावेज़ नहीं मिला।",
+              marathi: "या चर्चेसाठी कोणताही अधिकृत अपलोड केलेला वैद्यकीय दस्तऐवज आढळला नाही.",
+              tamil: "இந்த விவாதத்திற்கு அங்கீகரிக்கப்பட்ட ஆவணம் எதுவும் கிடைக்கவில்லை.",
             }[userLangForQA] ||
-            "No uploaded medical document was found. Please upload a report to discuss.";
+            "No authorized uploaded medical document was found for this report discussion.";
 
           return buildUnifiedResponse({
             mode: "ONBOARDING_DOCUMENT_QA",
@@ -1935,6 +1877,32 @@ class V1Service {
         state.chatSessionId = effectiveSessionId;
         await saveOnboardingState(userId, state);
 
+        const goToDashboardLabel = await getLocalizedText(
+          "onboarding.medicineOptions.goToDashboard",
+          "Go to Dashboard",
+          userLangForQA,
+        );
+        const addMedicinesLabel = await getLocalizedText(
+          "onboarding.medicineOptions.addMedicines",
+          "Add Medicines",
+          userLangForQA,
+        );
+        const continuationOptions = [
+          {
+            key: "DASHBOARD",
+            value: "DASHBOARD",
+            label: goToDashboardLabel,
+            primary: true,
+          },
+          {
+            key: "ADD",
+            value: "ADD_MEDICINE",
+            label: addMedicinesLabel,
+            primary: false,
+          },
+          ...(chatResult?.options || []),
+        ];
+
         const responsePayload = buildUnifiedResponse({
           mode: "ONBOARDING_DOCUMENT_QA",
           actionType: "ONBOARDING_DOCUMENT_QA",
@@ -1942,7 +1910,7 @@ class V1Service {
           sessionId: effectiveSessionId,
           citations: chatResult?.citations || [],
           onboardingState: state,
-          options: chatResult?.options || [],
+          options: continuationOptions,
           document: targetDoc,
           chart: chatResult?.chart || null,
         });

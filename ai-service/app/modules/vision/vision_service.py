@@ -47,8 +47,8 @@ def build_ocr_prompt(script_hint: str | None = None) -> str:
         "- NEVER transliterate, convert, or substitute regional Indic scripts (such as Gujarati, Tamil) into Hindi or Devanagari.\n"
         "- For mixed-script documents (e.g. Gujarati prescription with English medicine names), transcribe each language block in its native script exactly at its original layout position.\n"
         "- Transcribe medicine names, strengths (e.g., 500mg, 40mg), dosages, frequencies (e.g., 1-0-0, 0-1-0), durations, patient demographics, and dates verbatim. Never invent, hallucinate, omit, or alter medical values.\n"
-        "- Preserve line breaks, numeric values, units, reference ranges, and tabular column alignments.\n"
-        "- Output ONLY the transcribed document text. Do not include introductory notes, conversational preamble, translations, summaries, or explanations."
+        "- Output ONLY the transcribed document text. Do not include introductory notes, conversational preamble, translations, summaries, or explanations.\n"
+        "- If the document image contains NO visible text, writing, numbers, or printed clinical data (for example: an uncaptioned diagnostic radiograph, X-ray, CT slice, MRI scan, ultrasound, or pure medical image), output exactly: NO_TEXT_DETECTED. Do not output anything else."
     )
     if script_hint:
         hint_clean = script_hint.strip().lower()
@@ -424,7 +424,10 @@ class VisionModelService:
             model=self.model,
             telemetry=telemetry,
             downscale_info=downscale_info,
+            finish_reason=finish_reason,
         )
+        payload["finish_reason"] = finish_reason
+        payload.setdefault("metrics", {})["finish_reason"] = finish_reason
 
         if payload["metrics"]["non_empty_pages"] > 0 and not payload["metrics"]["truncated"]:
             self._cache.put(cache_key, payload)
@@ -515,6 +518,7 @@ class VisionModelService:
                         "summary": sum_data,
                         "request_ms": request_ms,
                         "truncated": finish_reason == "MAX_TOKENS",
+                        "finish_reason": finish_reason,
                         "error": None,
                         "telemetry": page_telemetry,
                         "downscale_info": page_downscale_info,
@@ -566,6 +570,15 @@ class VisionModelService:
         vision_summary = _combine_summaries(summaries, medical=medical)
         pdf_telemetry = {"pages": [r.get("telemetry") for r in results if r.get("telemetry")]}
         any_downscaled = any(bool(r.get("downscale_info", {}).get("downscaled")) for r in results)
+        pdf_finish_reason = (
+            results[0].get("finish_reason")
+            if len(results) == 1
+            else (
+                "stop"
+                if results and all(str(r.get("finish_reason") or "").lower() in {"stop", "done"} for r in results)
+                else next((r.get("finish_reason") for r in results if r.get("finish_reason")), None)
+            )
+        )
         payload = _build_payload(
             all_pages,
             engine=f"{self._ensure_client().engine}:{self.model}",
@@ -577,7 +590,10 @@ class VisionModelService:
             model=self.model,
             telemetry=pdf_telemetry,
             downscale_info={"downscaled": any_downscaled, "original_dims": None, "scaled_dims": None, "bytes_saved_pct": 0.0},
+            finish_reason=pdf_finish_reason,
         )
+        payload["finish_reason"] = pdf_finish_reason
+        payload.setdefault("metrics", {})["finish_reason"] = pdf_finish_reason
         payload["metrics"]["pdf_rendered_to_images"] = True
         payload["metrics"]["rendered_page_count"] = len(page_images)
         payload["metrics"]["page_errors"] = page_errors
@@ -809,6 +825,7 @@ def _build_payload(
     model: str,
     telemetry: dict[str, Any] | None = None,
     downscale_info: dict[str, Any] | None = None,
+    finish_reason: str | None = None,
 ) -> dict[str, Any]:
     downscale_info = downscale_info or {}
     page_payloads = []
@@ -822,6 +839,7 @@ def _build_payload(
                 "confidence": page.get("confidence"),
                 "lines": lines,
                 "elapsed_ms": 0,
+                "finish_reason": page.get("finish_reason") or finish_reason,
             }
         )
 
@@ -845,6 +863,7 @@ def _build_payload(
         "paragraphs": paragraphs,
         "medicalExtraction": medical_extraction,
         "visionSummary": vision_summary,
+        "finish_reason": finish_reason,
         "metrics": {
             "client_engine": engine.split(":", 1)[0],
             "engine": engine,
@@ -855,6 +874,7 @@ def _build_payload(
             "used_fallback": False,
             "fallback_used": False,
             "truncated": truncated,
+            "finish_reason": finish_reason,
             "cache_hit": False,
             "summary_from_vision": vision_summary is not None,
             "non_empty_pages": non_empty,

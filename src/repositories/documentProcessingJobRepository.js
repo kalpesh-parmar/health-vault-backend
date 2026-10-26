@@ -91,8 +91,26 @@ class DocumentProcessingJobRepository {
    * key terminated successfully, we still create a fresh QUEUED row so the
    * caller can re-run extraction with different settings.
    */
-  async startJob({ fileKey, userId, mimeType, originalName, ttlHours = DEFAULT_TTL_HOURS }) {
-    return this.createQueuedJob({ fileKey, userId, mimeType, originalName, ttlHours });
+  async startJob({
+    fileKey,
+    userId,
+    mimeType,
+    originalName,
+    pageCount = 1,
+    metadata = {},
+    checkpointData = {},
+    ttlHours = DEFAULT_TTL_HOURS,
+  }) {
+    return this.createQueuedJob({
+      fileKey,
+      userId,
+      mimeType,
+      originalName,
+      pageCount,
+      metadata,
+      checkpointData,
+      ttlHours,
+    });
   }
 
   async markRunning(jobId, patch = {}) {

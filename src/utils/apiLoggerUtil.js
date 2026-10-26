@@ -15,6 +15,20 @@ const SENSITIVE_KEYS = new Set([
   "awssecretaccesskey",
   "gcpcredentialsbase64",
   "firebasecredentialsbase64",
+  // PHI and Sensitive Health Identifiers (REQ-SEC-02)
+  "patientname",
+  "aadhaar",
+  "ssn",
+  "diagnosis",
+  "testvalue",
+  "numericvalue",
+  "dob",
+  "dateofbirth",
+  "phonenumber",
+  "allergies",
+  "medicalhistory",
+  "rawocrtext",
+  "extractedtext",
 ]);
 
 /**

@@ -26,6 +26,19 @@ class AnalysisStageHandler:
     """
 
     def analyze(self, structured_data: dict[str, Any]) -> dict[str, Any]:
+        if structured_data.get("isNoText") or structured_data.get("clinicallyAnalyzed") is False:
+            logger.info("analyze: image-only document bypass activated (isNoText=True)")
+            return {
+                "anomalies": [],
+                "warnings": [],
+                "riskLevel": "NOT_ASSESSED",
+                "clinicallyAnalyzed": False,
+                "message": "Document verified as image-only medical document. Clinical safety analysis requires written report or licensed clinician interpretation.",
+                "clinicalObservations": [
+                    "Document verified as diagnostic image without written report text. Clinical abnormalities cannot be assessed from textless images and require clinician review."
+                ],
+            }
+
         logger.info("Executing clinical anomaly detection and safety analysis...")
         anomalies: list[dict[str, Any]] = []
         warnings: list[str] = []

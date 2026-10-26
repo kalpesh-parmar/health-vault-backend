@@ -47,10 +47,14 @@ from app.services.pipeline.lifecycle_service import (
 )
 from app.services.pipeline.ocr_stage import (
     OcrStageHandler,
+    STATUS_NO_TEXT,
     has_ocr_failure_placeholders,
     validate_ocr_result,
 )
-from app.services.pipeline.summary_stage import SummaryStageHandler
+from app.services.pipeline.summary_stage import (
+    SummaryStageHandler,
+    detect_written_radiology_report,
+)
 from app.services.pipeline.timing_service import TimingTracker
 
 logger = logging.getLogger(__name__)
@@ -505,6 +509,8 @@ class PipelineOrchestrator:
                         checkpoint_data=checkpoint_data,
                         document_id=document_id,
                         batch_id=batch_id,
+                        mime_type=metadata.get("mimeType"),
+                        metadata=metadata,
                     )
 
                     # Validate OCR result (detects page failures, placeholders, unreadable text)
@@ -681,13 +687,75 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             if STAGE_FIELD_EXTRACTION not in completed_stages:
                 try:
-                    extracted_structured_data = await self.clinical_handler.extract_fields(
-                        raw_ocr_data=raw_ocr_data or {},
-                        layout_data=layout_data,
+                    is_no_text = bool(
+                        (raw_ocr_data or {}).get("is_no_text") is True
+                        or (raw_ocr_data or {}).get("ocr_outcome") == STATUS_NO_TEXT
                     )
+                    detected_modality = (
+                        (raw_ocr_data or {}).get("modality")
+                        or (metadata.get("modality") if metadata else None)
+                    )
+                    is_imaging_doc = bool(
+                        is_no_text
+                        or (detected_modality in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"})
+                        or (raw_ocr_data or {}).get("document_subtype") in {"image_only_radiograph", "diagnostic_imaging"}
+                        or (metadata and (metadata.get("documentType") == "IMAGING_REPORT" or metadata.get("reportType") == "IMAGING_REPORT"))
+                    )
+                    if is_no_text:
+                        eff_mod = detected_modality or "x_ray"
+                        subtype = (raw_ocr_data or {}).get("document_subtype") or f"image_only_{eff_mod}"
+                        extracted_structured_data = {
+                            "documentType": "IMAGING_REPORT",
+                            "subType": subtype,
+                            "isNoText": True,
+                            "clinicallyAnalyzed": False,
+                            "hasWrittenReport": False,
+                            "documentInfo": {
+                                "documentType": "IMAGING_REPORT",
+                                "subType": subtype,
+                                "modality": eff_mod,
+                                "rawClassification": "IMAGING_REPORT",
+                            },
+                            "providerInfo": {},
+                            "facilityInfo": {},
+                            "diagnosis": [],
+                            "medications": [],
+                            "labResults": [],
+                            "groupedLabResults": [],
+                            "sections": [],
+                            "vitals": [],
+                            "additionalInformation": {
+                                "extractionPath": "image_only_bypass",
+                                "isNoText": True,
+                                "clinicallyAnalyzed": False,
+                            },
+                        }
+                    else:
+                        extracted_structured_data = await self.clinical_handler.extract_fields(
+                            raw_ocr_data=raw_ocr_data or {},
+                            layout_data=layout_data,
+                        )
+                        if is_imaging_doc and extracted_structured_data and isinstance(extracted_structured_data, dict):
+                            eff_mod = detected_modality or "x_ray"
+                            extracted_structured_data["documentType"] = "IMAGING_REPORT"
+                            doc_info = extracted_structured_data.setdefault("documentInfo", {})
+                            doc_info["documentType"] = "IMAGING_REPORT"
+                            doc_info["modality"] = eff_mod
+                            raw_text = (raw_ocr_data or {}).get("fullText", "")
+                            word_count = len(raw_text.strip().split())
+                            has_report_markers = bool(re.search(
+                                r"\b(?:impression|findings|conclusion|radiologist|technique|infiltrate|consolidation|pleural effusion)\b",
+                                raw_text,
+                                re.IGNORECASE,
+                            ))
+                            has_written = word_count >= 40 and has_report_markers
+                            extracted_structured_data["hasWrittenReport"] = has_written
+                            if not has_written:
+                                extracted_structured_data["clinicallyAnalyzed"] = False
+                                extracted_structured_data.setdefault("additionalInformation", {})["clinicallyAnalyzed"] = False
 
                     # Persist evaluated lab results into relational patient_lab_results
-                    if self.lab_result_repo is not None and extracted_structured_data:
+                    if self.lab_result_repo is not None and extracted_structured_data and not is_no_text:
                         raw_labs = extracted_structured_data.get("labResults") or []
                         target_user_id = (
                             job.get("user_id")
@@ -731,7 +799,7 @@ class PipelineOrchestrator:
                         bucket=bucket,
                         stage=STAGE_FIELD_EXTRACTION,
                         progress_pct=current_pct,
-                        message="Clinical entities extracted and lab bounds evaluated",
+                        message="Clinical entities extracted and lab bounds evaluated" if not is_no_text else "Image-only radiograph structured data initialized",
                         stage_data=extracted_structured_data,
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
@@ -744,7 +812,7 @@ class PipelineOrchestrator:
                         stage=STAGE_FIELD_EXTRACTION,
                         stage_status=STATUS_IN_PROGRESS,
                         previous_percentage=current_pct,
-                        message="Medical entities extracted",
+                        message="Medical entities extracted" if not is_no_text else "Image-only document verified",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
                         extracted_structured_data=extracted_structured_data,
@@ -776,9 +844,34 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             if STAGE_ANALYZING not in completed_stages:
                 try:
-                    analysis_data = self.analysis_handler.analyze(
-                        structured_data=extracted_structured_data or {}
+                    is_no_text = bool(
+                        (raw_ocr_data or {}).get("is_no_text") is True
+                        or (raw_ocr_data or {}).get("ocr_outcome") == STATUS_NO_TEXT
+                        or (extracted_structured_data or {}).get("isNoText") is True
                     )
+                    is_unverified_imaging = bool(
+                        is_no_text
+                        or (extracted_structured_data or {}).get("clinicallyAnalyzed") is False
+                        or (
+                            (extracted_structured_data or {}).get("documentType") == "IMAGING_REPORT"
+                            and not (extracted_structured_data or {}).get("hasWrittenReport")
+                        )
+                    )
+                    if is_unverified_imaging:
+                        analysis_data = {
+                            "anomalies": [],
+                            "warnings": [],
+                            "riskLevel": "NOT_ASSESSED",
+                            "clinicallyAnalyzed": False,
+                            "message": "Document verified as diagnostic image without written report text. Clinical safety analysis requires written report or licensed clinician interpretation.",
+                            "clinicalObservations": [
+                                "Document verified as diagnostic image without written report text. Clinical abnormalities cannot be assessed from unverified images and require clinician review."
+                            ],
+                        }
+                    else:
+                        analysis_data = self.analysis_handler.analyze(
+                            structured_data=extracted_structured_data or {}
+                        )
 
                     completed_stages.append(STAGE_ANALYZING)
                     current_pct = ensure_monotonic_progress(
@@ -790,7 +883,7 @@ class PipelineOrchestrator:
                         bucket=bucket,
                         stage=STAGE_ANALYZING,
                         progress_pct=current_pct,
-                        message=f"Safety analysis complete: risk level {analysis_data.get('riskLevel')}",
+                        message=f"Safety analysis complete: risk level {analysis_data.get('riskLevel')}" if not is_no_text else "Image-only verification complete (unassessed clinical status)",
                         stage_data=analysis_data,
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
@@ -802,7 +895,7 @@ class PipelineOrchestrator:
                         stage=STAGE_ANALYZING,
                         stage_status=STATUS_IN_PROGRESS,
                         previous_percentage=current_pct,
-                        message="Clinical safety analysis completed",
+                        message="Clinical safety analysis completed" if not is_no_text else "Clinical safety status recorded",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
                         document_id=document_id,
@@ -828,11 +921,136 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             if STAGE_SUMMARIZING not in completed_stages:
                 try:
+                    is_no_text = bool(
+                        (raw_ocr_data or {}).get("is_no_text") is True
+                        or (raw_ocr_data or {}).get("ocr_outcome") == STATUS_NO_TEXT
+                        or (extracted_structured_data or {}).get("isNoText") is True
+                    )
+                    detected_modality = (
+                        (raw_ocr_data or {}).get("modality")
+                        or (extracted_structured_data or {}).get("documentInfo", {}).get("modality")
+                        or (metadata.get("modality") if metadata else None)
+                        or ("x_ray" if is_no_text else None)
+                    )
+                    is_imaging_doc = bool(
+                        is_no_text
+                        or (detected_modality in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"})
+                        or (raw_ocr_data or {}).get("document_subtype") in {"image_only_radiograph", "diagnostic_imaging"}
+                        or (extracted_structured_data or {}).get("documentType") == "IMAGING_REPORT"
+                        or (metadata and (metadata.get("documentType") == "IMAGING_REPORT" or metadata.get("reportType") == "IMAGING_REPORT"))
+                    )
+
+                    image_pages: list[tuple[int, bytes, str]] = []
+                    image_mime = (metadata.get("mimeType") if metadata else None) or "image/jpeg"
+
+                    if is_imaging_doc:
+                        # Resolve authorized image from local disk cache or S3
+                        if not temp_path or not temp_path.exists():
+                            temp_path = await self.ocr_handler.verify_upload(
+                                bucket=bucket, key=s3_key, expected_sha256=expected_sha256
+                            )
+                        if temp_path and temp_path.exists():
+                            raw_file_bytes = temp_path.read_bytes()
+                            if raw_file_bytes.startswith(b"%PDF"):
+                                from app.services.pipeline.ocr_stage import render_pdf_page_to_image
+                                ocr_pages = (raw_ocr_data or {}).get("pages", [])
+                                full_text = (raw_ocr_data or {}).get("fullText", "")
+
+                                # Classify each PDF page to distinguish:
+                                # 1. Diagnostic image
+                                # 2. Written radiology report
+                                # 3. Diagnostic image with written annotations/report
+                                # 4. Unknown content
+                                page_classifications: dict[int, str] = {}
+                                diagnostic_page_nums: list[int] = []
+
+                                for p in ocr_pages:
+                                    p_num = p.get("page")
+                                    if p_num is None:
+                                        continue
+                                    p_text = (p.get("text") or "").strip()
+                                    p_evidence = p.get("evidence") or {}
+                                    p_has_imaging = bool(
+                                        p.get("status") == STATUS_NO_TEXT
+                                        or p.get("is_no_text") is True
+                                        or p.get("modality") in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}
+                                        or p_evidence.get("is_imaging") is True
+                                        or p_evidence.get("modality") in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}
+                                    )
+                                    p_has_report = detect_written_radiology_report(p_text, ocr_pages=[p])
+
+                                    if p_has_imaging and not p_has_report:
+                                        cat = "DIAGNOSTIC_IMAGE"
+                                        diagnostic_page_nums.append(p_num)
+                                    elif p_has_imaging and p_has_report:
+                                        cat = "DIAGNOSTIC_IMAGE_WITH_REPORT"
+                                        diagnostic_page_nums.append(p_num)
+                                    elif not p_has_imaging and p_has_report:
+                                        cat = "WRITTEN_RADIOLOGY_REPORT"
+                                    else:
+                                        cat = "UNKNOWN_CONTENT"
+                                    page_classifications[p_num] = cat
+
+                                logger.info(
+                                    "PDF imaging page classifications: total_pages=%d, classifications=%s, diagnostic_pages=%s",
+                                    len(ocr_pages),
+                                    page_classifications,
+                                    diagnostic_page_nums,
+                                )
+
+                                # If OCR pages are absent but document is verified image-only NO_TEXT, fallback to page 1
+                                if not ocr_pages and is_no_text and not detect_written_radiology_report(full_text):
+                                    diagnostic_page_nums = [1]
+
+                                # Send ONLY actual diagnostic image pages to MedGemma.
+                                # Do NOT automatically fall back to all written-report PDF pages when imaging evidence is absent!
+                                for p_num in diagnostic_page_nums:
+                                    try:
+                                        p_bytes, p_mime = render_pdf_page_to_image(raw_file_bytes, p_num - 1, dpi=150)
+                                        image_pages.append((p_num, p_bytes, p_mime))
+                                    except Exception as p_err:
+                                        logger.warning("Failed to render PDF page %d for imaging: %s", p_num, p_err)
+                            else:
+                                if raw_file_bytes.startswith(b"\x89PNG"):
+                                    image_mime = "image/png"
+                                elif raw_file_bytes.startswith(b"\xff\xd8"):
+                                    image_mime = "image/jpeg"
+                                elif raw_file_bytes.startswith(b"RIFF") and b"WEBP" in raw_file_bytes[:16]:
+                                    image_mime = "image/webp"
+
+                                # Check if single image upload is an actual diagnostic image or pure paper document photo
+                                full_text = (raw_ocr_data or {}).get("fullText", "")
+                                doc_evidence = (raw_ocr_data or {}).get("evidence") or {}
+                                has_img_evidence = bool(
+                                    is_no_text
+                                    or (raw_ocr_data or {}).get("modality") in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}
+                                    or doc_evidence.get("is_imaging") is True
+                                    or (raw_ocr_data or {}).get("document_subtype") in {"image_only_radiograph", "diagnostic_imaging"}
+                                )
+                                has_written_doc_report = detect_written_radiology_report(full_text, extracted_structured_data)
+
+                                # Only send single image to MedGemma if it has imaging evidence OR does not have a formal written report
+                                if has_img_evidence or not has_written_doc_report:
+                                    image_pages.append((1, raw_file_bytes, image_mime))
+                                else:
+                                    logger.info(
+                                        "Single image upload classified as pure written report photo (no imaging scan evidence); skipping MedGemma image rendering."
+                                    )
+
+                    ocr_pages_list = (raw_ocr_data or {}).get("pages", [])
                     full_text = (raw_ocr_data or {}).get("fullText", "")
+                    first_bytes = image_pages[0][1] if image_pages else None
+                    first_mime = image_pages[0][2] if image_pages else image_mime
                     summary_data = await self.summary_handler.generate_summary(
                         raw_text=full_text,
                         structured_data=extracted_structured_data or {},
                         preferred_language=preferred_language,
+                        image_bytes=first_bytes,
+                        mime_type=first_mime,
+                        modality=detected_modality or "x_ray",
+                        image_pages=image_pages,
+                        image_source=s3_key or file_key,
+                        ocr_pages=ocr_pages_list,
                     )
                     if extracted_structured_data is not None and isinstance(summary_data, dict):
                         extracted_structured_data.update({
@@ -840,12 +1058,16 @@ class PipelineOrchestrator:
                             "summaryInPreferredLanguage": summary_data.get("summaryInPreferredLanguage"),
                             "summaryLanguage": summary_data.get("summaryLanguage"),
                             "preferredLanguage": summary_data.get("preferredLanguage"),
+                            "summariesByLanguage": summary_data.get("summariesByLanguage") or {},
                             "translationStatus": summary_data.get("translationStatus"),
                             "translationProvider": summary_data.get("translationProvider"),
+                            "summaryPipelineVersion": summary_data.get("summaryPipelineVersion", "1.1.0"),
                             "keyPoints": summary_data.get("keyPoints"),
                             "keyFindings": summary_data.get("keyFindings"),
                             "dosagePreserved": summary_data.get("dosagePreserved"),
                         })
+                        if summary_data.get("imageAnalysis"):
+                            extracted_structured_data["imageAnalysis"] = summary_data["imageAnalysis"]
 
                     completed_stages.append(STAGE_SUMMARIZING)
                     current_pct = ensure_monotonic_progress(
@@ -900,12 +1122,16 @@ class PipelineOrchestrator:
                         "summaryInPreferredLanguage": summary_data.get("summaryInPreferredLanguage"),
                         "summaryLanguage": summary_data.get("summaryLanguage"),
                         "preferredLanguage": summary_data.get("preferredLanguage"),
+                        "summariesByLanguage": summary_data.get("summariesByLanguage") or {},
                         "translationStatus": summary_data.get("translationStatus"),
                         "translationProvider": summary_data.get("translationProvider"),
+                        "summaryPipelineVersion": summary_data.get("summaryPipelineVersion", "1.1.0"),
                         "keyPoints": summary_data.get("keyPoints"),
                         "keyFindings": summary_data.get("keyFindings"),
                         "dosagePreserved": summary_data.get("dosagePreserved"),
                     })
+                    if summary_data.get("imageAnalysis"):
+                        extracted_structured_data["imageAnalysis"] = summary_data["imageAnalysis"]
 
             # ─────────────────────────────────────────────────────────────────
             # 9. STAGE: EMBEDDING
@@ -913,6 +1139,9 @@ class PipelineOrchestrator:
             if STAGE_EMBEDDING not in completed_stages:
                 try:
                     full_text = (raw_ocr_data or {}).get("fullText", "")
+                    summary_eng = (extracted_structured_data or {}).get("summaryEnglish") or ""
+                    if summary_eng and summary_eng not in full_text:
+                        full_text = f"{full_text}\n\n[CLINICAL SUMMARY AND IMAGING OBSERVATIONS]\n{summary_eng}".strip()
                     embedding_data = await self.embedding_handler.generate_embeddings(
                         full_text=full_text,
                         patient_id=patient_id,

@@ -720,118 +720,176 @@ class DocumentService {
         const fileKeys = list.map(() => newFileKey());
 
         sseConnectionService.registerBatch(batchId, fileKeys);
-        if (env.usePythonPipeline) {
-          const jobs = await Promise.all(
-            list.map(async (file, index) => {
-              const fileKey = fileKeys[index];
-              const tPage = Date.now();
-              const pageCount = await getPageCount(file);
+        const jobs = await Promise.all(
+          list.map(async (file, index) => {
+            const fileKey = fileKeys[index];
+            const tPage = Date.now();
+            const pageCount = await getPageCount(file);
+            console.log(
+              `  [NODE TIMING] [uploadDocuments] getPageCount took ${Date.now() - tPage}ms (pages=${pageCount})`,
+            );
+            const sha256 = computeFileSha256(file);
+
+            // 2.5 Check if an active/recent job already exists for this exact file SHA-256
+            const tSha = Date.now();
+            const existingShaJob = await documentProcessingJobRepository.findActiveJobBySha256(
+              authUserId,
+              sha256,
+              60,
+            );
+            console.log(
+              `  [NODE TIMING] [uploadDocuments] findActiveJobBySha256 took ${Date.now() - tSha}ms (hit=${Boolean(existingShaJob)})`,
+            );
+            if (existingShaJob) {
               console.log(
-                `  [NODE TIMING] [uploadDocuments] getPageCount took ${Date.now() - tPage}ms (pages=${pageCount})`,
+                `[uploadDocuments] SHA-256 deduplication hit: reusing existing job ${existingShaJob.id} for file ${file?.originalname || fileKey}`,
               );
-              const sha256 = computeFileSha256(file);
+              return {
+                jobId: existingShaJob.id,
+                fileKey: existingShaJob.fileKey,
+                documentId: existingShaJob.metadata?.documentId || null,
+                fileName: existingShaJob.originalName || file?.originalname || "",
+                status: existingShaJob.status,
+                streamUrl: `/sse/files/${existingShaJob.fileKey}/stream`,
+              };
+            }
 
-              // 2.5 Check if an active/recent job already exists for this exact file SHA-256
-              const tSha = Date.now();
-              const existingShaJob = await documentProcessingJobRepository.findActiveJobBySha256(
-                authUserId,
-                sha256,
-                60,
+            let s3Key = null;
+            let canonicalDocumentId = null;
+            let jobRow = null;
+
+            try {
+              // 1. Node BFF owns S3/MinIO upload of original file
+              const tS3 = Date.now();
+              const uploadResult = await objectStorageService.uploadFile(
+                file,
+                FileCategory.DOCUMENT,
+                patientId,
               );
               console.log(
-                `  [NODE TIMING] [uploadDocuments] findActiveJobBySha256 took ${Date.now() - tSha}ms (hit=${Boolean(existingShaJob)})`,
+                `  [NODE TIMING] [uploadDocuments] objectStorageService.uploadFile (S3) took ${Date.now() - tS3}ms`,
               );
-              if (existingShaJob) {
-                console.log(
-                  `[uploadDocuments] SHA-256 deduplication hit: reusing existing job ${existingShaJob.id} for file ${file?.originalname || fileKey}`,
-                );
-                return {
-                  jobId: existingShaJob.id,
-                  fileKey: existingShaJob.fileKey,
-                  documentId: existingShaJob.metadata?.documentId || null,
-                  fileName: existingShaJob.originalName || file?.originalname || "",
-                  status: existingShaJob.status,
-                  streamUrl: `/sse/files/${existingShaJob.fileKey}/stream`,
-                };
-              }
+              s3Key = uploadResult?.fileKey || uploadResult?.s3Key || fileKey;
+              const bucket =
+                uploadResult?.s3Bucket ||
+                uploadResult?.bucket ||
+                (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
+                env.patientDocumentsBucket;
 
-              let s3Key = null;
-              let canonicalDocumentId = null;
+              const documentId = crypto.randomUUID();
 
-              try {
-                // 1. Node BFF owns S3/MinIO upload of original file
-                const tS3 = Date.now();
-                const uploadResult = await objectStorageService.uploadFile(
-                  file,
-                  FileCategory.DOCUMENT,
-                  patientId,
-                );
-                console.log(
-                  `  [NODE TIMING] [uploadDocuments] objectStorageService.uploadFile (S3) took ${Date.now() - tS3}ms`,
-                );
-                s3Key = uploadResult?.fileKey || uploadResult?.s3Key || fileKey;
-                const bucket =
-                  uploadResult?.s3Bucket ||
-                  uploadResult?.bucket ||
-                  (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
-                  env.patientDocumentsBucket;
+              // 1.5 Create or link initial canonical document record in documents table
+              const tUpsert = Date.now();
+              const initialDoc = await documentRepository.upsertInitialDocument({
+                id: documentId,
+                userId: authUserId,
+                documentType: documentType.OTHER_MEDICAL_DOCUMENT,
+                fileName: file?.originalname || "",
+                s3Bucket: bucket,
+                s3Key,
+                fileType: inferFileType(file?.mimetype),
+                fileSize: file?.size || 0,
+                ocrStatus: ocrStatus.PENDING,
+              });
+              console.log(
+                `  [NODE TIMING] [uploadDocuments] documentRepository.upsertInitialDocument took ${Date.now() - tUpsert}ms`,
+              );
+              canonicalDocumentId = initialDoc?.id || documentId;
 
-                const documentId = crypto.randomUUID();
-
-                // 1.5 Create or link initial canonical document record in documents table
-                const tUpsert = Date.now();
-                const initialDoc = await documentRepository.upsertInitialDocument({
-                  id: documentId,
-                  userId: authUserId,
-                  documentType: documentType.OTHER_MEDICAL_DOCUMENT,
-                  fileName: file?.originalname || "",
-                  s3Bucket: bucket,
+              // 2. Node creates initial document_processing_jobs row with status=QUEUED
+              const tJob = Date.now();
+              jobRow = await documentProcessingJobRepository.createQueuedJob({
+                fileKey: fileKey,
+                userId: authUserId,
+                mimeType: file?.mimetype || "",
+                originalName: file?.originalname || "",
+                pageCount,
+                metadata: {
+                  bucket,
+                  key: s3Key,
                   s3Key,
-                  fileType: inferFileType(file?.mimetype),
-                  fileSize: file?.size || 0,
-                  ocrStatus: ocrStatus.PENDING,
-                });
-                console.log(
-                  `  [NODE TIMING] [uploadDocuments] documentRepository.upsertInitialDocument took ${Date.now() - tUpsert}ms`,
-                );
-                canonicalDocumentId = initialDoc?.id || documentId;
-
-                // 2. Node creates initial document_processing_jobs row with status=QUEUED
-                const tJob = Date.now();
-                const jobRow = await documentProcessingJobRepository.createQueuedJob({
-                  fileKey: fileKey,
-                  userId: authUserId,
+                  sha256,
+                  patientId,
+                  documentId: canonicalDocumentId,
+                  batchId,
+                  documentType: documentType.OTHER_MEDICAL_DOCUMENT,
+                  preferredLanguage,
+                  processor: "python",
                   mimeType: file?.mimetype || "",
                   originalName: file?.originalname || "",
+                },
+                checkpointData: {
                   pageCount,
-                  metadata: {
-                    bucket,
-                    key: s3Key,
-                    s3Key,
-                    sha256,
-                    patientId,
-                    documentId: canonicalDocumentId,
-                    batchId,
-                    documentType: documentType.OTHER_MEDICAL_DOCUMENT,
-                    preferredLanguage,
-                    processor: "python",
-                    mimeType: file?.mimetype || "",
-                    originalName: file?.originalname || "",
-                  },
-                  checkpointData: {
-                    pageCount,
-                    uploaded: true,
-                    s3Bucket: bucket,
-                    s3Key,
-                    sha256,
-                    documentId: canonicalDocumentId,
-                    batchId,
-                  },
-                });
-                console.log(
-                  `  [NODE TIMING] [uploadDocuments] documentProcessingJobRepository.createQueuedJob took ${Date.now() - tJob}ms`,
-                );
+                  uploaded: true,
+                  s3Bucket: bucket,
+                  s3Key,
+                  sha256,
+                  documentId: canonicalDocumentId,
+                },
+              });
+              console.log(
+                `  [NODE TIMING] [uploadDocuments] documentProcessingJobRepository.createQueuedJob took ${Date.now() - tJob}ms`,
+              );
 
+              const emitter = ProgressEmitter.for({
+                fileKey: fileKey,
+                fileName: file?.originalname || "",
+                batchId,
+                patientId,
+                totalPages: pageCount,
+              });
+
+              emitter.stage(
+                StageType.QUEUED,
+                StageType.STARTED,
+                messageConstants.QUEUE_FOR_EXTRACTION,
+              );
+
+              // 3. Pointer-only dispatch payload: zero file bytes sent across HTTP
+              const dispatchPayload = {
+                jobId: jobRow.id,
+                patientId,
+                documentId: canonicalDocumentId,
+                storage: {
+                  bucket,
+                  key: s3Key,
+                  sha256,
+                },
+                documentType: documentType.OTHER_MEDICAL_DOCUMENT,
+                preferredLanguage: preferredLanguage === "english" ? "en" : preferredLanguage,
+                resumeFromStage: null,
+              };
+
+              const tDispatch = Date.now();
+              await aiServiceClient.dispatchDocumentProcessing(dispatchPayload);
+              console.log(
+                `  [NODE TIMING] [uploadDocuments] aiServiceClient.dispatchDocumentProcessing took ${Date.now() - tDispatch}ms`,
+              );
+
+              return {
+                jobId: jobRow.id,
+                fileKey: fileKey,
+                documentId: canonicalDocumentId,
+                fileName: file?.originalname || "",
+                status: StageType.QUEUED,
+              };
+            } catch (fileErr) {
+              console.error(`[uploadDocuments] Failure processing file ${fileKey}:`, fileErr);
+              // If initial document and job row were created, mark them as retryable failure
+              // instead of deleting them, so the user can retry without re-uploading.
+              if (jobRow && canonicalDocumentId) {
+                const failureMessage = "AI OCR service temporarily unavailable. Please retry.";
+                await documentProcessingJobRepository
+                  .markFailed(jobRow.id, fileErr, {
+                    retryable: true,
+                    message: failureMessage,
+                  })
+                  .catch(() => {});
+                await documentRepository
+                  .update(canonicalDocumentId, {
+                    ocrStatus: ocrStatus.FAILED,
+                  })
+                  .catch(() => {});
                 const emitter = ProgressEmitter.for({
                   fileKey: fileKey,
                   fileName: file?.originalname || "",
@@ -839,162 +897,45 @@ class DocumentService {
                   patientId,
                   totalPages: pageCount,
                 });
-
-                emitter.stage(
-                  StageType.QUEUED,
-                  StageType.STARTED,
-                  messageConstants.QUEUE_FOR_EXTRACTION,
-                );
-
-                // 3. Pointer-only dispatch payload: zero file bytes sent across HTTP
-                const dispatchPayload = {
-                  jobId: jobRow.id,
-                  patientId,
-                  documentId: canonicalDocumentId,
-                  batchId,
-                  storage: {
-                    bucket,
-                    key: s3Key,
-                    sha256,
-                  },
-                  documentType: documentType.OTHER_MEDICAL_DOCUMENT,
-                  preferredLanguage: preferredLanguage === "english" ? "en" : preferredLanguage,
-                  resumeFromStage: null,
-                };
-
-                const tDispatch = Date.now();
-                await aiServiceClient.dispatchDocumentProcessing(dispatchPayload);
-                console.log(
-                  `  [NODE TIMING] [uploadDocuments] aiServiceClient.dispatchDocumentProcessing took ${Date.now() - tDispatch}ms`,
-                );
-
+                emitter.stage(StageType.FAILED, StageType.FAILED, failureMessage, {
+                  retryable: true,
+                  errorCode: "AI_SERVICE_UNAVAILABLE",
+                });
                 return {
                   jobId: jobRow.id,
                   fileKey: fileKey,
                   documentId: canonicalDocumentId,
                   fileName: file?.originalname || "",
-                  status: StageType.QUEUED,
+                  status: StageType.FAILED,
+                  retryable: true,
                 };
-              } catch (fileErr) {
-                console.error(`[uploadDocuments] Failure processing file ${fileKey}:`, fileErr);
-                // Compensating rollback: delete S3 file and initial DB row if created
-                if (s3Key) {
-                  await objectStorageService.deleteFile(s3Key).catch(() => {});
-                }
-                if (canonicalDocumentId) {
-                  await documentRepository
-                    .deleteDocument(canonicalDocumentId, authUserId)
-                    .catch(() => {});
-                }
-                throw fileErr;
               }
-            }),
-          );
-
-          return {
-            batchId,
-            patientId,
-            total: jobs.length,
-            batchUrl: `/sse/batches/${batchId}/stream`,
-            documents: jobs.map((j) => ({
-              jobId: j.jobId,
-              fileKey: j.fileKey,
-              documentId: j.documentId,
-              fileName: j.fileName,
-              status: j.status,
-              streamUrl: `/sse/files/${j.fileKey}/stream`,
-            })),
-          };
-        }
-
-        const jobs = await Promise.all(
-          list.map(async (file, index) => {
-            const fileKey = fileKeys[index];
-            const pageCount = await getPageCount(file);
-            const sha256 = computeFileSha256(file);
-
-            const existingShaJob = await documentProcessingJobRepository.findActiveJobBySha256(
-              authUserId,
-              sha256,
-              60,
-            );
-            if (existingShaJob) {
-              return {
-                record: {
-                  jobId: existingShaJob.id,
-                  fileKey: existingShaJob.fileKey,
-                  fileName: existingShaJob.originalName || file?.originalname || "",
-                  status: existingShaJob.status,
-                },
-                job: existingShaJob,
-              };
+              // Compensating rollback if S3 or initial DB creation failed before job was created
+              if (s3Key) {
+                await objectStorageService.deleteFile(s3Key).catch(() => {});
+              }
+              if (canonicalDocumentId) {
+                await documentRepository
+                  .deleteDocument(canonicalDocumentId, authUserId)
+                  .catch(() => {});
+              }
+              throw fileErr;
             }
-
-            const jobRow = await documentProcessingJobRepository.createQueuedJob({
-              fileKey,
-              userId: authUserId,
-              mimeType: file?.mimetype || "",
-              originalName: file?.originalname || "",
-              pageCount,
-              metadata: {
-                sha256,
-              },
-            });
-
-            const record = {
-              jobId: jobRow?.id,
-              fileKey,
-              batchId,
-              patientId,
-              uploadedBy: authUserId,
-              fileName: file?.originalname || "",
-              mimeType: file?.mimetype || "",
-              sizeBytes: file?.size || 0,
-              status: StageType.QUEUED,
-              totalPages: pageCount,
-              createdAt: new Date().toISOString(),
-              options: {
-                language: preferredLanguage,
-                preferredLanguage: preferredLanguage,
-                returnRawText: true,
-              },
-            };
-
-            const emitter = ProgressEmitter.for({
-              fileKey: record.fileKey,
-              fileName: record.fileName,
-              batchId,
-              patientId,
-              totalPages: pageCount,
-            });
-
-            emitter.stage(
-              StageType.QUEUED,
-              StageType.STARTED,
-              messageConstants.QUEUE_FOR_EXTRACTION,
-            );
-
-            return { file, record, emitter, job: jobRow };
           }),
         );
-
-        for (const jobItem of jobs) {
-          if (jobItem.file && documentQueue.enqueue) {
-            documentQueue.enqueue(jobItem);
-          }
-        }
 
         return {
           batchId,
           patientId,
           total: jobs.length,
           batchUrl: `/sse/batches/${batchId}/stream`,
-          documents: jobs.map(({ record, job }) => ({
-            jobId: record.jobId || job?.id || null,
-            fileKey: record.fileKey,
-            fileName: record.fileName,
-            status: record.status,
-            streamUrl: `/sse/files/${record.fileKey}/stream`,
+          documents: jobs.map((j) => ({
+            jobId: j.jobId,
+            fileKey: j.fileKey,
+            documentId: j.documentId,
+            fileName: j.fileName,
+            status: j.status,
+            streamUrl: `/sse/files/${j.fileKey}/stream`,
           })),
         };
       };
@@ -1046,120 +987,60 @@ class DocumentService {
       );
     }
 
-    if (env.usePythonPipeline) {
-      let updatedSha256 = job.checkpointData?.sha256 || job.metadata?.sha256;
-      let updatedBucket =
-        job.checkpointData?.s3Bucket ||
-        job.metadata?.bucket ||
-        (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
-        env.patientDocumentsBucket;
-      let updatedKey = job.checkpointData?.s3Key || job.fileKey;
+    let updatedSha256 = job.checkpointData?.sha256 || job.metadata?.sha256;
+    let updatedBucket =
+      job.checkpointData?.s3Bucket ||
+      job.metadata?.bucket ||
+      (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
+      env.patientDocumentsBucket;
+    let updatedKey = job.checkpointData?.s3Key || job.fileKey;
 
-      if (file) {
-        updatedSha256 = computeFileSha256(file);
-        const uploadResult = await objectStorageService.uploadFile(
-          file,
-          FileCategory.DOCUMENT,
-          userId,
-          { fileKey },
-        );
-        if (uploadResult?.s3Bucket || uploadResult?.bucket) {
-          updatedBucket = uploadResult?.s3Bucket || uploadResult?.bucket;
-        }
-        if (uploadResult?.fileKey || uploadResult?.s3Key) {
-          updatedKey = uploadResult?.fileKey || uploadResult?.s3Key;
-        }
+    if (file) {
+      updatedSha256 = computeFileSha256(file);
+      const uploadResult = await objectStorageService.uploadFile(
+        file,
+        FileCategory.DOCUMENT,
+        userId,
+        { fileKey },
+      );
+      if (uploadResult?.s3Bucket || uploadResult?.bucket) {
+        updatedBucket = uploadResult?.s3Bucket || uploadResult?.bucket;
       }
-
-      const resumeFromStage = calculateResumeFromStage(job);
-
-      // Acquire atomic retry lock (prevent duplicate retry races)
-      const claimed = await documentProcessingJobRepository.claimJobForRetryReEnqueue(job.id, {
-        status: "QUEUED",
-        stageStatus: "QUEUED",
-        error: null,
-        metadata: {
-          ...(job.metadata || {}),
-          processor: "python",
-          ...(updatedSha256 ? { sha256: updatedSha256 } : {}),
-          bucket: updatedBucket,
-          key: updatedKey,
-        },
-        checkpointData: {
-          ...(job.checkpointData || {}),
-          s3Bucket: updatedBucket,
-          s3Key: updatedKey,
-          uploaded: true,
-          failedStage: job.stage || job.checkpointData?.failedStage,
-          ...(updatedSha256 ? { sha256: updatedSha256 } : {}),
-        },
-      });
-
-      if (!claimed) {
-        // Another worker or request already claimed the retry lease
-        return {
-          fileKey,
-          status: "RUNNING",
-          resumeStage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
-          progress: job.percentage || 0,
-          streamUrl: `/sse/files/${fileKey}/stream`,
-        };
+      if (uploadResult?.fileKey || uploadResult?.s3Key) {
+        updatedKey = uploadResult?.fileKey || uploadResult?.s3Key;
       }
-
-      sseConnectionService.reopen(fileKey);
-      if (job.metadata?.batchId) {
-        sseConnectionService.unmarkDocumentDone(job.metadata.batchId, fileKey);
-      }
-
-      sseConnectionService.publish(fileKey, {
-        type: "document.retrying",
-        stage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
-        stageStatus: "QUEUED",
-        percentage: job.percentage || 0,
-        progress: job.percentage || 0,
-        message: `Resuming execution from stage ${resumeFromStage || job.stage}`,
-        failedStage: job.stage || job.checkpointData?.failedStage,
-        attemptCount: (job.attemptCount || 1) + 1,
-      });
-
-      const dispatchPayload = {
-        jobId: job.id,
-        patientId: job.userId || userId,
-        documentId: job.metadata?.documentId || crypto.randomUUID(),
-        storage: {
-          bucket: updatedBucket,
-          key: updatedKey,
-          sha256: updatedSha256 || "",
-        },
-        documentType: job.metadata?.documentType || documentType.OTHER_MEDICAL_DOCUMENT,
-        preferredLanguage:
-          (job.metadata?.preferredLanguage || "en") === "english"
-            ? "en"
-            : job.metadata?.preferredLanguage || "en",
-        resumeFromStage,
-      };
-
-      await aiServiceClient.dispatchDocumentProcessing(dispatchPayload);
-
-      const resumeStage = resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED;
-      const progress = STAGE_WEIGHTS[resumeStage]?.[0] ?? job.percentage ?? 0;
-
-      return {
-        jobId: job.id,
-        fileKey,
-        status: "RUNNING",
-        resumeStage,
-        progress,
-        streamUrl: `/sse/files/${fileKey}/stream`,
-      };
     }
 
-    const claimed = await documentProcessingJobRepository.claimJobForRetry(fileKey, userId);
+    const resumeFromStage = calculateResumeFromStage(job);
+
+    // Acquire atomic retry lock (prevent duplicate retry races)
+    const claimed = await documentProcessingJobRepository.claimJobForRetryReEnqueue(job.id, {
+      status: "QUEUED",
+      stageStatus: "QUEUED",
+      error: null,
+      metadata: {
+        ...(job.metadata || {}),
+        processor: "python",
+        ...(updatedSha256 ? { sha256: updatedSha256 } : {}),
+        bucket: updatedBucket,
+        key: updatedKey,
+      },
+      checkpointData: {
+        ...(job.checkpointData || {}),
+        s3Bucket: updatedBucket,
+        s3Key: updatedKey,
+        uploaded: true,
+        failedStage: job.stage || job.checkpointData?.failedStage,
+        ...(updatedSha256 ? { sha256: updatedSha256 } : {}),
+      },
+    });
+
     if (!claimed) {
+      // Another worker or request already claimed the retry lease
       return {
         fileKey,
         status: "RUNNING",
-        resumeStage: job.stage || DOCUMENT_STAGES.QUEUED,
+        resumeStage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
         progress: job.percentage || 0,
         streamUrl: `/sse/files/${fileKey}/stream`,
       };
@@ -1170,49 +1051,41 @@ class DocumentService {
       sseConnectionService.unmarkDocumentDone(job.metadata.batchId, fileKey);
     }
 
-    const pageCount = job.checkpointData?.pageCount || (file ? await getPageCount(file) : 1);
-    const emitter = ProgressEmitter.for({
-      fileKey,
-      fileName: job.metadata?.originalName || file?.originalname || "document",
-      batchId: job.metadata?.batchId,
-      patientId: userId,
-      totalPages: pageCount,
+    sseConnectionService.publish(fileKey, {
+      type: "document.retrying",
+      stage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
+      stageStatus: "QUEUED",
+      percentage: job.percentage || 0,
+      progress: job.percentage || 0,
+      message: `Resuming execution from stage ${resumeFromStage || job.stage}`,
+      failedStage: job.stage || job.checkpointData?.failedStage,
+      attemptCount: (job.attemptCount || 1) + 1,
     });
 
-    const record = {
-      jobId: claimed.id,
-      fileKey,
-      batchId: job.metadata?.batchId,
-      patientId: userId,
-      uploadedBy: userId,
-      fileName: job.metadata?.originalName || file?.originalname || "",
-      mimeType: job.metadata?.mimeType || file?.mimetype || "application/pdf",
-      sizeBytes: file?.size || 0,
-      status: StageType.IN_PROGRESS,
-      stage: claimed.stage,
-      attemptCount: claimed.attemptCount,
+    const dispatchPayload = {
+      jobId: job.id,
+      patientId: job.userId || userId,
+      documentId: job.metadata?.documentId || crypto.randomUUID(),
+      storage: {
+        bucket: updatedBucket,
+        key: updatedKey,
+        sha256: updatedSha256 || "",
+      },
+      documentType: job.metadata?.documentType || documentType.OTHER_MEDICAL_DOCUMENT,
+      preferredLanguage:
+        (job.metadata?.preferredLanguage || "en") === "english"
+          ? "en"
+          : job.metadata?.preferredLanguage || "en",
+      resumeFromStage,
     };
 
-    const jobs = [
-      {
-        file: file || {
-          originalname: record.fileName,
-          mimetype: record.mimeType,
-          buffer: null,
-        },
-        record,
-        emitter,
-        job: claimed,
-      },
-    ];
+    await aiServiceClient.dispatchDocumentProcessing(dispatchPayload);
 
-    documentQueue.enqueue(jobs[0]);
-
-    const resumeStage = claimed.stage || DOCUMENT_STAGES.QUEUED;
-    const progress = STAGE_WEIGHTS[resumeStage]?.[0] ?? claimed.percentage ?? 0;
+    const resumeStage = resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED;
+    const progress = STAGE_WEIGHTS[resumeStage]?.[0] ?? job.percentage ?? 0;
 
     return {
-      jobId: claimed.id,
+      jobId: job.id,
       fileKey,
       status: "RUNNING",
       resumeStage,

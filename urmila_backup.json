@@ -1,0 +1,149 @@
+{
+  "patient": {
+    "id": "b441c1d8-fd45-4d8a-9786-e80b33d89205",
+    "patientCode": "986711",
+    "firstName": "URMILA",
+    "lastName": "HIPARARA",
+    "fullName": "URMILA HIPARARA",
+    "email": "kalpesh.p@techroversolutions.com",
+    "password": null,
+    "status": "ACTIVE",
+    "gender": "female",
+    "mobile": null,
+    "countryCode": null,
+    "firebaseUid": "microsoft_2f858eef-d030-40c9-b28a-94393f6e5f3e",
+    "lastLoginAt": "2026-10-22T01:40:13.078Z",
+    "isMobileVerified": false,
+    "isEmailVerified": true,
+    "onboardingCompleted": true,
+    "preferredLanguage": "gujarati",
+    "dateOfBirth": "2026-10-20T00:00:00.000Z",
+    "profileImageKey": null,
+    "bloodGroup": "B+",
+    "allergies": [],
+    "softDelete": false,
+    "deletedAt": null,
+    "createdAt": "2026-10-21T20:31:38.297Z",
+    "updatedAt": "2026-10-22T01:40:29.142Z"
+  },
+  "onboarding": {
+    "id": "4c5a641e-5092-4abe-a360-89d1b26bcdd8",
+    "userId": "b441c1d8-fd45-4d8a-9786-e80b33d89205",
+    "step": 1,
+    "data": {
+      "userId": "b441c1d8-fd45-4d8a-9786-e80b33d89205",
+      "canSkip": true,
+      "flowMode": "UPLOAD",
+      "provider": "microsoft",
+      "loginData": {
+        "email": {
+          "value": "kalpesh.p@techroversolutions.com",
+          "verified": true
+        },
+        "gender": {
+          "value": "",
+          "verified": false
+        },
+        "lastName": {
+          "value": "Parmar",
+          "verified": true
+        },
+        "firstName": {
+          "value": "Kalpesh",
+          "verified": true
+        },
+        "dateOfBirth": {
+          "value": "2026-10-20",
+          "verified": false,
+          "provenance": "manual"
+        }
+      },
+      "documentId": "65222242-3a72-4484-a33a-312c56df32d8",
+      "hasSkipped": true,
+      "socialData": {
+        "email": "kalpesh.p@techroversolutions.com",
+        "gender": null,
+        "lastName": "Parmar",
+        "firstName": "Kalpesh",
+        "dateOfBirth": "2026-10-20",
+        "phoneNumber": null
+      },
+      "confirmMode": null,
+      "currentStep": "ASK_REPORT",
+      "documentData": {
+        "email": null,
+        "gender": "female",
+        "lastName": "HIPARARA",
+        "allergies": [],
+        "firstName": "URMILA",
+        "bloodGroup": null,
+        "dateOfBirth": null,
+        "phoneNumber": null
+      },
+      "hasLoginData": true,
+      "pendingQueue": [],
+      "chatSessionId": "36330b13-da29-4bd4-8c8d-db91783a7b8c",
+      "hasSocialData": true,
+      "loginProvider": "microsoft",
+      "useSocialData": false,
+      "activeMedicine": null,
+      "foundMedicines": [
+        {
+          "name": "MBSON",
+          "dosage": "SL",
+          "frequency": "1-0-0",
+          "provenance": "primary_ocr",
+          "verification_required": false
+        },
+        {
+          "name": "Caldison D3",
+          "dosage": "D3",
+          "frequency": "1-0-0",
+          "provenance": "primary_ocr",
+          "verification_required": false
+        }
+      ],
+      "medicinesToAdd": [],
+      "selectedOption": null,
+      "useDocumentData": true,
+      "allergiesSkipped": true,
+      "documentUploaded": true,
+      "existingUserData": {
+        "email": "kalpesh.p@techroversolutions.com",
+        "gender": "female",
+        "lastName": "HIPARARA",
+        "allergies": [],
+        "firstName": "URMILA",
+        "bloodGroup": "B+",
+        "dateOfBirth": "2026-10-20",
+        "phoneNumber": null
+      },
+      "loadedDocumentId": "65222242-3a72-4484-a33a-312c56df32d8",
+      "profileConfirmed": true,
+      "bloodGroupSkipped": false,
+      "documentConfirmed": true,
+      "documentExtracted": true,
+      "preferredLanguage": "gujarati",
+      "medicationFlowDone": true,
+      "medicinesConfirmed": true,
+      "medicinesSavedToDb": true,
+      "currentMedicineIndex": 0,
+      "medicinesFlowStarted": true,
+      "profileGreetingShown": true,
+      "completionMessageSent": true,
+      "isOnboardingCompleted": true,
+      "medicationFlowStarted": true,
+      "profileManuallyEdited": false,
+      "selectedProfileSource": "DOCUMENT",
+      "validMedsToBulkCreate": [],
+      "documentAttachedToChat": true,
+      "pendingProfileConflict": false,
+      "stepClarificationNeeded": false,
+      "uploadedMedicalDocument": true,
+      "documentOwnershipConfirmed": true
+    },
+    "isCompleted": true,
+    "createdAt": "2026-10-21T20:31:40.900Z",
+    "updatedAt": "2026-10-22T01:40:29.148Z"
+  }
+}

@@ -169,32 +169,32 @@ ${headings.keyHighlights}
 - Parameter Name: Value (Status)
 
 ${headings.overallStatus}
-[State Normal, Needs Attention, or Abnormal]. [Provide a 1-2 sentence explanation or advice].
+State clearly whether the overall status is Normal, Needs Attention, or Abnormal, followed by a concise 1-2 sentence explanation or advice.
 
 2. For DOCUMENT COMPARISON:
 ${headings.keyHighlights}
-- Parameter Name: [Value from Report 1/Patient 1] (Status) -> [Value from Report 2/Patient 2] (Status)
+- Parameter Name: Value from Report 1 (Status) -> Value from Report 2 (Status)
 
 ${headings.keyInsights}
-[If the reports belong to different patients, explicitly state the patient names found in the documents here. Provide a brief paragraph explaining the comparison, trends, or differences.]
+If the reports belong to different patients, explicitly state the patient names found in the documents. Provide a brief paragraph explaining the comparison, trends, or differences.
 
 3. For an OVERVIEW OF ALL DOCUMENTS:
 ${headings.overallSummary}
-- ${headings.totalReports}: [Number]
-- ${headings.normal}: [Number]
-- ${headings.needsAttention}: [Number]
-- ${headings.abnormal}: [Number]
+- ${headings.totalReports}: (Number of reports)
+- ${headings.normal}: (Number of normal findings)
+- ${headings.needsAttention}: (Number of findings needing attention)
+- ${headings.abnormal}: (Number of abnormal findings)
 
 ${headings.keyInsights}
-- [Provide key finding 1]
-- [Provide key finding 2]
+- Key clinical finding 1
+- Key clinical finding 2
 
 4. For SPECIFIC QUESTIONS (Smart Q&A):
 ${headings.answer}
-[${headings.smartQAPrefix} If the requested values are present in multiple reports, you MUST mention all values from all relevant reports without skipping any.]
+${headings.smartQAPrefix} If the requested values are present in multiple reports, you MUST mention all values from all relevant reports without skipping any.
 
 ${headings.recommendation}
-[Provide a short, actionable recommendation based on the finding]
+Provide a short, actionable clinical recommendation based on the finding.
 
 You MUST write your ENTIRE response strictly in ${language.toUpperCase()}. DO NOT mix languages.${language.toLowerCase() === "english" ? " Write cleanly and purely in ENGLISH." : " DO NOT include English or other language sentences."} If the provided context is in another language, you MUST translate the information completely into ${language.toUpperCase()} before responding.
 

@@ -109,6 +109,51 @@ class LLMService:
             num_predict=num_predict,
         )
 
+    async def describe_image(
+        self,
+        *,
+        model: str | None = None,
+        data: bytes,
+        mime_type: str,
+        prompt: str,
+        temperature: float = 0.1,
+    ) -> str:
+        effective_model = (model or self.model).strip()
+        started = time.monotonic()
+        try:
+            res = await self._client.generate_json_from_bytes(
+                model=effective_model,
+                data=data,
+                mime_type=mime_type,
+                prompt=prompt,
+                temperature=temperature,
+                json_only=False,
+            )
+            text = res[0] if isinstance(res, tuple) else getattr(res, "text", str(res))
+            finish_reason = res[1] if isinstance(res, tuple) else getattr(res, "finish_reason", None)
+        except Exception as exc:
+            logger.error(
+                "llm_describe_image_failed",
+                extra={"engine": self._client.engine, "model": effective_model, "error": str(exc)},
+            )
+            raise LLMModelError(f"Configured vision model ({effective_model}) failed: {exc}") from exc
+
+        if not (text or "").strip():
+            raise LLMModelError(
+                f"Configured vision model ({effective_model}) returned an empty response (finish_reason={finish_reason})"
+            )
+
+        logger.info(
+            "llm_describe_image_ok",
+            extra={
+                "engine": self._client.engine,
+                "model": effective_model,
+                "finish_reason": finish_reason,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            },
+        )
+        return text.strip()
+
     async def health(self) -> dict:
         return {
             "ok": True,

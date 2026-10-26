@@ -950,6 +950,64 @@ class RagContextService {
           };
         });
 
+        // Fallback for medical imaging scans if vector retrieval found no text chunks
+        if (summaryChunks.length === 0 && finalDocumentIds.length > 0) {
+          for (const dId of finalDocumentIds) {
+            const docData = docNameMap[dId] || {};
+            let structData = docData.structuredExtractedData;
+            if (typeof structData === "string") {
+              try {
+                structData = JSON.parse(structData);
+              } catch {
+                // Empty Block
+              }
+            }
+            const imgAnalysis = structData?.imageAnalysis;
+            const summaryText =
+              docData.summaryEnglish ||
+              structData?.summaryEnglish ||
+              imgAnalysis?.aiGeneratedDescription ||
+              "";
+            if (imgAnalysis || docData.documentType === "IMAGING_REPORT") {
+              const anatomicalRegion =
+                imgAnalysis?.anatomicalRegion || "Diagnostic Imaging / Radiograph";
+              const view = imgAnalysis?.suggestedView || "Standard projection";
+              const quality = imgAnalysis?.imageQuality || "Screening quality";
+              const visible =
+                imgAnalysis?.visibleDetails ||
+                (Array.isArray(imgAnalysis?.visibleStructures)
+                  ? imgAnalysis.visibleStructures.join("; ")
+                  : imgAnalysis?.visibleStructures) ||
+                "";
+              const uncertainty =
+                imgAnalysis?.uncertainty ||
+                "Preliminary visual screening; requires radiologist correlation.";
+
+              const content = `[AUTHORIZED MEDICAL IMAGE OBSERVATIONS (MEDGEMMA 4B PRELIMINARY SCREENING)]
+Document: ${docData.fileName || "X-ray / Medical Image"}
+Anatomical Region: ${anatomicalRegion}
+Suggested View: ${view}
+Technical Quality: ${quality}
+Visible Structures / Details: ${visible}
+Uncertainty & Technical Limitations: ${uncertainty}
+Review Status: PENDING_CLINICIAN_REVIEW (Preliminary AI screening; formal interpretation requires licensed radiologist review)
+
+Preliminary Summary:
+${summaryText}`;
+
+              summaryChunks.push({
+                chunkId: `img-obs-${dId}`,
+                documentId: dId,
+                sectionTitle: "Medical Image Observations",
+                content,
+                score: 1.0,
+                sourceType: "imaging_observations",
+                docData,
+              });
+            }
+          }
+        }
+
         // Structured Logging
         const coverageObj = {};
         finalDocumentIds.forEach((id) => {

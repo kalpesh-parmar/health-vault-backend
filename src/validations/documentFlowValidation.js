@@ -124,7 +124,62 @@ const createChatSessionSchema = z
 
 const sendChatMessageSchema = z
   .object({
-    documentId: z.array(z.string().trim().min(3).max(500)).optional().nullable(),
+    documentId: z
+      .preprocess(
+        (val) => {
+          if (!val) return undefined;
+          if (typeof val === "string") {
+            try {
+              const parsed = JSON.parse(val);
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              // Treat non-JSON strings as a single document ID
+            }
+            return [val];
+          }
+          if (Array.isArray(val)) return val;
+          return undefined;
+        },
+        z.array(z.string().trim().min(3).max(500)),
+      )
+      .optional()
+      .nullable(),
+    mentions: z
+      .preprocess(
+        (val) => {
+          if (!val) return undefined;
+          if (typeof val === "string") {
+            try {
+              const parsed = JSON.parse(val);
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              // Empty block
+            }
+            return undefined;
+          }
+          if (Array.isArray(val)) return val;
+          return undefined;
+        },
+        z
+          .array(
+            z.object({
+              documentId: z.string().trim().min(3).max(500),
+              displayName: z.string().trim().max(500).optional(),
+              type: z.literal("DOCUMENT").default("DOCUMENT").optional(),
+              fileName: z.string().trim().max(500).optional(),
+              patientId: z.string().uuid().optional().nullable(),
+              reportDate: z.string().optional().nullable(),
+            }),
+          )
+          .optional(),
+      )
+      .optional()
+      .nullable(),
+    scopeMode: z
+      .enum(["SINGLE_DOCUMENT", "MULTI_DOCUMENT", "AUTHORIZED_HISTORY"])
+      .optional()
+      .nullable(),
+    patientId: z.string().uuid().optional().nullable(),
     question: z.string().trim().min(1).max(4000).optional(),
     sessionId: z.string().uuid().optional().nullable(),
     preferredLanguage: z.string().optional(),
@@ -162,40 +217,48 @@ const sessionListQuerySchema = z
   })
   .strict();
 
-const unifiedChatSchema = z.object({
-  actionType: z.string().trim().optional().nullable(),
-  actionData: z.record(z.any()).optional().nullable(),
-  message: z
-    .union([z.string().trim().max(4000), z.record(z.any())])
-    .optional()
-    .nullable(),
-  question: z.string().trim().max(4000).optional().nullable(),
-  sessionId: z.string().uuid().optional().nullable(),
-  documentId: z
-    .union([z.string().trim(), z.array(z.string().trim())])
-    .optional()
-    .nullable(),
-  state: z.record(z.any()).optional().nullable(),
-  history: z.array(z.record(z.any())).optional().default([]),
-  displayLabel: z.string().optional().nullable(),
-  fromScreen: z.string().optional().nullable(),
-  medicines: z.array(z.any()).optional().nullable(),
-  preferredLanguage: z.string().optional().nullable(),
-  page: z
-    .union([z.number().int().positive(), z.string()])
-    .optional()
-    .nullable()
-    .transform((val) => (val ? Number(val) : undefined)),
-  limit: z
-    .union([z.number().int().positive(), z.string()])
-    .optional()
-    .nullable()
-    .transform((val) => (val ? Number(val) : undefined)),
-  stream: z
-    .union([z.boolean(), z.enum(["true", "false"])])
-    .optional()
-    .nullable(),
-});
+const unifiedChatSchema = z
+  .object({
+    actionType: z.string().trim().optional().nullable(),
+    actionData: z.record(z.any()).optional().nullable(),
+    message: z
+      .union([z.string().trim().max(4000), z.record(z.any())])
+      .optional()
+      .nullable(),
+    question: z.string().trim().max(4000).optional().nullable(),
+    sessionId: z.string().uuid().optional().nullable(),
+    clientMessageId: z.string().optional().nullable(),
+    loginProvider: z.string().optional().nullable(),
+    provider: z.string().optional().nullable(),
+    hasSocialData: z.boolean().optional().nullable(),
+    isSocialLogin: z.boolean().optional().nullable(),
+    isSilent: z.boolean().optional().nullable(),
+    documentId: z
+      .union([z.string().trim(), z.array(z.string().trim())])
+      .optional()
+      .nullable(),
+    state: z.record(z.any()).optional().nullable(),
+    history: z.array(z.record(z.any())).optional().default([]),
+    displayLabel: z.string().optional().nullable(),
+    fromScreen: z.string().optional().nullable(),
+    medicines: z.array(z.any()).optional().nullable(),
+    preferredLanguage: z.string().optional().nullable(),
+    page: z
+      .union([z.number().int().positive(), z.string()])
+      .optional()
+      .nullable()
+      .transform((val) => (val ? Number(val) : undefined)),
+    limit: z
+      .union([z.number().int().positive(), z.string()])
+      .optional()
+      .nullable()
+      .transform((val) => (val ? Number(val) : undefined)),
+    stream: z
+      .union([z.boolean(), z.enum(["true", "false"])])
+      .optional()
+      .nullable(),
+  })
+  .passthrough();
 
 /* Backup of original module.exports:
 module.exports = {

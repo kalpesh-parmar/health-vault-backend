@@ -157,6 +157,36 @@ class ClinicalStageHandler:
         patient_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
+        if raw_ocr_data.get("is_no_text") is True or raw_ocr_data.get("ocr_outcome") == "NO_TEXT":
+            subtype = raw_ocr_data.get("document_subtype") or "image_only_radiograph"
+            modality = raw_ocr_data.get("modality") or "x_ray"
+            logger.info("extract_fields: image-only document bypass activated (modality=%s)", modality)
+            return {
+                "documentType": "IMAGING_REPORT",
+                "subType": subtype,
+                "isNoText": True,
+                "clinicallyAnalyzed": False,
+                "documentInfo": {
+                    "documentType": "IMAGING_REPORT",
+                    "subType": subtype,
+                    "modality": modality,
+                    "rawClassification": "IMAGING_REPORT",
+                },
+                "providerInfo": {},
+                "facilityInfo": {},
+                "diagnosis": [],
+                "medications": [],
+                "labResults": [],
+                "groupedLabResults": [],
+                "sections": [],
+                "vitals": [],
+                "additionalInformation": {
+                    "extractionPath": "image_only_bypass",
+                    "isNoText": True,
+                    "clinicallyAnalyzed": False,
+                },
+            }
+
         logger.info("Extracting structured clinical fields from document text...")
         full_text = raw_ocr_data.get("fullText") or ""
         tables = (layout_data or {}).get("tables") or []

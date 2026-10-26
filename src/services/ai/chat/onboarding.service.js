@@ -33,10 +33,10 @@ const {
   normalizePhone,
   validateEditedFields,
   normalizeFlowModeLocally,
+  normalizeLanguageLocally,
   splitName,
   normalizeName,
   getLocalizedText,
-  normalizeLanguageLocally,
 } = require("../../../helpers/onboarding.helper");
 
 const {
@@ -429,22 +429,21 @@ async function updateStateFromMessage(state, message, userId = null) {
     state.currentStep = "ASK_BLOOD_GROUP";
   }
 
-  const isAskReportIntent =
-    msg === "ASK_REPORT" ||
-    msg === "ASK_ABOUT_REPORT" ||
-    msg === "REPORT_SUMMARY" ||
-    compactMsg === "ASK_REPORT" ||
-    compactMsg === "ASK_ABOUT_REPORT" ||
-    compactMsg === "REPORTSUMMARY" ||
-    compactMsg === "ASKREPORT" ||
-    compactMsg === "ASKABOUTREPORT";
-
-  if (isAskReportIntent) {
-    state.medicationFlowDone = true;
-    state.isOnboardingCompleted = false;
-    state.medicinesConfirmed = true;
-    state.currentStep = "ASK_REPORT";
-    return;
+  const isDocUploadMsg =
+    msg === "DOCUMENT_UPLOADED" ||
+    (typeof msg === "string" && msg.startsWith("Document Uploaded:"));
+  if (isDocUploadMsg) {
+    state.flowMode = "UPLOAD";
+    state.documentUploaded = true;
+    state.uploadedMedicalDocument = true;
+    state.documentExtracted = true;
+    if (
+      state.documentOwnershipConfirmed === undefined ||
+      state.documentOwnershipConfirmed === null
+    ) {
+      state.currentStep = "CONFIRM_DOCUMENT_OWNERSHIP";
+      return;
+    }
   }
 
   if (!state.currentStep) return;
@@ -709,7 +708,7 @@ async function updateStateFromMessage(state, message, userId = null) {
     case "ASK_UPLOAD_DOCUMENT": {
       const isUploaded = state.documentUploaded || state.uploadedMedicalDocument || false;
       if (isUploaded) {
-        state.currentStep = getNextRequiredOrOptionalStep(state);
+        state.currentStep = computeCurrentStep(state);
       } else if (msg === "OCR_FAILED") {
         state.ocrFailed = true;
         state.currentStep = "ASK_UPLOAD_DOCUMENT_FAILED";

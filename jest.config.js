@@ -6,4 +6,5 @@ module.exports = {
   verbose: true,
   collectCoverage: false,
   setupFiles: ["<rootDir>/tests/setup.js"],
+  modulePathIgnorePatterns: ["<rootDir>/ai-service/"],
 };

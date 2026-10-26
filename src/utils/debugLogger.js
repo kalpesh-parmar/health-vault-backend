@@ -1,10 +1,15 @@
+const { maskSensitiveData } = require("./apiLoggerUtil");
+
 const debugLogger = {
   // eslint-disable-next-line no-console
-  info: (msg, data) => console.log(`[DEBUG] ${msg}`, JSON.stringify(data, null, 2)),
+  info: (msg, data) =>
+    console.log(`[DEBUG] ${msg}`, JSON.stringify(maskSensitiveData(data), null, 2)),
   // eslint-disable-next-line no-console
-  warn: (msg, data) => console.warn(`[DEBUG WARN] ${msg}`, JSON.stringify(data, null, 2)),
+  warn: (msg, data) =>
+    console.warn(`[DEBUG WARN] ${msg}`, JSON.stringify(maskSensitiveData(data), null, 2)),
   // eslint-disable-next-line no-console
-  error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
+  error: (msg, data) =>
+    console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(maskSensitiveData(data), null, 2)),
 };
 
 module.exports = {

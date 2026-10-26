@@ -162,7 +162,12 @@ class Container:
             bypass_min_confidence=settings.clinical_heuristic_bypass_min_confidence,
         )
         self.analysis_stage_handler = AnalysisStageHandler()
-        self.summary_stage_handler = SummaryStageHandler(self.summary, self.translation)
+        self.summary_stage_handler = SummaryStageHandler(
+            self.summary,
+            self.translation,
+            llm_service=self.llm,
+            medgemma_model=getattr(settings, "medgemma_model", "medgemma:4b") or "medgemma:4b",
+        )
         self.embedding_stage_handler = EmbeddingStageHandler(self.models.embeddings)
 
         self.pipeline_orchestrator = PipelineOrchestrator(

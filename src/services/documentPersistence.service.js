@@ -1,3 +1,4 @@
+const { sql } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { env } = require("../configs/env");
 const { normalizeDocumentType } = require("../enums/documentType");
@@ -180,14 +181,75 @@ class DocumentPersistenceService {
         : null);
     const projectedDoctorName = primaryProvider || extractedStructuredData?.doctorName || null;
 
+    // Canonicalize structured extracted data contract
+    let canonicalStructured = extractedStructuredData ? { ...extractedStructuredData } : null;
+    if (canonicalStructured && typeof canonicalStructured === "object") {
+      const summaryEng =
+        canonicalStructured.summaryEnglish ||
+        canonicalStructured.summary ||
+        payload.summaryEnglish ||
+        null;
+      const summaryPref = canonicalStructured.summaryInPreferredLanguage || null;
+      const summaryLang =
+        canonicalStructured.summaryLanguage ||
+        (summaryPref ? payload.preferredLanguage || "english" : "english");
+      const prefLang =
+        canonicalStructured.preferredLanguage ||
+        payload.preferredLanguage ||
+        summaryLang ||
+        "english";
+
+      canonicalStructured.summaryEnglish = summaryEng;
+      if (summaryPref) {
+        canonicalStructured.summaryInPreferredLanguage = summaryPref;
+      }
+      canonicalStructured.summaryLanguage = summaryLang;
+      canonicalStructured.preferredLanguage = prefLang;
+      canonicalStructured.summaryPipelineVersion =
+        canonicalStructured.summaryPipelineVersion || "1.1.0";
+      canonicalStructured.translationStatus =
+        canonicalStructured.translationStatus || (summaryPref ? "translated" : "original");
+      canonicalStructured.translationProvider =
+        canonicalStructured.translationProvider || (summaryPref ? "medgemma" : "original");
+
+      if (!canonicalStructured.summariesByLanguage) {
+        canonicalStructured.summariesByLanguage = {
+          english: summaryEng || "",
+          en: summaryEng || "",
+          ...(summaryPref && summaryLang !== "english" ? { [summaryLang]: summaryPref } : {}),
+        };
+      } else {
+        if (!canonicalStructured.summariesByLanguage.english && summaryEng) {
+          canonicalStructured.summariesByLanguage.english = summaryEng;
+        }
+        if (!canonicalStructured.summariesByLanguage.en && summaryEng) {
+          canonicalStructured.summariesByLanguage.en = summaryEng;
+        }
+        if (
+          summaryPref &&
+          summaryLang !== "english" &&
+          !canonicalStructured.summariesByLanguage[summaryLang]
+        ) {
+          canonicalStructured.summariesByLanguage[summaryLang] = summaryPref;
+        }
+      }
+
+      if (!Array.isArray(canonicalStructured.keyPoints)) {
+        canonicalStructured.keyPoints = [];
+      }
+      if (!canonicalStructured.keyFindings) {
+        canonicalStructured.keyFindings = [];
+      }
+    }
+
     const [documentRow] = await tx
       .insert(document)
       .values({
         documentType: normalizeDocumentType(
           payload.documentType ||
-            extractedStructuredData?.documentInfo?.documentType ||
-            extractedStructuredData?.documentType ||
-            extractedStructuredData?.reportType,
+            canonicalStructured?.documentInfo?.documentType ||
+            canonicalStructured?.documentType ||
+            canonicalStructured?.reportType,
         ),
         doctorName: projectedDoctorName,
         fileName,
@@ -197,42 +259,42 @@ class DocumentPersistenceService {
         ocrExtractedText: rawOcrData?.fullText || null,
         ocrStatus: ocrStatus.COMPLETED,
         remarks:
-          extractedStructuredData?.summaryInPreferredLanguage ||
-          extractedStructuredData?.summary ||
-          extractedStructuredData?.additionalInformation?.remarks ||
+          canonicalStructured?.summaryInPreferredLanguage ||
+          canonicalStructured?.summary ||
+          canonicalStructured?.additionalInformation?.remarks ||
           null,
         reportDate: projectedReportDate,
         s3Bucket: bucketName,
         s3Key: s3Key,
-        structuredExtractedData: extractedStructuredData,
+        structuredExtractedData: canonicalStructured,
         userId,
-        summaryEnglish: extractedStructuredData?.summaryEnglish || null,
+        summaryEnglish: canonicalStructured?.summaryEnglish || null,
       })
       .onConflictDoUpdate({
         target: document.s3Key,
         set: {
           documentType: normalizeDocumentType(
             payload.documentType ||
-              extractedStructuredData?.documentInfo?.documentType ||
-              extractedStructuredData?.documentType ||
-              extractedStructuredData?.reportType,
+              canonicalStructured?.documentInfo?.documentType ||
+              canonicalStructured?.documentType ||
+              canonicalStructured?.reportType,
           ),
-          doctorName: projectedDoctorName,
+          doctorName: projectedDoctorName || sql`${document.doctorName}`,
           fileName,
-          fileSize: payload.fileSize || rawOcrData?.fileSize || 0,
+          fileSize: payload.fileSize || rawOcrData?.fileSize || sql`${document.fileSize}`,
           fileType: inferFileType(mimeType),
-          hospitalName: projectedHospitalName,
-          ocrExtractedText: rawOcrData?.fullText || null,
+          hospitalName: projectedHospitalName || sql`${document.hospitalName}`,
+          ocrExtractedText: rawOcrData?.fullText || sql`${document.ocrExtractedText}`,
           ocrStatus: ocrStatus.COMPLETED,
           remarks:
-            extractedStructuredData?.summaryInPreferredLanguage ||
-            extractedStructuredData?.summary ||
-            extractedStructuredData?.additionalInformation?.remarks ||
-            null,
-          reportDate: projectedReportDate,
+            canonicalStructured?.summaryInPreferredLanguage ||
+            canonicalStructured?.summary ||
+            canonicalStructured?.additionalInformation?.remarks ||
+            sql`${document.remarks}`,
+          reportDate: projectedReportDate || sql`${document.reportDate}`,
           s3Bucket: bucketName,
-          structuredExtractedData: extractedStructuredData,
-          summaryEnglish: extractedStructuredData?.summaryEnglish || null,
+          structuredExtractedData: canonicalStructured || sql`${document.structuredExtractedData}`,
+          summaryEnglish: canonicalStructured?.summaryEnglish || sql`${document.summaryEnglish}`,
           updatedAt: new Date(),
         },
       })

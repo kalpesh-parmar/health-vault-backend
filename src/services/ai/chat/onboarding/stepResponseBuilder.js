@@ -623,32 +623,18 @@ async function getLocalizedResponse(step, state) {
       const hasUnconfirmedMeds =
         Array.isArray(state.medicinesToAdd) &&
         state.medicinesToAdd.some((m) => Boolean(m && !m.isSaved));
-      const options = [
-        {
-          key: "ADD",
-          label: hasUnconfirmedMeds
-            ? await getLocalizedText(
-                "onboarding.medicineOptions.addMore",
-                "Add More Medicines",
-                state.preferredLanguage,
-              )
-            : await getLocalizedText(
-                "onboarding.medicineOptions.addMedicines",
-                "Add Medicines",
-                state.preferredLanguage,
-              ),
-          primary: true,
-        },
-      ];
+      const hasAuthorizedDocument =
+        (state.flowMode === "UPLOAD" ||
+          state.documentUploaded === true ||
+          state.uploadedMedicalDocument === true ||
+          !!state.documentId ||
+          !!state.loadedDocumentId ||
+          (state.documentData && Object.keys(state.documentData).length > 0)) &&
+        state.documentOwnershipConfirmed !== false;
 
-      const hasDocument =
-        state.flowMode === "UPLOAD" ||
-        state.documentUploaded === true ||
-        state.uploadedMedicalDocument === true ||
-        !!state.documentId ||
-        !!state.loadedDocumentId ||
-        (state.documentData && Object.keys(state.documentData).length > 0);
+      const options = [];
 
+      // 1. GO TO DASHBOARD
       if (
         state.fromScreen !== "AIChat" &&
         state.fromScreen !== "AIChatScreen" &&
@@ -663,11 +649,30 @@ async function getLocalizedResponse(step, state) {
             "Go to Dashboard",
             state.preferredLanguage,
           ),
-          primary: false,
+          primary: true,
         });
       }
 
-      if (hasDocument) {
+      // 2. ADD MEDICINES
+      options.push({
+        key: "ADD",
+        value: "ADD_MEDICINE",
+        label: hasUnconfirmedMeds
+          ? await getLocalizedText(
+              "onboarding.medicineOptions.addMore",
+              "Add More Medicines",
+              state.preferredLanguage,
+            )
+          : await getLocalizedText(
+              "onboarding.medicineOptions.addMedicines",
+              "Add Medicines",
+              state.preferredLanguage,
+            ),
+        primary: false,
+      });
+
+      // 3. ASK ABOUT YOUR REPORT (displayed only when user has an authorized uploaded medical document)
+      if (hasAuthorizedDocument) {
         options.push({
           key: "ASK_REPORT",
           value: "ASK_REPORT",

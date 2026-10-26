@@ -39,6 +39,8 @@ const {
   SUMMARY_KEYWORDS,
   SUMMARY_LABELS_I18N,
   REPORT_PROCESSING_I18N,
+  DOCUMENT_STILL_PROCESSING_I18N,
+  DOCUMENT_UNAVAILABLE_I18N,
   NO_REPORT_FOUND_I18N,
   NO_SUMMARY_AVAILABLE_I18N,
   PREDEFINED_QUESTIONS_I18N,
@@ -145,6 +147,35 @@ class ChatService {
             ? toDbDateOnlyString(docData.reportDate) || "Unknown"
             : "Unknown";
 
+          // Extract structured medical image observations if present
+          let imageAnalysisStr = "";
+          let structData = docData.structuredExtractedData;
+          if (typeof structData === "string") {
+            try {
+              structData = JSON.parse(structData);
+            } catch {
+              // Empty Block
+            }
+          }
+          const imgAnalysis = structData?.imageAnalysis;
+          if (imgAnalysis) {
+            const anat = imgAnalysis.anatomicalRegion || "";
+            const view = imgAnalysis.suggestedView || "";
+            const qual = imgAnalysis.imageQuality || "";
+            const vis =
+              imgAnalysis.visibleDetails ||
+              (Array.isArray(imgAnalysis.visibleStructures)
+                ? imgAnalysis.visibleStructures.join("; ")
+                : "") ||
+              "";
+            const unc = imgAnalysis.uncertainty || "";
+            const summ =
+              imgAnalysis.aiGeneratedDescription || imgAnalysis.educationalDescription || "";
+            imageAnalysisStr = `<imaging_observations modality="${xmlEscape(imgAnalysis.modality || "x_ray")}">
+${anat ? `<anatomical_region>${xmlEscape(anat)}</anatomical_region>\n` : ""}${view ? `<suggested_view>${xmlEscape(view)}</suggested_view>\n` : ""}${qual ? `<image_quality>${xmlEscape(qual)}</image_quality>\n` : ""}${vis ? `<visible_structures>${xmlEscape(String(vis))}</visible_structures>\n` : ""}${unc ? `<technical_uncertainty>${xmlEscape(String(unc))}</technical_uncertainty>\n` : ""}${summ ? `<preliminary_summary>${xmlEscape(String(summ))}</preliminary_summary>\n` : ""}<review_status>PENDING_CLINICIAN_REVIEW (Preliminary AI visual screening; formal diagnosis requires licensed radiologist / physician review)</review_status>
+</imaging_observations>\n`;
+          }
+
           // Fallback context: extract matching structured summary tests if present
           let structuredTestsStr = "";
           if (
@@ -177,7 +208,7 @@ class ChatService {
             .join("\n");
 
           return `<medical_record filename="${xmlEscape(fileName)}" report_date="${xmlEscape(reportDate)}" patient="${xmlEscape(pName)}">
-${structuredTestsStr ? `<verified_tests>\n${structuredTestsStr}\n</verified_tests>\n` : ""}<clinical_evidence>
+${imageAnalysisStr}${structuredTestsStr ? `<verified_tests>\n${structuredTestsStr}\n</verified_tests>\n` : ""}<clinical_evidence>
 ${chunksContent}
 </clinical_evidence>
 </medical_record>`;
@@ -393,6 +424,20 @@ ${chunksContent}
       const sessionId = session.id;
       const sessionSlots = session.metadata?.slots || {};
 
+      // Resolve normalized language early so document authorization handlers return localized messages
+      let earlyPreferredLanguage = passedLang || sessionSlots.preferredLanguage || "english";
+      if (!passedLang) {
+        try {
+          const p = await patientRepository.findById(userId);
+          if (p?.preferredLanguage) {
+            earlyPreferredLanguage = p.preferredLanguage;
+          }
+        } catch {
+          // Fall back to default
+        }
+      }
+      const normLang = normalizeLanguage(earlyPreferredLanguage);
+
       // 1. Deterministic Scope Resolution (Priority 1: Mentions / Explicit Doc IDs, Priority 2: NL / Clarification, Priority 3: Session Slots, Priority 4: Authorized History)
       let resolvedScopeMode = scopeMode || null;
       let authorizedDocs = [];
@@ -426,16 +471,78 @@ ${chunksContent}
       const hasExplicitDocInput = explicitDocIds.length > 0;
 
       if (hasExplicitDocInput) {
-        const authRes = await documentAuthorizationService.authorizeDocumentIds(
-          userId,
-          explicitDocIds,
-          { patientId },
-        );
-        finalDocumentIds = authRes.authorizedDocumentIds;
-        authorizedDocs = authRes.documents;
-        resolvedScopeMode =
-          resolvedScopeMode ||
-          (finalDocumentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
+        try {
+          const authRes = await documentAuthorizationService.authorizeDocumentIds(
+            userId,
+            explicitDocIds,
+            { patientId },
+          );
+
+          if (authRes?.isProcessing) {
+            const processingMsg =
+              DOCUMENT_STILL_PROCESSING_I18N[normLang] || DOCUMENT_STILL_PROCESSING_I18N.english;
+            if (onChunk) onChunk(processingMsg);
+            const userMsg = await chatSessionRepository.appendMessage({
+              content: question?.trim() || "",
+              role: "user",
+              sessionId,
+              userId,
+            });
+            const aiMsg = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: processingMsg,
+              metadata: {
+                mode: "DOCUMENT_PROCESSING",
+                scopeMode: "DOCUMENT_PROCESSING",
+              },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+            return {
+              ai: aiMsg,
+              citations: [],
+              reply: processingMsg,
+              user: userMsg,
+              mode: "DOCUMENT_PROCESSING",
+            };
+          }
+
+          finalDocumentIds = authRes.authorizedDocumentIds;
+          authorizedDocs = authRes.documents;
+          resolvedScopeMode =
+            resolvedScopeMode ||
+            (finalDocumentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
+        } catch (authErr) {
+          console.warn("[ChatService] Explicit document authorization failed:", authErr.message);
+          const fallbackUnavailableMsg =
+            DOCUMENT_UNAVAILABLE_I18N[normLang] || DOCUMENT_UNAVAILABLE_I18N.english;
+          if (onChunk) onChunk(fallbackUnavailableMsg);
+          const userMsg = await chatSessionRepository.appendMessage({
+            content: question?.trim() || "",
+            role: "user",
+            sessionId,
+            userId,
+          });
+          const aiMsg = await chatSessionRepository.appendMessage({
+            citations: [],
+            content: fallbackUnavailableMsg,
+            metadata: {
+              mode: "DOCUMENT_UNAVAILABLE",
+              scopeMode: "DOCUMENT_UNAVAILABLE",
+            },
+            role: "assistant",
+            sessionId,
+            userId,
+          });
+          return {
+            ai: aiMsg,
+            citations: [],
+            reply: fallbackUnavailableMsg,
+            user: userMsg,
+            mode: "DOCUMENT_UNAVAILABLE",
+          };
+        }
       } else if (scopeMode === "AUTHORIZED_HISTORY") {
         resolvedScopeMode = "AUTHORIZED_HISTORY";
         finalDocumentIds = [];
@@ -1643,6 +1750,7 @@ ${chunksContent}
             reportDate: document.reportDate,
             documentType: document.documentType,
             structuredExtractedData: document.structuredExtractedData,
+            summaryEnglish: document.summaryEnglish,
           })
           .from(document)
           .where(
@@ -1806,6 +1914,76 @@ ${chunksContent}
               debugLogger.error("sendMessage: Failed to lookup structured lab facts", {
                 error: factErr.message,
               });
+            }
+          }
+
+          // Hybrid RAG: Inject authorized structured medical image observations (MedGemma)
+          if (finalDocumentIds && finalDocumentIds.length > 0) {
+            for (const docId of finalDocumentIds) {
+              const docData = docNameMap[docId];
+              if (!docData) continue;
+              let struct = docData.structuredExtractedData;
+              if (typeof struct === "string") {
+                try {
+                  struct = JSON.parse(struct);
+                } catch {
+                  // Empty Block
+                }
+              }
+              const imgAnalysis = struct?.imageAnalysis;
+              const summaryEng = docData.summaryEnglish || struct?.summaryEnglish;
+              if (imgAnalysis || docData.documentType === "IMAGING_REPORT") {
+                const anatomicalRegion =
+                  imgAnalysis?.anatomicalRegion || "Diagnostic Radiograph / Scan";
+                const suggestedView = imgAnalysis?.suggestedView || "Standard projection";
+                const imageQuality = imgAnalysis?.imageQuality || "Screening quality";
+                const visibleDetails =
+                  imgAnalysis?.visibleDetails ||
+                  (Array.isArray(imgAnalysis?.visibleStructures)
+                    ? imgAnalysis.visibleStructures.join("; ")
+                    : imgAnalysis?.visibleStructures) ||
+                  "";
+                const uncertainty =
+                  imgAnalysis?.uncertainty ||
+                  "Preliminary visual screening; requires radiologist correlation.";
+                const reportSummary = summaryEng || imgAnalysis?.aiGeneratedDescription || "";
+
+                const imagingBlock = `[AUTHORIZED MEDICAL IMAGE OBSERVATIONS (MEDGEMMA 4B PRELIMINARY SCREENING)]
+                  Document: ${docData.fileName || "X-ray / Medical Image"}
+                  Anatomical Region: ${anatomicalRegion}
+                  Suggested View: ${suggestedView}
+                  Technical Quality: ${imageQuality}
+                  Visible Details / Landmarks: ${visibleDetails}
+                  Uncertainty & Technical Constraints: ${uncertainty}
+                  Preliminary Summary: ${reportSummary}
+                  Review Status: PENDING_CLINICIAN_REVIEW (Preliminary AI screening; not a confirmed diagnosis or proof of normal anatomy. Formal radiologist review required.)
+
+                  INSTRUCTION: You are answering questions about an authorized medical image. Base your response strictly on the above image observations. Do NOT invent diagnoses or claim definitive pathology-free status. Remind the patient that this is a preliminary AI screening requiring licensed radiologist review.`;
+
+                const alreadyInjected = summaryChunks.some(
+                  (c) =>
+                    String(c.documentId) === String(docId) &&
+                    c.sourceType === "imaging_observations",
+                );
+                if (!alreadyInjected) {
+                  summaryChunks.unshift({
+                    content: imagingBlock,
+                    relevanceScore: 1.0,
+                    pageNumber: 1,
+                    documentId: docId,
+                    sourceType: "imaging_observations",
+                    sectionTitle: "Medical Image Observations",
+                    docData: docData,
+                  });
+                  debugLogger.info(
+                    "sendMessage: Injected authorized image observations into context",
+                    {
+                      documentId: docId,
+                      modality: imgAnalysis?.modality || "x_ray",
+                    },
+                  );
+                }
+              }
             }
           }
         } catch (err) {

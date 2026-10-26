@@ -38,6 +38,9 @@ from app.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+STATUS_NO_TEXT = "NO_TEXT"
+
+
 class FieldEvidenceStatus:
     """Field-level optical evidence statuses for clinical entity extraction."""
     VERIFIED = "VERIFIED"
@@ -55,16 +58,52 @@ def is_blank_or_unreadable_refusal(text: str | None) -> bool:
         return False
 
     blank_refusal_patterns = (
+        r"^\s*\[?(?:NO_TEXT|NO_TEXT_DETECTED|NO_READABLE_TEXT)\]?[\.\!\,]?\s*$",
+        r"\bno[_\s]+text[_\s]+(?:found|detected|present|visible|in\s+(?:this|the)\s+image|on\s+(?:this|the)\s+image)\b",
+        r"\bno[_\s]+readable[_\s]+text\b",
         r"\b(?:image|page|document)\s+is\s+(?:entirely\s+|completely\s+)?blank\b",
         r"\bno\s+visible\s+(?:text|content|writing|words|characters)\b",
         r"\b(?:i\s+am\s+)?unable\s+to\s+(?:read|transcribe|extract|detect)\s+(?:any\s+)?(?:text|content|writing)\b",
         r"\bwhite\s+background\s+with\s+no\s+(?:visible\s+)?text\b",
-        r"\bno\s+text\s+(?:found|detected|present)\b",
+        r"\b(?:there\s+is\s+|contains?\s+)?no\s+readable\s+text\b",
+        r"\b(?:does\s+not|doesn't)\s+contain\s+(?:any\s+)?(?:readable\s+)?(?:text|writing|words)\b",
+        r"\bthis\s+is\s+(?:an?\s+)?(?:x[\-_]?ray|radiograph|scan|image)\s+(?:with\s+no\s+text|and\s+contains?\s+no\s+text)\b",
     )
     for pattern in blank_refusal_patterns:
         if re.search(pattern, stripped, flags=re.IGNORECASE):
             return True
     return False
+
+
+def is_verified_no_text_page(p: dict[str, Any]) -> bool:
+    """Returns True if and only if the page has a verified NO_TEXT outcome with no errors or failure reasons."""
+    status = str(p.get("status", "")).upper()
+    has_error = bool(p.get("error"))
+    fallback_reason = str(p.get("fallback_reason") or "")
+    has_fail_reason = bool(fallback_reason and ("FAILED" in fallback_reason.upper() or "ERROR" in fallback_reason.upper()))
+    return status == STATUS_NO_TEXT and not has_error and not has_fail_reason and (p.get("is_no_text") is True or status == STATUS_NO_TEXT)
+
+
+def is_genuinely_failed_page(p: dict[str, Any]) -> bool:
+    """Returns True if the page has any genuine failure, error, or missing text (unless verified NO_TEXT).
+    Even if an inconsistent is_no_text flag is present, a page with errors or FAILED status is counted as failed.
+    """
+    status = str(p.get("status", "")).upper()
+    has_error = bool(p.get("error"))
+    fallback_reason = str(p.get("fallback_reason") or "")
+    has_fail_reason = bool(fallback_reason and ("FAILED" in fallback_reason.upper() or "ERROR" in fallback_reason.upper()))
+
+    # Any failure status, error code, or failure reason ALWAYS marks the page as failed
+    if status.startswith("FAILED") or has_error or has_fail_reason:
+        return True
+
+    # If it is a verified NO_TEXT page with zero errors, it is not failed
+    if status == STATUS_NO_TEXT and not has_error and not has_fail_reason:
+        return False
+
+    # For all standard pages (SUCCESS, FALLBACK, PARTIAL, etc.), non-empty text is required
+    text = (p.get("text") or "").strip()
+    return not bool(text)
 
 
 def has_ocr_failure_placeholders(text: str | None) -> bool:
@@ -90,30 +129,63 @@ def validate_ocr_result(raw_ocr_data: dict[str, Any] | None) -> None:
             stage_details={"reason": "raw_ocr_data is None or empty"},
         )
 
-    full_text = str(raw_ocr_data.get("fullText") or raw_ocr_data.get("text") or "").strip()
-    if not full_text:
+    metrics = raw_ocr_data.get("metrics") or {}
+    pages = raw_ocr_data.get("pages") or []
+
+    # Recalculate failed pages to ensure failed_page_count counts every genuinely failed page,
+    # even if an inconsistent is_no_text flag is present
+    genuinely_failed_pages = [p for p in pages if is_genuinely_failed_page(p)]
+    failed_page_count = max(metrics.get("failed_page_count", 0), len(genuinely_failed_pages))
+
+    if failed_page_count > 0:
+        first_fail = genuinely_failed_pages[0] if genuinely_failed_pages else (pages[0] if pages else {})
+        fail_reason = first_fail.get("fallback_reason") or first_fail.get("error") or "Unknown error"
         raise OcrStageFailureError(
-            message="OCR stage failed to extract any readable text",
-            error_code="OCR_EMPTY_TEXT",
-            stage_details={"reason": "fullText is empty"},
+            message=f"OCR failed on {failed_page_count} page(s): {fail_reason}",
+            error_code="OCR_PAGE_FAILED",
+            stage_details={
+                "failed_page_count": failed_page_count,
+                "first_failed_page": first_fail.get("page", 1),
+                "reason": fail_reason,
+            },
         )
+
+    for p in pages:
+        p_status = str(p.get("status", "")).upper()
+        if p_status.startswith("FAILED") or p.get("error"):
+            raise OcrStageFailureError(
+                message=f"OCR stage failed on page {p.get('page', 1)}: {p.get('fallback_reason') or p.get('error') or 'Unknown error'}",
+                error_code="OCR_PAGE_FAILED",
+                stage_details={"page": p.get("page", 1), "reason": p.get("fallback_reason") or p.get("error")},
+            )
+
+    full_text = str(raw_ocr_data.get("fullText") or raw_ocr_data.get("text") or "").strip()
 
     if has_ocr_failure_placeholders(full_text):
         raise OcrStageFailureError(
             message="OCR stage produced unreadable failure markers for one or more pages",
             error_code="OCR_EXTRACTION_FAILED",
             stage_details={
-                "failed_page_count": raw_ocr_data.get("metrics", {}).get("failed_page_count", 1),
+                "failed_page_count": metrics.get("failed_page_count", 1),
                 "reason": "placeholder_detected",
             },
         )
 
-    metrics = raw_ocr_data.get("metrics") or {}
-    if metrics.get("failed_page_count", 0) > 0:
+    is_no_text_verified = bool(
+        failed_page_count == 0
+        and not genuinely_failed_pages
+        and pages
+        and all(is_verified_no_text_page(p) for p in pages)
+        and (raw_ocr_data.get("is_no_text") is True or raw_ocr_data.get("ocr_outcome") == STATUS_NO_TEXT)
+    )
+
+    if not full_text:
+        if is_no_text_verified and failed_page_count == 0:
+            return
         raise OcrStageFailureError(
-            message=f"OCR failed on {metrics.get('failed_page_count')} page(s)",
-            error_code="OCR_PAGE_FAILED",
-            stage_details={"failed_page_count": metrics.get("failed_page_count")},
+            message="OCR stage failed to extract any readable text",
+            error_code="OCR_EMPTY_TEXT",
+            stage_details={"reason": "fullText is empty"},
         )
 
 
@@ -692,12 +764,130 @@ class OcrStageHandler:
 
         return crop_lines
 
+    def _is_eligible_image_only_page(
+        self,
+        img_bytes: bytes,
+        filename: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
+        """Strictly validates whether an image page is eligible for image-only (NO_TEXT) handling.
+
+        Requires:
+        1. Valid, decodable non-empty image bytes (w >= 50, h >= 50).
+        2. Non-blank page (fails deterministic blank check to reject empty/non-medical blank pages).
+        3. Confirmed diagnostic imaging modality from:
+           - Local CPU MedicalDocumentClassifier (SigLIP-2: x_ray, ct, mri, ultrasound, other_diagnostic_imaging)
+             with p_medical >= 0.5 and not is_blank.
+           - OR verified upload metadata / document type indicating diagnostic imaging.
+        """
+        if not img_bytes:
+            return False, "EMPTY_BYTES"
+
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                pil_img.verify()
+            with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                pil_img.load()
+                w, h = pil_img.size
+                if w < 50 or h < 50:
+                    return False, "IMAGE_TOO_SMALL"
+
+                # Check blank page detector
+                from app.modules.validation.classifier import is_blank_page
+                if is_blank_page(pil_img):
+                    return False, "BLANK_PAGE"
+
+                # 1. Primary Authority: Local CPU MedicalDocumentClassifier
+                from app.modules.validation.classifier import MedicalDocumentClassifier
+                clf = MedicalDocumentClassifier.get_instance()
+                if not clf.is_ready():
+                    try:
+                        clf.load()
+                    except Exception as load_err:
+                        logger.warning("Classifier could not be loaded: %s", load_err)
+
+                clf_res = None
+                p_medical = 0.0
+                l2_key = ""
+                is_blank = False
+                if clf.is_ready():
+                    try:
+                        clf_res = clf.classify_image_sync(pil_img)
+                        l2_key = str(clf_res.get("l2_key", "")).lower()
+                        p_medical = float(clf_res.get("p_medical", 0.0))
+                        is_blank = clf_res.get("is_blank", False)
+
+                        imaging_l2_keys = {
+                            "x_ray",
+                            "ct",
+                            "mri",
+                            "ultrasound",
+                            "other_diagnostic_imaging",
+                            "scan_interpretation",
+                        }
+
+                        if not is_blank and p_medical >= 0.5:
+                            if l2_key in imaging_l2_keys:
+                                logger.info(
+                                    "Image verified as diagnostic imaging by classifier: l2_key=%s, p_medical=%.3f",
+                                    l2_key, p_medical
+                                )
+                                return True, l2_key
+                            elif l2_key == "ecg":
+                                logger.info(
+                                    "Image verified as ECG waveform by classifier: p_medical=%.3f",
+                                    p_medical
+                                )
+                                return True, "ecg"
+                    except Exception as clf_err:
+                        logger.warning("Classifier evaluation failed: %s", clf_err)
+
+                # 2. Visual feature heuristics: ONLY valid if medical probability is confirmed (p_medical >= 0.5)
+                # Image dimensions, aspect ratios, or filenames alone are NEVER sufficient evidence of medical modality.
+                if p_medical >= 0.5 and not is_blank:
+                    try:
+                        from app.modules.vision.visual_asset_filter import VisualAssetFilter
+                        v_filter = VisualAssetFilter()
+                        is_asset, asset_type, conf, reason = v_filter.classify_clinical_features(pil_img)
+                        if is_asset and asset_type == "ecg_waveform_strip":
+                            logger.info("Image verified as ECG waveform strip with p_medical=%.3f: %s", p_medical, reason)
+                            return True, "ecg"
+                        elif is_asset and asset_type == "radiology_scan":
+                            logger.info("Image verified as radiology scan with p_medical=%.3f: %s", p_medical, reason)
+                            return True, "other_diagnostic_imaging"
+                    except Exception as vf_err:
+                        logger.debug("VisualAssetFilter check error: %s", vf_err)
+
+                # 3. Trusted Upload Metadata (never filename or image dimensions alone)
+                if metadata and isinstance(metadata, dict):
+                    doc_type = (
+                        metadata.get("documentType")
+                        or metadata.get("document_type")
+                        or metadata.get("reportType")
+                    )
+                    from app.infrastructure.db.repositories.job_repository import normalize_document_type
+                    norm_type = normalize_document_type(doc_type)
+                    modality = str(metadata.get("modality") or "").lower()
+                    if norm_type == "IMAGING_REPORT" or modality in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}:
+                        eff_mod = modality if modality in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"} else "x_ray"
+                        logger.info("Image verified as diagnostic imaging by trusted metadata: doc_type=%s, modality=%s", doc_type, eff_mod)
+                        return True, eff_mod
+
+        except Exception as img_err:
+            logger.warning("Image eligibility check encountered error: %s", img_err)
+            return False, f"DECODE_ERROR: {img_err}"
+
+        return False, "NON_IMAGING_OR_UNCONFIRMED"
+
     def _apply_vision_result(
         self,
         res: dict[str, Any],
         paddle_res: dict[str, Any] | None,
         fallback_reason: str | None,
         expected_script: str | None = None,
+        img_bytes: bytes | None = None,
+        filename: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> tuple[str, float, list[dict[str, Any]], str, str]:
         """Process Vision model output and cleanly merge non-Latin lines with English Paddle lines."""
         from app.services.pipeline.summary_stage import strip_think_tokens
@@ -705,14 +895,26 @@ class OcrStageHandler:
         from app.modules.ocr.fallback_validator import FallbackOutputValidator
 
         raw_vision_text = (res.get("text") or "").strip()
-        finish_reason = res.get("finish_reason")
+        finish_reason = (
+            res.get("finish_reason")
+            or (res.get("metrics") or {}).get("finish_reason")
+            or (res.get("pages") and res["pages"][0].get("finish_reason"))
+        )
 
         has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_vision_text, flags=re.IGNORECASE))
         clean_vision_text = strip_think_tokens(raw_vision_text)
 
-        if has_unclosed_think or not clean_vision_text:
-            reason = "UNCLOSED_THINK_BLOCK" if has_unclosed_think else "EMPTY_AFTER_THINK_STRIP"
-            logger.warning("VLM fallback output rejected by reasoning guard: %s", reason)
+        if has_unclosed_think:
+            logger.warning("VLM output rejected: UNCLOSED_THINK_BLOCK")
+            return "", 0.0, [], "none", "FAILED: UNCLOSED_THINK_BLOCK"
+
+        if finish_reason in {"length", "MAX_TOKENS"}:
+            logger.warning("VLM output rejected: PREMATURE_LENGTH_TERMINATION")
+            return "", 0.0, [], "none", "FAILED: PREMATURE_LENGTH_TERMINATION"
+
+        if not clean_vision_text:
+            reason = "EMPTY_AFTER_THINK_STRIP" if raw_vision_text else "EMPTY_OUTPUT"
+            logger.warning("VLM output rejected: %s (finish_reason=%s)", reason, finish_reason)
             if paddle_res and paddle_res.get("lines"):
                 retained_lines = [
                     dict(l) for l in paddle_res["lines"]
@@ -723,6 +925,57 @@ class OcrStageHandler:
                     conf = round(sum(float(l.get("confidence") or 0.0) for l in retained_lines) / len(retained_lines), 4)
                     return page_text, conf, retained_lines, "paddleocr_partial", "FALLBACK_PARTIAL"
             return "", 0.0, [], "none", f"FAILED: {reason}"
+
+        if is_blank_or_unreadable_refusal(clean_vision_text):
+            # Model generated an explicit text-absence declaration (e.g. NO_TEXT_DETECTED).
+            # Requirement 3: Missing completion metadata must not be treated as confirmed completion.
+            # Requirement 4: Token truncation or abnormal termination must remain failures.
+            is_confirmed_completion = (
+                finish_reason is not None
+                and str(finish_reason).strip().lower() in {"stop", "done", "end_turn", "stop_sequence"}
+            )
+            if not is_confirmed_completion:
+                logger.warning(
+                    "VLM text-absence declaration rejected due to unconfirmed completion status: finish_reason=%s",
+                    finish_reason,
+                )
+                return "", 0.0, [], "none", "FAILED: UNCONFIRMED_COMPLETION"
+
+            # Requirement 2: Require explicit, valid NO_TEXT_DETECTED result from Qwen3-VL
+            # plus independent eligible imaging classification before setting status=NO_TEXT.
+            if img_bytes:
+                is_eligible, modality_or_reason = self._is_eligible_image_only_page(
+                    img_bytes, filename=filename, metadata=metadata
+                )
+                if is_eligible:
+                    detected_modality = (
+                        modality_or_reason
+                        if modality_or_reason in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}
+                        else "x_ray"
+                    )
+                    logger.info(
+                        "Explicit NO_TEXT_DETECTED verified by independent imaging classification (modality=%s); assigning NO_TEXT outcome",
+                        detected_modality,
+                    )
+                    # Assign confidence 0.0 to reflect text absence rather than artificial confidence
+                    return "", 0.0, [], "qwen_vl", f"{STATUS_NO_TEXT}:{detected_modality}"
+                else:
+                    logger.warning(
+                        "Text absence declaration rejected from non-imaging document: %s",
+                        modality_or_reason,
+                    )
+
+            logger.warning("VLM output rejected: UNREADABLE_TEXT_REFUSAL")
+            if paddle_res and paddle_res.get("lines"):
+                retained_lines = [
+                    dict(l) for l in paddle_res["lines"]
+                    if float(l.get("confidence") or 0.0) >= 0.70 and not self._is_pseudo_latin_noise(l)
+                ]
+                if retained_lines:
+                    page_text = "\n".join(l["text"] for l in retained_lines)
+                    conf = round(sum(float(l.get("confidence") or 0.0) for l in retained_lines) / len(retained_lines), 4)
+                    return page_text, conf, retained_lines, "paddleocr_partial", "FALLBACK_PARTIAL"
+            return "", 0.0, [], "none", "FAILED: UNREADABLE_TEXT_REFUSAL"
 
         raw_vision_text = clean_vision_text
         vision_conf = float(res.get("confidence") or 0.95) if raw_vision_text else 0.0
@@ -940,6 +1193,7 @@ class OcrStageHandler:
         queue_wait_ms: float = 0.0,
         text_hint: str = "",
         filename: str = "",
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Tiered extraction for a single rendered page or image:
         1. Pre-OCR Script Detection: inspect text hint; if non-Latin, skip Paddle directly to VLM.
@@ -1082,11 +1336,23 @@ class OcrStageHandler:
                 t_post_vlm = time.perf_counter()
                 with ocr_timer("postprocess_ms", engine="qwen_vl", page=page_num):
                     page_text, confidence, lines, engine_used, status = self._apply_vision_result(
-                        res, None, None, expected_script=detected_script
+                        res,
+                        None,
+                        None,
+                        expected_script=detected_script,
+                        img_bytes=img_bytes,
+                        filename=filename,
+                        metadata=metadata,
                     )
                 stage_timings["postprocess_ms"] = round((time.perf_counter() - t_post_vlm) * 1000, 2)
                 evidence: dict[str, Any] = {}
-                if status.startswith("FAILED"):
+                if status == STATUS_NO_TEXT or status.startswith(STATUS_NO_TEXT):
+                    detected_modality = status.split(":", 1)[1] if ":" in status else "x_ray"
+                    status = STATUS_NO_TEXT
+                    error_msg = None
+                    fallback_reason = None
+                    evidence = {"modality": detected_modality, "image_only": True}
+                elif status.startswith("FAILED"):
                     error_msg = status
                     fallback_reason = status
                     status = "FAILED"
@@ -1100,6 +1366,13 @@ class OcrStageHandler:
                         mime=mime,
                     )
                     stage_timings["vlm_crop_ms"] = round((time.perf_counter() - t_roi) * 1000, 2)
+                    if img_bytes:
+                        is_eligible, modality_or_reason = self._is_eligible_image_only_page(
+                            img_bytes, filename=filename, metadata=metadata
+                        )
+                        if is_eligible and modality_or_reason in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"}:
+                            evidence["modality"] = modality_or_reason
+                            evidence["is_imaging"] = True
             except Exception as v_err:
                 error_msg = str(v_err)
                 logger.warning("Vision OCR failed on page %d: %s", page_num, v_err)
@@ -1139,6 +1412,8 @@ class OcrStageHandler:
             "telemetry": page_telemetry,
             "stage_timings": stage_timings,
             "evidence": evidence,
+            "modality": evidence.get("modality"),
+            "is_no_text": (status == STATUS_NO_TEXT and not error_msg and not fallback_reason),
         }
 
         # Cache successful page OCR extractions (zero cache poisoning)
@@ -1163,6 +1438,7 @@ class OcrStageHandler:
         mime_type: str | None = None,
         document_id: UUID | str | None = None,
         batch_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute tiered OCR processing:
         1. DOCX/DOC: Direct office XML text extraction (<10ms).
@@ -1439,6 +1715,7 @@ class OcrStageHandler:
                                     queue_wait_ms=queue_wait_ms,
                                     text_hint=text_hint,
                                     filename=filename,
+                                    metadata=metadata,
                                 )
 
                         stop_lag_monitor = asyncio.Event()
@@ -1495,7 +1772,7 @@ class OcrStageHandler:
                                 frame_img.convert("RGB").save(buf, format="JPEG", quality=88)
                             render_ms = round((time.perf_counter() - t_render) * 1000, 2)
                             return await self._extract_page_with_tiered_ocr(
-                                buf.getvalue(), frame_idx, mime="image/jpeg", render_ms=render_ms, queue_wait_ms=queue_wait_ms, filename=filename
+                                buf.getvalue(), frame_idx, mime="image/jpeg", render_ms=render_ms, queue_wait_ms=queue_wait_ms, filename=filename, metadata=metadata
                             )
 
                     pages_data = list(
@@ -1513,7 +1790,7 @@ class OcrStageHandler:
             with ocr_timer("render_ms", page=1, format="raster_direct"):
                 pass
             res = await self._extract_page_with_tiered_ocr(
-                file_bytes, 1, mime=mime_type or "image/png", render_ms=0.0, queue_wait_ms=0.0, filename=filename
+                file_bytes, 1, mime=mime_type or "image/png", render_ms=0.0, queue_wait_ms=0.0, filename=filename, metadata=metadata
             )
             pages_data = [res]
 
@@ -1539,10 +1816,21 @@ class OcrStageHandler:
         with ocr_timer("postprocess_ms", scope="document_assembly"):
             text_parts: list[str] = []
             for p in pages_data:
-                if str(p.get("status", "")).startswith("FAILED") or not p.get("text"):
-                    text_parts.append(f"[PAGE {p['page']} OCR FAILED - CLINICAL DATA UNREADABLE]")
+                p_status = str(p.get("status", "")).upper()
+                if is_verified_no_text_page(p):
+                    # Verified NO_TEXT page: Do NOT append any failure marker
+                    continue
+                elif is_genuinely_failed_page(p) or p_status.startswith("FAILED"):
+                    fail_detail = p.get("fallback_reason") or p.get("error") or "CLINICAL DATA UNREADABLE"
+                    text_parts.append(f"[PAGE {p['page']} OCR FAILED - {fail_detail}]")
+                elif p_status in {"SUCCESS", "FALLBACK", "PARTIAL", "FALLBACK_PARTIAL"}:
+                    p_text = (p.get("text") or "").strip()
+                    if p_text:
+                        text_parts.append(p_text)
+                    else:
+                        text_parts.append(f"[PAGE {p['page']} OCR FAILED - CLINICAL DATA UNREADABLE]")
                 else:
-                    text_parts.append(p["text"])
+                    text_parts.append(f"[PAGE {p['page']} OCR FAILED - CLINICAL DATA UNREADABLE]")
 
             full_text = "\n\n".join(part for part in text_parts if part).strip()
             elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -1552,10 +1840,12 @@ class OcrStageHandler:
             used_qwen = any(p.get("engine") == "qwen_vl" for p in pages_data)
             used_ocr = used_qwen
             fallback_count = sum(1 for p in pages_data if p.get("status") == "FALLBACK")
-            failed_count = sum(1 for p in pages_data if str(p.get("status", "")).startswith("FAILED") or not p.get("text"))
+            no_text_count = sum(1 for p in pages_data if is_verified_no_text_page(p))
+            failed_count = sum(1 for p in pages_data if is_genuinely_failed_page(p))
+            is_document_no_text = bool(no_text_count > 0 and failed_count == 0 and not full_text)
 
             confidences = [p["confidence"] for p in pages_data if p.get("confidence") is not None]
-            mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else (0.95 if full_text else 0.5)
+            mean_conf = round(sum(confidences) / len(confidences), 4) if confidences else (0.95 if (full_text or is_document_no_text) else 0.5)
 
             cache_hits = sum(1 for p in pages_data if p.get("cached") is True)
             cache_misses = sum(1 for p in pages_data if p.get("cached") is not True)
@@ -1589,6 +1879,17 @@ class OcrStageHandler:
                         doc_evidence[key] = value
 
         stage_summary = _compute_stage_summary(pages_data)
+        doc_modality = (
+            next((p.get("modality") for p in pages_data if p.get("modality")), None)
+            or next(((p.get("evidence") or {}).get("modality") for p in pages_data if (p.get("evidence") or {}).get("modality")), None)
+            or (metadata.get("modality") if metadata else None)
+        )
+        is_imaging_doc = bool(
+            is_document_no_text
+            or (doc_modality in {"x_ray", "ct", "mri", "ultrasound", "ecg", "other_diagnostic_imaging"})
+            or (metadata and (metadata.get("documentType") == "IMAGING_REPORT" or metadata.get("reportType") == "IMAGING_REPORT"))
+        )
+
         return {
             "pages": pages_data,
             "fullText": full_text,
@@ -1598,6 +1899,10 @@ class OcrStageHandler:
             "processedPageCount": total_p,
             "detectedLanguages": detected_langs,
             "evidence": doc_evidence,
+            "is_no_text": is_document_no_text,
+            "ocr_outcome": STATUS_NO_TEXT if is_document_no_text else "TEXT_EXTRACTED",
+            "document_subtype": "image_only_radiograph" if is_document_no_text else ("diagnostic_imaging" if is_imaging_doc else None),
+            "modality": doc_modality if is_imaging_doc else None,
             "metrics": {
                 "used_direct_text": used_direct,
                 "used_ocr": used_ocr,
@@ -1621,6 +1926,8 @@ class OcrStageHandler:
                 "cache_misses": cache_misses,
                 "fallback_count": fallback_count,
                 "failed_page_count": failed_count,
+                "no_text_page_count": no_text_count,
+                "is_no_text": is_document_no_text,
                 "page_count": total_p,
                 "processing_seconds": round(elapsed_ms / 1000.0, 3),
                 "elapsed_ms": elapsed_ms,

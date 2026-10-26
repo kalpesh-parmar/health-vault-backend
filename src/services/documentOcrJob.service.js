@@ -31,7 +31,9 @@
  * (the public API of the bus is identical).
  */
 
+const crypto = require("crypto");
 const { env } = require("../configs/env");
+const aiServiceClient = require("../clients/aiServiceClient");
 const { STAGES, buildStageEvent } = require("../constants/ocrStages");
 const { messageConstants } = require("../constants/messageConstants");
 const { InvalidRequestException, NotFoundException } = require("../exceptions/appError");
@@ -40,12 +42,10 @@ const { normalizeDocumentType } = require("../enums/documentType");
 const { ocrOrchestrator, ocrService, embeddingService } = require("./ai");
 const documentProcessingJobRepository = require("../repositories/documentProcessingJobRepository");
 const documentRepository = require("../repositories/documentRepository");
-const DocumentIntelligenceRepository = require("../repositories/documentIntelligenceRepository");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
 const patientRepository = require("../repositories/patientRepository");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const { extractKeyPoints } = require("../helpers/summary.helper");
-const intelligenceRepository = new DocumentIntelligenceRepository();
 const objectStorageService = require("./objectStorage.service");
 const ocrProgressBus = require("./sse/ocrProgressBus");
 const { inferMimeType } = require("../helpers/document.helper");
@@ -105,36 +105,121 @@ class DocumentOcrJobService {
 
     await ensureFileExists(fileKey);
 
+    const bucket =
+      (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
+      env.patientDocumentsBucket;
+
+    // 1. Check for active concurrent job for this user and fileKey
+    const activeExistingJob = await documentProcessingJobRepository.findByFileKey(fileKey, userId);
+    if (
+      activeExistingJob &&
+      (activeExistingJob.status === "RUNNING" || activeExistingJob.status === "QUEUED")
+    ) {
+      return activeExistingJob;
+    }
+
+    let existingDoc = null;
+    try {
+      existingDoc = await documentRepository.findByFileKey(fileKey, userId);
+    } catch {
+      existingDoc = null;
+    }
+
+    let canonicalDocumentId = existingDoc?.id || crypto.randomUUID();
+
+    if (!existingDoc) {
+      try {
+        const initialDoc = await documentRepository.upsertInitialDocument({
+          id: canonicalDocumentId,
+          userId,
+          documentType: "OTHER_MEDICAL_DOCUMENT",
+          fileName: originalName || fileKey.split("/").pop() || "Document",
+          s3Bucket: bucket,
+          s3Key: fileKey,
+          fileType: inferMimeType(fileKey, mimeType),
+          fileSize: 0,
+          ocrStatus: ocrStatus.PENDING,
+        });
+        if (initialDoc?.id) {
+          canonicalDocumentId = initialDoc.id;
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[ocr-job] upsertInitialDocument fallback/warning:", err?.message);
+      }
+    }
+
     const job = await documentProcessingJobRepository.startJob({
       fileKey,
       userId,
       mimeType,
       originalName,
+      metadata: {
+        bucket,
+        key: fileKey,
+        s3Key: fileKey,
+        patientId: userId,
+        documentId: canonicalDocumentId,
+        preferredLanguage,
+        originalName,
+      },
+      checkpointData: {
+        s3Bucket: bucket,
+        s3Key: fileKey,
+        documentId: canonicalDocumentId,
+      },
     });
 
-    let patientContext = null;
-    try {
-      patientContext = await intelligenceRepository.getPatientContext(userId);
-    } catch {
-      patientContext = null;
-    }
-
-    setImmediate(() => {
-      this._runPipeline({
-        fileKey,
-        jobId: job.id,
-        mimeType,
-        patientContext,
-        preferredLanguage,
-        userId,
-      }).catch((error) => {
-        // eslint-disable-next-line no-console
-        console.error("[ocr-job] uncaught pipeline error", {
-          error: error.message,
-          fileKey,
+    setImmediate(async () => {
+      try {
+        const dispatchPayload = {
           jobId: job.id,
-        });
-      });
+          patientId: userId,
+          documentId: canonicalDocumentId,
+          storage: {
+            bucket,
+            key: fileKey,
+            sha256: "",
+          },
+          documentType: "OTHER_MEDICAL_DOCUMENT",
+          preferredLanguage: preferredLanguage === "english" ? "en" : preferredLanguage,
+          resumeFromStage: null,
+        };
+        // eslint-disable-next-line no-console
+        console.log(
+          `[ocr-job] Dispatching document processing to Python AI pipeline for fileKey: ${fileKey}`,
+        );
+        await aiServiceClient.dispatchDocumentProcessing(dispatchPayload);
+      } catch (dispatchErr) {
+        const failureMessage = "AI OCR service temporarily unavailable. Please retry.";
+        // eslint-disable-next-line no-console
+        console.error(
+          `[ocr-job] Python AI pipeline dispatch failed for job ${job.id} (fileKey: ${fileKey}):`,
+          dispatchErr?.message,
+        );
+
+        // Update job row to FAILED with retryable flag (preserving metadata & checkpoints)
+        await documentProcessingJobRepository
+          .markFailed(job.id, dispatchErr, {
+            retryable: true,
+            message: failureMessage,
+          })
+          .catch(() => {});
+
+        // Update initial document row to FAILED
+        await documentRepository
+          .update(canonicalDocumentId, {
+            ocrStatus: ocrStatus.FAILED,
+          })
+          .catch(() => {});
+
+        // Maintain SSE terminal event handling with retryable indicator
+        await emitAndPersist(job.id, fileKey, STAGES.FAILED, {
+          error: dispatchErr?.message || failureMessage,
+          message: failureMessage,
+          retryable: true,
+        }).catch(() => {});
+      }
     });
 
     return job;

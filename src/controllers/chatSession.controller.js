@@ -67,6 +67,10 @@ async function sendMessage(req, res) {
       });
 
       if (!res.writableEnded) {
+        if (result?.chart) {
+          res.write(`data: ${JSON.stringify({ type: "chart", data: result.chart })}\n\n`);
+          if (typeof res.flush === "function") res.flush();
+        }
         res.write(`data: ${JSON.stringify({ type: "final", data: result })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
       }

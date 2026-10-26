@@ -362,10 +362,10 @@ module.exports = {
   normalizePhone,
   validateEditedFields,
   normalizeFlowModeLocally,
+  normalizeLanguageLocally,
   splitName,
   normalizeName,
   isSamePhone,
   normalizeFieldVal,
   getLocalizedText,
-  normalizeLanguageLocally,
 };

@@ -245,6 +245,8 @@ async def test_orchestrator_stage_6_persists_lab_results(tmp_path: Path):
 
     mock_repo = MagicMock()
     mock_repo.complete_job = AsyncMock()
+    mock_repo.sync_to_documents_table = AsyncMock()
+    mock_repo.fail_job = AsyncMock()
     mock_lifecycle = MagicMock()
     mock_lifecycle.report_progress = AsyncMock(return_value=10)
     mock_checkpoint = MagicMock()
@@ -343,6 +345,8 @@ async def test_orchestrator_stage_6_survives_persistence_failure(tmp_path: Path)
 
     mock_repo = MagicMock()
     mock_repo.complete_job = AsyncMock()
+    mock_repo.sync_to_documents_table = AsyncMock()
+    mock_repo.fail_job = AsyncMock()
     mock_lifecycle = MagicMock()
     mock_lifecycle.report_progress = AsyncMock(return_value=10)
     mock_checkpoint = MagicMock()
