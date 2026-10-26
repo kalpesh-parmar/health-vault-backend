@@ -26,9 +26,14 @@ const {
   buildDependencyAwareContext,
 } = require("./ragContext.service");
 const { chatClassifier } = require("./chatClassifier.service");
+const { slotContextService } = require("./slotContext.service");
+const { medicalTrendChartService } = require("../../medicalTrendChart.service");
+const { medicalFactLookupService } = require("../../medicalFactLookup.service");
+const { patientLabResultRepository } = require("../../../repositories/patientLabResultRepository");
+const { medicalFactValidatorService } = require("../../medicalFactValidator.service");
 const {
   NO_CONTEXT_REPLY_I18N,
-  REQUIRE_SELECTION_I18N,
+  REQUIRE_SELECTION_REPORT_I18N,
   AGE_REPLY_I18N,
   AGE_KEYWORDS,
   SUMMARY_KEYWORDS,
@@ -40,6 +45,8 @@ const {
 } = require("../../../constants/chatReplies");
 
 const { chatFastPath } = require("./chatFastPath.service");
+const { documentAuthorizationService } = require("./documentAuthorization.service");
+const { documentResolverService } = require("./documentResolver.service");
 
 // Debug logger
 const debugLogger = {
@@ -48,6 +55,16 @@ const debugLogger = {
   // eslint-disable-next-line no-console
   error: (msg, data) => console.error(`[DEBUG ERROR] ${msg}`, JSON.stringify(data, null, 2)),
 };
+
+function xmlEscape(val) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
 
 const NO_CONTEXT_REPLY = "Information not found in uploaded reports.";
 // const MIN_CITATION_RELEVANCE = 0.7; // cosine similarity ≥ 0.3 distance ≤ 0.7
@@ -78,6 +95,7 @@ class ChatService {
     coverageStr = "",
     onChunk = null,
     abortSignal = null,
+    structuredRecords = [],
   ) {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user");
     const userQuery = lastUserMessage?.content || "";
@@ -115,7 +133,7 @@ class ChatService {
         chunksByDoc.get(docId).push(chunk);
       }
 
-      const contextText = Array.from(chunksByDoc.entries())
+      const xmlDelimitedReports = Array.from(chunksByDoc.entries())
         .map(([, chunks]) => {
           const docData = chunks[0].docData || {};
           let pName = "Unknown";
@@ -142,27 +160,31 @@ class ChatService {
             });
 
             if (relevantTests.length > 0) {
-              structuredTestsStr =
-                `Requested Medical Information:\n` +
-                relevantTests
-                  .map((t) => `- ${t.name}: ${t.value} ${t.unit || ""} (${t.status || "NORMAL"})`)
-                  .join("\n");
+              structuredTestsStr = relevantTests
+                .map(
+                  (t) =>
+                    `<test name="${xmlEscape(t.name)}" value="${xmlEscape(t.value)}" unit="${xmlEscape(t.unit || "")}" status="${xmlEscape(t.status || "NORMAL")}" />`,
+                )
+                .join("\n");
             }
           }
 
           const chunksContent = chunks
-            .map((c) => `[Section: ${c.sectionTitle || "General"}]\n${c.content}`)
-            .join("\n\n");
+            .map(
+              (c) =>
+                `<section title="${xmlEscape(c.sectionTitle || "General")}">\n${c.content}\n</section>`,
+            )
+            .join("\n");
 
-          return `=== REPORT ===
-Document: ${fileName}
-Report Date: ${reportDate}
-Patient: ${pName}
-
-${structuredTestsStr ? structuredTestsStr + "\n\n" : ""}Evidence:
-${chunksContent}`;
+          return `<medical_record filename="${xmlEscape(fileName)}" report_date="${xmlEscape(reportDate)}" patient="${xmlEscape(pName)}">
+${structuredTestsStr ? `<verified_tests>\n${structuredTestsStr}\n</verified_tests>\n` : ""}<clinical_evidence>
+${chunksContent}
+</clinical_evidence>
+</medical_record>`;
         })
-        .join("\n\n========================================\n\n");
+        .join("\n\n");
+
+      const contextText = `<medical_records>\n${xmlDelimitedReports}\n</medical_records>`;
 
       let systemPrompt = prompts.RAG_PROMPT_TEMPLATE(contextText, normLang, coverageStr);
 
@@ -170,8 +192,10 @@ ${chunksContent}`;
       systemPrompt += `\n\nIMPORTANT DOCUMENT COUNT INSTRUCTION: You have been provided with extracted context from EXACTLY ${uniqueDocsCount} distinct medical report(s). If asked for an overview, summary, or total count of reports, you MUST state that there are exactly ${uniqueDocsCount} report(s). Do NOT hallucinate any other number.`;
 
       if (patientContextStr) {
-        systemPrompt += `\n\n${patientContextStr}`;
+        systemPrompt += `\n\n<patient_observations>\n${patientContextStr}\n</patient_observations>`;
       }
+      systemPrompt += `\n\n<question>\n${userQuery}\n</question>`;
+
       const instructionContent =
         prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
         prompts.STRICT_LANGUAGE_INSTRUCTIONS.english;
@@ -180,56 +204,66 @@ ${chunksContent}`;
 
       // eslint-disable-next-line no-console
       console.log(
-        `[ChatService] Running local RAG chat (generation in ${normLang}) using ${env.chatModel}...`,
+        `[ChatService] Running grounded clinical QA (generation in ${normLang}) using ${env.chatModel}...`,
       );
 
-      let answer = "";
-      if (onChunk) {
-        //streming mode
-        await ollamaClient.chatStream(
-          formattedMessages,
-          env.chatModel,
-          (chunk) => {
-            answer += chunk; //save in local variable for final return
-            onChunk(chunk); //pass to frontend for streaming
-          },
-          {
-            temperature: 0.2,
-            maxTokens: 4096,
-            think: false,
-            rawOptions: {
-              num_ctx: env.ollamaNumCtx,
-              repeat_penalty: 1.2,
-              repeat_last_n: 64,
-            },
-            signal: abortSignal,
-          },
-        );
-      } else {
-        answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-          temperature: 0.2,
-          maxTokens: 4096,
-          think: false,
-          rawOptions: {
-            num_ctx: env.ollamaNumCtx,
-            repeat_penalty: 1.2,
-            repeat_last_n: 64,
-          },
-          signal: abortSignal,
-        });
+      // Buffer LLM generation to prevent streaming unvalidated patient-specific clinical claims directly to user (REQ-MED-02)
+      let rawAnswer = await ollamaClient.chat(formattedMessages, env.chatModel, {
+        temperature: 0.2,
+        maxTokens: 4096,
+        think: false,
+        rawOptions: {
+          num_ctx: env.ollamaNumCtx,
+          repeat_penalty: 1.2,
+          repeat_last_n: 64,
+        },
+        signal: abortSignal,
+      });
+
+      // Post-Generation Anti-Hallucination Gate (REQ-MED-02)
+      const factValidation = medicalFactValidatorService.verifyMedicalFacts(
+        rawAnswer,
+        structuredRecords,
+      );
+      const answer = factValidation.sanitizedText;
+
+      // Stream validated answer to client
+      if (onChunk && !abortSignal?.aborted) {
+        await streamTextLikeChat(answer, onChunk, abortSignal, 10);
       }
+
+      const citations = [];
+      const seenCitations = new Set();
+      for (const chunk of contextChunks) {
+        const docId = chunk.documentId;
+        const pageNo = chunk.pageNumber != null ? Number(chunk.pageNumber) : 1;
+        const key = `${docId}_p${pageNo}`;
+        if (docId && !seenCitations.has(key)) {
+          seenCitations.add(key);
+          citations.push({
+            documentId: docId,
+            fileName: chunk.fileName || "Medical Report",
+            pageNumber: pageNo,
+            relevanceScore:
+              chunk.relevanceScore != null ? Number(Number(chunk.relevanceScore).toFixed(2)) : 1.0,
+            excerpt: chunk.content ? chunk.content.substring(0, 160).trim() : null,
+          });
+        }
+      }
+
       return {
         answer,
         mode,
         emergency: false,
-        citations: contextChunks,
+        citations,
       };
     }
 
     let systemPrompt = prompts.GENERAL_HEALTH_PROMPT(normLang);
     if (patientContextStr) {
-      systemPrompt += `\n\n${patientContextStr}`;
+      systemPrompt += `\n\n<patient_observations>\n${patientContextStr}\n</patient_observations>`;
     }
+    systemPrompt += `\n\n<question>\n${userQuery}\n</question>`;
 
     const instructionContent =
       prompts.STRICT_LANGUAGE_INSTRUCTIONS[normLang] ||
@@ -242,6 +276,18 @@ ${chunksContent}`;
       `[ChatService] Running local general chat (generation in ${normLang}) using ${env.chatModel}...`,
     );
 
+    const genOptions = {
+      temperature: 0.2,
+      maxTokens: 4096,
+      think: false,
+      rawOptions: {
+        num_ctx: env.ollamaNumCtx,
+        repeat_penalty: 1.2,
+        repeat_last_n: 64,
+      },
+      signal: abortSignal,
+    };
+
     let answer = "";
     if (onChunk) {
       await ollamaClient.chatStream(
@@ -251,30 +297,10 @@ ${chunksContent}`;
           answer += chunk;
           onChunk(chunk);
         },
-        {
-          temperature: 0.2,
-          maxTokens: 4096,
-          think: false,
-          rawOptions: {
-            num_ctx: env.ollamaNumCtx,
-            repeat_penalty: 1.2,
-            repeat_last_n: 64,
-          },
-          signal: abortSignal,
-        },
+        genOptions,
       );
     } else {
-      answer = await ollamaClient.chat(formattedMessages, env.chatModel, {
-        temperature: 0.2,
-        maxTokens: 4096,
-        think: false,
-        rawOptions: {
-          num_ctx: env.ollamaNumCtx,
-          repeat_penalty: 1.2,
-          repeat_last_n: 64,
-        },
-        signal: abortSignal,
-      });
+      answer = await ollamaClient.chat(formattedMessages, env.chatModel, genOptions);
     }
 
     return {
@@ -294,8 +320,8 @@ ${chunksContent}`;
     });
   }
 
-  async listSessions({ userId, cursor, limit }) {
-    return chatSessionRepository.listSessions({ cursor, limit, userId });
+  async listSessions({ userId, cursor, limit, type, excludeOnboarding }) {
+    return chatSessionRepository.listSessions({ cursor, limit, userId, type, excludeOnboarding });
   }
 
   async listMessages({ sessionId, userId, cursor, limit, direction }) {
@@ -333,6 +359,9 @@ ${chunksContent}`;
   async sendMessage({
     userId,
     documentId,
+    mentions,
+    scopeMode,
+    patientId,
     question,
     sessionId: reqSessionId,
     preferredLanguage: passedLang,
@@ -351,10 +380,169 @@ ${chunksContent}`;
     }
 
     try {
-      // Normalize documentId to array
-      if (documentId && !Array.isArray(documentId)) {
-        documentId = [documentId];
+      // 0. Resolve session early to access conversation slots
+      let session;
+      if (reqSessionId) {
+        session = await chatSessionRepository.findSessionById(reqSessionId, userId);
+        if (!session) {
+          session = await this.getOrCreateCanonicalSession({ userId });
+        }
+      } else {
+        session = await this.getOrCreateCanonicalSession({ userId });
       }
+      const sessionId = session.id;
+      const sessionSlots = session.metadata?.slots || {};
+
+      // 1. Deterministic Scope Resolution (Priority 1: Mentions / Explicit Doc IDs, Priority 2: NL / Clarification, Priority 3: Session Slots, Priority 4: Authorized History)
+      let resolvedScopeMode = scopeMode || null;
+      let authorizedDocs = [];
+      let finalDocumentIds = [];
+
+      // Extract document IDs from explicit mentions
+      const mentionDocIds = Array.isArray(mentions)
+        ? mentions.map((m) => (m && typeof m === "object" ? m.documentId : m)).filter(Boolean)
+        : [];
+
+      // Combine with explicit documentId if provided
+      const rawExplicitDocInput = [];
+      if (documentId) {
+        if (Array.isArray(documentId)) {
+          rawExplicitDocInput.push(...documentId);
+        } else if (String(documentId).trim().length > 0) {
+          rawExplicitDocInput.push(String(documentId).trim());
+        }
+      }
+      if (mentionDocIds.length > 0) {
+        rawExplicitDocInput.push(...mentionDocIds);
+      }
+
+      const explicitDocIds = Array.from(
+        new Set(
+          rawExplicitDocInput
+            .map((id) => (typeof id === "string" ? id.trim() : String(id || "").trim()))
+            .filter((id) => id.length > 0),
+        ),
+      );
+      const hasExplicitDocInput = explicitDocIds.length > 0;
+
+      if (hasExplicitDocInput) {
+        const authRes = await documentAuthorizationService.authorizeDocumentIds(
+          userId,
+          explicitDocIds,
+          { patientId },
+        );
+        finalDocumentIds = authRes.authorizedDocumentIds;
+        authorizedDocs = authRes.documents;
+        resolvedScopeMode =
+          resolvedScopeMode ||
+          (finalDocumentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
+      } else if (scopeMode === "AUTHORIZED_HISTORY") {
+        resolvedScopeMode = "AUTHORIZED_HISTORY";
+        finalDocumentIds = [];
+      } else {
+        // Priority 2: Natural Language Document Resolver
+        const nlRes = await documentResolverService.resolveNaturalLanguageScope(
+          userId,
+          question,
+          sessionSlots,
+        );
+
+        if (nlRes.scopeMode === "REQUIRE_DOCUMENT_SELECTION") {
+          const disambiguationMsg =
+            "I found multiple matching reports. Please specify which report you want to discuss:\n" +
+            nlRes.candidateDocuments
+              .map((d, i) => {
+                const rDate = d.reportDate || d.createdAt;
+                const dateStr =
+                  rDate && !isNaN(new Date(rDate))
+                    ? new Date(rDate).toLocaleDateString()
+                    : "Unknown date";
+                return `${i + 1}. ${d.fileName} (${d.hospitalName || d.documentType} - ${dateStr})`;
+              })
+              .join("\n");
+
+          if (onChunk) onChunk(disambiguationMsg);
+          const userMsg = await chatSessionRepository.appendMessage({
+            content: question?.trim() || "",
+            role: "user",
+            sessionId,
+            userId,
+          });
+          const aiMsg = await chatSessionRepository.appendMessage({
+            citations: [],
+            content: disambiguationMsg,
+            metadata: {
+              mode: "REQUIRE_SELECTION",
+              candidateDocuments: nlRes.candidateDocuments,
+              scopeMode: "REQUIRE_DOCUMENT_SELECTION",
+            },
+            role: "assistant",
+            sessionId,
+            userId,
+          });
+
+          return {
+            ai: aiMsg,
+            citations: [],
+            reply: disambiguationMsg,
+            user: userMsg,
+            mode: "REQUIRE_SELECTION",
+            requireSelection: true,
+            candidateDocuments: nlRes.candidateDocuments,
+          };
+        } else if (nlRes.resolved && nlRes.comparison) {
+          resolvedScopeMode = "MULTI_DOCUMENT";
+          const authRes = await documentAuthorizationService.authorizeDocumentIds(
+            userId,
+            nlRes.documentIds,
+            { patientId },
+          );
+          finalDocumentIds = authRes.authorizedDocumentIds;
+          authorizedDocs = authRes.documents;
+        } else if (nlRes.resolved && nlRes.isHistorical) {
+          resolvedScopeMode = "AUTHORIZED_HISTORY";
+          finalDocumentIds = [];
+        } else if (nlRes.resolved && nlRes.documentIds?.length > 0) {
+          resolvedScopeMode = nlRes.scopeMode || "SINGLE_DOCUMENT";
+          const authRes = await documentAuthorizationService.authorizeDocumentIds(
+            userId,
+            nlRes.documentIds,
+            { patientId },
+          );
+          finalDocumentIds = authRes.authorizedDocumentIds;
+          authorizedDocs = authRes.documents;
+        } else {
+          // Priority 3: Carry over active document scope from conversation session slots
+          if (
+            sessionSlots.activeDocumentIds &&
+            sessionSlots.activeDocumentIds.length > 0 &&
+            sessionSlots.scopeMode !== "AUTHORIZED_HISTORY"
+          ) {
+            try {
+              const authRes = await documentAuthorizationService.authorizeDocumentIds(
+                userId,
+                sessionSlots.activeDocumentIds,
+                { patientId },
+              );
+              finalDocumentIds = authRes.authorizedDocumentIds;
+              authorizedDocs = authRes.documents;
+              resolvedScopeMode =
+                sessionSlots.scopeMode ||
+                (finalDocumentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
+            } catch {
+              finalDocumentIds = [];
+              resolvedScopeMode = "AUTHORIZED_HISTORY";
+            }
+          } else {
+            // Priority 4: Fallback to AUTHORIZED_HISTORY
+            resolvedScopeMode = "AUTHORIZED_HISTORY";
+            finalDocumentIds = [];
+          }
+        }
+      }
+
+      documentId = finalDocumentIds;
+      scopeMode = resolvedScopeMode;
 
       const _reqStartTime = Date.now();
       // const baseTime = onChunk?.startTime || _reqStartTime;
@@ -362,31 +550,25 @@ ${chunksContent}`;
       debugLogger.info("sendMessage: Incoming payload", {
         userId,
         documentId,
+        scopeMode,
         reqSessionId,
         question: question?.substring(0, 100),
       });
 
       if (!question?.trim()) {
         if (documentId && documentId.length > 0) {
-          let lookupSessionId = reqSessionId;
-          if (!lookupSessionId) {
-            const canonicalSession = await this.getOrCreateCanonicalSession({ userId });
-            lookupSessionId = canonicalSession?.id;
-          }
-          if (lookupSessionId) {
-            const recentMsgs = await chatSessionRepository.listMessages({
-              direction: "before",
-              limit: 10,
-              sessionId: lookupSessionId,
-              userId,
+          const recentMsgs = await chatSessionRepository.listMessages({
+            direction: "before",
+            limit: 10,
+            sessionId,
+            userId,
+          });
+          const lastUserMsg = (recentMsgs?.items || []).find((m) => m.role === "user");
+          if (lastUserMsg && lastUserMsg.content) {
+            question = lastUserMsg.content;
+            debugLogger.info("sendMessage: Re-using previous question from session", {
+              question,
             });
-            const lastUserMsg = (recentMsgs?.items || []).find((m) => m.role === "user");
-            if (lastUserMsg && lastUserMsg.content) {
-              question = lastUserMsg.content;
-              debugLogger.info("sendMessage: Re-using previous question from session", {
-                question,
-              });
-            }
           }
         }
       }
@@ -418,38 +600,65 @@ ${chunksContent}`;
       preferredLanguage = normalizeLanguage(preferredLanguage);
       const patientPreferredLang = preferredLanguage;
 
-      // --- ML LANGUAGE DETECTION ---
+      // --- ML & ROMANIZED LANGUAGE DETECTION (REQ-ML-01..05) ---
       let detectedLanguage = preferredLanguage;
+      let detectedLanguageMeta = null;
+      let effectiveQuestion = question;
+
       try {
         const detectStartTime = Date.now();
-        const detectedLang = await aiClient.detectLanguage(question);
+        // Strip @mention tokens (e.g. "@Urocare Report") so document names do not bias language detection
+        const textForLangDetection =
+          question
+            .replace(/@[^\s@]+/g, "")
+            .replace(/\s+/g, " ")
+            .trim() || question;
+
+        const langResult = await aiClient.detectLanguage(
+          textForLangDetection,
+          patientPreferredLang,
+        );
         const detectDuration = Date.now() - detectStartTime;
-        if (detectedLang) {
-          const normDetected = normalizeLanguage(detectedLang);
+
+        if (langResult) {
+          detectedLanguageMeta =
+            typeof langResult === "object" ? langResult : { language: langResult };
+          const normDetected = normalizeLanguage(detectedLanguageMeta.language);
+
           debugLogger.info(`sendMessage: [LANGUAGE DETECTION] took ${detectDuration}ms`, {
             detected: normDetected,
+            script: detectedLanguageMeta.script,
+            inputScript: detectedLanguageMeta.inputScript,
+            isRomanized: detectedLanguageMeta.isRomanized,
+            hasExplicitOverride: detectedLanguageMeta.hasExplicitOverride,
             previous: preferredLanguage,
           });
-          detectedLanguage = normDetected;
 
-          // console.log(
-          //   `[STREAM DEBUG] Language detected: "${detectedLanguage}" +${Date.now() - baseTime}ms`,
-          // );
+          detectedLanguage = normDetected;
+          if (detectedLanguageMeta.hasExplicitOverride && detectedLanguageMeta.cleanText) {
+            effectiveQuestion = detectedLanguageMeta.cleanText;
+          }
         }
       } catch (err) {
         debugLogger.error("sendMessage: Failed to detect language via ML model", {
           error: err.message,
         });
       }
-      // Force everything to use detectedLanguage
+
+      // Output language is the verified detected or explicitly overridden language
       preferredLanguage = detectedLanguage;
-      const retrievalQuery = question;
-      let englishQuestion = question;
-      if (detectedLanguage !== "english") {
+      const retrievalQuery = effectiveQuestion;
+      let englishQuestion = effectiveQuestion;
+
+      // Translate regional prompt to English for cross-lingual RAG retrieval if needed
+      const inputLanguage = normalizeLanguage(
+        detectedLanguageMeta?.inputLanguage || detectedLanguageMeta?.language || detectedLanguage,
+      );
+      if (inputLanguage !== "english") {
         try {
-          englishQuestion = await aiClient.translate(question, detectedLanguage, "english");
+          englishQuestion = await aiClient.translate(effectiveQuestion, inputLanguage, "english");
         } catch {
-          englishQuestion = question;
+          englishQuestion = effectiveQuestion;
         }
       }
 
@@ -471,18 +680,7 @@ ${chunksContent}`;
         }
       }
 
-      let session;
-      if (reqSessionId) {
-        session = await chatSessionRepository.findSessionById(reqSessionId, userId);
-        if (!session) {
-          session = await this.getOrCreateCanonicalSession({ userId });
-        }
-      } else {
-        session = await this.getOrCreateCanonicalSession({ userId });
-      }
-      const sessionId = session.id;
-
-      if (documentId) {
+      if (documentId && documentId.length > 0) {
         const docIdsToAttach = Array.isArray(documentId) ? documentId : [documentId];
         for (const docId of docIdsToAttach) {
           if (docId) {
@@ -516,7 +714,29 @@ ${chunksContent}`;
         };
       }
 
-      const isSummaryRequest = SUMMARY_KEYWORDS.some((kw) => cleanQuestion.includes(kw));
+      const hasCompareIntent =
+        resolvedScopeMode === "MULTI_DOCUMENT" ||
+        (finalDocumentIds && finalDocumentIds.length > 1) ||
+        /\b(compare|both|all|reports|trend|versus|vs)\b/i.test(cleanQuestion) ||
+        /સરખામણી|બંને|બધાય|તુલના/i.test(cleanQuestion);
+
+      const isSummaryRequest =
+        !hasCompareIntent &&
+        (SUMMARY_KEYWORDS.some((kw) => cleanQuestion.includes(kw)) ||
+          ((cleanQuestion.includes("summary") ||
+            cleanQuestion.includes("saransh") ||
+            cleanQuestion.includes("સારાંશ") ||
+            cleanQuestion.includes("सारांश") ||
+            cleanQuestion.includes("samjhavo") ||
+            cleanQuestion.includes("samjhao") ||
+            cleanQuestion.includes("સમજાવો")) &&
+            (cleanQuestion.includes("report") ||
+              cleanQuestion.includes("document") ||
+              cleanQuestion.includes("રિપોર્ટ") ||
+              cleanQuestion.includes("અહેવાલ") ||
+              cleanQuestion.includes("દાખલો") ||
+              cleanQuestion.includes("કાગળ") ||
+              cleanQuestion.includes("रिपोर्ट"))));
       if (isSummaryRequest) {
         let targetDoc = null;
         if (documentId && documentId.length > 0) {
@@ -535,14 +755,103 @@ ${chunksContent}`;
             targetDoc = docs[0];
           }
         } else {
-          const docs = await db
+          const allDocs = await db
             .select()
             .from(document)
             .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
-            .orderBy(desc(document.createdAt))
-            .limit(1);
-          if (docs.length > 0) {
-            targetDoc = docs[0];
+            .orderBy(desc(document.createdAt));
+
+          if (allDocs.length === 0) {
+            targetDoc = null;
+          } else if (allDocs.length === 1) {
+            targetDoc = allDocs[0];
+          } else {
+            // User has multiple documents and didn't select one.
+            // Check if natural language matched specific document(s) or latest/first
+            const lowerQ = cleanQuestion;
+            const isLatest =
+              lowerQ.includes("last") ||
+              lowerQ.includes("latest") ||
+              lowerQ.includes("recent") ||
+              lowerQ.includes("છેલ્લો") ||
+              lowerQ.includes("છેલ્લા") ||
+              lowerQ.includes("છેલ્લી") ||
+              lowerQ.includes("તાજેતરનો") ||
+              lowerQ.includes("તાજેતરના") ||
+              lowerQ.includes("નવો") ||
+              lowerQ.includes("નવી");
+
+            const isOldest =
+              lowerQ.includes("first") ||
+              lowerQ.includes("oldest") ||
+              lowerQ.includes("earliest") ||
+              lowerQ.includes("પહેલો") ||
+              lowerQ.includes("પહેલા") ||
+              lowerQ.includes("પહેલી");
+
+            const matchedDocs = allDocs.filter((d) => {
+              if (d.fileName) {
+                const cleanName = d.fileName
+                  .toLowerCase()
+                  .replace(/\.[^/.]+$/, "")
+                  .trim();
+                if (
+                  cleanName.length > 3 &&
+                  !["report", "reports", "document", "documents", "file", "files"].includes(
+                    cleanName,
+                  )
+                ) {
+                  if (lowerQ.includes(cleanName)) return true;
+                }
+              }
+              return false;
+            });
+
+            if (isLatest) {
+              targetDoc = allDocs[0];
+            } else if (isOldest) {
+              targetDoc = allDocs[allDocs.length - 1];
+            } else if (matchedDocs.length === 1) {
+              targetDoc = matchedDocs[0];
+            } else {
+              // Ambiguous: multiple documents available. Ask user to select report!
+              const userMsg = await chatSessionRepository.appendMessage({
+                content: question.trim(),
+                role: "user",
+                sessionId,
+                userId,
+              });
+              const replyText =
+                REQUIRE_SELECTION_REPORT_I18N[detectedLanguage] ||
+                REQUIRE_SELECTION_REPORT_I18N[patientPreferredLang] ||
+                REQUIRE_SELECTION_REPORT_I18N.english;
+              if (onChunk) {
+                await streamTextLikeChat(replyText, onChunk, abortSignal, 15);
+              }
+              const aiMsg = await chatSessionRepository.appendMessage({
+                citations: [],
+                content: replyText,
+                metadata: {
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                  requireSelection: true,
+                  documentId: [],
+                  reports: allDocs,
+                },
+                role: "assistant",
+                sessionId,
+                userId,
+              });
+              return {
+                ai: aiMsg,
+                user: userMsg,
+                reply: replyText,
+                requireSelection: true,
+                reports: allDocs,
+                mode: "DOCUMENT_RAG",
+                emergency: false,
+              };
+            }
           }
         }
 
@@ -556,6 +865,7 @@ ${chunksContent}`;
         let replyText = "";
         let options = [];
         let taskMode = "DOCUMENT_RAG";
+        let rawSummary = "";
 
         if (!targetDoc) {
           replyText = NO_REPORT_FOUND_I18N[patientPreferredLang] || NO_REPORT_FOUND_I18N.english;
@@ -578,9 +888,14 @@ ${chunksContent}`;
             targetDoc.structuredExtractedData?.patientName ||
             (p ? `${p.firstName || ""} ${p.lastName || ""}`.trim() : "Unknown");
 
+          const summaryOutputLang =
+            detectedLanguageMeta?.hasExplicitOverride || detectedLanguage !== "english"
+              ? detectedLanguage
+              : patientPreferredLang || "english";
+
           const reportAgeStr = getReportAgeString(
             targetDoc.reportDate || targetDoc.createdAt,
-            patientPreferredLang,
+            summaryOutputLang,
           );
 
           let structData = targetDoc.structuredExtractedData;
@@ -591,16 +906,16 @@ ${chunksContent}`;
               structData = {};
             }
           }
-          let rawSummary =
+          rawSummary =
             targetDoc.summaryEnglish ||
             structData?.summaryEnglish ||
             structData?.summary ||
             structData?.remarks ||
             "";
 
-          const labels = SUMMARY_LABELS_I18N[patientPreferredLang] || SUMMARY_LABELS_I18N.english;
+          const labels = SUMMARY_LABELS_I18N[summaryOutputLang] || SUMMARY_LABELS_I18N.english;
           const questions =
-            PREDEFINED_QUESTIONS_I18N[patientPreferredLang] || PREDEFINED_QUESTIONS_I18N.english;
+            PREDEFINED_QUESTIONS_I18N[summaryOutputLang] || PREDEFINED_QUESTIONS_I18N.english;
 
           const formattedHeader =
             `**${labels.patientName}:** ${patientName}\n` +
@@ -614,7 +929,7 @@ ${chunksContent}`;
           let translatedSummaryParts = [];
           if (!rawSummary) {
             const noSummary =
-              NO_SUMMARY_AVAILABLE_I18N[patientPreferredLang] || NO_SUMMARY_AVAILABLE_I18N.english;
+              NO_SUMMARY_AVAILABLE_I18N[summaryOutputLang] || NO_SUMMARY_AVAILABLE_I18N.english;
             translatedSummaryParts.push(noSummary);
             if (onChunk) {
               await streamTextLikeChat(noSummary, onChunk, abortSignal, 15);
@@ -634,7 +949,7 @@ ${chunksContent}`;
 
               let fullTranslatedPara = "";
 
-              if (patientPreferredLang !== "english") {
+              if (summaryOutputLang !== "english") {
                 // Split paragraph into sentences to stream translation faster
                 const sentences = rawPara.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [rawPara];
 
@@ -648,7 +963,7 @@ ${chunksContent}`;
                     translatedSentence = await aiClient.translate(
                       rawSentence.trim(),
                       "english",
-                      patientPreferredLang,
+                      summaryOutputLang,
                     );
                   } catch (err) {
                     debugLogger.error("sendMessage: Sentence translation failed", {
@@ -686,8 +1001,22 @@ ${chunksContent}`;
           }));
         }
 
+        const summaryCitations = targetDoc
+          ? [
+              {
+                documentId: targetDoc.id,
+                fileName: targetDoc.fileName || "Medical Report",
+                pageNumber: 1,
+                reportDate: targetDoc.reportDate || null,
+                documentType: targetDoc.documentType || null,
+                relevanceScore: 1.0,
+                excerpt: rawSummary ? rawSummary.substring(0, 160).trim() : null,
+              },
+            ]
+          : [];
+
         const aiMessage = await chatSessionRepository.appendMessage({
-          citations: [],
+          citations: summaryCitations,
           content: replyText,
           metadata: {
             mode: taskMode,
@@ -695,6 +1024,7 @@ ${chunksContent}`;
             documentId: targetDoc ? [targetDoc.id] : [],
             task: "SUMMARY",
             options,
+            citations: summaryCitations,
           },
           role: "assistant",
           sessionId,
@@ -703,7 +1033,7 @@ ${chunksContent}`;
 
         return {
           ai: aiMessage,
-          citations: [],
+          citations: summaryCitations,
           reply: replyText,
           user: userMessage,
           mode: taskMode,
@@ -712,17 +1042,305 @@ ${chunksContent}`;
         };
       }
 
-      // FAST-PATH INTERCEPTOR (Direct deterministic domain answers)
+      // FAST-PATH & MEDICAL INTENT INTERCEPTOR (Direct deterministic domain answers & deflections)
+      const DEFLECTION_I18N = {
+        english:
+          "I am your Health Vault medical assistant. I can only assist with your health records, lab reports, medications, and clinical questions.",
+        gujarati:
+          "હું તમારો હેલ્થ વૉલ્ટ સહાયક છું. હું ફક્ત તમારા સ્વાસ્થ્ય અહેવાલો, લેબ પરિણામો અને દવાઓ સંબંધિત પ્રશ્નોમાં મદદ કરી શકું છું.",
+        hindi:
+          "मैं आपका हेल्थ वॉल्ट मेडिकल असिस्टेंट हूं। मैं केवल आपकी स्वास्थ्य रिपोर्ट, लैब टेस्ट और दवाओं से संबंधित प्रश्नों में सहायता कर सकता हूं।",
+        marathi:
+          "मी तुमचा हेल्थ वॉल्ट वैद्यकीय सहाय्यक आहे. मी फक्त तुमचे आरोग्य अहवाल, लॅब चाचण्या आणि औषधांशी संबंधित प्रश्नांमध्ये मदत करू शकतो.",
+        tamil:
+          "நான் உங்கள் ஹெல்த் வால்ட் மருத்துவ உதவியாளர். உங்கள் மருத்துவ அறிக்கைகள், ஆய்வக முடிவுகள் மற்றும் மருந்துகள் தொடர்பான கேள்விகளுக்கு மட்டுமே நான் உதவ முடியும்.",
+      };
+
+      const CLARIFICATION_I18N = {
+        english:
+          "Could you please specify which medical report, lab test, or health metric you would like to know about?",
+        gujarati:
+          "કૃપા કરીને સ્પષ્ટ કરશો કે તમે કયા મેડિકલ રિપોર્ટ, લેબ ટેસ્ટ અથવા સ્વાસ્થ્ય મેટ્રિક વિશે જાણવા માંગો છો?",
+        hindi:
+          "कृपया स्पष्ट करें कि आप किस मेडिकल रिपोर्ट, लैब टेस्ट या स्वास्थ्य माप के बारे में जानना चाहते हैं?",
+        marathi:
+          "कृपया स्पष्ट करा की तुम्हाला कोणत्या वैद्यकीय अहवाल, लॅब चाचणी किंवा आरोग्याविषयी माहिती हवी आहे?",
+        tamil:
+          "நீங்கள் எந்த மருத்துவ அறிக்கை, ஆய்வக சோதனை அல்லது உடல்நல அளவீடு பற்றி அறிய விரும்புகிறீர்கள் என்பதை தெளிவுபடுத்த முடியுமா?",
+      };
+
+      let medicalIntentMeta = null;
+      let userMessage = null;
+
+      const getOrAppendUserMessage = async () => {
+        if (!userMessage) {
+          userMessage = await chatSessionRepository.appendMessage({
+            content: question.trim(),
+            role: "user",
+            sessionId,
+            userId,
+            metadata: {
+              ...(mentions && mentions.length > 0 ? { mentions } : {}),
+              scopeMode: resolvedScopeMode,
+              documentIds: finalDocumentIds,
+            },
+          });
+        }
+        return userMessage;
+      };
+
+      // Retrieve existing session slots for multi-turn clinical context (REQ-MEM-02)
+      const existingSlots = session?.metadata?.slots || session?.metadata?.conversationSlots || {};
+
+      let classificationResult = null;
+      let turnSlots = existingSlots;
+
       try {
-        const classification = chatClassifier.classify({
+        classificationResult = chatClassifier.classify({
           rawQuestion: question,
           englishQuestion,
           question,
           detectedLanguage,
           documentId,
+          sessionContext: existingSlots,
         });
 
-        if (classification && classification.fastPathType) {
+        if (classificationResult && classificationResult.medicalIntent) {
+          medicalIntentMeta = classificationResult.medicalIntent;
+
+          // Multi-turn slot resolution
+          turnSlots = slotContextService.resolveTurnSlots(
+            existingSlots,
+            classificationResult,
+            detectedLanguageMeta,
+            hasExplicitDocInput ? finalDocumentIds : existingSlots.activeDocumentIds || [],
+            {
+              scopeMode: resolvedScopeMode,
+              mentions,
+              selectedDocumentMetadata:
+                authorizedDocs && authorizedDocs[0]
+                  ? {
+                      id: authorizedDocs[0].id,
+                      fileName: authorizedDocs[0].fileName,
+                      hospitalName: authorizedDocs[0].hospitalName,
+                      doctorName: authorizedDocs[0].doctorName,
+                      reportDate: authorizedDocs[0].reportDate || authorizedDocs[0].createdAt,
+                      documentType: authorizedDocs[0].documentType,
+                    }
+                  : null,
+            },
+          );
+
+          // Inherit active metric from conversation slots if not explicitly stated in current follow-up turn
+          if (!medicalIntentMeta.canonicalMetric && turnSlots.activeMetric) {
+            medicalIntentMeta.canonicalMetric = turnSlots.activeMetric;
+          }
+
+          chatSessionRepository
+            .updateSessionMetadata(sessionId, userId, {
+              slots: turnSlots,
+              conversationSlots: turnSlots,
+            })
+            .catch(() => {});
+
+          // 1. OUT_OF_SCOPE Immediate Deflection
+          if (medicalIntentMeta.intent === "OUT_OF_SCOPE") {
+            const deflectText = DEFLECTION_I18N[detectedLanguage] || DEFLECTION_I18N.english;
+            const interceptUserMessage = await getOrAppendUserMessage();
+            await streamTextLikeChat(deflectText, onChunk, abortSignal, 10);
+            const aiMessage = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: deflectText,
+              metadata: { intent: "OUT_OF_SCOPE", mode: "DEFLECTION" },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+            return {
+              ai: aiMessage,
+              citations: [],
+              reply: deflectText,
+              user: interceptUserMessage,
+              mode: "DEFLECTION",
+              emergency: false,
+            };
+          }
+
+          // 2. CLARIFICATION_REQUIRED Handling
+          if (medicalIntentMeta.intent === "CLARIFICATION_REQUIRED") {
+            const clarifyText = CLARIFICATION_I18N[detectedLanguage] || CLARIFICATION_I18N.english;
+            const interceptUserMessage = await getOrAppendUserMessage();
+            await streamTextLikeChat(clarifyText, onChunk, abortSignal, 10);
+            const aiMessage = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: clarifyText,
+              metadata: { intent: "CLARIFICATION_REQUIRED", mode: "CLARIFICATION" },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+            return {
+              ai: aiMessage,
+              citations: [],
+              reply: clarifyText,
+              user: interceptUserMessage,
+              mode: "CLARIFICATION",
+              emergency: false,
+            };
+          }
+
+          // 3. MEDICAL_TREND_CHART Dynamic Generation (REQ-CHART-02, REQ-CHART-05, REQ-CHART-06, REQ-DOC-06)
+          let chartMetric = medicalIntentMeta.canonicalMetric || turnSlots.activeMetric;
+          const chartScopeDocIds =
+            scopeMode === "AUTHORIZED_HISTORY"
+              ? null
+              : documentId && documentId.length > 0
+                ? documentId
+                : turnSlots.activeDocumentIds || null;
+
+          if (medicalIntentMeta.intent === "MEDICAL_TREND_CHART") {
+            if (!chartMetric && chartScopeDocIds && chartScopeDocIds.length > 0) {
+              try {
+                const docLabs = await patientLabResultRepository.findLabResultsByPatientId(userId, {
+                  documentIds: chartScopeDocIds,
+                  limit: 50,
+                });
+                const numericLabs = (docLabs || []).filter(
+                  (l) => l.numericValue != null && l.canonicalName,
+                );
+                const metricCounts = {};
+                for (const lab of numericLabs) {
+                  metricCounts[lab.canonicalName] = (metricCounts[lab.canonicalName] || 0) + 1;
+                }
+                const sorted = Object.entries(metricCounts).sort((a, b) => b[1] - a[1]);
+                if (sorted.length > 0) {
+                  chartMetric = sorted[0][0];
+                }
+              } catch {
+                // Ignore and proceed
+              }
+            }
+
+            if (chartMetric) {
+              const chartRes = await medicalTrendChartService.generateTrendChart({
+                userId,
+                canonicalKey: chartMetric,
+                granularity: medicalIntentMeta.granularity || "date",
+                startDate: turnSlots.dateRange?.start,
+                endDate: turnSlots.dateRange?.end,
+                documentIds: chartScopeDocIds,
+                scopeMode,
+              });
+
+              if (chartRes.hasData && chartRes.chart) {
+                const interceptUserMessage = await getOrAppendUserMessage();
+                const isExpl =
+                  medicalIntentMeta.isExplanationRequest ||
+                  /સમજાવો|સમજાવોને|અર્થ|વિશેષતા|explain|breakdown|meaning/i.test(question);
+
+                let summaryText = "";
+                if (detectedLanguage === "gujarati") {
+                  const trendGuj =
+                    chartRes.chart.summary.trendDirection === "increasing"
+                      ? "વધતો (increasing)"
+                      : chartRes.chart.summary.trendDirection === "decreasing"
+                        ? "ઘટતો (decreasing)"
+                        : "સ્થિર (stable)";
+
+                  if (isExpl) {
+                    summaryText = `તમારા ${chartRes.chart.title} નો ચકાસાયેલ ચાર્ટ અહીં આપેલ છે:\n\n• **ઐતિહાસિક રેકોર્ડ:** તમારા રિપોર્ટ્સ મુજબ મૂલ્યો **${chartRes.chart.summary.firstValue}** થી **${chartRes.chart.summary.latestValue} ${chartRes.chart.canonicalUnit}** ની વચ્ચે રહ્યા છે.\n• **સામાન્ય સંદર્ભ રેન્જ:** ${chartRes.chart.referenceRange.low != null ? `${chartRes.chart.referenceRange.low} - ${chartRes.chart.referenceRange.high} ${chartRes.chart.canonicalUnit}` : "લાગુ નથી"}.\n• **ક્લિનિકલ વલણ (Trend):** સમય જતાં મૂલ્યોમાં **${trendGuj}** વલણ જોવા મળે છે (${chartRes.chart.summary.totalPoints} અવલોકનોમાંથી).\n\nઆ ચાર્ટ તમારા ચકાસાયેલા લેબ પરિણામો પર આધારિત છે. વધુ વિશ્લેષણ અને યોગ્ય સારવાર માટે તમારા ચિકિત્સક (ડૉક્ટર) નો સંપર્ક કરો.`;
+                  } else {
+                    summaryText = `આ રહ્યો તમારો ચકાસાયેલ ${chartRes.chart.title}. ઐતિહાસિક તબીબી અવલોકનો દર્શાવે છે કે તમારા મૂલ્યો ${chartRes.chart.summary.firstValue} થી ${chartRes.chart.summary.latestValue} ${chartRes.chart.canonicalUnit} ની વચ્ચે છે (સામાન્ય રેન્જ: ${chartRes.chart.referenceRange.low || 70} - ${chartRes.chart.referenceRange.high || 99} ${chartRes.chart.canonicalUnit}), જે ${chartRes.chart.summary.totalPoints} પરિણામોમાં ${trendGuj} વલણ દર્શાવે છે.`;
+                  }
+                } else if (detectedLanguage === "hindi") {
+                  const trendHindi =
+                    chartRes.chart.summary.trendDirection === "increasing"
+                      ? "बढ़ता हुआ (increasing)"
+                      : chartRes.chart.summary.trendDirection === "decreasing"
+                        ? "घटता हुआ (decreasing)"
+                        : "स्थिर (stable)";
+                  summaryText = `यहाँ आपका सत्यापित ${chartRes.chart.title} है। ऐतिहासिक रीडिंग ${chartRes.chart.summary.firstValue} से ${chartRes.chart.summary.latestValue} ${chartRes.chart.canonicalUnit} के बीच हैं, जो ${chartRes.chart.summary.totalPoints} नैदानिक अवलोकनों में ${trendHindi} ट्रेंड दर्शाती हैं।`;
+                } else {
+                  if (isExpl) {
+                    summaryText = `Here is the clinical explanation of your verified ${chartRes.chart.title}:\n\n• **Historical Range:** Observations span from **${chartRes.chart.summary.firstValue}** to **${chartRes.chart.summary.latestValue} ${chartRes.chart.canonicalUnit}** across ${chartRes.chart.summary.totalPoints} clinical reports.\n• **Reference Standard:** Normal clinical range is ${chartRes.chart.referenceRange.low != null ? `${chartRes.chart.referenceRange.low} - ${chartRes.chart.referenceRange.high} ${chartRes.chart.canonicalUnit}` : "Standard thresholds"}.\n• **Trajectory:** The overall progression shows a **${chartRes.chart.summary.trendDirection}** trend over the recorded period.\n\nPlease discuss these clinical trends with your healthcare provider for diagnostic context.`;
+                  } else {
+                    summaryText = `Here is your verified ${chartRes.chart.title}. Historical readings range from ${chartRes.chart.summary.firstValue} to ${chartRes.chart.summary.latestValue} ${chartRes.chart.canonicalUnit} showing a ${chartRes.chart.summary.trendDirection} trend across ${chartRes.chart.summary.totalPoints} clinical observations.`;
+                  }
+                }
+
+                await streamTextLikeChat(summaryText, onChunk, abortSignal, 10);
+
+                const chartCitations = (chartRes.chart.points || [])
+                  .filter((p) => p.documentId)
+                  .map((p) => ({
+                    documentId: p.documentId,
+                    fileName: p.documentName || "Medical Report",
+                    pageNumber: p.pageNumber || p.pageNo || 1,
+                    relevanceScore: 1.0,
+                    excerpt: `${chartRes.chart.title}: ${p.value} ${p.unit} on ${p.date}`,
+                  }));
+
+                const aiMessage = await chatSessionRepository.appendMessage({
+                  citations: chartCitations,
+                  content: summaryText,
+                  metadata: {
+                    intent: "MEDICAL_TREND_CHART",
+                    mode: "CHART",
+                    chart: chartRes.chart,
+                  },
+                  role: "assistant",
+                  sessionId,
+                  userId,
+                });
+
+                return {
+                  ai: aiMessage,
+                  citations: chartCitations,
+                  reply: summaryText,
+                  chart: chartRes.chart,
+                  user: interceptUserMessage,
+                  mode: "CHART",
+                  emergency: false,
+                };
+              } else {
+                // Explicit missing-data response for verified medical charts
+                const interceptUserMessage = await getOrAppendUserMessage();
+                const metricName = (chartMetric || "requested medical test").replace(/_/g, " ");
+                const emptyMsg =
+                  detectedLanguage === "gujarati"
+                    ? `તમારા અપલોડ કરેલા મેડિકલ રિપોર્ટ્સમાં ${metricName} માટે કોઈ માન્ય લેબ પરિણામો મળ્યા નથી.`
+                    : detectedLanguage === "hindi"
+                      ? `आपकी अपलोड की गई मेडिकल रिपोर्ट में ${metricName} के लिए कोई लैब परिणाम नहीं मिले।`
+                      : `No verified laboratory observations were found for ${metricName} in your authorized medical reports.`;
+
+                await streamTextLikeChat(emptyMsg, onChunk, abortSignal, 10);
+                const aiMessage = await chatSessionRepository.appendMessage({
+                  citations: [],
+                  content: emptyMsg,
+                  metadata: {
+                    intent: "MEDICAL_TREND_CHART",
+                    mode: "CHART_EMPTY",
+                  },
+                  role: "assistant",
+                  sessionId,
+                  userId,
+                });
+
+                return {
+                  ai: aiMessage,
+                  citations: [],
+                  reply: emptyMsg,
+                  chart: null,
+                  user: interceptUserMessage,
+                  mode: "CHART_EMPTY",
+                  emergency: false,
+                };
+              }
+            }
+          }
+        }
+
+        if (classificationResult && classificationResult.fastPathType) {
           const fastPathRes = await chatFastPath.execute(
             {
               userId,
@@ -735,7 +1353,7 @@ ${chunksContent}`;
               page,
               limit,
             },
-            classification,
+            classificationResult,
           );
           if (fastPathRes) {
             return fastPathRes;
@@ -840,9 +1458,10 @@ ${chunksContent}`;
         { intent, documentScope, detectedLanguage },
       );
 
-      let finalDocumentIds = [];
       if (intent === "DOCUMENT" || intent === "COMPARE") {
-        if (documentId && documentId.length > 0) {
+        if (finalDocumentIds && finalDocumentIds.length > 0) {
+          // Scope already established
+        } else if (documentId && documentId.length > 0) {
           finalDocumentIds = documentId;
         } else {
           const recentDocs = await db
@@ -854,115 +1473,110 @@ ${chunksContent}`;
               createdAt: document.createdAt,
             })
             .from(document)
-            .where(eq(document.userId, userId))
+            .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
             .orderBy(desc(document.createdAt));
 
           if (recentDocs.length === 0) {
-            intent = "GENERAL";
-            documentScope = "NONE";
-          } else if (
-            documentScope === "ALL_DOCUMENTS" ||
-            documentScope === "FULL_DOCUMENT" ||
-            documentScope === "COMPARE"
-          ) {
-            // Check if user is asking for selection vs specific reports
-            if (
-              intent === "COMPARE" &&
-              !retrievalQuery
-                .toLowerCase()
-                .replace(/[^a-z0-9]/g, " ")
-                .split(/\\s+/)
-                .filter((w) => w.length > 0)
-                .some(
-                  (w) =>
-                    !compareKeywords.includes(w) &&
-                    !documentKeywords.includes(w) &&
-                    ![
-                      "can",
-                      "you",
-                      "please",
-                      "and",
-                      "or",
-                      "show",
-                      "give",
-                      "me",
-                      "between",
-                      "these",
-                      "those",
-                      "results",
-                      "result",
-                      "of",
-                      "in",
-                      "from",
-                      "for",
-                      "with",
-                      "a",
-                      "an",
-                      "is",
-                      "are",
-                      "was",
-                      "were",
-                      "to",
-                      "do",
-                      "does",
-                      "did",
-                      "have",
-                      "has",
-                      "had",
-                    ].includes(w),
-                )
-            ) {
-              const userMsg = await chatSessionRepository.appendMessage({
-                content: question.trim(),
-                role: "user",
-                sessionId,
-                userId,
-              });
-              const replyText =
-                REQUIRE_SELECTION_I18N[detectedLanguage] || REQUIRE_SELECTION_I18N.english;
-              const aiMsg = await chatSessionRepository.appendMessage({
-                citations: [],
-                content: replyText,
-                metadata: {
-                  mode: "DOCUMENT_RAG",
-                  emergency: false,
-                  requireSelection: true,
-                  documentId: [],
-                  reports: recentDocs,
-                },
-                role: "assistant",
-                sessionId,
-                userId,
-              });
-              return {
-                ai: aiMsg,
-                user: userMsg,
-                reply: replyText,
-                requireSelection: true,
-                reports: recentDocs,
+            const userMsg = await chatSessionRepository.appendMessage({
+              content: question.trim(),
+              role: "user",
+              sessionId,
+              userId,
+            });
+            const replyText =
+              NO_REPORT_FOUND_I18N[detectedLanguage] || NO_REPORT_FOUND_I18N.english;
+            const aiMsg = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: replyText,
+              metadata: {
                 mode: "DOCUMENT_RAG",
                 emergency: false,
-              };
-            }
-            finalDocumentIds = recentDocs.map((d) => d.id);
+                documentId: [],
+              },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+            return {
+              ai: aiMsg,
+              user: userMsg,
+              reply: replyText,
+              mode: "DOCUMENT_RAG",
+              emergency: false,
+            };
           } else if (recentDocs.length === 1) {
             finalDocumentIds = [recentDocs[0].id];
             documentScope = "SINGLE_DOCUMENT";
           } else {
-            // Intent is DOCUMENT, trying to find which one
-            if (lowerQuestion.includes("first") || lowerQuestion.includes("oldest")) {
-              finalDocumentIds = [recentDocs[recentDocs.length - 1].id];
-            } else if (
+            // User has multiple documents (recentDocs.length > 1)
+            // 1. Check if user explicitly asked for latest/recent/last
+            const isLatest =
               lowerQuestion.includes("last") ||
               lowerQuestion.includes("latest") ||
-              lowerQuestion.includes("recent")
-            ) {
+              lowerQuestion.includes("recent") ||
+              lowerQuestion.includes("છેલ્લો") ||
+              lowerQuestion.includes("છેલ્લા") ||
+              lowerQuestion.includes("છેલ્લી") ||
+              lowerQuestion.includes("તાજેતરનો") ||
+              lowerQuestion.includes("તાજેતરના") ||
+              lowerQuestion.includes("આખરી") ||
+              lowerQuestion.includes("નવો") ||
+              lowerQuestion.includes("નવી") ||
+              lowerQuestion.includes("पिछला") ||
+              lowerQuestion.includes("पिछली") ||
+              lowerQuestion.includes("नवीनतम") ||
+              lowerQuestion.includes("शेवटचा") ||
+              lowerQuestion.includes("கடைசி") ||
+              lowerQuestion.includes("சமீபத்திய");
+
+            const isOldest =
+              lowerQuestion.includes("first") ||
+              lowerQuestion.includes("oldest") ||
+              lowerQuestion.includes("earliest") ||
+              lowerQuestion.includes("પહેલો") ||
+              lowerQuestion.includes("પહેલા") ||
+              lowerQuestion.includes("પહેલી") ||
+              lowerQuestion.includes("સૌથી જૂનો") ||
+              lowerQuestion.includes("पहला") ||
+              lowerQuestion.includes("पहली") ||
+              lowerQuestion.includes("पहिला") ||
+              lowerQuestion.includes("முதல்");
+
+            const isAllOrCompare =
+              intent === "COMPARE" ||
+              (documentScope === "ALL_DOCUMENTS" &&
+                (lowerQuestion.includes("all") ||
+                  lowerQuestion.includes("every") ||
+                  lowerQuestion.includes("both") ||
+                  lowerQuestion.includes("reports") ||
+                  lowerQuestion.includes("બધા") ||
+                  lowerQuestion.includes("તમામ") ||
+                  lowerQuestion.includes("દરેક") ||
+                  lowerQuestion.includes("badha") ||
+                  lowerQuestion.includes("સારે") ||
+                  lowerQuestion.includes("सभी") ||
+                  lowerQuestion.includes("सर्व") ||
+                  lowerQuestion.includes("அனைத்து")));
+
+            if (isLatest) {
               finalDocumentIds = [recentDocs[0].id];
+              documentScope = "SINGLE_DOCUMENT";
+            } else if (isOldest) {
+              finalDocumentIds = [recentDocs[recentDocs.length - 1].id];
+              documentScope = "SINGLE_DOCUMENT";
+            } else if (isAllOrCompare) {
+              finalDocumentIds = recentDocs.map((d) => d.id);
+              documentScope = "ALL_DOCUMENTS";
             } else {
+              // Check if natural language matched specific document(s)
               const matchedDocs = recentDocs.filter((d) => {
                 if (d.fileName) {
-                  const cleanName = d.fileName.toLowerCase().replace(".pdf", "").trim();
+                  const cleanName = d.fileName
+                    .toLowerCase()
+                    .replace(/\.[^/.]+$/, "")
+                    .trim();
                   if (
+                    cleanName.length > 3 &&
                     !["report", "reports", "document", "documents", "file", "files"].includes(
                       cleanName,
                     )
@@ -972,11 +1586,48 @@ ${chunksContent}`;
                 }
                 return false;
               });
-              if (matchedDocs.length > 0) {
+
+              if (matchedDocs.length === 1) {
+                finalDocumentIds = [matchedDocs[0].id];
+                documentScope = "SINGLE_DOCUMENT";
+              } else if (matchedDocs.length > 1) {
                 finalDocumentIds = matchedDocs.map((d) => d.id);
+                documentScope = "SELECTED_MULTI_DOCUMENT";
               } else {
-                finalDocumentIds = recentDocs.map((d) => d.id);
-                documentScope = "ALL_DOCUMENTS";
+                // Ambiguous: User has multiple reports and asked about a singular/unspecified report
+                // INV-DOC-03: Never silently dump all 23 documents into RAG!
+                const userMsg = await chatSessionRepository.appendMessage({
+                  content: question.trim(),
+                  role: "user",
+                  sessionId,
+                  userId,
+                });
+                const replyText =
+                  REQUIRE_SELECTION_REPORT_I18N[detectedLanguage] ||
+                  REQUIRE_SELECTION_REPORT_I18N.english;
+                const aiMsg = await chatSessionRepository.appendMessage({
+                  citations: [],
+                  content: replyText,
+                  metadata: {
+                    mode: "DOCUMENT_RAG",
+                    emergency: false,
+                    requireSelection: true,
+                    documentId: [],
+                    reports: recentDocs,
+                  },
+                  role: "assistant",
+                  sessionId,
+                  userId,
+                });
+                return {
+                  ai: aiMsg,
+                  user: userMsg,
+                  reply: replyText,
+                  requireSelection: true,
+                  reports: recentDocs,
+                  mode: "DOCUMENT_RAG",
+                  emergency: false,
+                };
               }
             }
           }
@@ -994,18 +1645,26 @@ ${chunksContent}`;
             structuredExtractedData: document.structuredExtractedData,
           })
           .from(document)
-          .where(inArray(document.id, finalDocumentIds));
+          .where(
+            and(
+              inArray(document.id, finalDocumentIds),
+              eq(document.userId, userId),
+              eq(document.softDelete, false),
+            ),
+          );
         finalDocsMetadata.forEach((d) => {
           docNameMap[d.id] = d;
         });
       }
 
-      const userMessage = await chatSessionRepository.appendMessage({
-        content: question.trim(),
-        role: "user",
-        sessionId,
-        userId,
-      });
+      if (!userMessage) {
+        userMessage = await chatSessionRepository.appendMessage({
+          content: question.trim(),
+          role: "user",
+          sessionId,
+          userId,
+        });
+      }
 
       // HISTORY: Keep recent history even if documentId is passed to support follow-up questions
       const recent = await chatSessionRepository.listMessages({
@@ -1026,6 +1685,8 @@ ${chunksContent}`;
       let assistantText = NO_CONTEXT_REPLY;
       let isEmergency = false;
       let mode = intent === "GENERAL" ? "GENERAL_HEALTH" : "DOCUMENT_RAG";
+      let aiResponse = null;
+      let summaryChunks = [];
 
       // Fetch user's dependency-aware smart context
       let medicationsContextStr = "";
@@ -1065,7 +1726,7 @@ ${chunksContent}`;
           debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for GENERAL (Qwen)");
 
           const qwenStartTime = Date.now();
-          const aiResponse = await this.qwenHealthChat(
+          aiResponse = await this.qwenHealthChat(
             history,
             "GENERAL_HEALTH",
             [],
@@ -1094,7 +1755,7 @@ ${chunksContent}`;
         }
       } else {
         // DATA RETRIEVER (Vector Search via RagContextService)
-        let summaryChunks = [];
+        summaryChunks = [];
         let coverageStr = "";
         try {
           const queryEmbedding = await embeddingService.embedText(retrievalQuery);
@@ -1108,8 +1769,45 @@ ${chunksContent}`;
             detectedLanguage,
             intent,
           });
-          summaryChunks = ragResult.summaryChunks;
-          coverageStr = ragResult.coverageStr;
+          summaryChunks = ragResult.summaryChunks || [];
+          coverageStr = ragResult.coverageStr || "";
+
+          // Hybrid RAG: Inject verified structured lab observations from relational database (REQ-RAG-03, REQ-DOC-05)
+          if (medicalIntentMeta?.canonicalMetric) {
+            try {
+              const factScopeDocIds =
+                scopeMode === "AUTHORIZED_HISTORY"
+                  ? null
+                  : finalDocumentIds && finalDocumentIds.length > 0
+                    ? finalDocumentIds
+                    : null;
+              const factRes = await medicalFactLookupService.lookupFact(
+                userId,
+                medicalIntentMeta.canonicalMetric,
+                { documentIds: factScopeDocIds },
+              );
+              if (factRes && factRes.results && factRes.results.length > 0) {
+                const tableMd = medicalFactLookupService.formatAsMarkdownTable(factRes.results);
+                summaryChunks.unshift({
+                  content: `[VERIFIED STRUCTURED CLINICAL OBSERVATIONS FROM DATABASE]\n${tableMd}\n\nINSTRUCTION: The above table contains exact, verified laboratory data. Always cite these exact numbers, units, dates, and reference ranges when answering.`,
+                  relevanceScore: 1.0,
+                  pageNumber: factRes.results[0]?.pageNo || 1,
+                  documentId: factRes.results[0]?.documentId || null,
+                });
+                debugLogger.info(
+                  "sendMessage: Injected structured lab results table into context",
+                  {
+                    metric: medicalIntentMeta.canonicalMetric,
+                    rowCount: factRes.results.length,
+                  },
+                );
+              }
+            } catch (factErr) {
+              debugLogger.error("sendMessage: Failed to lookup structured lab facts", {
+                error: factErr.message,
+              });
+            }
+          }
         } catch (err) {
           debugLogger.error("sendMessage: Failed to fetch chunks via vector search", {
             error: err.message,
@@ -1120,12 +1818,34 @@ ${chunksContent}`;
           assistantText = NO_CONTEXT_REPLY_I18N[detectedLanguage] || NO_CONTEXT_REPLY_I18N.english;
         } else {
           try {
-            debugLogger.info(
-              "sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG (Qwen)",
-            );
+            debugLogger.info("sendMessage: [LLM TRACKING] [4] Calling Final Chat for DOCUMENT_RAG");
+
+            let structuredRecords = [];
+            try {
+              const filterDocIds =
+                scopeMode === "AUTHORIZED_HISTORY"
+                  ? null
+                  : finalDocumentIds && finalDocumentIds.length > 0
+                    ? finalDocumentIds
+                    : null;
+              structuredRecords = await patientLabResultRepository.findLabResultsByPatientId(
+                userId,
+                {
+                  limit: 50,
+                  documentIds: filterDocIds,
+                },
+              );
+            } catch (recErr) {
+              debugLogger.error(
+                "sendMessage: Failed to load patient lab records for fact verification",
+                {
+                  error: recErr.message,
+                },
+              );
+            }
 
             const qwenStartTime = Date.now();
-            const aiResponse = await this.qwenHealthChat(
+            aiResponse = await this.qwenHealthChat(
               history,
               "DOCUMENT_RAG",
               summaryChunks,
@@ -1134,9 +1854,10 @@ ${chunksContent}`;
               coverageStr,
               onChunk,
               abortSignal,
+              structuredRecords,
             );
             debugLogger.info(
-              `sendMessage: [QWEN] ${JSON.stringify({ model: env.chatModel, language: detectedLanguage, contextChunks: summaryChunks.length, generationDuration: Date.now() - qwenStartTime })}`,
+              `sendMessage: [GROUNDED_QA] ${JSON.stringify({ model: env.chatModel, language: detectedLanguage, contextChunks: summaryChunks.length, generationDuration: Date.now() - qwenStartTime })}`,
             );
             assistantText = aiResponse.answer;
             isEmergency = !!aiResponse.emergency;
@@ -1155,19 +1876,92 @@ ${chunksContent}`;
         }
       }
 
+      // Collect and enrich citations from RAG chunks
+      let finalCitations = [];
+      if (aiResponse && aiResponse.citations && aiResponse.citations.length > 0) {
+        finalCitations = aiResponse.citations.map((c) => {
+          const docMeta = docNameMap[c.documentId] || {};
+          return {
+            ...c,
+            fileName: docMeta.fileName || c.fileName || "Medical Report",
+            reportDate: docMeta.reportDate || null,
+            documentType: docMeta.documentType || null,
+          };
+        });
+      } else if (summaryChunks && summaryChunks.length > 0) {
+        const seen = new Set();
+        for (const chunk of summaryChunks) {
+          const docId = chunk.documentId;
+          const pageNo = chunk.pageNumber != null ? Number(chunk.pageNumber) : 1;
+          const key = `${docId}_p${pageNo}`;
+          if (docId && !seen.has(key)) {
+            seen.add(key);
+            const docMeta = docNameMap[docId] || {};
+            finalCitations.push({
+              documentId: docId,
+              fileName: docMeta.fileName || chunk.fileName || "Medical Report",
+              pageNumber: pageNo,
+              reportDate: docMeta.reportDate || null,
+              documentType: docMeta.documentType || null,
+              relevanceScore:
+                chunk.relevanceScore != null
+                  ? Number(Number(chunk.relevanceScore).toFixed(2))
+                  : 1.0,
+              excerpt: chunk.content ? chunk.content.substring(0, 160).trim() : null,
+            });
+          }
+        }
+      }
+
       const aiMessage = await chatSessionRepository.appendMessage({
-        citations: [],
+        citations: finalCitations,
         content: assistantText,
         metadata: {
           mode,
           emergency: isEmergency,
           documentId: finalDocumentIds || [],
           task: intent,
+          citations: finalCitations,
+          mentions: mentions || [],
+          scopeMode: resolvedScopeMode,
         },
         role: "assistant",
         sessionId,
         userId,
       });
+
+      // Persist updated conversation slots to session metadata
+      try {
+        const finalSlots = slotContextService.resolveTurnSlots(
+          turnSlots || sessionSlots,
+          classificationResult || { intent },
+          detectedLanguageMeta,
+          hasExplicitDocInput
+            ? finalDocumentIds
+            : (turnSlots && turnSlots.activeDocumentIds) || sessionSlots.activeDocumentIds || [],
+          {
+            scopeMode: resolvedScopeMode,
+            mentions,
+            selectedDocumentMetadata:
+              authorizedDocs && authorizedDocs[0]
+                ? {
+                    id: authorizedDocs[0].id,
+                    fileName: authorizedDocs[0].fileName,
+                    hospitalName: authorizedDocs[0].hospitalName,
+                    doctorName: authorizedDocs[0].doctorName,
+                    reportDate: authorizedDocs[0].reportDate || authorizedDocs[0].createdAt,
+                    documentType: authorizedDocs[0].documentType,
+                  }
+                : null,
+          },
+        );
+        await chatSessionRepository.updateSessionMetadata(sessionId, userId, {
+          slots: finalSlots,
+          conversationSlots: finalSlots,
+        });
+      } catch (err) {
+        debugLogger.error("sendMessage: Failed to persist session slots", { error: err.message });
+      }
 
       debugLogger.info("sendMessage: Total request execution time", {
         durationSec: ((Date.now() - _reqStartTime) / 1000).toFixed(2),
@@ -1175,11 +1969,14 @@ ${chunksContent}`;
 
       return {
         ai: aiMessage,
-        citations: [],
+        citations: finalCitations,
         reply: assistantText,
         user: userMessage,
         mode,
         emergency: isEmergency,
+        scopeMode: resolvedScopeMode,
+        documentIds: finalDocumentIds,
+        mentions: mentions || [],
       };
     } finally {
       if (reqSessionId) processingSessions.delete(reqSessionId);
@@ -1194,55 +1991,20 @@ ${chunksContent}`;
 
   /**
    * Get or create the single canonical chat session for a patient.
+   * Strictly isolated from pre-onboarding chat sessions.
    */
   async getOrCreateCanonicalSession({ userId, title = "Health Assistant", metadata = {} }) {
     if (!userId) {
       throw new InvalidRequestException("User ID is required to get or create a session");
     }
 
-    // 1. Check user_onboarding table for an anchored chatSessionId
-    try {
-      const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-      const existingSessionId = onboardingRecord?.data?.chatSessionId;
-      if (existingSessionId) {
-        const found = await chatSessionRepository.findSessionById(existingSessionId, userId);
-        if (found) {
-          if (!found.metadata?.isCanonical) {
-            await chatSessionRepository.markAsCanonical(found.id, userId);
-            found.metadata = { ...(found.metadata || {}), isCanonical: true, type: "CANONICAL" };
-          }
-          return found;
-        }
-      }
-    } catch (err) {
-      debugLogger.error("getOrCreateCanonicalSession: Failed checking onboarding record", {
-        error: err.message,
-      });
-    }
-
-    // 2. Check repository for an existing canonical or active session
+    // 1. Check repository for an existing canonical session
     const canonical = await chatSessionRepository.findCanonicalSession(userId);
     if (canonical) {
-      // Anchor it into user_onboarding if record exists
-      try {
-        const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
-        if (onboardingRecord && onboardingRecord.data?.chatSessionId !== canonical.id) {
-          await userOnboardingRepository.updateByUserId(userId, {
-            data: { ...(onboardingRecord.data || {}), chatSessionId: canonical.id },
-          });
-        }
-      } catch (err) {
-        debugLogger.error(
-          "getOrCreateCanonicalSession: Failed anchoring canonical ID to onboarding",
-          {
-            error: err.message,
-          },
-        );
-      }
       return canonical;
     }
 
-    // 3. Create fresh canonical session for the patient
+    // 2. Create fresh canonical session for the patient
     const newSession = await chatSessionRepository.createSession({
       userId,
       documentId: null,
@@ -1255,7 +2017,48 @@ ${chunksContent}`;
       },
     });
 
-    // Anchor to user_onboarding
+    return newSession;
+  }
+
+  /**
+   * Create or retrieve dedicated pre-onboarding session (strictly isolated from canonical QA session).
+   */
+  async createOnboardingSession({ userId, title = "Health Assistant", metadata = {} }) {
+    if (!userId) {
+      throw new InvalidRequestException(
+        "User ID is required to get or create an onboarding session",
+      );
+    }
+
+    // 1. Check if user already has an active ONBOARDING session in repository
+    try {
+      const existing = await chatSessionRepository.findOnboardingSession(userId);
+      if (existing && !existing.metadata?.isCanonical) {
+        return existing;
+      }
+    } catch (err) {
+      debugLogger.error(
+        "createOnboardingSession: Failed checking repository for onboarding session",
+        {
+          error: err.message,
+        },
+      );
+    }
+
+    // 2. Create dedicated onboarding session with isCanonical: false
+    const newSession = await chatSessionRepository.createSession({
+      userId,
+      documentId: null,
+      title,
+      lastMessageAt: new Date(),
+      metadata: {
+        ...metadata,
+        type: "ONBOARDING",
+        isCanonical: false,
+      },
+    });
+
+    // 3. Anchor dedicated onboarding session into user_onboarding
     try {
       const onboardingRecord = await userOnboardingRepository.findByUserId(userId);
       if (onboardingRecord) {
@@ -1265,7 +2068,7 @@ ${chunksContent}`;
       }
     } catch (err) {
       debugLogger.error(
-        "getOrCreateCanonicalSession: Failed saving chatSessionId to onboarding record",
+        "createOnboardingSession: Failed saving chatSessionId to onboarding record",
         {
           error: err.message,
         },
@@ -1273,15 +2076,6 @@ ${chunksContent}`;
     }
 
     return newSession;
-  }
-
-  // Create or retrieve onboarding session (delegates to canonical session)
-  async createOnboardingSession({ userId, title = "Health Assistant", metadata = {} }) {
-    return this.getOrCreateCanonicalSession({
-      userId,
-      title,
-      metadata: { ...metadata, type: "ONBOARDING" },
-    });
   }
 
   //appted chat messages
@@ -1306,6 +2100,7 @@ const chatService = new ChatService();
 
 module.exports = {
   chatService,
+  ChatService,
   triageService,
   ragContextService,
   EMERGENCY_WARNING_I18N,

@@ -235,6 +235,43 @@ function normalizeFlowModeLocally(rawText) {
   return null;
 }
 
+function normalizeLanguageLocally(rawText) {
+  if (!rawText || typeof rawText !== "string") return null;
+  const lower = rawText.trim().toLowerCase();
+
+  if (lower === "english" || lower === "en" || lower.includes("english")) return "english";
+  if (
+    lower === "gujarati" ||
+    lower === "gu" ||
+    lower.includes("gujarati") ||
+    lower.includes("ગુજરાતી")
+  ) {
+    return "gujarati";
+  }
+  if (
+    lower === "hindi" ||
+    lower === "hi" ||
+    lower.includes("hindi") ||
+    lower.includes("हिंदी") ||
+    lower.includes("हिन्दी")
+  ) {
+    return "hindi";
+  }
+  if (
+    lower === "marathi" ||
+    lower === "mr" ||
+    lower.includes("marathi") ||
+    lower.includes("मराठी")
+  ) {
+    return "marathi";
+  }
+  if (lower === "tamil" || lower === "ta" || lower.includes("tamil") || lower.includes("தமிழ்")) {
+    return "tamil";
+  }
+
+  return null;
+}
+
 function splitName(fullName) {
   if (!fullName || typeof fullName !== "string") {
     return { firstName: "", lastName: "" };
@@ -330,4 +367,5 @@ module.exports = {
   isSamePhone,
   normalizeFieldVal,
   getLocalizedText,
+  normalizeLanguageLocally,
 };

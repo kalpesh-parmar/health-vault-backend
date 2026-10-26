@@ -32,12 +32,20 @@ const {
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  batchCreateMedicationSchema,
 } = require("./medicationValidation");
 const {
   createReminderSchema,
   updateOccurrenceSchema,
   listOccurrencesQuerySchema,
 } = require("./reminderValidation");
+const {
+  isValidTimezone,
+  weeklyDashboardQuerySchema,
+  monthlyDashboardQuerySchema,
+  dailyDetailsQuerySchema,
+  refillsDashboardQuerySchema,
+} = require("./adherenceDashboardValidation");
 const { createSessionSchema } = require("./sessionValidation");
 const {
   patientIdParamSchema,
@@ -104,6 +112,7 @@ module.exports = {
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  batchCreateMedicationSchema,
   patientIdParamSchema,
   profileUploadSchema,
   documentUploadSchema,
@@ -114,4 +123,9 @@ module.exports = {
   documentRetryUploadMulter,
   validateDocumentRetry,
   retryDocumentSchema,
+  isValidTimezone,
+  weeklyDashboardQuerySchema,
+  monthlyDashboardQuerySchema,
+  dailyDetailsQuerySchema,
+  refillsDashboardQuerySchema,
 };

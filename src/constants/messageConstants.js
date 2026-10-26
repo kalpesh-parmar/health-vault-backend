@@ -50,6 +50,7 @@ const messageConstants = Object.freeze({
   MEDICATION_UPDATED: "Medication updated successfully",
   MEDICATION_DELETED: "Medication deleted successfully",
   MEDICATIONS_BATCH_DELETED: "Medications batch deleted successfully",
+  MEDICATIONS_BATCH_CREATED: "Medications batch created successfully",
   MEDICATION_FETCHED: "Medication fetched successfully",
   MEDICATION_LIST_FETCHED: "Mediaction list fetched successfully",
   MEDICATION_FILTERED_LIST_FETCHED: "Medicaton filtered list featchd successfully",
@@ -74,6 +75,9 @@ const messageConstants = Object.freeze({
   MEDICATION_OCCURRENCE_UPDATED: "Medication occurrence updated successfully",
   MEDICTION_SUMMARY: "Medication summary fetched successfully",
   MEDICATION_REFILLED: "Medication refilled successfully",
+  WEEKLY_ADHERENCE_FETCHED: "Weekly medication adherence retrieved successfully",
+  MONTHLY_ADHERENCE_FETCHED: "Monthly adherence summary retrieved successfully",
+  DAILY_DETAILS_FETCHED: "Daily medication details retrieved successfully",
 
   //OCR Message
   DOCUMENT_PROCESSING: "Document Processing",

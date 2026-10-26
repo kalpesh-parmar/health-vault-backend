@@ -4,7 +4,6 @@ const { foodTypeValues } = require("../enums/foodType");
 const { frequencyTypeValues, frequencyType } = require("../enums/frequencyType");
 const { medicationTypeValues } = require("../enums/medicationType");
 const { bestTakenType } = require("../enums/bestTakenType");
-// const { mediactionUnitValues } = require("../enums/medicationUnit");
 
 const time24HourSchema = z
   .string({
@@ -56,26 +55,58 @@ const validateStartDate = (startDate, ctx) => {
   }
 };
 
-// const medicationScheduleSchema = z
-//   .preprocess(
-//     (val) => {
-//       if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-//         const newVal = {};
-//         for (const key of Object.keys(val)) {
-//           const normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
-//           newVal[normalizedKey] = val[key];
-//         }
-//         return newVal;
-//       }
-//       return val;
-//     },
-//     z.object({
-//       [bestTakenType.MORNING]: time24HourSchema.optional(),
-//       [bestTakenType.NOON]: time24HourSchema.optional(),
-//       [bestTakenType.NIGHT]: time24HourSchema.optional(),
-//       [bestTakenType.CUSTOM]: z.array(time24HourSchema).optional(),
-//     }),
-//   )
+const medicationTypeField = z.preprocess(
+  (val) => (typeof val === "string" ? val.trim().toUpperCase() : val),
+  z.enum(medicationTypeValues, {
+    required_error: errorConstants.MEDICATION_TYPE_REQUIRED,
+    invalid_type_error: errorConstants.INVALID_TYPE,
+  }),
+);
+
+const frequencyField = z.preprocess(
+  (val) => {
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      const upper = trimmed.toUpperCase().replace(/\s+/g, "_");
+      if (upper === "ONCE_DAILY" || upper === "ONCE" || upper === "1X_DAILY") {
+        return frequencyType.ONCE_DAILY;
+      }
+      if (upper === "TWICE_DAILY" || upper === "TWICE" || upper === "2X_DAILY") {
+        return frequencyType.TWICE_DAILY;
+      }
+      if (
+        upper === "THREE_TIMES_DAILY" ||
+        upper === "THRICE_DAILY" ||
+        upper === "THRICE" ||
+        upper === "3X_DAILY"
+      ) {
+        return frequencyType.THREE_TIMES_DAILY;
+      }
+      if (upper === "AS_NEEDED") {
+        return frequencyType.AS_NEEDED;
+      }
+      return trimmed;
+    }
+    return val;
+  },
+  z.enum(frequencyTypeValues, {
+    required_error: errorConstants.FREQUENCY_REQUIRED,
+    invalid_type_error: errorConstants.INVALID_TYPE,
+  }),
+);
+
+const foodFrequencyField = z.preprocess((val) => {
+  if (typeof val === "string") {
+    const upper = val.trim().toUpperCase().replace(/\s+/g, "_");
+    if (foodTypeValues.includes(upper)) return upper;
+    if (upper === "BEFORE_MEAL" || upper === "BEFORE") return "BEFORE_FOOD";
+    if (upper === "AFTER_MEAL" || upper === "AFTER") return "AFTER_FOOD";
+    if (upper === "WITH_MEAL" || upper === "WITH") return "WITH_FOOD";
+    return upper;
+  }
+  return val;
+}, z.enum(foodTypeValues).optional());
+
 const medicationScheduleSchema = z
   .preprocess(
     (val) => {
@@ -83,9 +114,7 @@ const medicationScheduleSchema = z
       if (typeof val === "string") {
         try {
           parsedVal = JSON.parse(val);
-        } catch (e) {
-          console.log("error:-", e);
-
+        } catch {
           // Ignore parsing error, keep as string
         }
       }
@@ -97,18 +126,48 @@ const medicationScheduleSchema = z
       if (typeof parsedVal === "object" && parsedVal !== null) {
         const newVal = {};
         for (const key of Object.keys(parsedVal)) {
-          const normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
+          let normalizedKey = key.charAt(0).toUpperCase() + key.slice(1).toLowerCase();
+          const upperKey = key.toUpperCase();
+          if (upperKey.startsWith("CUSTOM")) {
+            normalizedKey = bestTakenType.CUSTOM;
+          } else if (upperKey === "MORNING") {
+            normalizedKey = bestTakenType.MORNING;
+          } else if (upperKey === "NOON") {
+            normalizedKey = bestTakenType.NOON;
+          } else if (upperKey === "NIGHT") {
+            normalizedKey = bestTakenType.NIGHT;
+          }
+
           let keyValue = parsedVal[key];
 
-          if (normalizedKey === "Custom" && typeof keyValue === "string") {
-            try {
-              const parsedKeyVal = JSON.parse(keyValue);
-              keyValue = Array.isArray(parsedKeyVal) ? parsedKeyVal : [keyValue];
-            } catch (e) {
-              console.log("error:-", e);
-              keyValue = keyValue.includes(",")
-                ? keyValue.split(",").map((s) => s.trim())
-                : [keyValue];
+          if (normalizedKey === bestTakenType.CUSTOM) {
+            if (typeof keyValue === "string") {
+              const trimmed = keyValue.trim();
+              if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+                try {
+                  const parsedKeyVal = JSON.parse(trimmed);
+                  keyValue = Array.isArray(parsedKeyVal) ? parsedKeyVal : [trimmed];
+                } catch {
+                  keyValue = trimmed.includes(",")
+                    ? trimmed.split(",").map((s) => s.trim())
+                    : [trimmed];
+                }
+              } else {
+                keyValue = trimmed.includes(",")
+                  ? trimmed.split(",").map((s) => s.trim())
+                  : [trimmed];
+              }
+            }
+            if (Array.isArray(keyValue)) {
+              keyValue = keyValue.flatMap((item) => {
+                if (typeof item === "string" && item.includes(",")) {
+                  return item
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                }
+                return typeof item === "string" ? item.trim() : item;
+              });
             }
           }
 
@@ -132,6 +191,7 @@ const medicationScheduleSchema = z
       message: errorConstants.ONE_REQUIRED,
     },
   );
+
 const validateMedicationSelections = (data, ctx) => {
   if (!data.frequency || !data.medicationSchedule) {
     return;
@@ -163,24 +223,17 @@ const validateMedicationSelections = (data, ctx) => {
     });
   }
 };
-//CREATE SCHEMA
+
 //CREATE SCHEMA
 const createMedicationSchema = z
   .object({
     medicationName: medicationNameField,
-    medicationType: z.enum(medicationTypeValues, {
-      required_error: errorConstants.MEDICATION_TYPE_REQUIRED,
-      invalid_type_error: errorConstants.INVALID_TYPE,
-    }),
-
-    prescribedBy: prescribedByField.optional(),
+    medicationType: medicationTypeField,
+    prescribedBy: prescribedByField.optional().nullable(),
     dosePerIntake: doseField,
-    frequency: z.enum(frequencyTypeValues, {
-      required_error: errorConstants.FREQUENCY_REQUIRED,
-      invalid_type_error: errorConstants.INVALID_TYPE,
-    }),
+    frequency: frequencyField,
     medicationSchedule: medicationScheduleSchema,
-    foodFrequency: z.enum(foodTypeValues).optional(),
+    foodFrequency: foodFrequencyField,
     startDate: dateField,
     endDate: dateField.optional().nullable(),
     ongoing: z.boolean().default(false),
@@ -198,9 +251,16 @@ const createMedicationSchema = z
       .optional()
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
-    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
-    replaceMedicationId: z.string().optional(),
+    resolution: z
+      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"])
+      .optional()
+      .nullable(),
+    replaceMedicationId: z.string().optional().nullable(),
+    targetMedicationId: z.string().optional().nullable(),
+    matchedMedicationId: z.string().optional().nullable(),
     refillAlert: z.boolean().optional(),
+    unit: z.string().optional().nullable(),
+    clientMedId: z.string().optional().nullable(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -229,12 +289,14 @@ const createMedicationSchema = z
 
     if (
       (data.resolution === "REPLACE" || data.resolution === "EDIT") &&
-      !data.replaceMedicationId
+      !data.replaceMedicationId &&
+      !data.targetMedicationId &&
+      !data.matchedMedicationId
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["replaceMedicationId"],
-        message: `replaceMedicationId is required when resolution is ${data.resolution}`,
+        message: errorConstants.REPLACE_MEDICATION_ID_REQUIRED,
       });
     }
 
@@ -261,7 +323,7 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
-    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW"]).optional(),
+    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"]).optional(),
     replaceMedicationId: z.string().optional(),
   })
   .strict()
@@ -461,8 +523,113 @@ const batchDeleteMedicationSchema = z.object({
         invalid_type_error: "ids must be an array of UUIDs",
       },
     )
-    .min(1, "At least one medication ID is required"),
+    .min(1, errorConstants.AT_LEAST_ONE_MEDICATION_ID_REQUIRED),
 });
+
+const batchMedicationItemSchema = z
+  .object({
+    medicationName: medicationNameField,
+    medicationType: medicationTypeField,
+    prescribedBy: prescribedByField.optional().nullable(),
+    dosePerIntake: doseField.default(1),
+    frequency: frequencyField,
+    medicationSchedule: medicationScheduleSchema.optional(),
+    foodFrequency: foodFrequencyField,
+    startDate: dateField,
+    endDate: dateField.optional().nullable(),
+    ongoing: z.boolean().default(false),
+    totalQuantity: z
+      .number({
+        required_error: errorConstants.TOTAL_PILLS_REQUIRED,
+      })
+      .int()
+      .min(0, errorConstants.NOT_NEGATIVE),
+    reminderBeforeMinutes: z
+      .number({
+        invalid_type_error: errorConstants.INVALID_NUMBER,
+      })
+      .int()
+      .optional()
+      .nullable(),
+    notes: z.string().trim().max(1000).optional().nullable(),
+    resolution: z
+      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"])
+      .optional()
+      .nullable(),
+    replaceMedicationId: z.string().optional().nullable(),
+    targetMedicationId: z.string().optional().nullable(),
+    matchedMedicationId: z.string().optional().nullable(),
+    selected: z.boolean().optional(),
+    refillAlert: z.boolean().optional(),
+    unit: z.string().optional().nullable(),
+    clientMedId: z.string().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (
+      data.selected === false ||
+      data.resolution === "KEEP_EXISTING" ||
+      data.resolution === "REMOVE_NEW"
+    ) {
+      return;
+    }
+
+    validateStartDate(data.startDate, ctx);
+
+    if (data.totalQuantity !== undefined && data.dosePerIntake > data.totalQuantity) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dosePerIntake"],
+        message: errorConstants.DOSE_GREATER_THAN_PILLS,
+      });
+    }
+
+    if (!data.ongoing && data.endDate) {
+      const start = new Date(data.startDate);
+      const end = new Date(data.endDate);
+
+      if (end < start) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["endDate"],
+          message: errorConstants.END_DATE_INVALID,
+        });
+      }
+    }
+
+    if (
+      (data.resolution === "REPLACE" || data.resolution === "EDIT") &&
+      !data.replaceMedicationId &&
+      !data.targetMedicationId &&
+      !data.matchedMedicationId
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["replaceMedicationId"],
+        message: errorConstants.REPLACE_MEDICATION_ID_REQUIRED,
+      });
+    }
+
+    validateMedicationSelections(data, ctx);
+  });
+
+const batchCreateMedicationSchema = z.union([
+  z
+    .array(batchMedicationItemSchema, {
+      required_error: errorConstants.MEDICATIONS_ARRAY_REQUIRED,
+      invalid_type_error: errorConstants.MEDICATIONS_ARRAY_REQUIRED,
+    })
+    .min(1, errorConstants.MEDICATIONS_ARRAY_REQUIRED),
+  z
+    .object({
+      medications: z
+        .array(batchMedicationItemSchema, {
+          required_error: errorConstants.MEDICATIONS_ARRAY_REQUIRED,
+          invalid_type_error: errorConstants.MEDICATIONS_ARRAY_REQUIRED,
+        })
+        .min(1, errorConstants.MEDICATIONS_ARRAY_REQUIRED),
+    })
+    .transform((val) => val.medications),
+]);
 
 module.exports = {
   createMedicationSchema,
@@ -472,4 +639,5 @@ module.exports = {
   medicationOnboardingSchema,
   checkDuplicateMedicationSchema,
   batchDeleteMedicationSchema,
+  batchCreateMedicationSchema,
 };

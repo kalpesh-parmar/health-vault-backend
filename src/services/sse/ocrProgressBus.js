@@ -115,6 +115,10 @@ class OcrProgressBus {
     channel.subscribers.set(subscriberId, { sink, onTerminal });
     channel.expiresAt = Math.max(channel.expiresAt, Date.now() + STREAM_TTL_MS);
 
+    console.log(
+      `[ocrProgressBus] [SUBSCRIBE] Client subscribed to channelKey: '${channelKey}' (active subscribers: ${channel.subscribers.size})`,
+    );
+
     // Replay: only what the subscriber has not already seen.
     const since = Number.isFinite(Number(sinceEventId)) ? Number(sinceEventId) : -1;
     for (const event of channel.buffer) {
@@ -230,6 +234,16 @@ class OcrProgressBus {
       channel.buffer.splice(0, channel.buffer.length - max);
     }
     channel.expiresAt = Date.now() + STREAM_TTL_MS;
+
+    const subscriberCount = channel.subscribers.size;
+    console.log(
+      `[ocrProgressBus] [EMIT] channelKey: '${channelKey}' | stage: ${enriched.stage} (${enriched.stageStatus || enriched.status || "N/A"}) | pct: ${enriched.percentage}% | subscribers: ${subscriberCount}`,
+    );
+    if (subscriberCount === 0) {
+      console.warn(
+        `[ocrProgressBus] [NO_ACTIVE_SUBSCRIBERS] Warning: 0 subscribers active on '${channelKey}'. Event buffered in memory (buffer size: ${channel.buffer.length}).`,
+      );
+    }
 
     for (const { sink } of channel.subscribers.values()) {
       try {

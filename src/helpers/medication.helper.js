@@ -1,4 +1,5 @@
 const { ConflictException } = require("../exceptions/appError");
+const { errorConstants } = require("../constants/errorConstants");
 
 const SUGGESTED_ACTIONS = Object.freeze([
   { action: "KEEP EXISTING", label: "keep previous medication" },
@@ -11,10 +12,10 @@ function normalizeMedicationName(name) {
   if (!name || typeof name !== "string") return "";
   let clean = name.toLowerCase().trim();
   clean = clean.replace(
-    /^(?:tab\.|tablet|tab|cap\.|capsule|caps|cap|syp\.|syrup|syp|inj\.|injection|inj|drops?|drop|spray|inhaler|inh\.|inh)\s+/i,
+    /\b(?:tab\.|tablet|tablets|tab|cap\.|capsule|capsules|caps|cap|syp\.|syrup|syp|inj\.|injection|inj|drops?|drop|spray|inhaler|inh\.|inh)\b/gi,
     "",
   );
-  clean = clean.replace(/\b\d+(\.\d+)?\s*(mg|g|mcg|ml|iu|puffs?)?\b/gi, "");
+  clean = clean.replace(/\b\d+(\.\d+)?\s*(mg|g|mcg|ml|iu|puffs?|%)?\b/gi, "");
   clean = clean
     .replace(/[^a-z0-9\s]/gi, "")
     .replace(/\s+/g, " ")
@@ -86,8 +87,10 @@ function throwDuplicateConflict(dupCheck) {
     (dupCheck.matchedMedications && dupCheck.matchedMedications[0]) ||
     null;
 
-  throw new ConflictException("A similar medication already exists.", {
+  throw new ConflictException(errorConstants.MEDICATION_ALREADY_EXISTS, {
     duplicateInfo: {
+      hasDuplicate: true,
+      conflictType: dupCheck.conflictType || "SIMILAR_NAME",
       existingMedicationId: matchedMedication ? matchedMedication.id : null,
       existingMedicationName: matchedMedication ? matchedMedication.medicationName : null,
       matchType: dupCheck.conflictType === "EXACT_DUPLICATE" ? "exact" : "fuzzy",
@@ -305,4 +308,6 @@ module.exports = {
   mapOnboardingMedicationToDb,
   normalizeMedicationName,
   throwDuplicateConflict,
+  mapFrequencyToDb,
+  getFrequencyCount,
 };

@@ -26,6 +26,7 @@ class ChatClassifierService {
     question = "",
     detectedLanguage = "english",
     documentId = [],
+    sessionContext = null,
   }) {
     const rawQ = String(rawQuestion || question || "").trim();
     const engQ = String(englishQuestion || question || rawQuestion || "").trim();
@@ -985,6 +986,207 @@ class ChatClassifierService {
       cleanEng,
       cleanRaw,
       detectedLanguage,
+      medicalIntent: this.classifyMedicalIntent({
+        rawQuestion: rawQ,
+        englishQuestion: engQ,
+        question: rawQ,
+        sessionContext,
+      }),
+    };
+  }
+
+  classifyMedicalIntent({
+    rawQuestion = "",
+    englishQuestion = "",
+    question = "",
+    sessionContext = null,
+  }) {
+    const raw = String(rawQuestion || question || "").trim();
+    const eng = String(englishQuestion || question || rawQuestion || "").trim();
+    const lowerRaw = raw.toLowerCase();
+    const lowerEng = eng.toLowerCase();
+    const cleanEng = lowerEng.replace(/[?.,!]/g, "").trim();
+    const cleanRaw = lowerRaw.replace(/[?.,!]/g, "").trim();
+
+    // 1. Check OUT_OF_SCOPE / Security
+    const outOfScopePatterns = [
+      /\b(?:write|create|generate)\s+(?:(?:a|an|the)\s+)?(?:python|javascript|code|script|program)\b/i,
+      /\b(?:debug\s+code|run\s+code|execute\s+script)\b/i,
+      /\b(?:capital\s+of|weather\s+in|who\s+won|stock\s+price|president\s+of|prime\s+minister)\b/i,
+      /\b(?:ignore\s+(?:all\s+)?previous\s+instructions|system\s+prompt|you\s+are\s+now(?:\s+dan)?|jailbreak)\b/i,
+      /\b(?:drop\s+(?:all\s+)?(?:database|table|tables)|delete\s+from\s+\w+\s+where|insert\s+into\s+\w+|select\s+(?:\*|[\w,\s]+)\s+from\s+\w+\s*(?:where|;|$))\b/i,
+    ];
+    for (const pat of outOfScopePatterns) {
+      if (pat.test(lowerEng) || pat.test(lowerRaw)) {
+        return {
+          intent: "OUT_OF_SCOPE",
+          confidence: 0.99,
+          canonicalMetric: null,
+          isAmbiguous: false,
+          suggestedAction: "deflect_out_of_scope",
+        };
+      }
+    }
+
+    // 2. Canonical Metric Extraction
+    const canonicalMap = [
+      {
+        regex: /\b(?:fasting\s+(?:blood\s+)?sugar|fbs|fasting\s+glucose)\b/i,
+        canonical: "glucose_fasting",
+      },
+      {
+        regex:
+          /\b(?:ppbs|post\s*(?:prandial|meal)\s+(?:blood\s+)?sugar|post\s*(?:prandial|meal)\s+glucose)\b/i,
+        canonical: "glucose_postprandial",
+      },
+      {
+        regex: /\b(?:rbs|random\s+(?:blood\s+)?sugar|random\s+glucose|sugar|glucose)\b/i,
+        canonical: "glucose_random",
+      },
+      { regex: /\b(?:hba1c|glycated\s+hemoglobin|a1c)\b/i, canonical: "hba1c" },
+      { regex: /\b(?:hemoglobin|hb)\b/i, canonical: "hemoglobin" },
+      { regex: /\b(?:creatinine|serum\s+creatinine)\b/i, canonical: "creatinine_serum" },
+      { regex: /\b(?:tsh|thyroid\s+stimulating\s+hormone|thyroid)\b/i, canonical: "tsh" },
+      { regex: /\b(?:lipid|cholesterol|total\s+cholesterol)\b/i, canonical: "cholesterol_total" },
+      { regex: /\b(?:ldl|ldl\s+cholesterol)\b/i, canonical: "cholesterol_ldl" },
+      { regex: /\b(?:hdl|hdl\s+cholesterol)\b/i, canonical: "cholesterol_hdl" },
+      { regex: /\b(?:triglycerides|tg)\b/i, canonical: "triglycerides" },
+      { regex: /\b(?:wbc|white\s+blood\s+cells|leukocytes)\b/i, canonical: "wbc_count" },
+      { regex: /\b(?:platelets|platelet\s+count)\b/i, canonical: "platelet_count" },
+    ];
+
+    let canonicalMetric = null;
+    for (const item of canonicalMap) {
+      if (item.regex.test(lowerEng) || item.regex.test(lowerRaw)) {
+        canonicalMetric = item.canonical;
+        break;
+      }
+    }
+
+    // Extract year & temporal granularity
+    const yearMatch = (lowerEng + " " + lowerRaw).match(/\b(20[12]\d)\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
+    const hasMonth =
+      lowerEng.includes("month") || lowerRaw.includes("month") || /મહિના|માસ/i.test(lowerRaw);
+    const hasYear =
+      year || lowerEng.includes("year") || lowerRaw.includes("year") || /વર્ષ|સાલ/i.test(lowerRaw);
+    const granularity = hasMonth ? "month" : hasYear ? "year" : "date";
+
+    // 3. MEDICAL_TREND_CHART
+    const chartPatterns = [
+      /\b(?:trend|trends|graph|chart|plot|over\s+time|history|progression)\b/i,
+      /\b(?:compare\s+(?:years|months|dates)|timeline)\b/i,
+      /ચાર્ટ|ગ્રાફ|ટ્રેન્ડ|આલેખ|ચાર્ટમાં/i,
+    ];
+    if (chartPatterns.some((pat) => pat.test(lowerEng) || pat.test(lowerRaw))) {
+      const isExplanationRequest =
+        /\b(?:explain|explanation|meaning|samjhavo|samjhao|batao|understand)\b/i.test(lowerEng) ||
+        /સમજાવો|સમજાવોને|અર્થ|વિશેષતા/i.test(lowerRaw);
+
+      return {
+        intent: "MEDICAL_TREND_CHART",
+        confidence: 0.95,
+        canonicalMetric,
+        year,
+        granularity,
+        isExplanationRequest,
+        isAmbiguous: false,
+        suggestedAction: "generate_chart",
+      };
+    }
+
+    // 4. DOCUMENT_COMPARISON
+    const comparePatterns = [/\b(?:compare\s+with|vs|versus|difference\s+between)\b/i];
+    if (comparePatterns.some((pat) => pat.test(lowerEng) || pat.test(lowerRaw))) {
+      return {
+        intent: "DOCUMENT_COMPARISON",
+        confidence: 0.92,
+        canonicalMetric,
+        year,
+        isAmbiguous: false,
+        suggestedAction: "compare_documents",
+      };
+    }
+
+    // 5. TABLE_REQUEST
+    const tablePatterns = [/\b(?:table|tabular|list\s+all\s+(?:results|tests|values)|matrix)\b/i];
+    if (tablePatterns.some((pat) => pat.test(lowerEng) || pat.test(lowerRaw))) {
+      return {
+        intent: "TABLE_REQUEST",
+        confidence: 0.95,
+        canonicalMetric,
+        isAmbiguous: false,
+        suggestedAction: "render_table",
+      };
+    }
+
+    // 6. DOCUMENT_SUMMARY
+    const summaryPatterns = [
+      /\b(?:summary|summarize|overview|saransh|samjhavo|samjhao|batao)\b/i,
+      /\b(?:report\s+ma\s+su\s+chhe|report\s+samjhao|explain\s+report)\b/i,
+    ];
+    const isSummary = summaryPatterns.some((pat) => pat.test(lowerEng) || pat.test(lowerRaw));
+
+    // 7. FACT_LOOKUP
+    if (canonicalMetric && !isSummary) {
+      return {
+        intent: "FACT_LOOKUP",
+        confidence: 0.93,
+        canonicalMetric,
+        year,
+        isAmbiguous: false,
+        suggestedAction: "direct_fact_lookup",
+      };
+    }
+
+    if (isSummary) {
+      return {
+        intent: "DOCUMENT_SUMMARY",
+        confidence: 0.94,
+        canonicalMetric,
+        year,
+        isAmbiguous: false,
+        suggestedAction: "fetch_document_summary",
+      };
+    }
+
+    // 8. FOLLOW_UP
+    if (sessionContext && (sessionContext.activeMetric || sessionContext.active_metric)) {
+      if (
+        /\b(?:what\s+about|aur|ani|ane|and|compare|pachhi)\b/i.test(lowerEng) ||
+        /\b(?:what\s+about|aur|ani|ane|and|compare|pachhi)\b/i.test(lowerRaw)
+      ) {
+        return {
+          intent: "FOLLOW_UP",
+          confidence: 0.88,
+          canonicalMetric:
+            canonicalMetric || sessionContext.activeMetric || sessionContext.active_metric,
+          year,
+          isAmbiguous: false,
+          suggestedAction: "resolve_followup",
+        };
+      }
+    }
+
+    // 9. Ambiguity check
+    if (cleanEng.length < 3 && cleanRaw.length < 3) {
+      return {
+        intent: "CLARIFICATION_REQUIRED",
+        confidence: 0.9,
+        canonicalMetric: null,
+        isAmbiguous: true,
+        suggestedAction: "request_clarification",
+      };
+    }
+
+    // 10. Default: MEDICAL_EXPLANATION
+    return {
+      intent: "MEDICAL_EXPLANATION",
+      confidence: 0.85,
+      canonicalMetric,
+      year,
+      isAmbiguous: false,
+      suggestedAction: "rag_explanation",
     };
   }
 }

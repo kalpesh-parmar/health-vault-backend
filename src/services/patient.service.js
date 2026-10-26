@@ -360,10 +360,25 @@ class PatientService {
       throw new UnauthorizedException(errorConstants.UNAUTHORIZED);
     }
     const params = await validateSchema(idParamSchema, { id: userId });
-    const existingPatient = await patientRepository.findById(params.id);
+    let existingPatient = await patientRepository.findById(params.id);
 
     if (!existingPatient) {
       throw new NotFoundException(errorConstants.PATIENT_NOT_FOUND);
+    }
+
+    const onboardingState = await userOnboardingRepository.findByUserId(existingPatient.id);
+    const isOnboardingCompleted = !!(
+      existingPatient.onboardingCompleted ||
+      onboardingState?.isCompleted ||
+      onboardingState?.data?.isOnboardingCompleted ||
+      onboardingState?.data?.hasSkipped
+    );
+
+    if (isOnboardingCompleted !== existingPatient.onboardingCompleted) {
+      await patientRepository.updateById(existingPatient.id, {
+        onboardingCompleted: isOnboardingCompleted,
+      });
+      existingPatient.onboardingCompleted = isOnboardingCompleted;
     }
 
     return sanitizePatient(existingPatient);

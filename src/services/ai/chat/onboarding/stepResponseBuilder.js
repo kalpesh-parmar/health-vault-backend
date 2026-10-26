@@ -706,7 +706,9 @@ async function getLocalizedResponse(step, state) {
     }
 
     case "ASK_REPORT": {
-      const targetDocId = Array.isArray(state.documentId) ? state.documentId[0] : state.documentId;
+      const targetDocId = Array.isArray(state.documentId)
+        ? state.documentId[0]
+        : state.documentId || state.loadedDocumentId || null;
       const effectiveUserId = state.userId || state.existingUserData?.id;
       const payload = await buildStructuredReportPayload({
         docRecord: state.documentRecord || state.document || null,

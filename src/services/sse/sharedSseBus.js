@@ -17,8 +17,8 @@ class SharedSseBus {
     this.isListening = false;
     this.onRemoteEvent = null;
     this.isDestroyed = false;
-    this.reconnectTimer = null;
-    this.provider = env.redisEnabled && env.redisUrl ? "redis" : "postgres";
+    // The Python AI pipeline emits progress events strictly over PostgreSQL LISTEN/NOTIFY
+    this.provider = "postgres";
   }
 
   /**

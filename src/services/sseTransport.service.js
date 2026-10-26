@@ -25,6 +25,10 @@ const sseTransport = {
     res.write(`event: ${eventName}\n`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
 
+    if (typeof res.flush === "function") {
+      res.flush();
+    }
+
     return true;
   },
 

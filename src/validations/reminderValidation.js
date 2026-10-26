@@ -4,15 +4,57 @@ const {
   reminderOccurrenceStatusValues,
 } = require("../enums/reminderOccurrenceStatus");
 
-const createReminderSchema = z
+const singleReminderObjectSchema = z
   .object({
     medicationId: z.string().uuid(),
   })
-  .strict();
+  .passthrough();
+
+const createReminderSchema = z.union([
+  singleReminderObjectSchema,
+  z.array(z.string().uuid()).min(1),
+  z.array(singleReminderObjectSchema).min(1),
+  z
+    .object({
+      medicationIds: z.array(z.string().uuid()).min(1),
+    })
+    .transform((val) => val.medicationIds),
+  z
+    .object({
+      ids: z.array(z.string().uuid()).min(1),
+    })
+    .transform((val) => val.ids),
+  z
+    .string()
+    .uuid()
+    .transform((val) => ({ medicationId: val })),
+]);
 
 const updateOccurrenceSchema = z
   .object({
-    status: z.literal(reminderOccurrenceStatus.COMPLETED).optional(),
+    status: z
+      .enum([
+        reminderOccurrenceStatus.COMPLETED,
+        reminderOccurrenceStatus.SKIPPED,
+        reminderOccurrenceStatus.CANCELLED,
+      ])
+      .optional(),
+    completedAt: z
+      .string()
+      .datetime({
+        offset: true,
+        message: "completedAt must be a valid ISO 8601 datetime string",
+      })
+      .optional(),
+    takenAt: z
+      .string()
+      .datetime({
+        offset: true,
+        message: "takenAt must be a valid ISO 8601 datetime string",
+      })
+      .optional(),
+    notes: z.string().max(500).optional(),
+    skipReason: z.string().max(255).optional(),
   })
   .strict();
 

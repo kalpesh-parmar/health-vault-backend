@@ -91,6 +91,12 @@ const errorConstants = Object.freeze({
   UNIT_REQUIRED: "Unit is required",
   INVALID_UNIT: "Invalid Unit allowd only PILLS , ML , DROPS , UNITS",
   MEDICATION_NOT_FOUND: "Medication not found",
+  MEDICATION_ALREADY_EXISTS: "A similar medication already exists.",
+  REPLACE_MEDICATION_ID_REQUIRED:
+    "Target medication ID is required when replacing or editing medication",
+  AT_LEAST_ONE_MEDICATION_ID_REQUIRED: "At least one medication ID is required",
+  MEDICATIONS_ARRAY_REQUIRED:
+    "Medications array is required and must contain at least one medication",
   MEDICATION_REMINDER_NOT_FOUND: "Medication reminder not found",
   MEDICATION_OCCURRENCE_NOT_FOUND: "Medication occurrence reminder not found",
   INVALID_OCCURRENCE_ACTION:

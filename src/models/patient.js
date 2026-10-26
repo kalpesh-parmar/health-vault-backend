@@ -41,6 +41,7 @@ const patient = pgTable(
     isEmailVerified: boolean("is_email_verified").default(false).notNull(),
     onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
     preferredLanguage: varchar("preferred_language", { length: 50 }).default("english"),
+    timezone: varchar("timezone", { length: 64 }).default("Asia/Kolkata").notNull(),
 
     // Support DOB, Age, allergies, bloodGroup from both branches
     dateOfBirth: date("date_of_birth", { mode: "date" }),

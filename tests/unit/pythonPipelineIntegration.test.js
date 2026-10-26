@@ -113,12 +113,13 @@ describe("M1 Wave 5: Python Pipeline Integration, Dispatch, Feature Flag & Retry
         jobId: "b2222222-2222-4222-b222-222222222222",
         patientId,
         documentId: expect.any(String),
+        batchId: expect.any(String),
         storage: {
           bucket: "test-health-vault-bucket",
           key: "documents/patient-1/test-key-123.pdf",
           sha256: expect.any(String),
         },
-        documentType: "OTHER",
+        documentType: "OTHER_MEDICAL_DOCUMENT",
         preferredLanguage: "en",
         resumeFromStage: null,
       });
@@ -213,6 +214,7 @@ describe("M1 Wave 5: Python Pipeline Integration, Dispatch, Feature Flag & Retry
       };
 
       documentProcessingJobRepository.findByFileKey.mockResolvedValue(existingJob);
+      documentProcessingJobRepository.claimJobForRetryReEnqueue = jest.fn().mockResolvedValue(true);
       documentProcessingJobRepository.reEnqueueJob.mockResolvedValue({
         ...existingJob,
         status: "QUEUED",
@@ -231,9 +233,9 @@ describe("M1 Wave 5: Python Pipeline Integration, Dispatch, Feature Flag & Retry
         patientId,
       );
 
-      // 2. Transition FAILED -> QUEUED via reEnqueueJob (Node does NOT call claimJobForRetry)
+      // 2. Transition FAILED -> QUEUED via atomic retry lock (Node does NOT call claimJobForRetry)
       expect(documentProcessingJobRepository.claimJobForRetry).not.toHaveBeenCalled();
-      expect(documentProcessingJobRepository.reEnqueueJob).toHaveBeenCalledWith(
+      expect(documentProcessingJobRepository.claimJobForRetryReEnqueue).toHaveBeenCalledWith(
         existingJob.id,
         expect.objectContaining({
           status: "QUEUED",
@@ -243,7 +245,8 @@ describe("M1 Wave 5: Python Pipeline Integration, Dispatch, Feature Flag & Retry
       );
 
       // 3. Node does NOT increment attempt_count
-      const reEnqueuePatch = documentProcessingJobRepository.reEnqueueJob.mock.calls[0][1];
+      const reEnqueuePatch =
+        documentProcessingJobRepository.claimJobForRetryReEnqueue.mock.calls[0][1];
       expect(reEnqueuePatch).not.toHaveProperty("attemptCount");
 
       // 4. resumeFromStage calculated as next incomplete stage ("PARSING")

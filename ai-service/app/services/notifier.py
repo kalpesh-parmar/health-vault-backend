@@ -56,6 +56,10 @@ class ProgressNotifier:
         requires_reupload: bool | None = None,
         attempt_count: int | None = None,
         extra_fields: dict[str, Any] | None = None,
+        current_step: str | None = None,
+        completed_steps: int | None = None,
+        total_steps: int | None = 9,
+        **kwargs: Any,
     ) -> SseWireEnvelope:
         # Zero-PHI safety check: ensure no extra fields leak PHI
         if extra_fields:
@@ -79,6 +83,12 @@ class ProgressNotifier:
                 requires_reupload = extra_fields.get("requiresReupload")
             if attempt_count is None:
                 attempt_count = extra_fields.get("attemptCount")
+            if current_step is None:
+                current_step = extra_fields.get("currentStep") or extra_fields.get("current_step")
+            if completed_steps is None:
+                completed_steps = extra_fields.get("completedSteps") or extra_fields.get("completed_steps")
+            if total_steps is None:
+                total_steps = extra_fields.get("totalSteps") or extra_fields.get("total_steps") or 9
 
         event = InnerProgressEvent(
             jobId=str(job_id),
@@ -91,6 +101,9 @@ class ProgressNotifier:
             percentage=int(percentage),
             status=overall_status,
             message=message,
+            currentStep=current_step,
+            completedSteps=completed_steps,
+            totalSteps=total_steps or 9,
             errorCode=error_code,
             failedStage=failed_stage,
             retryable=retryable,
@@ -150,6 +163,10 @@ class ProgressNotifier:
         requires_reupload: bool | None = None,
         attempt_count: int | None = None,
         extra_fields: dict[str, Any] | None = None,
+        current_step: str | None = None,
+        completed_steps: int | None = None,
+        total_steps: int | None = 9,
+        **kwargs: Any,
     ) -> str:
         envelope = self.build_envelope(
             job_id=job_id,
@@ -170,6 +187,10 @@ class ProgressNotifier:
             requires_reupload=requires_reupload,
             attempt_count=attempt_count,
             extra_fields=extra_fields,
+            current_step=current_step,
+            completed_steps=completed_steps,
+            total_steps=total_steps,
+            **kwargs,
         )
 
         serialized = self.serialize_and_truncate(envelope)

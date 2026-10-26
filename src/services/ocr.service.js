@@ -28,6 +28,7 @@ const { normalizeCreateMedicationInput } = require("../helpers/medicineNormalize
 const { messageConstants } = require("../constants/messageConstants");
 const { errorConstants } = require("../constants/errorConstants");
 const { inferFileType } = require("../helpers/document.helper");
+const { normalizeMedicationName } = require("../helpers/medication.helper");
 const documentPersistenceService = require("./documentPersistence.service");
 const documentOcrJobService = require("./documentOcrJob.service");
 const medicationService = require("./medication.service");
@@ -41,6 +42,12 @@ const {
 const { and, eq, desc } = require("drizzle-orm");
 const { bloodGroupTypeValues } = require("../enums/bloodGroupType");
 const { ToWords } = require("to-words");
+const { documentAuthorizationService } = require("./ai/chat/documentAuthorization.service");
+const { chatClassifier } = require("./ai/chat/chatClassifier.service");
+const {
+  REPORT_QUESTIONS_I18N,
+  GENERAL_DOC_QUESTIONS_I18N,
+} = require("../helpers/reportPayload.helper");
 
 function isStepAlreadySatisfied(stepName, state) {
   if (!stepName || !state) return false;
@@ -77,6 +84,328 @@ function isStepAlreadySatisfied(stepName, state) {
     return state.medicationFlowDone === true;
   }
   return false;
+}
+
+function isOnboardingMedicalQuestion({ message, actionType, preferredLanguage }) {
+  if (!message || typeof message !== "string") return false;
+  const trimmed = message.trim();
+  if (trimmed.length < 2) return false;
+
+  const explicitOnboardingActions = [
+    "DASHBOARD",
+    "GO_TO_DASHBOARD",
+    "ADD_MEDICINE",
+    "EDIT_MEDICINE",
+    "CONFIRM_MEDICINES",
+    "CONFIRM_MEDICINE",
+    "SAVE_AND_REVIEW",
+    "SKIP_MEDICINES",
+    "SKIP_ONBOARDING",
+    "SKIP",
+    "CONFIRM",
+    "CANCEL",
+    "ASK_LANGUAGE",
+    "ASK_GENDER",
+    "ASK_DOB",
+    "ASK_BLOOD_GROUP",
+    "ASK_ALLERGIES",
+    "MEDICINE_OPTIONS",
+    "DOCUMENT_UPLOADED",
+    "DOC_UPLOAD",
+    "UPLOAD",
+    "UPLOAD_DOCUMENT",
+    "ASK_UPLOAD_DOCUMENT",
+    "ASK_UPLOAD_OR_SKIP",
+    "ASK_UPLOAD_DOCUMENT_FAILED",
+    "CONFIRM_DOCUMENT_OWNERSHIP",
+    "RESOLVE_PROFILE_SOURCE",
+    "DOCUMENT",
+    "DOC",
+    "MEDICAL_DOCUMENT",
+    "USE_DOCUMENT",
+    "USE_DOCUMENT_DATA",
+    "DOCUMENT_DATA",
+    "USE_SOCIAL",
+    "USE_SOCIAL_LOGIN",
+    "SOCIAL",
+    "LOGIN",
+    "SOCIAL_LOGIN",
+    "LOGIN_DATA",
+    "SOCIAL_DATA",
+    "MANUAL",
+    "MANUAL_ENTRY",
+    "EDIT_MANUALLY",
+    "ASK_FIRST_NAME",
+    "ASK_LAST_NAME",
+    "REVIEW_MEDICINES_LIST",
+    "ASK_FOUND_MEDICINES",
+    "ASK_ON_MEDICINES",
+    "ASK_MEDICINE_DETAILS",
+    "REGISTER_USER",
+    "COMPLETE",
+    "POST_ONBOARDING",
+    "START_ONBOARDING",
+    "RESET_ONBOARDING",
+    "RETRY_ONBOARDING",
+    "SKIP_QUESTION",
+    "YES",
+    "NO",
+    "HA",
+    "NA",
+    "OWNER_SELF",
+    "OWNER_OTHER",
+    "SELF",
+    "OTHER",
+    "ASK_REPORT",
+    "ASK_ABOUT_REPORT",
+    "REPORT_SUMMARY",
+  ];
+
+  const upperTrimmed = trimmed.toUpperCase();
+  if (actionType && explicitOnboardingActions.includes(actionType.toUpperCase())) {
+    return false;
+  }
+  if (explicitOnboardingActions.includes(upperTrimmed)) {
+    return false;
+  }
+  if (
+    upperTrimmed === "ASK_REPORT" ||
+    upperTrimmed === "ASK_ABOUT_REPORT" ||
+    upperTrimmed === "REPORT_SUMMARY" ||
+    upperTrimmed === "ASK REPORT" ||
+    upperTrimmed === "ASK ABOUT REPORT" ||
+    upperTrimmed === "ASK ABOUT MY REPORT" ||
+    upperTrimmed === "VIEW REPORT" ||
+    upperTrimmed === "VIEW MY REPORT"
+  ) {
+    return false;
+  }
+  if (
+    upperTrimmed.includes("DOCUMENT_UPLOADED") ||
+    upperTrimmed.includes("DOCUMENT UPLOADED") ||
+    upperTrimmed.startsWith("DOCUMENT UPLOADED:") ||
+    upperTrimmed.includes("DOC_UPLOAD") ||
+    upperTrimmed === "DOC UPLOAD" ||
+    upperTrimmed === "UPLOAD DOCUMENT"
+  ) {
+    return false;
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") {
+        if (
+          parsed.action ||
+          parsed.source ||
+          parsed.confirmed !== undefined ||
+          parsed.selected !== undefined ||
+          parsed.saveAndReview ||
+          parsed.skipAll ||
+          parsed.allergies ||
+          parsed.edited
+        ) {
+          return false;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const cleanMsg = trimmed
+    .toLowerCase()
+    .replace(/[?.,!]/g, "")
+    .trim();
+
+  // Known onboarding field answers and choices
+  if (
+    [
+      "b+",
+      "a+",
+      "o+",
+      "ab+",
+      "b-",
+      "a-",
+      "o-",
+      "ab-",
+      "male",
+      "female",
+      "other",
+      "yes",
+      "no",
+      "હા",
+      "ના",
+      "हाँ",
+      "नहीं",
+      "होय",
+      "नाही",
+      "ஆம்",
+      "இல்லை",
+      "gujarati",
+      "english",
+      "hindi",
+      "marathi",
+      "tamil",
+      "ગુજરાતી",
+      "हिन्दी",
+      "मराठी",
+      "தமிழ்",
+      "manual entry",
+      "manual",
+      "upload",
+      "અપલોડ",
+      "મેન્યુઅલ",
+      "document_uploaded",
+      "document uploaded",
+      "doc_upload",
+      "use_document",
+      "use document",
+      "use_document_data",
+      "use document data",
+      "document_data",
+      "document data",
+      "medical_document",
+      "medical document",
+      "document",
+      "use_social",
+      "use social",
+      "use_social_login",
+      "use social login",
+      "social",
+      "login",
+      "social_data",
+      "login_data",
+      "edit manually",
+      "edit_manually",
+      "ask_report",
+      "ask report",
+      "ask about report",
+      "ask about my report",
+      "ask_about_report",
+      "report_summary",
+      "report summary",
+      "view report",
+      "view my report",
+      "મારા રિપોર્ટ વિશે પૂછો",
+      "મારી રિપોર્ટ વિશે પૂછો",
+      "મારા રીપોર્ટ વિશે પૂછો",
+      "રિપોર્ટ વિશે પૂછો",
+      "મેરે રિપોર્ટ કે બારે મેં પૂછો",
+      "મેરે રિપોર્ટ કે બારે મેં પૂછેં",
+      "मेरे रिपोर्ट के बारे में पूछें",
+      "मेरे रिपोर्ट के बारे में पूछो",
+      "મારા રિપોર્ટ વિશે",
+    ].includes(cleanMsg)
+  ) {
+    return false;
+  }
+
+  if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(trimmed)) {
+    return false;
+  }
+
+  // Check known suggested report questions in all languages
+  const allSuggested = [
+    ...(REPORT_QUESTIONS_I18N.english || []),
+    ...(REPORT_QUESTIONS_I18N.gujarati || []),
+    ...(REPORT_QUESTIONS_I18N.hindi || []),
+    ...(REPORT_QUESTIONS_I18N.marathi || []),
+    ...(REPORT_QUESTIONS_I18N.tamil || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.english || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.gujarati || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.hindi || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.marathi || []),
+    ...(GENERAL_DOC_QUESTIONS_I18N.tamil || []),
+  ].map((q) =>
+    q
+      .toLowerCase()
+      .replace(/[?.,!]/g, "")
+      .trim(),
+  );
+
+  if (allSuggested.includes(cleanMsg)) {
+    return true;
+  }
+
+  // Classify intent via chatClassifier
+  try {
+    const classification = chatClassifier.classify({
+      rawQuestion: trimmed,
+      detectedLanguage: preferredLanguage || "english",
+    });
+
+    const hasMedicalKeywords =
+      /(?:રિપોર્ટ|દસ્તાવેજ|અર્થ|સમજાવો|હિમોગ્લોબિન|દવા|બીમારી|સારવાર|લક્ષણો|ટેસ્ટ|પરિણામ|report|document|summary|explain|treatment|medicine|hemoglobin|normal|abnormal|su\s+lakhyu|kya\s+likha|bimari|sarvar|doctor|hospital|diagnosis|prescription|lab)/i.test(
+        trimmed,
+      );
+
+    if (classification.primaryDomain === "PROFILE" && !hasMedicalKeywords) {
+      return false;
+    }
+
+    const isDocDomain =
+      classification.primaryDomain === "DOCUMENTS" ||
+      classification.primaryDomain === "MEDICATIONS";
+
+    if (isDocDomain && hasMedicalKeywords) {
+      return true;
+    }
+  } catch (err) {
+    console.warn("[OcrService] chatClassifier error in isOnboardingMedicalQuestion:", err.message);
+  }
+
+  return false;
+}
+
+function deduplicateDraftMedicines(medicines = []) {
+  if (!Array.isArray(medicines)) return [];
+  const seenKeys = new Set();
+  const seenNames = new Map();
+  const result = [];
+
+  for (const m of medicines) {
+    if (!m || typeof m !== "object") continue;
+    const rawName = (m.name || m.medicationName || m.medicine_name || m.medicineName || "").trim();
+    const normName = normalizeMedicationName(rawName) || rawName.toLowerCase();
+    const key = m.client_med_id || m.clientMedId || m.id;
+
+    if (!normName && !key) continue;
+
+    if (key && seenKeys.has(key)) {
+      continue;
+    }
+
+    if (normName && seenNames.has(normName)) {
+      const existingIdx = seenNames.get(normName);
+      const existing = result[existingIdx];
+      result[existingIdx] = {
+        ...existing,
+        ...m,
+        id: existing.id || m.id || key,
+        client_med_id:
+          existing.client_med_id ||
+          existing.clientMedId ||
+          m.client_med_id ||
+          m.clientMedId ||
+          existing.id ||
+          m.id ||
+          key,
+        name: existing.name || m.name || rawName,
+        medicationName: existing.medicationName || m.medicationName || existing.name || rawName,
+        documentId: existing.documentId || m.documentId,
+        documentName: existing.documentName || m.documentName,
+      };
+      if (key) seenKeys.add(key);
+      continue;
+    }
+
+    if (key) seenKeys.add(key);
+    if (normName) seenNames.set(normName, result.length);
+    result.push(m);
+  }
+
+  return result;
 }
 
 class V1Service {
@@ -261,6 +590,7 @@ class V1Service {
         history,
         displayLabel,
         preferredLanguage,
+        fromScreen,
         clientMessageId,
       } = normalizedInput;
       console.log("[MEDICINES]===", normalizedInput.message);
@@ -283,17 +613,41 @@ class V1Service {
         `[ONBOARDING PROFILE LOG] User ID: ${userId} | Patient DB Record: firstName="${patient?.firstName || ""}", lastName="${patient?.lastName || ""}", email="${patient?.email || ""}"`,
       );
 
-      // Resolve canonical session ID for the patient
+      // Resolve session ID for the patient (strictly isolating onboarding vs canonical QA)
       let effectiveSessionId =
         sessionId || inputState?.chatSessionId || dbState?.chatSessionId || null;
+
+      const isPreOnboardingRequest = fromScreen === "Onboarding" || !isOnboardingCompleted;
+
+      if (effectiveSessionId && userId && isPreOnboardingRequest) {
+        try {
+          const sessionMeta = await chatSessionRepository.findSessionById(
+            effectiveSessionId,
+            userId,
+          );
+          if (sessionMeta?.metadata?.isCanonical && sessionMeta?.metadata?.type !== "ONBOARDING") {
+            effectiveSessionId = null;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       if (!effectiveSessionId && userId) {
         try {
-          if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
-            const canonical = await chatService.getOrCreateCanonicalSession({ userId });
-            effectiveSessionId = canonical?.id || null;
+          if (isPreOnboardingRequest) {
+            if (chatService && typeof chatService.createOnboardingSession === "function") {
+              const onboarding = await chatService.createOnboardingSession({ userId });
+              effectiveSessionId = onboarding?.id || null;
+            }
+          } else {
+            if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+              const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+              effectiveSessionId = canonical?.id || null;
+            }
           }
         } catch (sErr) {
-          console.warn("[UnifiedChat] Failed to get or create canonical session:", sErr.message);
+          console.warn("[UnifiedChat] Failed to resolve session:", sErr.message);
         }
       }
 
@@ -491,7 +845,8 @@ class V1Service {
         !isOnboardingCompleted &&
         ((Boolean(currentOnboardingStep) &&
           currentOnboardingStep !== "COMPLETE" &&
-          currentOnboardingStep !== "POST_ONBOARDING") ||
+          currentOnboardingStep !== "POST_ONBOARDING" &&
+          currentOnboardingStep !== "ASK_REPORT") ||
           isMedicineAction ||
           isAddMedicineMsg ||
           hasUnconfirmedMedicines);
@@ -583,6 +938,10 @@ class V1Service {
             }
           }
 
+          if (availableMeds.length > 0) {
+            availableMeds = deduplicateDraftMedicines(availableMeds);
+          }
+
           if (activeSessionId) {
             let userContent = displayLabel;
             if (
@@ -664,12 +1023,17 @@ class V1Service {
                 ? [actionData.medicine]
                 : effectiveState?.medicinesToAdd || [];
 
+          reviewMeds = deduplicateDraftMedicines(reviewMeds);
+
           if (userId && Array.isArray(reviewMeds) && reviewMeds.length > 0) {
             try {
-              reviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+              const checked = await medicationService.checkDuplicateMedicationsBatch(
                 userId,
                 reviewMeds,
               );
+              if (Array.isArray(checked)) {
+                reviewMeds = checked;
+              }
             } catch (dupErr) {
               console.warn(
                 "[UnifiedChat] Duplicate check warning in SAVE_AND_REVIEW:",
@@ -759,13 +1123,18 @@ class V1Service {
           stateToUpdate.medicinesConfirmed = false;
           stateToUpdate.medicinesSavedToDb = false;
           stateToUpdate.medicationFlowDone = false;
-          let cleanedReviewMeds = (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId);
+          let cleanedReviewMeds = deduplicateDraftMedicines(
+            (reviewMeds || []).filter((m) => !m.isSaved && !m.dbId),
+          );
           if (userId && Array.isArray(cleanedReviewMeds) && cleanedReviewMeds.length > 0) {
             try {
-              cleanedReviewMeds = await medicationService.checkDuplicateMedicationsBatch(
+              const checked = await medicationService.checkDuplicateMedicationsBatch(
                 userId,
                 cleanedReviewMeds,
               );
+              if (Array.isArray(checked)) {
+                cleanedReviewMeds = checked;
+              }
             } catch (dupErr) {
               console.warn(
                 "[UnifiedChat] Duplicate check warning in pre-onboarding SAVE_AND_REVIEW:",
@@ -973,13 +1342,15 @@ class V1Service {
             medsToProcess[i] = normalizeCreateMedicationInput(medData);
           }
 
-          const unsavedMeds = medsToProcess.filter(
-            (m) =>
-              m &&
-              !m.isSaved &&
-              !m.dbId &&
-              m.resolution !== "KEEP_EXISTING" &&
-              m.resolution !== "REMOVE_NEW",
+          const unsavedMeds = deduplicateDraftMedicines(
+            medsToProcess.filter(
+              (m) =>
+                m &&
+                !m.isSaved &&
+                !m.dbId &&
+                m.resolution !== "KEEP_EXISTING" &&
+                m.resolution !== "REMOVE_NEW",
+            ),
           );
 
           if (unsavedMeds.length > 0) {
@@ -1274,7 +1645,25 @@ class V1Service {
       const isForcedOnboardingAction =
         message === "ASK_REPORT" ||
         message === "ASK_ABOUT_REPORT" ||
+        message === "REPORT_SUMMARY" ||
         actionType === "ASK_REPORT" ||
+        actionType === "ASK_ABOUT_REPORT" ||
+        actionType === "REPORT_SUMMARY" ||
+        (typeof message === "string" &&
+          [
+            "ask about report",
+            "ask about my report",
+            "ask report",
+            "report summary",
+            "મારા રિપોર્ટ વિશે પૂછો",
+            "મારી રિપોર્ટ વિશે પૂછો",
+            "રિપોર્ટ વિશે પૂછો",
+          ].includes(
+            message
+              .trim()
+              .toLowerCase()
+              .replace(/[?.,!]/g, ""),
+          )) ||
         actionType === "ADD_MEDICINE" ||
         actionType === "SAVE_AND_REVIEW" ||
         actionType === "CONFIRM_MEDICINES" ||
@@ -1282,7 +1671,6 @@ class V1Service {
         message === "DASHBOARD" ||
         message === "GO_TO_DASHBOARD" ||
         actionType === "DASHBOARD" ||
-        inputState?.currentStep === "ASK_REPORT" ||
         actionType === "ASK_ALLERGIES" ||
         actionType === "ASK_BLOOD_GROUP" ||
         actionType === "MEDICINE_OPTIONS";
@@ -1301,27 +1689,270 @@ class V1Service {
         dbState?.currentStep === "ASK_BLOOD_GROUP" ||
         dbState?.currentStep === "MEDICINE_OPTIONS";
 
-      const isNormalChat =
-        !isMedicineAction &&
-        !isForcedOnboardingAction &&
-        !isIncomingOnboardingStep &&
+      const isAskingReportQuestion =
+        (dbState?.currentStep === "ASK_REPORT" ||
+          inputState?.currentStep === "ASK_REPORT" ||
+          effectiveState?.currentStep === "ASK_REPORT") &&
+        message !== "ASK_REPORT" &&
+        message !== "ASK_ABOUT_REPORT" &&
+        message !== "REPORT_SUMMARY" &&
+        actionType !== "ASK_REPORT" &&
+        actionType !== "ASK_ABOUT_REPORT" &&
+        actionType !== "REPORT_SUMMARY" &&
+        !(
+          typeof message === "string" &&
+          [
+            "ask about report",
+            "ask about my report",
+            "ask report",
+            "report summary",
+            "મારા રિપોર્ટ વિશે પૂછો",
+            "મારી રિપોર્ટ વિશે પૂછો",
+            "રિપોર્ટ વિશે પૂછો",
+          ].includes(
+            message
+              .trim()
+              .toLowerCase()
+              .replace(/[?.,!]/g, ""),
+          )
+        ) &&
+        message !== "DASHBOARD" &&
+        message !== "GO_TO_DASHBOARD" &&
+        actionType !== "DASHBOARD" &&
+        actionType !== "ADD_MEDICINE" &&
         actionType !== "SKIP_ONBOARDING" &&
-        !hasUnansweredOptional &&
-        !isMedicationFlowPending &&
-        (actionType === "NORMAL_CHAT" ||
-          ((isOnboardingCompleted ||
-            isCompletedStep ||
-            isSkippedValid ||
-            dbState?.currentStep === "ASK_REPORT" ||
-            inputState?.currentStep === "ASK_REPORT") &&
-            !isActiveOnboardingStep &&
-            message !== "ASK_REPORT" &&
-            (actionType !== "ONBOARDING" ||
+        !isMedicineAction;
+
+      const isNormalChat =
+        isAskingReportQuestion ||
+        (!isMedicineAction &&
+          !isForcedOnboardingAction &&
+          !isIncomingOnboardingStep &&
+          actionType !== "SKIP_ONBOARDING" &&
+          !hasUnansweredOptional &&
+          !isMedicationFlowPending &&
+          (actionType === "NORMAL_CHAT" ||
+            ((isOnboardingCompleted ||
               isCompletedStep ||
               isSkippedValid ||
               dbState?.currentStep === "ASK_REPORT" ||
               inputState?.currentStep === "ASK_REPORT") &&
-            actionType !== "OTHER_ACTIONS"));
+              !isActiveOnboardingStep &&
+              message !== "ASK_REPORT" &&
+              message !== "ASK_ABOUT_REPORT" &&
+              message !== "REPORT_SUMMARY" &&
+              actionType !== "ASK_REPORT" &&
+              actionType !== "ASK_ABOUT_REPORT" &&
+              actionType !== "REPORT_SUMMARY" &&
+              !(
+                typeof message === "string" &&
+                [
+                  "ask about report",
+                  "ask about my report",
+                  "ask report",
+                  "report summary",
+                  "મારા રિપોર્ટ વિશે પૂછો",
+                  "મારી રિપોર્ટ વિશે પૂછો",
+                  "રિપોર્ટ વિશે પૂછો",
+                ].includes(
+                  message
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[?.,!]/g, ""),
+                )
+              ) &&
+              (actionType !== "ONBOARDING" ||
+                isCompletedStep ||
+                isSkippedValid ||
+                dbState?.currentStep === "ASK_REPORT" ||
+                inputState?.currentStep === "ASK_REPORT") &&
+              actionType !== "OTHER_ACTIONS")));
+
+      // CASE 2.5: ONBOARDING DOCUMENT QA (Medical Question Answering During Pre-Onboarding)
+      const isPreOnboardingContext = fromScreen === "Onboarding" || !isOnboardingCompleted;
+      const userLangForQA =
+        preferredLanguage ||
+        inputState?.preferredLanguage ||
+        dbState?.preferredLanguage ||
+        patient?.preferredLanguage ||
+        "english";
+
+      const isOnboardingDocQA =
+        !isAskingReportQuestion &&
+        isPreOnboardingContext &&
+        isOnboardingMedicalQuestion({
+          message,
+          actionType,
+          state: inputState || dbState,
+          dbState,
+          preferredLanguage: userLangForQA,
+        });
+
+      if (isOnboardingDocQA) {
+        console.log(
+          `[UnifiedChat] Executing Onboarding Document QA for userId=${userId}, question="${message}"`,
+        );
+        let state = inputState || dbState || {};
+        if (!state.currentStep && dbState?.currentStep) {
+          state.currentStep = dbState.currentStep;
+        }
+        if (!state.currentStep) {
+          state.currentStep = "ASK_REPORT";
+        }
+
+        let targetDocId = documentId || state.documentId || dbState?.documentId;
+        if (Array.isArray(targetDocId)) {
+          targetDocId = targetDocId[0];
+        }
+
+        let targetDoc = null;
+        if (targetDocId) {
+          try {
+            const authRes = await documentAuthorizationService.authorizeDocumentIds(userId, [
+              targetDocId,
+            ]);
+            if (authRes.documents && authRes.documents.length > 0) {
+              targetDoc = authRes.documents[0];
+            }
+          } catch (authErr) {
+            console.warn(
+              `[UnifiedChat] Document authorization warning for docId=${targetDocId}:`,
+              authErr.message,
+            );
+          }
+        }
+
+        if (!targetDoc && userId) {
+          try {
+            const userDocs = await db
+              .select()
+              .from(document)
+              .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+              .orderBy(desc(document.createdAt))
+              .limit(1);
+            if (userDocs && userDocs.length > 0) {
+              targetDoc = userDocs[0];
+              targetDocId = targetDoc.id;
+            }
+          } catch (dbDocErr) {
+            console.warn("[UnifiedChat] Error looking up user document:", dbDocErr.message);
+          }
+        }
+
+        if (!targetDoc) {
+          const noDocReply =
+            {
+              english: "No uploaded medical document was found. Please upload a report to discuss.",
+              gujarati:
+                "કોઈ અપલોડ કરેલ તબીબી દસ્તાવેજ મળ્યો નથી. કૃપા કરીને ચર્ચા કરવા માટે રિપોર્ટ અપલોડ કરો.",
+              hindi:
+                "कोई अपलोड किया गया मेडिकल दस्तावेज़ नहीं मिला। कृपया चर्चा के लिए रिपोर्ट अपलोड करें।",
+              marathi:
+                "कोणताही अपलोड केलेला वैद्यकीय दस्तऐवज आढळला नाही. कृपया चर्चा करण्यासाठी अहवाल अपलोड करा.",
+              tamil:
+                "பதிவேற்றப்பட்ட மருத்துவ ஆவணம் எதுவும் கிடைக்கவில்லை. விவாதிக்க அறிக்கையைப் பதிவேற்றவும்.",
+            }[userLangForQA] ||
+            "No uploaded medical document was found. Please upload a report to discuss.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: noDocReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: null,
+            options: [],
+          });
+        }
+
+        const ocrStat = String(targetDoc.ocrStatus || "").toLowerCase();
+        if (ocrStat === "failed") {
+          const failedReply =
+            {
+              english:
+                "Processing failed for this document. Please upload a clearer image or document.",
+              gujarati:
+                "આ દસ્તાવેજની પ્રક્રિયા નિષ્ફળ રહી છે. કૃપા કરીને વધુ સ્પષ્ટ છબી અથવા દસ્તાવેજ અપલોડ કરો.",
+              hindi:
+                "इस दस्तावेज़ का प्रसंस्करण विफल रहा। कृपया एक स्पष्ट छवि या दस्तावेज़ अपलोड करें।",
+              marathi:
+                "या दस्तऐवजाची प्रक्रिया अयशस्वी झाली. कृपया अधिक स्पष्ट प्रतिमा किंवा दस्तऐवज अपलोड करा.",
+              tamil:
+                "இந்த ஆவணத்தின் செயலாக்கம் தோல்வியடைந்தது. தெளிவான படம் அல்லது ஆவணத்தைப் பதிவேற்றவும்.",
+            }[userLangForQA] ||
+            "Processing failed for this document. Please upload a clearer image or document.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: failedReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: targetDoc,
+            options: [],
+          });
+        }
+
+        if (ocrStat === "pending" || ocrStat === "processing") {
+          const pendingReply =
+            {
+              english:
+                "Your document is currently being analyzed. Please wait a moment for processing to complete.",
+              gujarati:
+                "તમારો દસ્તાવેજ હાલમાં વિશ્લેષિત થઈ રહ્યો છે. કૃપા કરીને પ્રક્રિયા પૂર્ણ થાય ત્યાં સુધી થોડીવાર રાહ જુઓ.",
+              hindi:
+                "आपके दस्तावेज़ का विश्लेषण किया जा रहा है। कृपया प्रक्रिया पूरी होने तक प्रतीक्षा करें।",
+              marathi:
+                "तुमच्या दस्तऐवजाचे विश्लेषण सुरू आहे. कृपया प्रक्रिया पूर्ण होईपर्यंत થોડા वेळ थांबा.",
+              tamil:
+                "உங்கள் ஆவணம் தற்போது பகுப்பாய்வு செய்யப்படுகிறது. செயலாக்கம் முடியும் வரை காத்திருக்கவும்.",
+            }[userLangForQA] ||
+            "Your document is currently being analyzed. Please wait a moment for processing to complete.";
+
+          return buildUnifiedResponse({
+            mode: "ONBOARDING_DOCUMENT_QA",
+            actionType: "ONBOARDING_DOCUMENT_QA",
+            reply: pendingReply,
+            sessionId: effectiveSessionId,
+            onboardingState: state,
+            document: targetDoc,
+            options: [],
+          });
+        }
+
+        const chatResult = await chatService.sendMessage({
+          userId,
+          question: message,
+          sessionId: effectiveSessionId,
+          documentId: [targetDocId],
+          scopeMode: "SINGLE_DOCUMENT",
+          preferredLanguage: userLangForQA,
+          onChunk,
+          abortSignal,
+        });
+
+        state.documentId = targetDocId;
+        state.chatSessionId = effectiveSessionId;
+        await saveOnboardingState(userId, state);
+
+        const responsePayload = buildUnifiedResponse({
+          mode: "ONBOARDING_DOCUMENT_QA",
+          actionType: "ONBOARDING_DOCUMENT_QA",
+          reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
+          sessionId: effectiveSessionId,
+          citations: chatResult?.citations || [],
+          onboardingState: state,
+          options: chatResult?.options || [],
+          document: targetDoc,
+          chart: chatResult?.chart || null,
+        });
+        responsePayload.action = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.actionType = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.mode = "ONBOARDING_DOCUMENT_QA";
+        responsePayload.state = state;
+        responsePayload.canSkip = canSkipOnboarding(state);
+        return responsePayload;
+      }
 
       // CASE 3: ONBOARDING STATE MACHINE FLOW
       if (!isNormalChat) {
@@ -1329,7 +1960,27 @@ class V1Service {
         let state = inputState;
         let isStaleDuplicateSubmission = false;
         const isRepeatableReportAction =
-          message === "ASK_REPORT" || message === "ASK_ABOUT_REPORT" || actionType === "ASK_REPORT";
+          message === "ASK_REPORT" ||
+          message === "ASK_ABOUT_REPORT" ||
+          message === "REPORT_SUMMARY" ||
+          actionType === "ASK_REPORT" ||
+          actionType === "ASK_ABOUT_REPORT" ||
+          actionType === "REPORT_SUMMARY" ||
+          (typeof message === "string" &&
+            [
+              "ask about report",
+              "ask about my report",
+              "ask report",
+              "report summary",
+              "મારા રિપોર્ટ વિશે પૂછો",
+              "મારી રિપોર્ટ વિશે પૂછો",
+              "રિપોર્ટ વિશે પૂછો",
+            ].includes(
+              message
+                .trim()
+                .toLowerCase()
+                .replace(/[?.,!]/g, ""),
+            ));
         const isTerminalNavigationAction =
           message === "DASHBOARD" ||
           message === "GO_TO_DASHBOARD" ||
@@ -1516,6 +2167,10 @@ class V1Service {
           }
           state.isOnboardingCompleted = true;
           state.hasSkipped = true;
+          state.medicationFlowDone = true;
+          state.medicinesConfirmed = true;
+          state.currentStep = state.flowMode === "MANUAL" ? "COMPLETE" : "POST_ONBOARDING";
+
           if (userId) {
             try {
               await patientRepository.updateById(userId, { onboardingCompleted: true });
@@ -1525,9 +2180,6 @@ class V1Service {
                 err.message,
               );
             }
-          }
-          if (!state.currentStep && dbState && dbState.currentStep) {
-            state.currentStep = dbState.currentStep;
           }
 
           await saveOnboardingState(userId, state);
@@ -1541,6 +2193,7 @@ class V1Service {
             medicines: [],
           });
           responsePayload.canSkip = true;
+          responsePayload.isOnboardingCompleted = true;
           return responsePayload;
         }
 
@@ -1566,14 +2219,30 @@ class V1Service {
           }
         }
 
-        if (isRepeatableReportAction && !effectiveMessage) {
-          effectiveMessage = actionType || "ASK_REPORT";
+        if (isRepeatableReportAction) {
+          if (!effectiveDisplayLabel && displayLabel) {
+            effectiveDisplayLabel = displayLabel;
+          } else if (!effectiveDisplayLabel && message && message !== "ASK_REPORT") {
+            effectiveDisplayLabel = message;
+          }
+          effectiveMessage = "ASK_REPORT";
         }
         if (isTerminalNavigationAction && !effectiveMessage) {
           effectiveMessage = actionType || "DASHBOARD";
         }
         if (isTerminalNavigationAction && !effectiveDisplayLabel && displayLabel) {
           effectiveDisplayLabel = displayLabel;
+        }
+
+        if (documentId && !state.documentId) {
+          state.documentId = Array.isArray(documentId) ? documentId[0] : documentId;
+        }
+        if (!state.documentId) {
+          state.documentId =
+            dbState?.documentId ||
+            dbState?.loadedDocumentId ||
+            inputState?.loadedDocumentId ||
+            null;
         }
 
         if (
@@ -1659,30 +2328,69 @@ class V1Service {
 
       const intentResult = detectActionIntent(promptText, userLang);
 
+      let targetDocIds = documentId;
+      if (!targetDocIds || (Array.isArray(targetDocIds) && targetDocIds.length === 0)) {
+        const fallbackDocId =
+          effectiveState?.documentId ||
+          effectiveState?.loadedDocumentId ||
+          dbState?.documentId ||
+          dbState?.loadedDocumentId;
+        if (fallbackDocId) {
+          targetDocIds = Array.isArray(fallbackDocId) ? fallbackDocId : [fallbackDocId];
+        }
+      } else if (!Array.isArray(targetDocIds)) {
+        targetDocIds = [targetDocIds];
+      }
+
       const chatResult = await chatService.sendMessage({
         userId,
         question: promptText,
         sessionId: effectiveSessionId,
-        documentId,
+        documentId: targetDocIds,
         preferredLanguage: userLang,
         onChunk,
         abortSignal,
       });
 
+      const isReportContext =
+        isAskingReportQuestion ||
+        effectiveState?.currentStep === "ASK_REPORT" ||
+        inputState?.currentStep === "ASK_REPORT" ||
+        dbState?.currentStep === "ASK_REPORT";
+
+      const resolvedOptions =
+        intentResult.options.length > 0
+          ? intentResult.options
+          : isReportContext
+            ? []
+            : chatResult?.options || [];
+
       return buildUnifiedResponse({
-        mode: "NORMAL_CHAT",
-        actionType: chatResult?.requireSelection ? "REQUIRE_DOCUMENT_SELECTION" : "NORMAL_CHAT",
+        mode: chatResult?.mode || "NORMAL_CHAT",
+        actionType: chatResult?.requireSelection
+          ? "REQUIRE_DOCUMENT_SELECTION"
+          : chatResult?.chart
+            ? "MEDICAL_TREND_CHART"
+            : "NORMAL_CHAT",
         reply: chatResult?.reply || chatResult?.answer || chatResult?.message || "",
         sessionId: chatResult?.ai?.sessionId || chatResult?.sessionId || effectiveSessionId,
+        onboardingState: effectiveState
+          ? {
+              ...effectiveState,
+              currentStep: "ASK_REPORT",
+              canSkip: true,
+            }
+          : null,
         citations: chatResult?.citations || [],
         suggestedAction: chatResult?.requireSelection
           ? "REQUIRE_DOCUMENT_SELECTION"
           : intentResult.suggestedAction,
-        options: intentResult.options.length > 0 ? intentResult.options : chatResult?.options || [],
+        options: resolvedOptions,
         requireSelection: chatResult?.requireSelection || false,
         reports: chatResult?.reports || [],
         allowMultiSelect: chatResult?.allowMultiSelect || false,
         selectionType: chatResult?.selectionType || null,
+        chart: chatResult?.chart || null,
       });
     } catch (error) {
       console.error(`[UnifiedChat] Unified chat processing error for userId=${userId}:`, error);
@@ -1723,7 +2431,11 @@ class V1Service {
 
     // If we have an onboarding record, trust its completion status
     if (resumableState) {
-      isOnboardingCompleted = patient.onboardingCompleted || isStateCompleted;
+      isOnboardingCompleted =
+        patient.onboardingCompleted ||
+        isStateCompleted ||
+        resumableState?.hasSkipped === true ||
+        resumableState?.isOnboardingCompleted === true;
     } else {
       // Fallback for users without an onboarding record (legacy)
       isOnboardingCompleted = patient.onboardingCompleted || isBasicProfileComplete;
@@ -1740,27 +2452,29 @@ class V1Service {
       const allergiesSkipped = resumableState?.allergiesSkipped === true;
 
       let effectivePendingStep = "COMPLETE";
-      if (!bloodGroup && !bloodGroupSkipped) {
-        effectivePendingStep = "ASK_BLOOD_GROUP";
-      } else if (
-        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
-        !allergiesSkipped
-      ) {
-        effectivePendingStep = "ASK_ALLERGIES";
-      } else if (
-        resumableState?.medicationFlowDone !== true &&
-        resumableState?.hasSkipped !== true &&
-        resumableState?.medicinesConfirmed !== true
-      ) {
-        const hasExtractedMedicines =
-          (Array.isArray(resumableState?.foundMedicines) &&
-            resumableState.foundMedicines.length > 0) ||
-          (Array.isArray(resumableState?.medicinesToAdd) &&
-            resumableState.medicinesToAdd.length > 0);
-        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
-          effectivePendingStep = "REVIEW_MEDICINES_LIST";
-        } else {
-          effectivePendingStep = "MEDICINE_OPTIONS";
+      if (!resumableState?.hasSkipped) {
+        if (!bloodGroup && !bloodGroupSkipped) {
+          effectivePendingStep = "ASK_BLOOD_GROUP";
+        } else if (
+          (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+          !allergiesSkipped
+        ) {
+          effectivePendingStep = "ASK_ALLERGIES";
+        } else if (
+          resumableState?.medicationFlowDone !== true &&
+          resumableState?.hasSkipped !== true &&
+          resumableState?.medicinesConfirmed !== true
+        ) {
+          const hasExtractedMedicines =
+            (Array.isArray(resumableState?.foundMedicines) &&
+              resumableState.foundMedicines.length > 0) ||
+            (Array.isArray(resumableState?.medicinesToAdd) &&
+              resumableState.medicinesToAdd.length > 0);
+          if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+            effectivePendingStep = "REVIEW_MEDICINES_LIST";
+          } else {
+            effectivePendingStep = "MEDICINE_OPTIONS";
+          }
         }
       }
 
@@ -1786,6 +2500,9 @@ class V1Service {
   }
 
   async getOnboardingHistory(userId) {
+    if (typeof userId === "object" && userId !== null && userId.userId) {
+      userId = userId.userId;
+    }
     if (!userId) {
       throw new UnauthorizedException("Unauthorized access");
     }
@@ -1800,7 +2517,13 @@ class V1Service {
       // ignore
     }
 
-    if (patient?.onboardingCompleted) {
+    const isCompleted = Boolean(
+      patient?.onboardingCompleted ||
+      resumableState?.isOnboardingCompleted === true ||
+      resumableState?.hasSkipped === true,
+    );
+
+    if (isCompleted) {
       const data = resumableState?.existingUserData || {};
       const bloodGroup = patient?.bloodGroup || data?.bloodGroup;
       const allergies = patient?.allergies || data?.allergies;
@@ -1808,27 +2531,29 @@ class V1Service {
       const allergiesSkipped = resumableState?.allergiesSkipped === true;
 
       let effectivePendingStep = "COMPLETE";
-      if (!bloodGroup && !bloodGroupSkipped) {
-        effectivePendingStep = "ASK_BLOOD_GROUP";
-      } else if (
-        (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
-        !allergiesSkipped
-      ) {
-        effectivePendingStep = "ASK_ALLERGIES";
-      } else if (
-        resumableState?.medicationFlowDone !== true &&
-        resumableState?.hasSkipped !== true &&
-        resumableState?.medicinesConfirmed !== true
-      ) {
-        const hasExtractedMedicines =
-          (Array.isArray(resumableState?.foundMedicines) &&
-            resumableState.foundMedicines.length > 0) ||
-          (Array.isArray(resumableState?.medicinesToAdd) &&
-            resumableState.medicinesToAdd.length > 0);
-        if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
-          effectivePendingStep = "REVIEW_MEDICINES_LIST";
-        } else {
-          effectivePendingStep = "MEDICINE_OPTIONS";
+      if (!resumableState?.hasSkipped) {
+        if (!bloodGroup && !bloodGroupSkipped) {
+          effectivePendingStep = "ASK_BLOOD_GROUP";
+        } else if (
+          (!allergies || (Array.isArray(allergies) && allergies.length === 0)) &&
+          !allergiesSkipped
+        ) {
+          effectivePendingStep = "ASK_ALLERGIES";
+        } else if (
+          resumableState?.medicationFlowDone !== true &&
+          resumableState?.hasSkipped !== true &&
+          resumableState?.medicinesConfirmed !== true
+        ) {
+          const hasExtractedMedicines =
+            (Array.isArray(resumableState?.foundMedicines) &&
+              resumableState.foundMedicines.length > 0) ||
+            (Array.isArray(resumableState?.medicinesToAdd) &&
+              resumableState.medicinesToAdd.length > 0);
+          if (!resumableState?.medicinesConfirmed && hasExtractedMedicines) {
+            effectivePendingStep = "REVIEW_MEDICINES_LIST";
+          } else {
+            effectivePendingStep = "MEDICINE_OPTIONS";
+          }
         }
       }
 
@@ -1861,11 +2586,29 @@ class V1Service {
       }
     }
     let chatSessionId = resumableState?.chatSessionId || null;
+    if (chatSessionId && userId) {
+      // Defensive guard: Ensure session is not a canonical Smart QA session
+      try {
+        const sessionMeta = await chatSessionRepository.findSessionById(chatSessionId, userId);
+        if (sessionMeta?.metadata?.isCanonical && sessionMeta?.metadata?.type !== "ONBOARDING") {
+          chatSessionId = null;
+        }
+      } catch {
+        // ignore
+      }
+    }
     if (!chatSessionId && userId) {
       try {
-        if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
-          const canonical = await chatService.getOrCreateCanonicalSession({ userId });
-          chatSessionId = canonical?.id || null;
+        const existingOnboarding = await chatSessionRepository.findOnboardingSession(userId);
+        if (existingOnboarding) {
+          chatSessionId = existingOnboarding.id;
+        } else if (
+          !patient?.onboardingCompleted &&
+          chatService &&
+          typeof chatService.createOnboardingSession === "function"
+        ) {
+          const onboarding = await chatService.createOnboardingSession({ userId });
+          chatSessionId = onboarding?.id || null;
         }
       } catch {
         // ignore
@@ -1960,4 +2703,8 @@ class V1Service {
     };
   }
 }
-module.exports = new V1Service();
+
+const serviceInstance = new V1Service();
+serviceInstance.isOnboardingMedicalQuestion = isOnboardingMedicalQuestion;
+serviceInstance.v1Service = serviceInstance;
+module.exports = serviceInstance;

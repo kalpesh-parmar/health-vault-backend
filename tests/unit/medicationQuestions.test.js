@@ -54,11 +54,17 @@ describe("14 Core Medication Questions Suite", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-10-10T12:00:00.000Z"));
     medicationRepository.findAll.mockResolvedValue(sampleMedications);
     chatSessionRepository.appendMessage.mockImplementation(async (msg) => ({
       id: "msg-" + Math.random(),
       ...msg,
     }));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   // 1. What medicines am I taking?

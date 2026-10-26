@@ -19,11 +19,31 @@ from app.services.notifier import ProgressNotifier
 logger = logging.getLogger(__name__)
 
 
+STAGE_LABELS: dict[str, str] = {
+    STAGE_QUEUED: "Queued",
+    "VALIDATING": "Validating Document",
+    "UPLOADING": "Verifying Storage",
+    "OCR_RUNNING": "Extracting Text",
+    "PARSING": "Parsing Layout & Tables",
+    "GRAPH_EXTRACTION": "Extracting Visual Assets",
+    "FIELD_EXTRACTION": "Extracting Medical Entities",
+    "ANALYZING": "Clinical Safety Analysis",
+    "SUMMARIZING": "Generating Medical Summary",
+    "EMBEDDING": "Indexing Medical Records",
+}
+
+
 def calculate_stage_percentage(
-    stage: str, page: int | None = None, total_pages: int | None = None
+    stage: str,
+    page: int | None = None,
+    total_pages: int | None = None,
+    is_completed: bool = False,
 ) -> int:
     window = STAGE_PROGRESS_WINDOWS.get(stage, (0, 0))
     start_pct, end_pct = window
+
+    if is_completed:
+        return end_pct
 
     if stage == STAGE_OCR_RUNNING and page is not None and total_pages is not None and total_pages > 0:
         ratio = min(page, total_pages) / total_pages
@@ -82,42 +102,68 @@ class PipelineLifecycleService:
         completed_stages: list[str],
         checkpoint_data: dict[str, Any],
         document_id: UUID | str | None = None,
+        batch_id: str | None = None,
         page: int | None = None,
         total_pages: int | None = None,
         detected_languages: list[str] | None = None,
         raw_ocr_data: dict[str, Any] | None = None,
         extracted_structured_data: dict[str, Any] | None = None,
     ) -> int:
-        calculated_pct = calculate_stage_percentage(stage, page=page, total_pages=total_pages)
+        is_completed = (stage_status == STATUS_COMPLETED) or (stage in completed_stages)
+        calculated_pct = calculate_stage_percentage(
+            stage, page=page, total_pages=total_pages, is_completed=is_completed
+        )
         monotonic_pct = ensure_monotonic_progress(previous_percentage, calculated_pct)
 
-        # 1. Update database checkpoint state
-        await self.repo.update_job_checkpoint(
-            job_id=job_id,
-            stage=stage,
-            stage_status=stage_status,
-            percentage=monotonic_pct,
-            message=message,
-            completed_stages=completed_stages,
-            checkpoint_data=checkpoint_data,
-            raw_ocr_data=raw_ocr_data,
-            extracted_structured_data=extracted_structured_data,
+        completed_steps = (
+            PIPELINE_STAGES_ORDER.index(stage) + 1
+            if stage in PIPELINE_STAGES_ORDER
+            else 1
         )
+        total_steps = len(PIPELINE_STAGES_ORDER)
+        current_step = STAGE_LABELS.get(stage, stage)
+
+      
+
+        # 1. Update database checkpoint state
+        try:
+            await self.repo.update_job_checkpoint(
+                job_id=job_id,
+                stage=stage,
+                stage_status=stage_status,
+                percentage=monotonic_pct,
+                message=message,
+                completed_stages=completed_stages,
+                checkpoint_data=checkpoint_data,
+                raw_ocr_data=raw_ocr_data,
+                extracted_structured_data=extracted_structured_data,
+            )
+        except Exception as db_err:
+            raise
 
         # 2. Publish zero-PHI progress notification over PostgreSQL channel
         doc_id = document_id or checkpoint_data.get("documentId")
-        await self.notifier.publish_progress(
-            job_id=job_id,
-            file_key=file_key,
-            stage=stage,
-            stage_status=stage_status,
-            progress=monotonic_pct,
-            percentage=monotonic_pct,
-            message=message,
-            document_id=doc_id,
-            page=page,
-            total_pages=total_pages,
-            detected_languages=detected_languages,
-        )
+        resolved_batch_id = batch_id or checkpoint_data.get("batchId") or checkpoint_data.get("batch_id")
+        try:
+            await self.notifier.publish_progress(
+                job_id=job_id,
+                file_key=file_key,
+                stage=stage,
+                stage_status=stage_status,
+                progress=monotonic_pct,
+                percentage=monotonic_pct,
+                message=message,
+                batch_id=resolved_batch_id,
+                document_id=doc_id,
+                page=page,
+                total_pages=total_pages,
+                detected_languages=detected_languages,
+                current_step=current_step,
+                completed_steps=completed_steps,
+                total_steps=total_steps,
+            )
+        except Exception as notify_err:
+         
+            raise
 
         return monotonic_pct

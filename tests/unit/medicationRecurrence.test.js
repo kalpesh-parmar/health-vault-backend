@@ -6,6 +6,7 @@ const {
   convertToUserTimeZone,
 } = require("../../src/utils/reminderOccurrenceGenerator");
 const { reminderOccurrenceStatus } = require("../../src/enums/reminderOccurrenceStatus");
+const { calculateMedicationValues } = require("../../src/utils/medicationCalculation");
 
 describe("Medication Recurrence Engine & Multi-Timezone DST Tests", () => {
   const baseReminder = { id: "reminder-uuid-1" };
@@ -227,6 +228,81 @@ describe("Medication Recurrence Engine & Multi-Timezone DST Tests", () => {
 
       // Exactly 30 days
       expect(occurrences).toHaveLength(30);
+    });
+  });
+
+  describe("4. Custom Schedules & Daily Consumption Calculations", () => {
+    test("calculateMedicationValues accurately calculates dailyConsumption for multiple Custom times", () => {
+      const data = {
+        medicationType: "TABLET",
+        dosePerIntake: 1,
+        totalQuantity: 30,
+        startDate: "2026-10-22",
+        medicationSchedule: {
+          Custom: ["09:00:00", "14:00:00", "20:00:00"],
+        },
+      };
+
+      const result = calculateMedicationValues(data);
+      // 1 dose * 3 times a day = 3 daily consumption
+      expect(result.dailyConsumption).toBe(3);
+    });
+
+    test("generateReminderOccurrences generates occurrences for each time in Custom array", () => {
+      const med = {
+        ...baseMedication,
+        frequency: "Twice Daily",
+        totalQuantity: 4,
+        remainingQuantity: 4,
+        medicationSchedule: {
+          Custom: ["10:15:00", "16:45:00"],
+        },
+        startDate: "2026-10-22T00:00:00.000Z",
+      };
+
+      const occurrences = generateReminderOccurrences(
+        baseReminder,
+        med,
+        "2026-10-22T00:00:00.000Z",
+        {
+          skipPastOccurrences: false,
+        },
+      );
+
+      // 4 totalQuantity / 1 dose per intake = 4 doses total = 2 days x 2 times
+      expect(occurrences).toHaveLength(4);
+      const times = occurrences.map((occ) =>
+        moment(occ.actualMedicationTime).tz(med.timezone).format("HH:mm:ss"),
+      );
+      expect(times).toEqual(["10:15:00", "16:45:00", "10:15:00", "16:45:00"]);
+    });
+
+    test("generateReminderOccurrences supports Custom as a single string", () => {
+      const med = {
+        ...baseMedication,
+        frequency: "Once Daily",
+        totalQuantity: 2,
+        remainingQuantity: 2,
+        medicationSchedule: {
+          Custom: "11:30:00",
+        },
+        startDate: "2026-10-22T00:00:00.000Z",
+      };
+
+      const occurrences = generateReminderOccurrences(
+        baseReminder,
+        med,
+        "2026-10-22T00:00:00.000Z",
+        {
+          skipPastOccurrences: false,
+        },
+      );
+
+      expect(occurrences).toHaveLength(2);
+      const times = occurrences.map((occ) =>
+        moment(occ.actualMedicationTime).tz(med.timezone).format("HH:mm:ss"),
+      );
+      expect(times).toEqual(["11:30:00", "11:30:00"]);
     });
   });
 });

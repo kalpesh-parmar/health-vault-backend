@@ -516,7 +516,19 @@ async function executeAddDocumentAction({
 
   if (Array.isArray(rawMeds) && rawMeds.length > 0) {
     const todayStr = new Date().toISOString().slice(0, 10);
-    const rawList = rawMeds.map((m, idx) => {
+    const seenNames = new Set();
+    const uniqueRawMeds = [];
+    rawMeds.forEach((m) => {
+      if (!m || typeof m !== "object") return;
+      const rawName = (m.name || m.medicationName || m.medicine_name || m.medicineName || "")
+        .trim()
+        .toLowerCase();
+      if (rawName && seenNames.has(rawName)) return;
+      if (rawName) seenNames.add(rawName);
+      uniqueRawMeds.push(m);
+    });
+
+    const rawList = uniqueRawMeds.map((m, idx) => {
       const { row, onboardingMed } = normalizeMedicine(m, idx, "P-TEMP", {
         startDate: todayStr,
       });
@@ -543,11 +555,20 @@ async function executeAddDocumentAction({
         refillAlert: row.refillAlert || false,
         selected: true,
         isSaved: false,
+        duplicateInfo: {
+          hasDuplicate: false,
+          conflictType: null,
+          matchedMedication: null,
+          matchedMedications: [],
+          suggestedActions: [],
+        },
       };
     });
 
     if (userId) {
-      extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList);
+      extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList, {
+        skipDbCheck: true,
+      });
     } else {
       extractedMedicines = rawList;
     }

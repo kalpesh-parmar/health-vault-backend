@@ -1,7 +1,7 @@
 const fileType = Object.freeze({
   DOCX: {
     ext: "docx",
-    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    type: "docx",
   },
   DOC: { ext: "doc", type: "application/msword" },
   JPEG: { ext: "jpeg", type: "image/jpeg" },
@@ -14,7 +14,8 @@ const fileType = Object.freeze({
   JPG: { ext: "jpg", type: "image/jpg" },
 });
 
-const fileTypeValue = Object.values(fileType).map((item) => item.type);
+const fileTypeValue = [...new Set(Object.values(fileType).map((item) => item.type))];
+
 const fileExtensionValue = Object.values(fileType).map((item) => item.ext);
 
 module.exports = {

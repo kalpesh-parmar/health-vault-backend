@@ -1161,6 +1161,8 @@ class OcrStageHandler:
         completed_stages: list[str],
         checkpoint_data: dict[str, Any],
         mime_type: str | None = None,
+        document_id: UUID | str | None = None,
+        batch_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute tiered OCR processing:
         1. DOCX/DOC: Direct office XML text extraction (<10ms).
@@ -1219,6 +1221,8 @@ class OcrStageHandler:
                         message="Extracting page 1 of 1",
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
+                        document_id=document_id,
+                        batch_id=batch_id,
                         page=1,
                         total_pages=1,
                     )
@@ -1344,6 +1348,8 @@ class OcrStageHandler:
                                     message=f"Extracting page {page_item['page']} of {total_p}",
                                     completed_stages=completed_stages,
                                     checkpoint_data=checkpoint_data,
+                                    document_id=document_id,
+                                    batch_id=batch_id,
                                     page=page_item["page"],
                                     total_pages=total_p,
                                 )
@@ -1523,6 +1529,8 @@ class OcrStageHandler:
                     message=f"Extracting page {p['page']} of {total_p}",
                     completed_stages=completed_stages,
                     checkpoint_data=checkpoint_data,
+                    document_id=document_id,
+                    batch_id=batch_id,
                     page=p["page"],
                     total_pages=total_p,
                 )

@@ -1,4 +1,13 @@
-const { pgTable, uuid, timestamp, boolean, pgEnum, index } = require("drizzle-orm/pg-core");
+const {
+  pgTable,
+  uuid,
+  timestamp,
+  boolean,
+  pgEnum,
+  index,
+  integer,
+  varchar,
+} = require("drizzle-orm/pg-core");
 const { patient } = require("./patient");
 const { medicationReminder } = require("./medicationReminder");
 const {
@@ -29,6 +38,9 @@ const medicationReminderOccurrence = pgTable(
     status: occurrenceStatusEnum("status").default(reminderOccurrenceStatus.PENDING).notNull(),
     actualMedicationTime: timestamp("actual_medication_time").notNull(),
     completedAt: timestamp("completed_at"),
+    delayMinutes: integer("delay_minutes"),
+    completionClassification: varchar("completion_classification", { length: 32 }),
+    skipReason: varchar("skip_reason", { length: 255 }),
     isOverdue: boolean("is_overdue").default(false),
     createdAt: timestamp("created_at", {
       withTimezone: true,
@@ -48,6 +60,11 @@ const medicationReminderOccurrence = pgTable(
     index("medication_reminder_occurrences_patient_id_idx").on(table.patientId),
     index("occurrence_medication_idx").on(table.medicationId),
     index("occurrence_status_idx").on(table.status),
+    index("occurrence_status_classification_idx").on(
+      table.patientId,
+      table.status,
+      table.completionClassification,
+    ),
   ],
 );
 

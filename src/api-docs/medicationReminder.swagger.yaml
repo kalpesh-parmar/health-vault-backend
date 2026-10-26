@@ -251,6 +251,23 @@ components:
                 type: integer
                 example: 6
 
+  CreateReminderRequest:
+    oneOf:
+      - type: object
+        required:
+          - medicationId
+        properties:
+          medicationId:
+            type: string
+            format: uuid
+            example: "2ac99583-b7bd-4875-b2e9-16bd25976aa7"
+      - type: array
+        items:
+          type: string
+          format: uuid
+        example:
+          - "2ac99583-b7bd-4875-b2e9-16bd25976aa7"
+
 paths:
   /medication-reminders/create:
     post:
