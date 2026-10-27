@@ -25,13 +25,23 @@ class SlotContextService {
     const newYear = medicalIntent.year;
     const newGranularity = medicalIntent.granularity;
 
+    const clientTimestamp = options.clientTimestamp ? Number(options.clientTimestamp) : null;
+    const lastScopeUpdated = slots.scopeUpdatedAt ? Number(slots.scopeUpdatedAt) : 0;
+
     // 0. Handle explicit scope clearing
     if (actionType === "CLEAR_DOCUMENT_SCOPE" || intent === "CLEAR_DOCUMENT_SCOPE") {
+      // Prevent stale scope-clear operations from overriding newer selections
+      if (clientTimestamp && lastScopeUpdated && clientTimestamp < lastScopeUpdated) {
+        // Stale clear - do not overwrite newer scope selection
+        return slots;
+      }
       slots.activeDocumentId = null;
       slots.activeDocumentIds = [];
       slots.selectedDocumentMetadata = null;
       slots.scopeMode = "AUTHORIZED_HISTORY";
       slots.comparisonContext = null;
+      slots.activeMentions = [];
+      slots.scopeUpdatedAt = clientTimestamp || Date.now();
     } else {
       // 1. Document ID & Scope Mode slot update
       if (documentIds && Array.isArray(documentIds) && documentIds.length > 0) {
@@ -39,12 +49,15 @@ class SlotContextService {
         slots.activeDocumentIds = Array.from(new Set(documentIds));
         slots.scopeMode =
           scopeMode || (documentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
+        slots.scopeUpdatedAt = clientTimestamp || Date.now();
       } else if (scopeMode === "AUTHORIZED_HISTORY") {
         slots.activeDocumentId = null;
         slots.activeDocumentIds = [];
         slots.selectedDocumentMetadata = null;
         slots.scopeMode = "AUTHORIZED_HISTORY";
         slots.comparisonContext = null;
+        slots.activeMentions = [];
+        slots.scopeUpdatedAt = clientTimestamp || Date.now();
       }
 
       if (selectedDocumentMetadata) {

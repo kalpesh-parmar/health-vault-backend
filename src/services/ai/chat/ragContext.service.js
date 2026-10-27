@@ -966,7 +966,10 @@ class RagContextService {
             const summaryText =
               docData.summaryEnglish ||
               structData?.summaryEnglish ||
+              structData?.summary ||
+              imgAnalysis?.educationalDescription ||
               imgAnalysis?.aiGeneratedDescription ||
+              structData?.remarks ||
               "";
             if (imgAnalysis || docData.documentType === "IMAGING_REPORT") {
               const anatomicalRegion =
@@ -1002,6 +1005,31 @@ ${summaryText}`;
                 content,
                 score: 1.0,
                 sourceType: "imaging_observations",
+                docData,
+              });
+            } else if (
+              summaryText ||
+              (Array.isArray(structData?.tests) && structData.tests.length > 0)
+            ) {
+              let testsBlock = "";
+              if (Array.isArray(structData?.tests) && structData.tests.length > 0) {
+                testsBlock =
+                  "\n\nKey Laboratory Tests & Observations:\n" +
+                  structData.tests
+                    .slice(0, 15)
+                    .map(
+                      (t) =>
+                        `• ${t.name || t.testName || "Test"}: ${t.value} ${t.unit || ""} (Status: ${t.status || (t.isAbnormal ? "ABNORMAL" : "NORMAL")})`,
+                    )
+                    .join("\n");
+              }
+              summaryChunks.push({
+                chunkId: `doc-summary-${dId}`,
+                documentId: dId,
+                sectionTitle: "Document Summary & Verified Clinical Data",
+                content: `[AUTHORIZED DOCUMENT SUMMARY & CLINICAL DATA: ${docData.fileName || "Medical Report"}]\n${summaryText || "Pre-extracted clinical findings:"}${testsBlock}`,
+                score: 1.0,
+                sourceType: "summary",
                 docData,
               });
             }

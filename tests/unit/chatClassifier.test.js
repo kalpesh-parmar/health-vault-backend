@@ -246,6 +246,34 @@ describe("ChatClassifierService — Universal Multilingual Intent & Entity Tests
       expect(res.intents.has("CLINICAL_ADVICE")).toBe(true);
       expect(res.isFastPathEligible).toBe(false);
     });
+
+    test("English: @Urocare Report with documentId -> DOCUMENT_SUMMARY (Fast-Path, requiresRag = false)", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "@Urocare Report",
+        englishQuestion: "@Urocare Report",
+        detectedLanguage: "english",
+        documentId: ["doc-123"],
+      });
+
+      expect(res.domains.has("DOCUMENTS")).toBe(true);
+      expect(res.requiresRag).toBe(false);
+      expect(res.isFastPathEligible).toBe(true);
+      expect(res.fastPathType).toBe("DOCUMENT_SUMMARY");
+    });
+
+    test("Gujarati: @રિપોર્ટ નો સારાંશ આપો with documentId -> DOCUMENT_SUMMARY", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "@રિપોર્ટ નો સારાંશ આપો",
+        englishQuestion: "give summary of report",
+        detectedLanguage: "gujarati",
+        documentId: ["doc-123"],
+      });
+
+      expect(res.domains.has("DOCUMENTS")).toBe(true);
+      expect(res.requiresRag).toBe(false);
+      expect(res.isFastPathEligible).toBe(true);
+      expect(res.fastPathType).toBe("DOCUMENT_SUMMARY");
+    });
   });
 
   describe("7. MULTI-DOMAIN QUERIES", () => {
@@ -261,6 +289,69 @@ describe("ChatClassifierService — Universal Multilingual Intent & Entity Tests
       expect(res.isMultiDomain).toBe(true);
       // Multi-domain requires synthesis across domains so not single fast-path
       expect(res.isFastPathEligible).toBe(false);
+    });
+  });
+
+  describe("8. TRANSLITERATED ROMAN-SCRIPT (HINGLISH / GUJLISH) QUERIES", () => {
+    test("Hinglish: meri dawai ki list do -> MEDICATIONS + LIST_MEDICATION", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "meri dawai ki list do",
+        englishQuestion: "give me list of my medicines",
+        detectedLanguage: "hindi",
+      });
+
+      expect(res.domains.has("MEDICATIONS")).toBe(true);
+      expect(res.isFastPathEligible).toBe(true);
+      expect(res.fastPathType).toBe("LIST_MEDICATION");
+    });
+
+    test("Gujlish: aa dava nu refill baki che -> REFILL_STOCK", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "aa dava nu refill baki che",
+        englishQuestion: "is refill remaining for this medicine",
+        detectedLanguage: "gujarati",
+      });
+
+      expect(res.domains.has("REFILLS")).toBe(true);
+      expect(res.isFastPathEligible).toBe(true);
+      expect(res.fastPathType).toBe("REFILL_STOCK");
+    });
+
+    test("Gujlish: aa dava ketli baki che -> REFILLS + COUNT", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "aa dava ketli baki che",
+        englishQuestion: "how much of this medicine is left",
+        detectedLanguage: "gujarati",
+      });
+
+      expect(res.domains.has("REFILLS")).toBe(true);
+      expect(res.intents.has("COUNT")).toBe(true);
+      expect(res.isFastPathEligible).toBe(true);
+      expect(res.fastPathType).toBe("COUNT");
+    });
+
+    test("Hinglish: aaj kitni dava leni hai -> REMINDERS + today", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "aaj kitni dava leni hai",
+        englishQuestion: "how many medicines to take today",
+        detectedLanguage: "hindi",
+      });
+
+      expect(res.domains.has("REMINDERS")).toBe(true);
+      expect(res.entities.temporal).toBe("today");
+      expect(res.isFastPathEligible).toBe(true);
+    });
+
+    test("Hinglish: meri umar kitni hai -> SPECIFIC_FIELD (age)", () => {
+      const res = chatClassifier.classify({
+        rawQuestion: "meri umar kitni hai",
+        englishQuestion: "what is my age",
+        detectedLanguage: "hindi",
+      });
+
+      expect(res.domains.has("PROFILE")).toBe(true);
+      expect(res.entities.specificField).toBe("age");
+      expect(res.isFastPathEligible).toBe(true);
     });
   });
 });

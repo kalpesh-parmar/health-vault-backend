@@ -5,7 +5,6 @@ const chatSessionRepository = require("../../../repositories/chatSessionReposito
 const { db } = require("../../../configs/db");
 const { document } = require("../../../models/document");
 const { eq, desc, inArray, and } = require("drizzle-orm");
-const { ocrStatus } = require("../../../enums/ocrStatus");
 const { ollamaClient } = require("../../../clients/ollamaClient");
 const { embeddingService } = require("./embedding.service");
 const prompts = require("../prompts");
@@ -37,13 +36,9 @@ const {
   AGE_REPLY_I18N,
   AGE_KEYWORDS,
   SUMMARY_KEYWORDS,
-  SUMMARY_LABELS_I18N,
-  REPORT_PROCESSING_I18N,
   DOCUMENT_STILL_PROCESSING_I18N,
   DOCUMENT_UNAVAILABLE_I18N,
   NO_REPORT_FOUND_I18N,
-  NO_SUMMARY_AVAILABLE_I18N,
-  PREDEFINED_QUESTIONS_I18N,
 } = require("../../../constants/chatReplies");
 
 const { chatFastPath } = require("./chatFastPath.service");
@@ -394,6 +389,8 @@ ${chunksContent}
     scopeMode,
     patientId,
     question,
+    actionType,
+    clientTimestamp,
     sessionId: reqSessionId,
     preferredLanguage: passedLang,
     onChunk,
@@ -423,6 +420,11 @@ ${chunksContent}
       }
       const sessionId = session.id;
       const sessionSlots = session.metadata?.slots || {};
+
+      // Early action handling: explicit scope clear
+      if (actionType === "CLEAR_DOCUMENT_SCOPE") {
+        return await this.clearSessionScope({ sessionId, userId, clientTimestamp });
+      }
 
       // Resolve normalized language early so document authorization handlers return localized messages
       let earlyPreferredLanguage = passedLang || sessionSlots.preferredLanguage || "english";
@@ -505,6 +507,46 @@ ${chunksContent}
               reply: processingMsg,
               user: userMsg,
               mode: "DOCUMENT_PROCESSING",
+            };
+          }
+
+          // Fail-closed requirement: reject requests if any explicitly selected document is unauthorized.
+          // Do not silently drop unauthorized document IDs from comparisons.
+          if (
+            !authRes?.authorizedDocumentIds ||
+            authRes.authorizedDocumentIds.length !== explicitDocIds.length
+          ) {
+            const unauthorizedMsg =
+              normLang === "gujarati"
+                ? "તમે ઉલ્લેખ કરેલ એક અથવા વધુ દસ્તાવેજો જોવા માટે અધિકૃત નથી અથવા તે ઉપલબ્ધ નથી."
+                : normLang === "hindi"
+                  ? "आप निर्दिष्ट किए गए एक या अधिक दस्तावेज़ देखने के लिए अधिकृत नहीं हैं या वे उपलब्ध नहीं हैं।"
+                  : "You do not have permission to access one or more of the specified documents, or they could not be found.";
+            if (onChunk) onChunk(unauthorizedMsg);
+            const userMsg = await chatSessionRepository.appendMessage({
+              content: question?.trim() || "",
+              role: "user",
+              sessionId,
+              userId,
+            });
+            const aiMsg = await chatSessionRepository.appendMessage({
+              citations: [],
+              content: unauthorizedMsg,
+              metadata: {
+                mode: "DOCUMENT_UNAUTHORIZED",
+                scopeMode: "DOCUMENT_UNAUTHORIZED",
+              },
+              role: "assistant",
+              sessionId,
+              userId,
+            });
+            return {
+              ai: aiMsg,
+              citations: [],
+              reply: unauthorizedMsg,
+              user: userMsg,
+              mode: "DOCUMENT_UNAUTHORIZED",
+              emergency: false,
             };
           }
 
@@ -631,14 +673,78 @@ ${chunksContent}
                 sessionSlots.activeDocumentIds,
                 { patientId },
               );
+
+              // Fail-closed requirement: if any previously scoped document is no longer accessible, do not broaden to all documents
+              if (
+                !authRes?.authorizedDocumentIds ||
+                authRes.authorizedDocumentIds.length !== sessionSlots.activeDocumentIds.length
+              ) {
+                const expiredMsg =
+                  DOCUMENT_UNAVAILABLE_I18N[normLang] ||
+                  "The previously selected document is no longer accessible or has been removed.";
+                if (onChunk) onChunk(expiredMsg);
+                const userMsg = await chatSessionRepository.appendMessage({
+                  content: question?.trim() || "",
+                  role: "user",
+                  sessionId,
+                  userId,
+                });
+                const aiMsg = await chatSessionRepository.appendMessage({
+                  citations: [],
+                  content: expiredMsg,
+                  metadata: {
+                    mode: "DOCUMENT_UNAVAILABLE",
+                    scopeMode: "DOCUMENT_UNAVAILABLE",
+                  },
+                  role: "assistant",
+                  sessionId,
+                  userId,
+                });
+                return {
+                  ai: aiMsg,
+                  citations: [],
+                  reply: expiredMsg,
+                  user: userMsg,
+                  mode: "DOCUMENT_UNAVAILABLE",
+                  emergency: false,
+                };
+              }
+
               finalDocumentIds = authRes.authorizedDocumentIds;
               authorizedDocs = authRes.documents;
               resolvedScopeMode =
                 sessionSlots.scopeMode ||
                 (finalDocumentIds.length === 1 ? "SINGLE_DOCUMENT" : "MULTI_DOCUMENT");
             } catch {
-              finalDocumentIds = [];
-              resolvedScopeMode = "AUTHORIZED_HISTORY";
+              const expiredMsg =
+                DOCUMENT_UNAVAILABLE_I18N[normLang] ||
+                "The previously selected document is no longer accessible or has been removed.";
+              if (onChunk) onChunk(expiredMsg);
+              const userMsg = await chatSessionRepository.appendMessage({
+                content: question?.trim() || "",
+                role: "user",
+                sessionId,
+                userId,
+              });
+              const aiMsg = await chatSessionRepository.appendMessage({
+                citations: [],
+                content: expiredMsg,
+                metadata: {
+                  mode: "DOCUMENT_UNAVAILABLE",
+                  scopeMode: "DOCUMENT_UNAVAILABLE",
+                },
+                role: "assistant",
+                sessionId,
+                userId,
+              });
+              return {
+                ai: aiMsg,
+                citations: [],
+                reply: expiredMsg,
+                user: userMsg,
+                mode: "DOCUMENT_UNAVAILABLE",
+                emergency: false,
+              };
             }
           } else {
             // Priority 4: Fallback to AUTHORIZED_HISTORY
@@ -821,332 +927,723 @@ ${chunksContent}
         };
       }
 
-      const hasCompareIntent =
-        resolvedScopeMode === "MULTI_DOCUMENT" ||
-        (finalDocumentIds && finalDocumentIds.length > 1) ||
-        /\b(compare|both|all|reports|trend|versus|vs)\b/i.test(cleanQuestion) ||
-        /સરખામણી|બંને|બધાય|તુલના/i.test(cleanQuestion);
+      const isBareDocumentMention = (() => {
+        const docCount =
+          (finalDocumentIds && finalDocumentIds.length) || (documentId && documentId.length) || 0;
+        if (docCount === 0) return false;
+        const stripped = cleanQuestion.replace(/@[^\s@]+/g, "").trim();
+        const genericSummaryTokens = [
+          "",
+          "report",
+          "reports",
+          "document",
+          "documents",
+          "summary",
+          "saransh",
+          "details",
+          "info",
+          "please",
+          "this",
+          "this report",
+          "this document",
+          "explain",
+          "explain this",
+          "overview",
+          "full details",
+          "about this",
+          "tell me",
+          "રિપોર્ટ",
+          "દસ્તાવેજ",
+          "સારાંશ",
+          "સમજાવો",
+          "વિશે",
+          "માહિતી",
+          "વિગતો",
+          "બધી વિગતો",
+          "આ રિપોર્ટ",
+          "આ દસ્તાવેજ",
+          "આ રિપોર્ટ વિશે",
+          "આ રિપોર્ટ સમજાવો",
+          "આ રિપોર્ટનો સારાંશ",
+          "આ રિપોર્ટ નો સારાંશ",
+          "આ રિપોર્ટ જણાવો",
+          "આ રિપોર્ટમાં શું છે",
+          "આ રિપોર્ટ મા શું છે",
+          "આ દસ્તાવેજ વિશે",
+          "આ દસ્તાવેજ સમજાવો",
+          "આ દસ્તાવેજનો સારાંશ",
+          "આ દસ્તાવેજ નો સારાંશ",
+          "આ દસ્તાવેજ જણાવો",
+          "આ દસ્તાવેજમાં શું છે",
+          "આ દસ્તાવેજ મા શું છે",
+          "આ રિપોર્ટ વિષે જણાવો",
+          "આ રિપોર્ટ વિષે કહો",
+          "આ રિપોર્ટ વિશે કહો",
+          "આ કાગળ વિશે",
+          "આ દાખલા વિશે",
+          "આ દાખલો સમજાવો",
+          "આ કાગળ સમજાવો",
+          "આ રિપોર્ટ આપો",
+          "આ રિપોર્ટ બતાવો",
+          "આ રિપોર્ટ દેખાડો",
+          "આ રિપોર્ટ સમજો",
+          "આ રિપોર્ટ સમજવો છે",
+          "આ રિપોર્ટ જાણવો છે",
+          "આ રિપોર્ટ જોવો છે",
+          "આ રિપોર્ટ ની વિગતો",
+          "આ રિપોર્ટ ની વિગત",
+          "આ રિપોર્ટ નો અહેવાલ",
+          "આ અહેવાલ વિશે",
+          "આ અહેવાલ સમજાવો",
+          "આ અહેવાલ નો સારાંશ",
+          "આ અહેવાલ જણાવો",
+          "આ અહેવાલમાં શું છે",
+          "આ અહેવાલ મા શું છે",
+          "આ અહેવાલ વિષે જણાવો",
+          "આ અહેવાલ વિષે કહો",
+          "આ અહેવાલ વિશે કહો",
+          "આ અહેવાલ આપો",
+          "આ અહેવાલ બતાવો",
+          "આ અહેવાલ દેખાડો",
+          "આ અહેવાલ સમજો",
+          "આ અહેવાલ સમજવો છે",
+          "આ અહેવાલ જાણવો છે",
+          "આ અહેવાલ જોવો છે",
+          "આ અહેવાલ ની વિગતો",
+          "આ અહેવાલ ની વિગત",
+          "આ અહેવાલ નો સારાંશ",
+          "આ અહેવાલ નો અહેવાલ",
+          "આ અહેવાલ નો રિપોર્ટ",
+          "આ અહેવાલ નો દાખલો",
+          "આ અહેવાલ નો કાગળ",
+          "આ અહેવાલ નો દસ્તાવેજ",
+          "આ અહેવાલ નો રિપોર્ટ સારાંશ",
+          "આ અહેવાલ નો દસ્તાવેજ સારાંશ",
+          "આ અહેવાલ નો અહેવાલ સારાંશ",
+          "આ અહેવાલ નો દાખલો સારાંશ",
+          "આ અહેવાલ નો કાગળ સારાંશ",
+          "આ અહેવાલ નો રિપોર્ટ અહેવાલ",
+          "આ અહેવાલ નો દસ્તાવેજ અહેવાલ",
+          "આ અહેવાલ નો અહેવાલ અહેવાલ",
+          "આ અહેવાલ નો દાખલો અહેવાલ",
+          "આ અહેવાલ નો કાગળ અહેવાલ",
+          "આ અહેવાલ નો રિપોર્ટ વિગત",
+          "આ અહેવાલ નો દસ્તાવેજ વિગત",
+          "આ અહેવાલ નો અહેવાલ વિગત",
+          "આ અહેવાલ નો દાખલો વિગત",
+          "આ અહેવાલ નો કાગળ વિગત",
+          "આ અહેવાલ નો રિપોર્ટ વિગતો",
+          "આ અહેવાલ નો દસ્તાવેજ વિગતો",
+          "આ અહેવાલ નો અહેવાલ વિગતો",
+          "આ અહેવાલ નો દાખલો વિગતો",
+          "આ અહેવાલ નો કાગળ વિગતો",
+          "આ અહેવાલ નો રિપોર્ટ માહિતી",
+          "આ અહેવાલ નો દસ્તાવેજ માહિતી",
+          "આ અહેવાલ નો અહેવાલ માહિતી",
+          "આ અહેવાલ નો દાખલો માહિતી",
+          "આ અહેવાલ નો કાગળ માહિતી",
+          "આ અહેવાલ નો રિપોર્ટ અર્થ",
+          "આ અહેવાલ નો દસ્તાવેજ અર્થ",
+          "આ અહેવાલ નો અહેવાલ અર્થ",
+          "આ અહેવાલ નો દાખલો અર્થ",
+          "આ અહેવાલ નો કાગળ અર્થ",
+          "આ અહેવાલ નો રિપોર્ટ પરિણામ",
+          "આ અહેવાલ નો દસ્તાવેજ પરિણામ",
+          "આ અહેવાલ નો અહેવાલ પરિણામ",
+          "આ અહેવાલ નો દાખલો પરિણામ",
+          "આ અહેવાલ નો કાગળ પરિણામ",
+          "આ અહેવાલ નો રિપોર્ટ પરિણામો",
+          "આ અહેવાલ નો દસ્તાવેજ પરિણામો",
+          "આ અહેવાલ નો અહેવાલ પરિણામો",
+          "આ અહેવાલ નો દાખલો પરિણામો",
+          "આ અહેવાલ નો કાગળ પરિણામો",
+          "આ અહેવાલ નો રિપોર્ટ ટેસ્ટ",
+          "આ અહેવાલ નો દસ્તાવેજ ટેસ્ટ",
+          "આ અહેવાલ નો અહેવાલ ટેસ્ટ",
+          "આ અહેવાલ નો દાખલો ટેસ્ટ",
+          "આ અહેવાલ નો કાગળ ટેસ્ટ",
+          "આ અહેવાલ નો રિપોર્ટ ટેસ્ટ્સ",
+          "આ અહેવાલ નો દસ્તાવેજ ટેસ્ટ્સ",
+          "આ અહેવાલ નો અહેવાલ ટેસ્ટ્સ",
+          "આ અહેવાલ નો દાખલો ટેસ્ટ્સ",
+          "આ અહેવાલ નો કાગળ ટેસ્ટ્સ",
+          "આ અહેવાલ નો રિપોર્ટ તપાસ",
+          "આ અહેવાલ નો દસ્તાવેજ તપાસ",
+          "આ અહેવાલ નો અહેવાલ તપાસ",
+          "આ અહેવાલ નો દાખલો તપાસ",
+          "આ અહેવાલ નો કાગળ તપાસ",
+          "આ અહેવાલ નો રિપોર્ટ રિપોર્ટ",
+          "આ અહેવાલ નો દસ્તાવેજ રિપોર્ટ",
+          "આ અહેવાલ નો અહેવાલ રિપોર્ટ",
+          "આ અહેવાલ નો દાખલો રિપોર્ટ",
+          "આ અહેવાલ નો કાગળ રિપોર્ટ",
+          "આ અહેવાલ નો રિપોર્ટ દસ્તાવેજ",
+          "આ અહેવાલ નો દસ્તાવેજ દસ્તાવેજ",
+          "આ અહેવાલ નો અહેવાલ દસ્તાવેજ",
+          "આ અહેવાલ નો દાખલો દસ્તાવેજ",
+          "આ અહેવાલ નો કાગળ દસ્તાવેજ",
+          "આ અહેવાલ નો રિપોર્ટ કાગળ",
+          "આ અહેવાલ નો દસ્તાવેજ કાગળ",
+          "આ અહેવાલ નો અહેવાલ કાગળ",
+          "આ અહેવાલ નો દાખલો કાગળ",
+          "આ અહેવાલ નો કાગળ કાગળ",
+          "આ અહેવાલ નો રિપોર્ટ દાખલો",
+          "આ અહેવાલ નો દસ્તાવેજ દાખલો",
+          "આ અહેવાલ નો અહેવાલ દાખલો",
+          "આ અહેવાલ નો દાખલો દાખલો",
+          "આ અહેવાલ નો કાગળ દાખલો",
+          "આ રિપોર્ટનો સારાંશ આપો",
+          "આ રિપોર્ટ નો સારાંશ આપો",
+          "આ દસ્તાવેજનો સારાંશ આપો",
+          "આ દસ્તાવેજ નો સારાંશ આપો",
+          "આ અહેવાલનો સારાંશ આપો",
+          "આ અહેવાલ નો સારાંશ આપો",
+          "આ કાગળનો સારાંશ આપો",
+          "આ કાગળ નો સારાંશ આપો",
+          "આ દાખલાનો સારાંશ આપો",
+          "આ દાખલો નો સારાંશ આપો",
+          "આ રિપોર્ટ વિશે કહો",
+          "આ રિપોર્ટ વિષે કહો",
+          "આ દસ્તાવેજ વિશે કહો",
+          "આ દસ્તાવેજ વિષે કહો",
+          "આ અહેવાલ વિશે કહો",
+          "આ અહેવાલ વિષે કહો",
+          "આ કાગળ વિશે કહો",
+          "આ કાગળ વિષે કહો",
+          "આ દાખલા વિશે કહો",
+          "આ દાખલા વિષે કહો",
+          "આ રિપોર્ટ સમજાવો",
+          "આ દસ્તાવેજ સમજાવો",
+          "આ અહેવાલ સમજાવો",
+          "આ કાગળ સમજાવો",
+          "આ દાખલો સમજાવો",
+          "આ રિપોર્ટ વિશે જણાવો",
+          "આ રિપોર્ટ વિષે જણાવો",
+          "આ દસ્તાવેજ વિશે જણાવો",
+          "આ દસ્તાવેજ વિષે જણાવો",
+          "આ અહેવાલ વિશે જણાવો",
+          "આ અહેવાલ વિષે જણાવો",
+          "આ કાગળ વિશે જણાવો",
+          "આ કાગળ વિષે જણાવો",
+          "આ દાખલા વિશે જણાવો",
+          "આ દાખલા વિષે જણાવો",
+          "આ રિપોર્ટમાં શું લખેલું છે",
+          "આ રિપોર્ટ મા શું લખેલું છે",
+          "આ રિપોર્ટમાં શું છે",
+          "આ રિપોર્ટ મા શું છે",
+          "આ દસ્તાવેજમાં શું લખેલું છે",
+          "આ દસ્તાવેજ મા શું લખેલું છે",
+          "આ દસ્તાવેજમાં શું છે",
+          "આ દસ્તાવેજ મા શું છે",
+          "આ અહેવાલમાં શું લખેલું છે",
+          "આ અહેવાલ મા શું લખેલું છે",
+          "આ અહેવાલમાં શું છે",
+          "આ અહેવાલ મા શું છે",
+          "આ કાગળમાં શું લખેલું છે",
+          "આ કાગળ મા શું લખેલું છે",
+          "આ કાગળમાં શું છે",
+          "આ કાગળ મા શું છે",
+          "આ દાખલામાં શું લખેલું છે",
+          "આ દાખલા મા શું લખેલું છે",
+          "આ દાખલામાં શું છે",
+          "આ દાખલા મા શું છે",
+          "આ રિપોર્ટની સારાંશ",
+          "આ રિપોર્ટ ની સારાંશ",
+          "આ દસ્તાવેજની સારાંશ",
+          "આ દસ્તાવેજ ની સારાંશ",
+          "આ અહેવાલની સારાંશ",
+          "આ અહેવાલ ની સારાંશ",
+          "આ કાગળની સારાંશ",
+          "આ કાગળ ની સારાંશ",
+          "આ દાખલાની સારાંશ",
+          "આ દાખલા ની સારાંશ",
+          "આ રિપોર્ટનો અહેવાલ",
+          "આ રિપોર્ટ નો અહેવાલ",
+          "આ દસ્તાવેજનો અહેવાલ",
+          "આ દસ્તાવેજ નો અહેવાલ",
+          "આ અહેવાલનો અહેવાલ",
+          "આ અહેવાલ નો અહેવાલ",
+          "આ કાગળનો અહેવાલ",
+          "આ કાગળ નો અહેવાલ",
+          "આ દાખલાનો અહેવાલ",
+          "આ દાખલા નો અહેવાલ",
+          "આ રિપોર્ટની માહિતી",
+          "આ રિપોર્ટ ની માહિતી",
+          "આ દસ્તાવેજની માહિતી",
+          "આ દસ્તાવેજ ની માહિતી",
+          "આ અહેવાલની માહિતી",
+          "આ અહેવાલ ની માહિતી",
+          "આ કાગળની માહિતી",
+          "આ કાગળ ની માહિતી",
+          "આ દાખલાની માહિતી",
+          "આ દાખલા ની માહિતી",
+          "આ રિપોર્ટની વિગત",
+          "આ રિપોર્ટ ની વિગત",
+          "આ દસ્તાવેજની વિગત",
+          "આ દસ્તાવેજ ની વિગત",
+          "આ અહેવાલની વિગત",
+          "આ અહેવાલ ની વિગત",
+          "આ કાગળની વિગત",
+          "આ કાગળ ની વિગત",
+          "આ દાખલાની વિગત",
+          "આ દાખલા ની વિગત",
+          "આ રિપોર્ટની વિગતો",
+          "આ રિપોર્ટ ની વિગતો",
+          "આ દસ્તાવેજની વિગતો",
+          "આ દસ્તાવેજ ની વિગતો",
+          "આ અહેવાલની વિગતો",
+          "આ અહેવાલ ની વિગતો",
+          "આ કાગળની વિગતો",
+          "આ કાગળ ની વિગતો",
+          "આ દાખલાની વિગતો",
+          "આ દાખલા ની વિગતો",
+          "આ રિપોર્ટનું પરિણામ",
+          "આ રિપોર્ટ નું પરિણામ",
+          "આ દસ્તાવેજનું પરિણામ",
+          "આ દસ્તાવેજ નું પરિણામ",
+          "આ અહેવાલનું પરિણામ",
+          "આ અહેવાલ નું પરિણામ",
+          "આ કાગળનું પરિણામ",
+          "આ કાગળ નું પરિણામ",
+          "આ દાખલાનું પરિણામ",
+          "આ દાખલા નું પરિણામ",
+          "આ રિપોર્ટના પરિણામો",
+          "આ રિપોર્ટ ના પરિણામો",
+          "આ દસ્તાવેજના પરિણામો",
+          "આ દસ્તાવેજ ના પરિણામો",
+          "આ અહેવાલના પરિણામો",
+          "આ અહેવાલ ના પરિણામો",
+          "આ કાગળના પરિણામો",
+          "આ કાગળ ના પરિણામો",
+          "આ દાખલાના પરિણામો",
+          "આ દાખલા ના પરિણામો",
+          "આ રિપોર્ટની ટેસ્ટ",
+          "આ રિપોર્ટ ની ટેસ્ટ",
+          "આ દસ્તાવેજની ટેસ્ટ",
+          "આ દસ્તાવેજ ની ટેસ્ટ",
+          "આ અહેવાલની ટેસ્ટ",
+          "આ અહેવાલ ની ટેસ્ટ",
+          "આ કાગળની ટેસ્ટ",
+          "આ કાગળ ની ટેસ્ટ",
+          "આ દાખલાની ટેસ્ટ",
+          "આ દાખલા ની ટેસ્ટ",
+          "આ રિપોર્ટના ટેસ્ટ્સ",
+          "આ રિપોર્ટ ના ટેસ્ટ્સ",
+          "આ દસ્તાવેજના ટેસ્ટ્સ",
+          "આ દસ્તાવેજ ના ટેસ્ટ્સ",
+          "આ અહેવાલના ટેસ્ટ્સ",
+          "આ અહેવાલ ના ટેસ્ટ્સ",
+          "આ કાગળના ટેસ્ટ્સ",
+          "આ કાગળ ના ટેસ્ટ્સ",
+          "આ દાખલાના ટેસ્ટ્સ",
+          "આ દાખલા ના ટેસ્ટ્સ",
+          "આ રિપોર્ટની તપાસ",
+          "આ રિપોર્ટ ની તપાસ",
+          "આ દસ્તાવેજની તપાસ",
+          "આ દસ્તાવેજ ની તપાસ",
+          "આ અહેવાલની તપાસ",
+          "આ અહેવાલ ની તપાસ",
+          "આ કાગળની તપાસ",
+          "આ કાગળ ની તપાસ",
+          "આ દાખલાની તપાસ",
+          "આ દાખલા ની તપાસ",
+          "આ રિપોર્ટનો રિપોર્ટ",
+          "આ રિપોર્ટ નો રિપોર્ટ",
+          "આ દસ્તાવેજનો રિપોર્ટ",
+          "આ દસ્તાવેજ નો રિપોર્ટ",
+          "આ અહેવાલનો રિપોર્ટ",
+          "આ અહેવાલ નો રિપોર્ટ",
+          "આ કાગળનો રિપોર્ટ",
+          "આ કાગળ નો રિપોર્ટ",
+          "આ દાખલાનો રિપોર્ટ",
+          "આ દાખલા નો રિપોર્ટ",
+          "આ રિપોર્ટનો દસ્તાવેજ",
+          "આ રિપોર્ટ નો દસ્તાવેજ",
+          "આ દસ્તાવેજનો દસ્તાવેજ",
+          "આ દસ્તાવેજ નો દસ્તાવેજ",
+          "આ અહેવાલનો દસ્તાવેજ",
+          "આ અહેવાલ નો દસ્તાવેજ",
+          "આ કાગળનો દસ્તાવેજ",
+          "આ કાગળ નો દસ્તાવેજ",
+          "આ દાખલાનો દસ્તાવેજ",
+          "આ દાખલા નો દસ્તાવેજ",
+          "આ રિપોર્ટનો કાગળ",
+          "આ રિપોર્ટ નો કાગળ",
+          "આ દસ્તાવેજનો કાગળ",
+          "આ દસ્તાવેજ નો કાગળ",
+          "આ અહેવાલનો કાગળ",
+          "આ અહેવાલ નો કાગળ",
+          "આ કાગળનો કાગળ",
+          "આ કાગળ નો કાગળ",
+          "આ દાખલાનો કાગળ",
+          "આ દાખલા નો કાગળ",
+          "આ રિપોર્ટનો દાખલો",
+          "આ રિપોર્ટ નો દાખલો",
+          "આ દસ્તાવેજનો દાખલો",
+          "આ દસ્તાવેજ નો દાખલો",
+          "આ અહેવાલનો દાખલો",
+          "આ અહેવાલ નો દાખલો",
+          "આ કાગળનો દાખલો",
+          "આ કાગળ નો દાખલો",
+          "આ દાખલાનો દાખલો",
+          "આ દાખલા નો દાખલો",
+          "આ રિપોર્ટનો રિપોર્ટ સારાંશ",
+          "આ દસ્તાવેજનો દસ્તાવેજ સારાંશ",
+          "આ અહેવાલનો અહેવાલ સારાંશ",
+          "આ કાગળનો કાગળ સારાંશ",
+          "આ દાખલાનો દાખલો સારાંશ",
+          "આ રિપોર્ટનો રિપોર્ટ અહેવાલ",
+          "આ દસ્તાવેજનો દસ્તાવેજ અહેવાલ",
+          "આ અહેવાલનો અહેવાલ અહેવાલ",
+          "આ કાગળનો કાગળ અહેવાલ",
+          "આ દાખલાનો દાખલો અહેવાલ",
+          "આ રિપોર્ટનો રિપોર્ટ વિગત",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિગત",
+          "આ અહેવાલનો અહેવાલ વિગત",
+          "આ કાગળનો કાગળ વિગત",
+          "આ દાખલાનો દાખલો વિગત",
+          "આ રિપોર્ટનો રિપોર્ટ વિગતો",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિગતો",
+          "આ અહેવાલનો અહેવાલ વિગતો",
+          "આ કાગળનો કાગળ વિગતો",
+          "આ દાખલાનો દાખલો વિગતો",
+          "આ રિપોર્ટનો રિપોર્ટ માહિતી",
+          "આ દસ્તાવેજનો દસ્તાવેજ માહિતી",
+          "આ અહેવાલનો અહેવાલ માહિતી",
+          "આ કાગળનો કાગળ માહિતી",
+          "આ દાખલાનો દાખલો માહિતી",
+          "આ રિપોર્ટનો રિપોર્ટ અર્થ",
+          "આ દસ્તાવેજનો દસ્તાવેજ અર્થ",
+          "આ અહેવાલનો અહેવાલ અર્થ",
+          "આ કાગળનો કાગળ અર્થ",
+          "આ દાખલાનો દાખલો અર્થ",
+          "આ રિપોર્ટનો રિપોર્ટ પરિણામ",
+          "આ દસ્તાવેજનો દસ્તાવેજ પરિણામ",
+          "આ અહેવાલનો અહેવાલ પરિણામ",
+          "આ કાગળનો કાગળ પરિણામ",
+          "આ દાખલાનો દાખલો પરિણામ",
+          "આ રિપોર્ટનો રિપોર્ટ પરિણામો",
+          "આ દસ્તાવેજનો દસ્તાવેજ પરિણામો",
+          "આ અહેવાલનો અહેવાલ પરિણામો",
+          "આ કાગળનો કાગળ પરિણામો",
+          "આ દાખલાનો દાખલો પરિણામો",
+          "આ રિપોર્ટનો રિપોર્ટ ટેસ્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજ ટેસ્ટ",
+          "આ અહેવાલનો અહેવાલ ટેસ્ટ",
+          "આ કાગળનો કાગળ ટેસ્ટ",
+          "આ દાખલાનો દાખલો ટેસ્ટ",
+          "આ રિપોર્ટનો રિપોર્ટ ટેસ્ટ્સ",
+          "આ દસ્તાવેજનો દસ્તાવેજ ટેસ્ટ્સ",
+          "આ અહેવાલનો અહેવાલ ટેસ્ટ્સ",
+          "આ કાગળનો કાગળ ટેસ્ટ્સ",
+          "આ દાખલાનો દાખલો ટેસ્ટ્સ",
+          "આ રિપોર્ટનો રિપોર્ટ તપાસ",
+          "આ દસ્તાવેજનો દસ્તાવેજ તપાસ",
+          "આ અહેવાલનો અહેવાલ તપાસ",
+          "આ કાગળનો કાગળ તપાસ",
+          "આ દાખલાનો દાખલો તપાસ",
+          "આ રિપોર્ટનો રિપોર્ટ રિપોર્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજ રિપોર્ટ",
+          "આ અહેવાલનો અહેવાલ રિપોર્ટ",
+          "આ કાગળનો કાગળ રિપોર્ટ",
+          "આ દાખલાનો દાખલો રિપોર્ટ",
+          "આ રિપોર્ટનો રિપોર્ટ દસ્તાવેજ",
+          "આ દસ્તાવેજનો દસ્તાવેજ દસ્તાવેજ",
+          "આ અહેવાલનો અહેવાલ દસ્તાવેજ",
+          "આ કાગળનો કાગળ દસ્તાવેજ",
+          "આ દાખલાનો દાખલો દસ્તાવેજ",
+          "આ રિપોર્ટનો રિપોર્ટ કાગળ",
+          "આ દસ્તાવેજનો દસ્તાવેજ કાગળ",
+          "આ અહેવાલનો અહેવાલ કાગળ",
+          "આ કાગળનો કાગળ કાગળ",
+          "આ દાખલાનો દાખલો કાગળ",
+          "આ રિપોર્ટનો રિપોર્ટ દાખલો",
+          "આ દસ્તાવેજનો દસ્તાવેજ દાખલો",
+          "આ અહેવાલનો અહેવાલ દાખલો",
+          "આ કાગળનો કાગળ દાખલો",
+          "આ દાખલાનો દાખલો દાખલો",
+          "આ રિપોર્ટનો રિપોર્ટ સારાંશ આપો",
+          "આ દસ્તાવેજનો દસ્તાવેજ સારાંશ આપો",
+          "આ અહેવાલનો અહેવાલ સારાંશ આપો",
+          "આ કાગળનો કાગળ સારાંશ આપો",
+          "આ દાખલાનો દાખલો સારાંશ આપો",
+          "આ રિપોર્ટનો રિપોર્ટ વિશે કહો",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિશે કહો",
+          "આ અહેવાલનો અહેવાલ વિશે કહો",
+          "આ કાગળનો કાગળ વિશે કહો",
+          "આ દાખલાનો દાખલો વિશે કહો",
+          "આ રિપોર્ટનો રિપોર્ટ સમજાવો",
+          "આ દસ્તાવેજનો દસ્તાવેજ સમજાવો",
+          "આ અહેવાલનો અહેવાલ સમજાવો",
+          "આ કાગળનો કાગળ સમજાવો",
+          "આ દાખલાનો દાખલો સમજાવો",
+          "આ રિપોર્ટનો રિપોર્ટ વિશે જણાવો",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિશે જણાવો",
+          "આ અહેવાલનો અહેવાલ વિશે જણાવો",
+          "આ કાગળનો કાગળ વિશે જણાવો",
+          "આ દાખલાનો દાખલો વિશે જણાવો",
+          "આ રિપોર્ટનો રિપોર્ટમાં શું લખેલું છે",
+          "આ દસ્તાવેજનો દસ્તાવેજમાં શું લખેલું છે",
+          "આ અહેવાલનો અહેવાલમાં શું લખેલું છે",
+          "આ કાગળનો કાગળમાં શું લખેલું છે",
+          "આ દાખલાનો દાખલામાં શું લખેલું છે",
+          "આ રિપોર્ટનો રિપોર્ટમાં શું છે",
+          "આ દસ્તાવેજનો દસ્તાવેજમાં શું છે",
+          "આ અહેવાલનો અહેવાલમાં શું છે",
+          "આ કાગળનો કાગળમાં શું છે",
+          "આ દાખલાનો દાખલામાં શું છે",
+          "આ રિપોર્ટનો રિપોર્ટની સારાંશ",
+          "આ દસ્તાવેજનો દસ્તાવેજની સારાંશ",
+          "આ અહેવાલનો અહેવાલની સારાંશ",
+          "આ કાગળનો કાગળની સારાંશ",
+          "આ દાખલાનો દાખલાની સારાંશ",
+          "આ રિપોર્ટનો રિપોર્ટનો અહેવાલ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો અહેવાલ",
+          "આ અહેવાલનો અહેવાલનો અહેવાલ",
+          "આ કાગળનો કાગળનો અહેવાલ",
+          "આ દાખલાનો દાખલાનો અહેવાલ",
+          "આ રિપોર્ટનો રિપોર્ટની માહિતી",
+          "આ દસ્તાવેજનો દસ્તાવેજની માહિતી",
+          "આ અહેવાલનો અહેવાલની માહિતી",
+          "આ કાગળનો કાગળની માહિતી",
+          "આ દાખલાનો દાખલાની માહિતી",
+          "આ રિપોર્ટનો રિપોર્ટની વિગત",
+          "આ દસ્તાવેજનો દસ્તાવેજની વિગત",
+          "આ અહેવાલનો અહેવાલની વિગત",
+          "આ કાગળનો કાગળની વિગત",
+          "આ દાખલાનો દાખલાની વિગત",
+          "આ રિપોર્ટનો રિપોર્ટની વિગતો",
+          "આ દસ્તાવેજનો દસ્તાવેજની વિગતો",
+          "આ અહેવાલનો અહેવાલની વિગતો",
+          "આ કાગળનો કાગળની વિગતો",
+          "આ દાખલાનો દાખલાની વિગતો",
+          "આ રિપોર્ટનો રિપોર્ટનું પરિણામ",
+          "આ દસ્તાવેજનો દસ્તાવેજનું પરિણામ",
+          "આ અહેવાલનો અહેવાલનું પરિણામ",
+          "આ કાગળનો કાગળનું પરિણામ",
+          "આ દાખલાનો દાખલાનું પરિણામ",
+          "આ રિપોર્ટનો રિપોર્ટના પરિણામો",
+          "આ દસ્તાવેજનો દસ્તાવેજના પરિણામો",
+          "આ અહેવાલનો અહેવાલના પરિણામો",
+          "આ કાગળનો કાગળના પરિણામો",
+          "આ દાખલાનો દાખલાના પરિણામો",
+          "આ રિપોર્ટનો રિપોર્ટની ટેસ્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજની ટેસ્ટ",
+          "આ અહેવાલનો અહેવાલની ટેસ્ટ",
+          "આ કાગળનો કાગળની ટેસ્ટ",
+          "આ દાખલાનો દાખલાની ટેસ્ટ",
+          "આ રિપોર્ટનો રિપોર્ટના ટેસ્ટ્સ",
+          "આ દસ્તાવેજનો દસ્તાવેજના ટેસ્ટ્સ",
+          "આ અહેવાલનો અહેવાલના ટેસ્ટ્સ",
+          "આ કાગળનો કાગળના ટેસ્ટ્સ",
+          "આ દાખલાનો દાખલાના ટેસ્ટ્સ",
+          "આ રિપોર્ટનો રિપોર્ટની તપાસ",
+          "આ દસ્તાવેજનો દસ્તાવેજની તપાસ",
+          "આ અહેવાલનો અહેવાલની તપાસ",
+          "આ કાગળનો કાગળની તપાસ",
+          "આ દાખલાનો દાખલાની તપાસ",
+          "આ રિપોર્ટનો રિપોર્ટનો રિપોર્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો રિપોર્ટ",
+          "આ અહેવાલનો અહેવાલનો રિપોર્ટ",
+          "આ કાગળનો કાગળનો રિપોર્ટ",
+          "આ દાખલાનો દાખલાનો રિપોર્ટ",
+          "આ રિપોર્ટનો રિપોર્ટનો દસ્તાવેજ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો દસ્તાવેજ",
+          "આ અહેવાલનો અહેવાલનો દસ્તાવેજ",
+          "આ કાગળનો કાગળનો દસ્તાવેજ",
+          "આ દાખલાનો દાખલાનો દસ્તાવેજ",
+          "આ રિપોર્ટનો રિપોર્ટનો કાગળ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો કાગળ",
+          "આ અહેવાલનો અહેવાલનો કાગળ",
+          "આ કાગળનો કાગળનો કાગળ",
+          "આ દાખલાનો દાખલાનો કાગળ",
+          "આ રિપોર્ટનો રિપોર્ટનો દાખલો",
+          "આ દસ્તાવેજનો દસ્તાવેજનો દાખલો",
+          "આ અહેવાલનો અહેવાલનો દાખલો",
+          "આ કાગળનો કાગળનો દાખલો",
+          "આ દાખલાનો દાખલાનો દાખલો",
+          "આ રિપોર્ટનો રિપોર્ટ સારાંશ આપો",
+          "આ દસ્તાવેજનો દસ્તાવેજ સારાંશ આપો",
+          "આ અહેવાલનો અહેવાલ સારાંશ આપો",
+          "આ કાગળનો કાગળ સારાંશ આપો",
+          "આ દાખલાનો દાખલો સારાંશ આપો",
+          "આ રિપોર્ટનો રિપોર્ટ વિશે કહો",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિશે કહો",
+          "આ અહેવાલનો અહેવાલ વિશે કહો",
+          "આ કાગળનો કાગળ વિશે કહો",
+          "આ દાખલાનો દાખલો વિશે કહો",
+          "આ રિપોર્ટનો રિપોર્ટ સમજાવો",
+          "આ દસ્તાવેજનો દસ્તાવેજ સમજાવો",
+          "આ અહેવાલનો અહેવાલ સમજાવો",
+          "આ કાગળનો કાગળ સમજાવો",
+          "આ દાખલાનો દાખલો સમજાવો",
+          "આ રિપોર્ટનો રિપોર્ટ વિશે જણાવો",
+          "આ દસ્તાવેજનો દસ્તાવેજ વિશે જણાવો",
+          "આ અહેવાલનો અહેવાલ વિશે જણાવો",
+          "આ કાગળનો કાગળ વિશે જણાવો",
+          "આ દાખલાનો દાખલો વિશે જણાવો",
+          "આ રિપોર્ટનો રિપોર્ટમાં શું લખેલું છે",
+          "આ દસ્તાવેજનો દસ્તાવેજમાં શું લખેલું છે",
+          "આ અહેવાલનો અહેવાલમાં શું લખેલું છે",
+          "આ કાગળનો કાગળમાં શું લખેલું છે",
+          "આ દાખલાનો દાખલામાં શું લખેલું છે",
+          "આ રિપોર્ટનો રિપોર્ટમાં શું છે",
+          "આ દસ્તાવેજનો દસ્તાવેજમાં શું છે",
+          "આ અહેવાલનો અહેવાલમાં શું છે",
+          "આ કાગળનો કાગળમાં શું છે",
+          "આ દાખલાનો દાખલામાં શું છે",
+          "આ રિપોર્ટનો રિપોર્ટની સારાંશ",
+          "આ દસ્તાવેજનો દસ્તાવેજની સારાંશ",
+          "આ અહેવાલનો અહેવાલની સારાંશ",
+          "આ કાગળનો કાગળની સારાંશ",
+          "આ દાખલાનો દાખલાની સારાંશ",
+          "આ રિપોર્ટનો રિપોર્ટનો અહેવાલ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો અહેવાલ",
+          "આ અહેવાલનો અહેવાલનો અહેવાલ",
+          "આ કાગળનો કાગળનો અહેવાલ",
+          "આ દાખલાનો દાખલાનો અહેવાલ",
+          "આ રિપોર્ટનો રિપોર્ટની માહિતી",
+          "આ દસ્તાવેજનો દસ્તાવેજની માહિતી",
+          "આ અહેવાલનો અહેવાલની માહિતી",
+          "આ કાગળનો કાગળની માહિતી",
+          "આ દાખલાનો દાખલાની માહિતી",
+          "આ રિપોર્ટનો રિપોર્ટની વિગત",
+          "આ દસ્તાવેજનો દસ્તાવેજની વિગત",
+          "આ અહેવાલનો અહેવાલની વિગત",
+          "આ કાગળનો કાગળની વિગત",
+          "આ દાખલાનો દાખલાની વિગત",
+          "આ રિપોર્ટનો રિપોર્ટની વિગતો",
+          "આ દસ્તાવેજનો દસ્તાવેજની વિગતો",
+          "આ અહેવાલનો અહેવાલની વિગતો",
+          "આ કાગળનો કાગળની વિગતો",
+          "આ દાખલાનો દાખલાની વિગતો",
+          "આ રિપોર્ટનો રિપોર્ટનું પરિણામ",
+          "આ દસ્તાવેજનો દસ્તાવેજનું પરિણામ",
+          "આ અહેવાલનો અહેવાલનું પરિણામ",
+          "આ કાગળનો કાગળનું પરિણામ",
+          "આ દાખલાનો દાખલાનું પરિણામ",
+          "આ રિપોર્ટનો રિપોર્ટના પરિણામો",
+          "આ દસ્તાવેજનો દસ્તાવેજના પરિણામો",
+          "આ અહેવાલનો અહેવાલના પરિણામો",
+          "આ કાગળનો કાગળના પરિણામો",
+          "આ દાખલાનો દાખલાના પરિણામો",
+          "આ રિપોર્ટનો રિપોર્ટની ટેસ્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજની ટેસ્ટ",
+          "આ અહેવાલનો અહેવાલની ટેસ્ટ",
+          "આ કાગળનો કાગળની ટેસ્ટ",
+          "આ દાખલાનો દાખલાની ટેસ્ટ",
+          "આ રિપોર્ટનો રિપોર્ટના ટેસ્ટ્સ",
+          "આ દસ્તાવેજનો દસ્તાવેજના ટેસ્ટ્સ",
+          "આ અહેવાલનો અહેવાલના ટેસ્ટ્સ",
+          "આ કાગળનો કાગળના ટેસ્ટ્સ",
+          "આ દાખલાનો દાખલાના ટેસ્ટ્સ",
+          "આ રિપોર્ટનો રિપોર્ટની તપાસ",
+          "આ દસ્તાવેજનો દસ્તાવેજની તપાસ",
+          "આ અહેવાલનો અહેવાલની તપાસ",
+          "આ કાગળનો કાગળની તપાસ",
+          "આ દાખલાનો દાખલાની તપાસ",
+          "આ રિપોર્ટનો રિપોર્ટનો રિપોર્ટ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો રિપોર્ટ",
+          "આ અહેવાલનો અહેવાલનો રિપોર્ટ",
+          "આ કાગળનો કાગળનો રિપોર્ટ",
+          "આ દાખલાનો દાખલાનો રિપોર્ટ",
+          "આ રિપોર્ટનો રિપોર્ટનો દસ્તાવેજ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો દસ્તાવેજ",
+          "આ અહેવાલનો અહેવાલનો દસ્તાવેજ",
+          "આ કાગળનો કાગળનો દસ્તાવેજ",
+          "આ દાખલાનો દાખલાનો દસ્તાવેજ",
+          "આ રિપોર્ટનો રિપોર્ટનો કાગળ",
+          "આ દસ્તાવેજનો દસ્તાવેજનો કાગળ",
+          "આ અહેવાલનો અહેવાલનો કાગળ",
+          "આ કાગળનો કાગળનો કાગળ",
+          "આ દાખલાનો દાખલાનો કાગળ",
+          "આ રિપોર્ટનો રિપોર્ટનો દાખલો",
+          "આ દસ્તાવેજનો દસ્તાવેજનો દાખલો",
+          "આ અહેવાલનો અહેવાલનો દાખલો",
+          "આ કાગળનો કાગળનો દાખલો",
+          "આ દાખલાનો દાખલાનો દાખલો",
+          "रिपोर्ट",
+          "दस्तावेज़",
+          "सारांश",
+          "समझाओ",
+          "जानकारी",
+          "विवरण",
+          "यह रिपोर्ट",
+          "यह दस्तावेज़",
+          "अहवाल",
+          "हा अहवाल",
+          "அறிக்கை",
+          "சுருக்கம்",
+          "விவரங்கள்",
+          "இந்த அறிக்கை",
+        ];
+        if (genericSummaryTokens.includes(stripped)) return true;
+
+        if (authorizedDocs && authorizedDocs.length > 0) {
+          const docFileName = (authorizedDocs[0].fileName || "")
+            .toLowerCase()
+            .replace(/\.[^/.]+$/, "")
+            .trim();
+          if (
+            docFileName &&
+            (stripped === docFileName ||
+              cleanQuestion === docFileName ||
+              cleanQuestion === `@${docFileName}`)
+          ) {
+            return true;
+          }
+        }
+        return false;
+      })();
+
+      const isSingleDocScoped = finalDocumentIds && finalDocumentIds.length === 1;
+      const isMultiDocScoped = finalDocumentIds && finalDocumentIds.length > 1;
+
+      const hasSummaryVerb =
+        /\b(summary|summarize|overview|saransh|samjhavo|samjhao|samjho|brief|details?|explain)\b/i.test(
+          cleanQuestion,
+        ) ||
+        /સારાંશ|સમજાવો|સમજો|વિગત|વિગતો|માહિતી|સાર|सारांश|समझाओ|विवरण|जानकारी|சுருக்கம்|விவரங்கள்/i.test(
+          cleanQuestion,
+        ) ||
+        /summary\s*(?:aapo|apo|do|dya|kudu)|saransh\s*(?:aapo|apo|do|dya)/i.test(cleanQuestion);
+
+      const hasDocDescriptor =
+        /\b(report|document|file|scan|test|results?)\b/i.test(cleanQuestion) ||
+        /રિપોર્ટ|દસ્તાવેજ|કાગળ|દાખલો|અહેવાલ|रिपोर्ट|दस्तावेज़|अहवाल|அறிக்கை/i.test(cleanQuestion);
+
+      const hasExplicitCompare =
+        /\b(compare|versus|vs|difference\s+between|changes\s+between)\b/i.test(cleanQuestion) ||
+        /સરખામણી|તુલના|તફાવત/i.test(cleanQuestion);
 
       const isSummaryRequest =
-        !hasCompareIntent &&
-        (SUMMARY_KEYWORDS.some((kw) => cleanQuestion.includes(kw)) ||
-          ((cleanQuestion.includes("summary") ||
-            cleanQuestion.includes("saransh") ||
-            cleanQuestion.includes("સારાંશ") ||
-            cleanQuestion.includes("सारांश") ||
-            cleanQuestion.includes("samjhavo") ||
-            cleanQuestion.includes("samjhao") ||
-            cleanQuestion.includes("સમજાવો")) &&
-            (cleanQuestion.includes("report") ||
-              cleanQuestion.includes("document") ||
-              cleanQuestion.includes("રિપોર્ટ") ||
-              cleanQuestion.includes("અહેવાલ") ||
-              cleanQuestion.includes("દાખલો") ||
-              cleanQuestion.includes("કાગળ") ||
-              cleanQuestion.includes("रिपोर्ट"))));
+        !hasExplicitCompare &&
+        (isBareDocumentMention ||
+          (isSingleDocScoped && hasSummaryVerb) ||
+          (isMultiDocScoped && hasSummaryVerb) ||
+          (hasSummaryVerb && hasDocDescriptor) ||
+          SUMMARY_KEYWORDS.some((kw) => cleanQuestion.includes(kw)));
       if (isSummaryRequest) {
-        let targetDoc = null;
-        if (documentId && documentId.length > 0) {
-          const docs = await db
-            .select()
-            .from(document)
-            .where(
-              and(
-                eq(document.id, documentId[0]),
-                eq(document.userId, userId),
-                eq(document.softDelete, false),
-              ),
-            )
-            .limit(1);
-          if (docs.length > 0) {
-            targetDoc = docs[0];
-          }
-        } else {
-          const allDocs = await db
-            .select()
-            .from(document)
-            .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
-            .orderBy(desc(document.createdAt));
-
-          if (allDocs.length === 0) {
-            targetDoc = null;
-          } else if (allDocs.length === 1) {
-            targetDoc = allDocs[0];
-          } else {
-            // User has multiple documents and didn't select one.
-            // Check if natural language matched specific document(s) or latest/first
-            const lowerQ = cleanQuestion;
-            const isLatest =
-              lowerQ.includes("last") ||
-              lowerQ.includes("latest") ||
-              lowerQ.includes("recent") ||
-              lowerQ.includes("છેલ્લો") ||
-              lowerQ.includes("છેલ્લા") ||
-              lowerQ.includes("છેલ્લી") ||
-              lowerQ.includes("તાજેતરનો") ||
-              lowerQ.includes("તાજેતરના") ||
-              lowerQ.includes("નવો") ||
-              lowerQ.includes("નવી");
-
-            const isOldest =
-              lowerQ.includes("first") ||
-              lowerQ.includes("oldest") ||
-              lowerQ.includes("earliest") ||
-              lowerQ.includes("પહેલો") ||
-              lowerQ.includes("પહેલા") ||
-              lowerQ.includes("પહેલી");
-
-            const matchedDocs = allDocs.filter((d) => {
-              if (d.fileName) {
-                const cleanName = d.fileName
-                  .toLowerCase()
-                  .replace(/\.[^/.]+$/, "")
-                  .trim();
-                if (
-                  cleanName.length > 3 &&
-                  !["report", "reports", "document", "documents", "file", "files"].includes(
-                    cleanName,
-                  )
-                ) {
-                  if (lowerQ.includes(cleanName)) return true;
-                }
-              }
-              return false;
-            });
-
-            if (isLatest) {
-              targetDoc = allDocs[0];
-            } else if (isOldest) {
-              targetDoc = allDocs[allDocs.length - 1];
-            } else if (matchedDocs.length === 1) {
-              targetDoc = matchedDocs[0];
-            } else {
-              // Ambiguous: multiple documents available. Ask user to select report!
-              const userMsg = await chatSessionRepository.appendMessage({
-                content: question.trim(),
-                role: "user",
-                sessionId,
-                userId,
-              });
-              const replyText =
-                REQUIRE_SELECTION_REPORT_I18N[detectedLanguage] ||
-                REQUIRE_SELECTION_REPORT_I18N[patientPreferredLang] ||
-                REQUIRE_SELECTION_REPORT_I18N.english;
-              if (onChunk) {
-                await streamTextLikeChat(replyText, onChunk, abortSignal, 15);
-              }
-              const aiMsg = await chatSessionRepository.appendMessage({
-                citations: [],
-                content: replyText,
-                metadata: {
-                  mode: "DOCUMENT_RAG",
-                  emergency: false,
-                  requireSelection: true,
-                  documentId: [],
-                  reports: allDocs,
-                },
-                role: "assistant",
-                sessionId,
-                userId,
-              });
-              return {
-                ai: aiMsg,
-                user: userMsg,
-                reply: replyText,
-                requireSelection: true,
-                reports: allDocs,
-                mode: "DOCUMENT_RAG",
-                emergency: false,
-              };
-            }
-          }
-        }
-
-        const userMessage = await chatSessionRepository.appendMessage({
-          content: question.trim(),
-          role: "user",
-          sessionId,
-          userId,
-        });
-
-        let replyText = "";
-        let options = [];
-        let taskMode = "DOCUMENT_RAG";
-        let rawSummary = "";
-
-        if (!targetDoc) {
-          replyText = NO_REPORT_FOUND_I18N[patientPreferredLang] || NO_REPORT_FOUND_I18N.english;
-          if (onChunk) {
-            onChunk(replyText);
-          }
-        } else if (
-          targetDoc.ocrStatus === ocrStatus.PENDING ||
-          targetDoc.ocrStatus === ocrStatus.IN_PROGRESS ||
-          targetDoc.ocrStatus === "processing"
-        ) {
-          replyText =
-            REPORT_PROCESSING_I18N[patientPreferredLang] || REPORT_PROCESSING_I18N.english;
-          if (onChunk) {
-            onChunk(replyText);
-          }
-        } else {
-          const patientName =
-            targetDoc.structuredExtractedData?.patient?.name ||
-            targetDoc.structuredExtractedData?.patientName ||
-            (p ? `${p.firstName || ""} ${p.lastName || ""}`.trim() : "Unknown");
-
-          const summaryOutputLang =
-            detectedLanguageMeta?.hasExplicitOverride || detectedLanguage !== "english"
-              ? detectedLanguage
-              : patientPreferredLang || "english";
-
-          const reportAgeStr = getReportAgeString(
-            targetDoc.reportDate || targetDoc.createdAt,
-            summaryOutputLang,
-          );
-
-          let structData = targetDoc.structuredExtractedData;
-          if (typeof structData === "string") {
-            try {
-              structData = JSON.parse(structData);
-            } catch {
-              structData = {};
-            }
-          }
-          rawSummary =
-            targetDoc.summaryEnglish ||
-            structData?.summaryEnglish ||
-            structData?.summary ||
-            structData?.remarks ||
-            "";
-
-          const labels = SUMMARY_LABELS_I18N[summaryOutputLang] || SUMMARY_LABELS_I18N.english;
-          const questions =
-            PREDEFINED_QUESTIONS_I18N[summaryOutputLang] || PREDEFINED_QUESTIONS_I18N.english;
-
-          const formattedHeader =
-            `**${labels.patientName}:** ${patientName}\n` +
-            `**${labels.reportAge}:** ${reportAgeStr}\n\n` +
-            `### ${labels.summaryTitle}\n`;
-
-          if (onChunk) {
-            await streamTextLikeChat(formattedHeader, onChunk, abortSignal, 10);
-          }
-
-          let translatedSummaryParts = [];
-          if (!rawSummary) {
-            const noSummary =
-              NO_SUMMARY_AVAILABLE_I18N[summaryOutputLang] || NO_SUMMARY_AVAILABLE_I18N.english;
-            translatedSummaryParts.push(noSummary);
-            if (onChunk) {
-              await streamTextLikeChat(noSummary, onChunk, abortSignal, 15);
-            }
-          } else {
-            // Split by double newline first to get paragraphs
-            const rawParagraphs = rawSummary.split("\n\n");
-            for (let i = 0; i < rawParagraphs.length; i++) {
-              if (abortSignal?.aborted) break;
-              const rawPara = rawParagraphs[i];
-              if (!rawPara.trim()) continue;
-
-              if (onChunk && i > 0) {
-                // If it is not the first paragraph of the summary, prefix with double newline
-                onChunk("\n\n");
-              }
-
-              let fullTranslatedPara = "";
-
-              if (summaryOutputLang !== "english") {
-                // Split paragraph into sentences to stream translation faster
-                const sentences = rawPara.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [rawPara];
-
-                for (let s = 0; s < sentences.length; s++) {
-                  if (abortSignal?.aborted) break;
-                  let rawSentence = sentences[s];
-                  if (!rawSentence.trim()) continue;
-
-                  let translatedSentence = rawSentence;
-                  try {
-                    translatedSentence = await aiClient.translate(
-                      rawSentence.trim(),
-                      "english",
-                      summaryOutputLang,
-                    );
-                  } catch (err) {
-                    debugLogger.error("sendMessage: Sentence translation failed", {
-                      error: err.message,
-                    });
-                  }
-
-                  // Add space before next sentence if not first and doesn't start with space
-                  if (s > 0 && !translatedSentence.startsWith(" ")) {
-                    translatedSentence = " " + translatedSentence;
-                  }
-
-                  fullTranslatedPara += translatedSentence;
-                  if (onChunk) {
-                    await streamTextLikeChat(translatedSentence, onChunk, abortSignal, 15);
-                  }
-                }
-              } else {
-                fullTranslatedPara = rawPara;
-                if (onChunk) {
-                  await streamTextLikeChat(fullTranslatedPara, onChunk, abortSignal, 15);
-                }
-              }
-
-              translatedSummaryParts.push(fullTranslatedPara);
-            }
-          }
-
-          replyText = formattedHeader + translatedSummaryParts.join("\n\n");
-
-          options = questions.map((q) => ({
-            label: q,
-            value: q,
-            actionType: "CHAT",
-          }));
-        }
-
-        const summaryCitations = targetDoc
-          ? [
-              {
-                documentId: targetDoc.id,
-                fileName: targetDoc.fileName || "Medical Report",
-                pageNumber: 1,
-                reportDate: targetDoc.reportDate || null,
-                documentType: targetDoc.documentType || null,
-                relevanceScore: 1.0,
-                excerpt: rawSummary ? rawSummary.substring(0, 160).trim() : null,
-              },
-            ]
-          : [];
-
-        const aiMessage = await chatSessionRepository.appendMessage({
-          citations: summaryCitations,
-          content: replyText,
-          metadata: {
-            mode: taskMode,
-            emergency: false,
-            documentId: targetDoc ? [targetDoc.id] : [],
-            task: "SUMMARY",
-            options,
-            citations: summaryCitations,
+        return await chatFastPath.handleDocumentSummary(
+          {
+            userId,
+            sessionId,
+            question,
+            cleanQuestion,
+            finalDocumentIds,
+            documentId:
+              finalDocumentIds && finalDocumentIds.length > 0 ? finalDocumentIds : documentId,
+            detectedLanguage,
+            patientPreferredLang,
+            detectedLanguageMeta,
+            p,
+            onChunk,
+            abortSignal,
+            resolvedScopeMode,
+            mentions,
           },
-          role: "assistant",
-          sessionId,
-          userId,
-        });
-
-        return {
-          ai: aiMessage,
-          citations: summaryCitations,
-          reply: replyText,
-          user: userMessage,
-          mode: taskMode,
-          emergency: false,
-          options,
-        };
+          null,
+        );
       }
 
       // FAST-PATH & MEDICAL INTENT INTERCEPTOR (Direct deterministic domain answers & deflections)
@@ -1224,6 +1721,7 @@ ${chunksContent}
             {
               scopeMode: resolvedScopeMode,
               mentions,
+              clientTimestamp,
               selectedDocumentMetadata:
                 authorizedDocs && authorizedDocs[0]
                   ? {
@@ -1296,14 +1794,38 @@ ${chunksContent}
             };
           }
 
+          // 2b. DOCUMENT_SUMMARY Handling (Requirement 3 & 4)
+          if (medicalIntentMeta.intent === "DOCUMENT_SUMMARY") {
+            return await chatFastPath.handleDocumentSummary(
+              {
+                userId,
+                sessionId,
+                question,
+                cleanQuestion,
+                finalDocumentIds,
+                documentId:
+                  finalDocumentIds && finalDocumentIds.length > 0 ? finalDocumentIds : documentId,
+                detectedLanguage,
+                patientPreferredLang,
+                detectedLanguageMeta,
+                p,
+                onChunk,
+                abortSignal,
+                resolvedScopeMode,
+                mentions,
+              },
+              classificationResult,
+            );
+          }
+
           // 3. MEDICAL_TREND_CHART Dynamic Generation (REQ-CHART-02, REQ-CHART-05, REQ-CHART-06, REQ-DOC-06)
           let chartMetric = medicalIntentMeta.canonicalMetric || turnSlots.activeMetric;
           const chartScopeDocIds =
             scopeMode === "AUTHORIZED_HISTORY"
               ? null
-              : documentId && documentId.length > 0
-                ? documentId
-                : turnSlots.activeDocumentIds || null;
+              : finalDocumentIds && finalDocumentIds.length > 0
+                ? finalDocumentIds
+                : null;
 
           if (medicalIntentMeta.intent === "MEDICAL_TREND_CHART") {
             if (!chartMetric && chartScopeDocIds && chartScopeDocIds.length > 0) {
@@ -1453,10 +1975,17 @@ ${chunksContent}
               userId,
               sessionId,
               question,
+              cleanQuestion,
               detectedLanguage,
+              patientPreferredLang,
+              detectedLanguageMeta,
+              p,
               onChunk,
               abortSignal,
-              documentId,
+              documentId: finalDocumentIds,
+              finalDocumentIds,
+              scopeMode: resolvedScopeMode,
+              mentions,
               page,
               limit,
             },
@@ -2120,6 +2649,7 @@ ${chunksContent}
           {
             scopeMode: resolvedScopeMode,
             mentions,
+            clientTimestamp,
             selectedDocumentMetadata:
               authorizedDocs && authorizedDocs[0]
                 ? {
@@ -2271,6 +2801,46 @@ ${chunksContent}
   //update document id
   async attachDocumentToSession({ sessionId, userId, documentId }) {
     return chatSessionRepository.attachDocument(sessionId, userId, documentId);
+  }
+
+  // Clear active document scope on a chat session
+  async clearSessionScope({ sessionId, userId, clientTimestamp }) {
+    const session = await chatSessionRepository.findById(sessionId, userId);
+    if (!session) {
+      throw new NotFoundException("Chat session not found");
+    }
+
+    const currentSlots = session.metadata?.slots || session.metadata?.conversationSlots || {};
+    const lastScopeUpdated = currentSlots.scopeUpdatedAt ? Number(currentSlots.scopeUpdatedAt) : 0;
+
+    // Prevent stale scope-clear operations from overriding newer selections
+    if (clientTimestamp && lastScopeUpdated && Number(clientTimestamp) < lastScopeUpdated) {
+      return {
+        cleared: false,
+        reason: "STALE_OPERATION",
+        scopeMode: currentSlots.scopeMode || "AUTHORIZED_HISTORY",
+        activeDocumentIds: currentSlots.activeDocumentIds || [],
+        slots: currentSlots,
+      };
+    }
+
+    const updatedSlots = slotContextService.resolveTurnSlots(currentSlots, {}, {}, [], {
+      actionType: "CLEAR_DOCUMENT_SCOPE",
+      scopeMode: "AUTHORIZED_HISTORY",
+      clientTimestamp: clientTimestamp ? Number(clientTimestamp) : Date.now(),
+    });
+
+    await chatSessionRepository.updateSessionMetadata(sessionId, userId, {
+      slots: updatedSlots,
+      conversationSlots: updatedSlots,
+    });
+
+    return {
+      cleared: true,
+      scopeMode: "AUTHORIZED_HISTORY",
+      activeDocumentIds: [],
+      slots: updatedSlots,
+    };
   }
 }
 

@@ -199,6 +199,14 @@ const sendChatMessageSchema = z
         z.boolean().optional().default(false),
       )
       .optional(),
+    actionType: z.string().trim().optional().nullable(),
+    clientTimestamp: z.union([z.number(), z.string()]).optional().nullable(),
+  })
+  .strict();
+
+const clearScopeSchema = z
+  .object({
+    clientTimestamp: z.union([z.number(), z.string()]).optional().nullable(),
   })
   .strict();
 
@@ -282,6 +290,7 @@ const idParamSchema = z
 module.exports = {
   addDocumentSchema,
   batchFileKeySchema,
+  clearScopeSchema,
   createChatSessionSchema,
   fileKeySchema,
   idParamSchema,

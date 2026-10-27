@@ -7,6 +7,12 @@ const notificationRepository = require("../../../repositories/notificationReposi
 const patientRepository = require("../../../repositories/patientRepository");
 const refillRepository = require("../../../repositories/refillRepository");
 
+const { and, eq, inArray, desc } = require("drizzle-orm");
+const { db } = require("../../../configs/db");
+const { document } = require("../../../models/document");
+const { structuredDocument } = require("../../../models/documentIntelligence");
+
+const aiClient = require("../clients/aiClient.service");
 const { ocrStatus } = require("../../../enums/ocrStatus");
 const { normalizeDocumentType } = require("../../../enums/documentType");
 const { getAgeFromDateOfBirth } = require("../../../helpers/dateHelper");
@@ -24,7 +30,7 @@ const {
   humanizeFoodFreq,
   humanizeFrequency,
 } = require("./chatHelpers");
-const { paginateArray } = require("./ragContext.service");
+const { paginateArray, getReportAgeString } = require("./ragContext.service");
 const {
   AGE_REPLY_I18N,
   PROFILE_REPLY_I18N,
@@ -34,6 +40,12 @@ const {
   COUNT_REPLY_I18N,
   MEDICATION_REPLY_I18N,
   DOCUMENT_REPLY_I18N,
+  SUMMARY_LABELS_I18N,
+  PREDEFINED_QUESTIONS_I18N,
+  NO_SUMMARY_AVAILABLE_I18N,
+  NO_REPORT_FOUND_I18N,
+  REPORT_PROCESSING_I18N,
+  REQUIRE_SELECTION_REPORT_I18N,
 } = require("../../../constants/chatReplies");
 
 const SOCIAL_PROVIDER_NAMES = {
@@ -42,6 +54,98 @@ const SOCIAL_PROVIDER_NAMES = {
   apple: "Apple",
   microsoft: "Microsoft",
 };
+
+/**
+ * Authoritative Multi-Path Extractor for medications from document records.
+ * Inspects document.structuredExtractedData (medications, structuredData, prescriptions)
+ * and structured_documents.prescriptions.
+ */
+function extractMedicationsFromDocumentData(docRow, structuredDocRow) {
+  if (!docRow && !structuredDocRow) return [];
+  const rawMeds = [];
+
+  const extractFromObject = (struct) => {
+    if (!struct) return;
+    let obj = struct;
+    if (typeof obj === "string") {
+      try {
+        obj = JSON.parse(obj);
+      } catch {
+        return;
+      }
+    }
+    if (!obj || typeof obj !== "object") return;
+
+    if (Array.isArray(obj.medications) && obj.medications.length > 0) {
+      rawMeds.push(...obj.medications);
+    }
+    if (
+      Array.isArray(obj.structuredData?.medications) &&
+      obj.structuredData.medications.length > 0
+    ) {
+      rawMeds.push(...obj.structuredData.medications);
+    }
+    if (Array.isArray(obj.prescriptions)) {
+      for (const p of obj.prescriptions) {
+        if (Array.isArray(p?.medications)) {
+          rawMeds.push(...p.medications);
+        }
+      }
+    }
+  };
+
+  extractFromObject(docRow?.structuredExtractedData);
+  if (structuredDocRow?.prescriptions) {
+    extractFromObject({ prescriptions: structuredDocRow.prescriptions });
+  }
+
+  const seen = new Set();
+  const normalizedMeds = [];
+
+  for (const raw of rawMeds) {
+    if (!raw) continue;
+    const name =
+      typeof raw === "string"
+        ? raw.trim()
+        : (raw.name || raw.medicationName || raw.medicineName || "").trim();
+    if (!name) continue;
+    const lowerName = name.toLowerCase();
+    if (seen.has(lowerName)) continue;
+    seen.add(lowerName);
+
+    const dose =
+      typeof raw === "object" ? raw.dosePerIntake || raw.dosage || raw.dose || null : null;
+    const sched =
+      typeof raw === "object"
+        ? raw.medicationSchedule || raw.schedule || (raw.timing ? { timing: raw.timing } : null)
+        : null;
+    const food = typeof raw === "object" ? raw.foodFrequency || raw.instructions || null : null;
+    const freq = typeof raw === "object" ? raw.frequency || null : null;
+    const unit = typeof raw === "object" ? raw.unit || "" : "";
+    const endDate =
+      typeof raw === "object"
+        ? raw.endDate || (raw.duration ? `Duration: ${raw.duration}` : null)
+        : null;
+
+    normalizedMeds.push({
+      medicationName: name,
+      name,
+      dosePerIntake: dose,
+      unit,
+      frequency: freq,
+      medicationSchedule: sched,
+      foodFrequency: food,
+      startDate: typeof raw === "object" ? raw.startDate || raw.issueDate || null : null,
+      endDate,
+      ongoing: typeof raw === "object" ? Boolean(raw.ongoing) : false,
+      prescribedBy: typeof raw === "object" ? raw.prescribedBy || raw.doctorName || null : null,
+      remainingQuantity: null,
+      status: "ACTIVE",
+    });
+  }
+
+  return normalizedMeds;
+}
 
 class ChatFastPathService {
   /**
@@ -338,7 +442,93 @@ class ChatFastPathService {
   async handleMedicationList(ctx) {
     const { userId, sessionId, question, detectedLanguage, onChunk, abortSignal } = ctx;
     const labels = pickLang(MEDICATION_REPLY_I18N, detectedLanguage);
-    const allMeds = await medicationRepository.findAll(userId);
+
+    const scopedDocumentIds =
+      ctx.finalDocumentIds && ctx.finalDocumentIds.length > 0
+        ? ctx.finalDocumentIds
+        : ctx.documentId && Array.isArray(ctx.documentId) && ctx.documentId.length > 0
+          ? ctx.documentId
+          : typeof ctx.documentId === "string" && ctx.documentId.trim()
+            ? [ctx.documentId.trim()]
+            : [];
+
+    let allMeds = [];
+    const isDocumentScoped = scopedDocumentIds.length > 0;
+
+    if (isDocumentScoped) {
+      const targetDocs = await db
+        .select()
+        .from(document)
+        .where(
+          and(
+            inArray(document.id, scopedDocumentIds),
+            eq(document.userId, userId),
+            eq(document.softDelete, false),
+          ),
+        );
+
+      const targetStructuredDocs = await db
+        .select()
+        .from(structuredDocument)
+        .where(
+          and(
+            inArray(structuredDocument.documentId, scopedDocumentIds),
+            eq(structuredDocument.userId, userId),
+          ),
+        );
+
+      const structMap = new Map(targetStructuredDocs.map((sd) => [String(sd.documentId), sd]));
+      for (const d of targetDocs) {
+        const extracted = extractMedicationsFromDocumentData(d, structMap.get(String(d.id)));
+        allMeds.push(...extracted);
+      }
+
+      if (allMeds.length === 0) {
+        const docNames =
+          targetDocs
+            .map((d) => d.fileName)
+            .filter(Boolean)
+            .join(", ") || "the selected document";
+        const emptyMsg =
+          detectedLanguage === "gujarati"
+            ? `પસંદ કરેલ દસ્તાવેજ (${docNames}) માં કોઈ દવાઓની માહિતી નોંધાયેલ નથી.`
+            : detectedLanguage === "hindi"
+              ? `चयनित दस्तावेज़ (${docNames}) में किसी दवा का विवरण नहीं मिला।`
+              : `No medications were found in the selected document (${docNames}).`;
+
+        if (onChunk && emptyMsg) {
+          await streamTextLikeChat(emptyMsg, onChunk, abortSignal, 10);
+        }
+
+        const { userMessage, aiMessage } = await this._saveExchange({
+          userId,
+          sessionId,
+          question,
+          content: emptyMsg,
+          metadata: {
+            mode: "STRUCTURED_LIST",
+            task: "MEDICATION_LIST",
+            emergency: false,
+            documentId: scopedDocumentIds,
+          },
+        });
+
+        return {
+          ai: aiMessage,
+          user: userMessage,
+          reply: {
+            items: [],
+            pagination: { total: 0, page: 1, limit: 20 },
+            text: emptyMsg,
+            formattedText: emptyMsg,
+          },
+          mode: "STRUCTURED_LIST",
+          emergency: false,
+        };
+      }
+    } else {
+      allMeds = await medicationRepository.findAll(userId);
+    }
 
     const reqPage = ctx.page || 1;
     const reqLimit = ctx.limit || (allMeds.length > 0 ? allMeds.length : 20);
@@ -409,7 +599,7 @@ class ChatFastPathService {
         mode: "STRUCTURED_LIST",
         task: "MEDICATION_LIST",
         emergency: false,
-        documentId: [],
+        documentId: isDocumentScoped ? scopedDocumentIds : [],
       },
     });
 
@@ -430,7 +620,94 @@ class ChatFastPathService {
     const { detectedLanguage, userId, sessionId, question, onChunk, abortSignal } = ctx;
     const labels = pickLang(MEDICATION_REPLY_I18N, detectedLanguage);
     const facet = classification?.entities?.medicationFacet || { type: "list", value: "all" };
-    const allMeds = await medicationRepository.findAll(userId);
+
+    const scopedDocumentIds =
+      ctx.finalDocumentIds && ctx.finalDocumentIds.length > 0
+        ? ctx.finalDocumentIds
+        : ctx.documentId && Array.isArray(ctx.documentId) && ctx.documentId.length > 0
+          ? ctx.documentId
+          : typeof ctx.documentId === "string" && ctx.documentId.trim()
+            ? [ctx.documentId.trim()]
+            : [];
+
+    let allMeds = [];
+    const isDocumentScoped = scopedDocumentIds.length > 0;
+
+    if (isDocumentScoped) {
+      const targetDocs = await db
+        .select()
+        .from(document)
+        .where(
+          and(
+            inArray(document.id, scopedDocumentIds),
+            eq(document.userId, userId),
+            eq(document.softDelete, false),
+          ),
+        );
+
+      const targetStructuredDocs = await db
+        .select()
+        .from(structuredDocument)
+        .where(
+          and(
+            inArray(structuredDocument.documentId, scopedDocumentIds),
+            eq(structuredDocument.userId, userId),
+          ),
+        );
+
+      const structMap = new Map(targetStructuredDocs.map((sd) => [String(sd.documentId), sd]));
+      for (const d of targetDocs) {
+        const extracted = extractMedicationsFromDocumentData(d, structMap.get(String(d.id)));
+        allMeds.push(...extracted);
+      }
+
+      if (allMeds.length === 0) {
+        const docNames =
+          targetDocs
+            .map((d) => d.fileName)
+            .filter(Boolean)
+            .join(", ") || "the selected document";
+        const emptyMsg =
+          detectedLanguage === "gujarati"
+            ? `પસંદ કરેલ દસ્તાવેજ (${docNames}) માં કોઈ દવાઓની માહિતી નોંધાયેલ નથી.`
+            : detectedLanguage === "hindi"
+              ? `चयनित दस्तावेज़ (${docNames}) में किसी दवा का विवरण नहीं मिला।`
+              : `No medications were found in the selected document (${docNames}).`;
+
+        if (onChunk && emptyMsg) {
+          await streamTextLikeChat(emptyMsg, onChunk, abortSignal, 10);
+        }
+
+        const { userMessage, aiMessage } = await this._saveExchange({
+          userId,
+          sessionId,
+          question,
+          content: emptyMsg,
+          metadata: {
+            mode: "STRUCTURED_LIST",
+            task: "MEDICATION_FACET",
+            emergency: false,
+            documentId: scopedDocumentIds,
+          },
+        });
+
+        return {
+          ai: aiMessage,
+          user: userMessage,
+          reply: {
+            items: [],
+            pagination: { total: 0, page: 1, limit: 20 },
+            text: emptyMsg,
+            formattedText: emptyMsg,
+          },
+          mode: "STRUCTURED_LIST",
+          emergency: false,
+        };
+      }
+    } else {
+      allMeds = await medicationRepository.findAll(userId);
+    }
+
     const todayStr = new Date().toISOString().split("T")[0];
 
     const allMedsWithQty = await Promise.all(
@@ -1571,10 +1848,585 @@ class ChatFastPathService {
   }
 
   /**
+   * Fast-Path Handler: DOCUMENT_SUMMARY
+   * Deterministic summary card generation for single and multiple authorized documents.
+   */
+  async handleDocumentSummary(ctx) {
+    const {
+      userId,
+      sessionId,
+      question = "",
+      cleanQuestion: rawCleanQ = "",
+      documentId = [],
+      finalDocumentIds = [],
+      detectedLanguage = "english",
+      patientPreferredLang = "english",
+      detectedLanguageMeta = null,
+      p = null,
+      onChunk = null,
+      abortSignal = null,
+      resolvedScopeMode = "EXPLICIT_DOCUMENTS",
+      mentions = [],
+    } = ctx;
+
+    const cleanQuestion = rawCleanQ || String(question).trim().toLowerCase();
+    const targetDocIds =
+      finalDocumentIds && finalDocumentIds.length > 0
+        ? finalDocumentIds
+        : documentId && documentId.length > 0
+          ? documentId
+          : [];
+
+    let targetDocs = [];
+    if (targetDocIds.length > 0) {
+      // Strict authorization & isolation: filter strictly by targetDocIds, userId, and not softDeleted
+      targetDocs = await db
+        .select()
+        .from(document)
+        .where(
+          and(
+            inArray(document.id, targetDocIds),
+            eq(document.userId, userId),
+            eq(document.softDelete, false),
+          ),
+        );
+    } else {
+      // No explicit document passed: lookup user documents
+      const allDocs = await db
+        .select()
+        .from(document)
+        .where(and(eq(document.userId, userId), eq(document.softDelete, false)))
+        .orderBy(desc(document.createdAt));
+
+      if (allDocs.length === 0) {
+        targetDocs = [];
+      } else if (allDocs.length === 1) {
+        targetDocs = [allDocs[0]];
+      } else {
+        // Natural language matching for latest/first/specific document
+        const lowerQ = cleanQuestion;
+        const isLatest =
+          lowerQ.includes("last") ||
+          lowerQ.includes("latest") ||
+          lowerQ.includes("recent") ||
+          lowerQ.includes("છેલ્લો") ||
+          lowerQ.includes("છેલ્લા") ||
+          lowerQ.includes("છેલ્લી") ||
+          lowerQ.includes("તાજેતરનો") ||
+          lowerQ.includes("તાજેતરના") ||
+          lowerQ.includes("નવો") ||
+          lowerQ.includes("નવી");
+
+        const isOldest =
+          lowerQ.includes("first") ||
+          lowerQ.includes("oldest") ||
+          lowerQ.includes("earliest") ||
+          lowerQ.includes("પહેલો") ||
+          lowerQ.includes("પહેલા") ||
+          lowerQ.includes("પહેલી");
+
+        const matchedDocs = allDocs.filter((d) => {
+          if (d.fileName) {
+            const cleanName = d.fileName
+              .toLowerCase()
+              .replace(/\.[^/.]+$/, "")
+              .trim();
+            if (
+              cleanName.length > 3 &&
+              !["report", "reports", "document", "documents", "file", "files"].includes(cleanName)
+            ) {
+              if (lowerQ.includes(cleanName)) return true;
+            }
+          }
+          return false;
+        });
+
+        if (isLatest) {
+          targetDocs = [allDocs[0]];
+        } else if (isOldest) {
+          targetDocs = [allDocs[allDocs.length - 1]];
+        } else if (matchedDocs.length === 1) {
+          targetDocs = [matchedDocs[0]];
+        } else {
+          // Multiple documents exist without clear selection: ask user to select
+          const userMsg = await chatSessionRepository.appendMessage({
+            content: question.trim(),
+            role: "user",
+            sessionId,
+            userId,
+          });
+          const replyText =
+            REQUIRE_SELECTION_REPORT_I18N[detectedLanguage] ||
+            REQUIRE_SELECTION_REPORT_I18N[patientPreferredLang] ||
+            REQUIRE_SELECTION_REPORT_I18N.english;
+          if (onChunk) {
+            await streamTextLikeChat(replyText, onChunk, abortSignal, 15);
+          }
+          const aiMsg = await chatSessionRepository.appendMessage({
+            citations: [],
+            content: replyText,
+            metadata: {
+              mode: "DOCUMENT_RAG",
+              emergency: false,
+              requireSelection: true,
+              documentId: [],
+              reports: allDocs,
+            },
+            role: "assistant",
+            sessionId,
+            userId,
+          });
+          return {
+            ai: aiMsg,
+            user: userMsg,
+            reply: replyText,
+            requireSelection: true,
+            reports: allDocs,
+            mode: "DOCUMENT_RAG",
+            emergency: false,
+          };
+        }
+      }
+    }
+
+    let userMessage = ctx.userMessage;
+    if (!userMessage) {
+      userMessage = await chatSessionRepository.appendMessage({
+        content: question.trim(),
+        role: "user",
+        sessionId,
+        userId,
+        metadata: {
+          ...(mentions && mentions.length > 0 ? { mentions } : {}),
+          scopeMode: resolvedScopeMode,
+          documentIds: targetDocs.map((d) => d.id),
+        },
+      });
+    }
+
+    if (targetDocs.length === 0) {
+      const replyText = NO_REPORT_FOUND_I18N[patientPreferredLang] || NO_REPORT_FOUND_I18N.english;
+      if (onChunk) {
+        await streamTextLikeChat(replyText, onChunk, abortSignal, 15);
+      }
+      const aiMessage = await chatSessionRepository.appendMessage({
+        citations: [],
+        content: replyText,
+        metadata: { mode: "DOCUMENT_RAG", emergency: false, documentId: [], task: "SUMMARY" },
+        role: "assistant",
+        sessionId,
+        userId,
+      });
+      return {
+        ai: aiMessage,
+        citations: [],
+        reply: replyText,
+        user: userMessage,
+        mode: "DOCUMENT_RAG",
+        emergency: false,
+      };
+    }
+
+    // Determine target output language
+    const summaryOutputLang =
+      detectedLanguageMeta?.hasExplicitOverride ||
+      (detectedLanguage && detectedLanguage !== "english")
+        ? detectedLanguage
+        : patientPreferredLang || "english";
+
+    const labels = SUMMARY_LABELS_I18N[summaryOutputLang] || SUMMARY_LABELS_I18N.english;
+    const questions =
+      PREDEFINED_QUESTIONS_I18N[summaryOutputLang] || PREDEFINED_QUESTIONS_I18N.english;
+
+    // Helper: extract raw summary text from a document record
+    const getDocSummaryText = (doc) => {
+      let structData = doc.structuredExtractedData;
+      if (typeof structData === "string") {
+        try {
+          structData = JSON.parse(structData);
+        } catch {
+          structData = {};
+        }
+      }
+
+      // Check language-specific precomputed summary first if requesting that language
+      if (summaryOutputLang !== "english" && doc.summaryInPreferredLanguage) {
+        let prefSummary = null;
+        if (
+          typeof doc.summaryInPreferredLanguage === "string" &&
+          doc.summaryInPreferredLanguage.trim()
+        ) {
+          prefSummary = doc.summaryInPreferredLanguage.trim();
+        } else if (typeof doc.summaryInPreferredLanguage === "object") {
+          prefSummary =
+            doc.summaryInPreferredLanguage[summaryOutputLang] ||
+            doc.summaryInPreferredLanguage.text ||
+            null;
+        }
+        if (prefSummary) {
+          return { text: prefSummary, isPreTranslated: true };
+        }
+      }
+
+      let summary =
+        doc.summaryEnglish ||
+        structData?.summaryEnglish ||
+        structData?.summary ||
+        structData?.imageAnalysis?.educationalDescription ||
+        structData?.imageAnalysis?.aiGeneratedDescription ||
+        structData?.remarks ||
+        "";
+
+      // If document is an image and narrative summary is empty, check doc.imageAnalysis
+      if (!summary && doc.imageAnalysis) {
+        let img = doc.imageAnalysis;
+        if (typeof img === "string") {
+          try {
+            img = JSON.parse(img);
+          } catch {
+            img = {};
+          }
+        }
+        if (Array.isArray(img?.findings) && img.findings.length > 0) {
+          summary =
+            img.findings.join("\n") + (img.impression ? `\n\nImpression: ${img.impression}` : "");
+        } else if (img?.educationalDescription) {
+          summary = img.educationalDescription;
+        } else if (img?.aiGeneratedDescription) {
+          summary = img.aiGeneratedDescription;
+        }
+      }
+
+      // If narrative summary is empty, build a concise structured summary from extracted tests
+      if (!summary && Array.isArray(structData?.tests) && structData.tests.length > 0) {
+        const abnormalTests = structData.tests.filter(
+          (t) => t.isAbnormal || t.status === "ABNORMAL",
+        );
+        const normalTests = structData.tests.filter(
+          (t) => !t.isAbnormal && t.status !== "ABNORMAL",
+        );
+        const parts = [];
+        if (abnormalTests.length > 0) {
+          parts.push(
+            `Key Findings Requiring Attention:\n` +
+              abnormalTests
+                .slice(0, 8)
+                .map(
+                  (t) =>
+                    `• ${t.name || t.testName}: ${t.value} ${t.unit || ""} (${t.status || "Abnormal"})`,
+                )
+                .join("\n"),
+          );
+        }
+        if (normalTests.length > 0) {
+          parts.push(
+            `Normal Parameters:\n` +
+              normalTests
+                .slice(0, 6)
+                .map((t) => `• ${t.name || t.testName}: ${t.value} ${t.unit || ""}`)
+                .join("\n"),
+          );
+        }
+        summary = parts.join("\n\n");
+      }
+
+      return { text: summary ? summary.trim() : "", isPreTranslated: false };
+    };
+
+    // Resolve patient details
+    let patientObj = p;
+    if (!patientObj && userId) {
+      try {
+        patientObj = await patientRepository.findById(userId);
+      } catch {
+        // Ignore and proceed
+      }
+    }
+
+    // SINGLE DOCUMENT CASE
+    if (targetDocs.length === 1) {
+      const targetDoc = targetDocs[0];
+      const isProcessing =
+        targetDoc.ocrStatus === ocrStatus.PENDING ||
+        targetDoc.ocrStatus === ocrStatus.IN_PROGRESS ||
+        targetDoc.ocrStatus === "processing";
+
+      if (isProcessing) {
+        const replyText =
+          REPORT_PROCESSING_I18N[patientPreferredLang] || REPORT_PROCESSING_I18N.english;
+        if (onChunk) {
+          await streamTextLikeChat(replyText, onChunk, abortSignal, 15);
+        }
+        const aiMessage = await chatSessionRepository.appendMessage({
+          citations: [],
+          content: replyText,
+          metadata: {
+            mode: "DOCUMENT_RAG",
+            emergency: false,
+            documentId: [targetDoc.id],
+            task: "SUMMARY",
+          },
+          role: "assistant",
+          sessionId,
+          userId,
+        });
+        return {
+          ai: aiMessage,
+          citations: [],
+          reply: replyText,
+          user: userMessage,
+          mode: "DOCUMENT_RAG",
+          emergency: false,
+        };
+      }
+
+      const patientName =
+        targetDoc.structuredExtractedData?.patient?.name ||
+        targetDoc.structuredExtractedData?.patientName ||
+        (patientObj
+          ? `${patientObj.firstName || ""} ${patientObj.lastName || ""}`.trim()
+          : "Unknown");
+
+      const reportAgeStr = getReportAgeString(
+        targetDoc.reportDate || targetDoc.createdAt,
+        summaryOutputLang,
+      );
+
+      const { text: rawSummary, isPreTranslated } = getDocSummaryText(targetDoc);
+
+      const formattedHeader =
+        `**${labels.patientName}:** ${patientName}\n` +
+        `**${labels.reportAge}:** ${reportAgeStr}\n\n` +
+        `### ${labels.summaryTitle}\n`;
+
+      if (onChunk) {
+        await streamTextLikeChat(formattedHeader, onChunk, abortSignal, 10);
+      }
+
+      let translatedSummaryParts = [];
+      if (!rawSummary) {
+        const noSummary =
+          NO_SUMMARY_AVAILABLE_I18N[summaryOutputLang] || NO_SUMMARY_AVAILABLE_I18N.english;
+        translatedSummaryParts.push(noSummary);
+        if (onChunk) {
+          await streamTextLikeChat(noSummary, onChunk, abortSignal, 15);
+        }
+      } else if (isPreTranslated || summaryOutputLang === "english") {
+        translatedSummaryParts.push(rawSummary);
+        if (onChunk) {
+          await streamTextLikeChat(rawSummary, onChunk, abortSignal, 15);
+        }
+      } else {
+        // Translate paragraph by paragraph, streaming sentences
+        const rawParagraphs = rawSummary.split("\n\n");
+        for (let i = 0; i < rawParagraphs.length; i++) {
+          if (abortSignal?.aborted) break;
+          const rawPara = rawParagraphs[i];
+          if (!rawPara.trim()) continue;
+
+          if (onChunk && i > 0) {
+            onChunk("\n\n");
+          }
+
+          let fullTranslatedPara = "";
+          const sentences = rawPara.match(/[^.!?]+[.!?]+|\s*[^.!?]+$/g) || [rawPara];
+
+          for (let s = 0; s < sentences.length; s++) {
+            if (abortSignal?.aborted) break;
+            const rawSentence = sentences[s];
+            if (!rawSentence.trim()) continue;
+
+            let translatedSentence = rawSentence;
+            try {
+              translatedSentence = await aiClient.translate(
+                rawSentence.trim(),
+                "english",
+                summaryOutputLang,
+              );
+            } catch {
+              // fallback to rawSentence on error
+            }
+
+            if (s > 0 && !translatedSentence.startsWith(" ")) {
+              translatedSentence = " " + translatedSentence;
+            }
+
+            fullTranslatedPara += translatedSentence;
+            if (onChunk) {
+              await streamTextLikeChat(translatedSentence, onChunk, abortSignal, 15);
+            }
+          }
+          translatedSummaryParts.push(fullTranslatedPara);
+        }
+      }
+
+      const replyText = formattedHeader + translatedSummaryParts.join("\n\n");
+      const options = questions.map((q) => ({
+        label: q,
+        value: q,
+        actionType: "CHAT",
+      }));
+
+      const summaryCitations = [
+        {
+          documentId: targetDoc.id,
+          fileName: targetDoc.fileName || "Medical Report",
+          pageNumber: 1,
+          reportDate: targetDoc.reportDate || null,
+          documentType: targetDoc.documentType || null,
+          relevanceScore: 1.0,
+          excerpt: rawSummary ? rawSummary.substring(0, 160).trim() : null,
+        },
+      ];
+
+      const aiMessage = await chatSessionRepository.appendMessage({
+        citations: summaryCitations,
+        content: replyText,
+        metadata: {
+          mode: "DOCUMENT_RAG",
+          emergency: false,
+          documentId: [targetDoc.id],
+          task: "SUMMARY",
+          options,
+          citations: summaryCitations,
+        },
+        role: "assistant",
+        sessionId,
+        userId,
+      });
+
+      return {
+        ai: aiMessage,
+        citations: summaryCitations,
+        reply: replyText,
+        user: userMessage,
+        mode: "DOCUMENT_RAG",
+        emergency: false,
+        options,
+      };
+    }
+
+    // MULTI-DOCUMENT CASE (Requirement 8)
+    const multiDocSummarySections = [];
+    const summaryCitations = [];
+
+    const multiTitle =
+      summaryOutputLang === "gujarati"
+        ? `### પસંદ કરેલા ${targetDocs.length} રિપોર્ટ્સનો સારાંશ\n`
+        : summaryOutputLang === "hindi"
+          ? `### चयनित ${targetDocs.length} रिपोर्टों का सारांश\n`
+          : summaryOutputLang === "marathi"
+            ? `### निवडलेल्या ${targetDocs.length} अहवालांचा सारांश\n`
+            : summaryOutputLang === "tamil"
+              ? `### தேர்ந்தெடுக்கப்பட்ட ${targetDocs.length} அறிக்கைகளின் சுருக்கம்\n`
+              : `### Summary of ${targetDocs.length} Selected Reports\n`;
+
+    if (onChunk) {
+      await streamTextLikeChat(multiTitle, onChunk, abortSignal, 10);
+    }
+    multiDocSummarySections.push(multiTitle);
+
+    for (let i = 0; i < targetDocs.length; i++) {
+      if (abortSignal?.aborted) break;
+      const doc = targetDocs[i];
+      const isProcessing =
+        doc.ocrStatus === ocrStatus.PENDING ||
+        doc.ocrStatus === ocrStatus.IN_PROGRESS ||
+        doc.ocrStatus === "processing";
+
+      const reportAgeStr = getReportAgeString(doc.reportDate || doc.createdAt, summaryOutputLang);
+
+      const docHeader = `\n#### 📄 ${i + 1}. ${doc.fileName || "Medical Report"} (${reportAgeStr})\n`;
+      if (onChunk) {
+        await streamTextLikeChat(docHeader, onChunk, abortSignal, 10);
+      }
+      multiDocSummarySections.push(docHeader);
+
+      if (isProcessing) {
+        const procText =
+          REPORT_PROCESSING_I18N[patientPreferredLang] || REPORT_PROCESSING_I18N.english;
+        if (onChunk) {
+          await streamTextLikeChat(procText, onChunk, abortSignal, 15);
+        }
+        multiDocSummarySections.push(procText);
+        continue;
+      }
+
+      const { text: rawSummary, isPreTranslated } = getDocSummaryText(doc);
+      let docSummaryTranslated = rawSummary;
+
+      if (!rawSummary) {
+        docSummaryTranslated =
+          NO_SUMMARY_AVAILABLE_I18N[summaryOutputLang] || NO_SUMMARY_AVAILABLE_I18N.english;
+      } else if (!isPreTranslated && summaryOutputLang !== "english") {
+        try {
+          docSummaryTranslated = await aiClient.translate(
+            rawSummary.trim(),
+            "english",
+            summaryOutputLang,
+          );
+        } catch {
+          docSummaryTranslated = rawSummary;
+        }
+      }
+
+      if (onChunk) {
+        await streamTextLikeChat(docSummaryTranslated, onChunk, abortSignal, 15);
+      }
+      multiDocSummarySections.push(docSummaryTranslated);
+
+      summaryCitations.push({
+        documentId: doc.id,
+        fileName: doc.fileName || "Medical Report",
+        pageNumber: 1,
+        reportDate: doc.reportDate || null,
+        documentType: doc.documentType || null,
+        relevanceScore: 1.0,
+        excerpt: rawSummary ? rawSummary.substring(0, 160).trim() : null,
+      });
+    }
+
+    const replyText = multiDocSummarySections.join("\n");
+    const options = questions.map((q) => ({
+      label: q,
+      value: q,
+      actionType: "CHAT",
+    }));
+
+    const aiMessage = await chatSessionRepository.appendMessage({
+      citations: summaryCitations,
+      content: replyText,
+      metadata: {
+        mode: "DOCUMENT_RAG",
+        emergency: false,
+        documentId: targetDocs.map((d) => d.id),
+        task: "SUMMARY",
+        options,
+        citations: summaryCitations,
+      },
+      role: "assistant",
+      sessionId,
+      userId,
+    });
+
+    return {
+      ai: aiMessage,
+      citations: summaryCitations,
+      reply: replyText,
+      user: userMessage,
+      mode: "DOCUMENT_RAG",
+      emergency: false,
+      options,
+    };
+  }
+
+  /**
    * Main Dispatcher for Fast-Path Execution.
    */
   async execute(ctx, classification) {
     switch (classification.fastPathType) {
+      case "DOCUMENT_SUMMARY":
+        return this.handleDocumentSummary(ctx, classification);
       case "SPECIFIC_PROFILE_FIELD":
         return this.handleSpecificProfileField(ctx, classification);
       case "COUNT":

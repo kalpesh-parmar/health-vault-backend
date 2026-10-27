@@ -43,23 +43,96 @@ components:
             type: string
             format: uuid
 
+    ChatMentionItem:
+      type: object
+      required: [documentId]
+      properties:
+        documentId:
+          type: string
+          description: Unique identifier of the mentioned document or report
+        displayName:
+          type: string
+          description: Display name of the document shown in chat UI
+        type:
+          type: string
+          enum: [DOCUMENT]
+          default: DOCUMENT
+          description: Mention entity type
+        fileName:
+          type: string
+          description: Original file name of the document
+        patientId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Tenant patient ID if targeting dependent profile
+        reportDate:
+          type: string
+          nullable: true
+          description: Date printed or extracted from the report
+
     SendChatMessageRequest:
       type: object
       required: [question]
       properties:
-        question: { type: string }
-        sessionId: { type: string, format: uuid, nullable: true }
+        question:
+          type: string
+          description: User question or conversational prompt
+        sessionId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Active chat session UUID
         documentId:
           type: array
           items:
             type: string
           nullable: true
-        stream: { type: boolean, default: false }
-        page: { type: integer, minimum: 1, default: 1, nullable: true }
-        limit: { type: integer, minimum: 1, nullable: true }
+          description: Explicit document UUID(s) targeting specific report(s)
+        mentions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMentionItem"
+          nullable: true
+          description: Array of structured document mentions extracted from @mentions in UI
+        scopeMode:
+          type: string
+          enum: [SINGLE_DOCUMENT, MULTI_DOCUMENT, AUTHORIZED_HISTORY]
+          nullable: true
+          description: Target document retrieval scope constraint
+        preferredLanguage:
+          type: string
+          enum: [english, gujarati, hindi, marathi, tamil]
+          default: english
+          description: Preferred response language
+        patientId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional profile/patient UUID constraint
+        stream:
+          type: boolean
+          default: false
+          description: Whether to stream SSE tokens
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          nullable: true
       example:
         question: "What is my blood sugar level?"
-        documentId: ["doc_id_1", "doc_id_2"]
+        documentId: ["327bd14c-3f92-4c4f-b2fc-4989a0f5a83a"]
+        mentions:
+          - documentId: "327bd14c-3f92-4c4f-b2fc-4989a0f5a83a"
+            displayName: "Apollo Blood Report"
+            type: "DOCUMENT"
+            fileName: "apollo_blood_report.pdf"
+        scopeMode: "SINGLE_DOCUMENT"
+        preferredLanguage: "english"
         sessionId: "123e4567-e89b-12d3-a456-426614174000"
         stream: true
         page: 1
@@ -166,6 +239,47 @@ paths:
                 properties:
                   status: { type: string, example: "SUCCESS" }
                   message: { type: string, example: "Session deleted" }
+
+  /chat/session/{id}/clear-scope:
+    post:
+      tags: [Chat]
+      summary: Explicitly clear active document scope on a chat session
+      description: |
+        Resets conversation slot document filters to AUTHORIZED_HISTORY.
+        Guarded with timestamp ordering to prevent stale asynchronous clear operations
+        from overriding newer document selections.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientTimestamp:
+                  type: number
+                  description: Epoch millisecond timestamp of the clear action on the client
+      responses:
+        "200":
+          description: Scope cleared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "SUCCESS" }
+                  message: { type: string, example: "Document scope updated successfully" }
+                  data:
+                    type: object
+                    properties:
+                      cleared: { type: boolean, example: true }
+                      scopeMode: { type: string, example: "AUTHORIZED_HISTORY" }
+                      activeDocumentIds: { type: array, items: { type: string } }
 
   /chat/message:
     post:

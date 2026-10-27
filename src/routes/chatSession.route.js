@@ -4,6 +4,7 @@ const chatSessionController = require("../controllers/chatSession.controller");
 const { verifyToken } = require("../middlewares/authMiddleware");
 const { validateRequest } = require("../middlewares/validateRequest");
 const {
+  clearScopeSchema,
   createChatSessionSchema,
   idParamSchema,
   sendChatMessageSchema,
@@ -32,6 +33,13 @@ router.get(
   verifyToken,
   validateRequest({ params: idParamSchema, query: sessionMessagesQuerySchema }),
   chatSessionController.listMessages,
+);
+
+router.post(
+  "/session/:id/clear-scope",
+  verifyToken,
+  validateRequest({ params: idParamSchema, body: clearScopeSchema }),
+  chatSessionController.clearScope,
 );
 
 router.delete(

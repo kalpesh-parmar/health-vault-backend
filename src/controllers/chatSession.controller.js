@@ -109,4 +109,20 @@ async function deleteSession(req, res) {
   return successResponse(res, result, messageConstants.SESSION_DELETED);
 }
 
-module.exports = { createSession, deleteSession, listMessages, listSessions, sendMessage };
+async function clearScope(req, res) {
+  const result = await chatService.clearSessionScope({
+    sessionId: req.params.id,
+    userId: req.auth.userId,
+    clientTimestamp: req.body?.clientTimestamp,
+  });
+  return successResponse(res, result, "Document scope updated successfully", StatusCodes.OK);
+}
+
+module.exports = {
+  clearScope,
+  createSession,
+  deleteSession,
+  listMessages,
+  listSessions,
+  sendMessage,
+};

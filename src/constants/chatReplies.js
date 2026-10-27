@@ -164,6 +164,20 @@ const AGE_KEYWORDS = [
 ];
 
 const SUMMARY_KEYWORDS = [
+  // Generic / Action Requests
+  "summary aapo",
+  "mane summary aapo",
+  "aani summary aapo",
+  "summary apo",
+  "saransh aapo",
+  "aano saransh aapo",
+  "give me summary",
+  "summary please",
+  "give summary",
+  "summary do",
+  "mujhe summary do",
+  "summary dya",
+  "summary kudu",
   // English
   "ask_report",
   "ask report",

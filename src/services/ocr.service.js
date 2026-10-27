@@ -2297,14 +2297,21 @@ class V1Service {
       const intentResult = detectActionIntent(promptText, userLang);
 
       let targetDocIds = documentId;
+      const isExplicitHistory =
+        body?.scopeMode === "AUTHORIZED_HISTORY" || actionType === "CLEAR_DOCUMENT_SCOPE";
+
       if (!targetDocIds || (Array.isArray(targetDocIds) && targetDocIds.length === 0)) {
-        const fallbackDocId =
-          effectiveState?.documentId ||
-          effectiveState?.loadedDocumentId ||
-          dbState?.documentId ||
-          dbState?.loadedDocumentId;
-        if (fallbackDocId) {
-          targetDocIds = Array.isArray(fallbackDocId) ? fallbackDocId : [fallbackDocId];
+        if (!isExplicitHistory) {
+          const fallbackDocId =
+            effectiveState?.documentId ||
+            effectiveState?.loadedDocumentId ||
+            dbState?.documentId ||
+            dbState?.loadedDocumentId;
+          if (fallbackDocId) {
+            targetDocIds = Array.isArray(fallbackDocId) ? fallbackDocId : [fallbackDocId];
+          }
+        } else {
+          targetDocIds = [];
         }
       } else if (!Array.isArray(targetDocIds)) {
         targetDocIds = [targetDocIds];
@@ -2315,6 +2322,10 @@ class V1Service {
         question: promptText,
         sessionId: effectiveSessionId,
         documentId: targetDocIds,
+        mentions: body?.mentions,
+        scopeMode: body?.scopeMode || (isExplicitHistory ? "AUTHORIZED_HISTORY" : undefined),
+        actionType: actionType || body?.actionType,
+        clientTimestamp: body?.clientTimestamp,
         preferredLanguage: userLang,
         onChunk,
         abortSignal,
