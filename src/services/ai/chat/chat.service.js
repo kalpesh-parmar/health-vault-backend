@@ -384,6 +384,68 @@ ${chunksContent}
       };
     });
 
+    // Heal / synchronize REVIEW_MEDICINES_LIST messages with confirmed medicines (including user-added ones like Testing_1)
+    for (let i = 0; i < items.length; i++) {
+      const msg = items[i];
+      const action =
+        msg.action || msg.actionType || msg.metadata?.action || msg.metadata?.actionType;
+      if (msg.role === "assistant" && action === "REVIEW_MEDICINES_LIST") {
+        const confirmTurn = items.find(
+          (m, idx) =>
+            idx > i &&
+            (m.actionType === "CONFIRM_MEDICINES" ||
+              m.action === "CONFIRM_MEDICINES" ||
+              m.metadata?.actionType === "CONFIRM_MEDICINES" ||
+              m.metadata?.action === "CONFIRM_MEDICINES" ||
+              (typeof m.metadata?.rawValue === "string" &&
+                m.metadata.rawValue.includes('"medicines"')) ||
+              (typeof m.metadata?.rawValue === "object" && m.metadata?.rawValue?.medicines)),
+        );
+
+        let confirmedMedsList = null;
+        if (confirmTurn) {
+          if (Array.isArray(confirmTurn.medicines) && confirmTurn.medicines.length > 0) {
+            confirmedMedsList = confirmTurn.medicines;
+          } else if (
+            Array.isArray(confirmTurn.metadata?.medicines) &&
+            confirmTurn.metadata.medicines.length > 0
+          ) {
+            confirmedMedsList = confirmTurn.metadata.medicines;
+          } else {
+            let rawVal = confirmTurn.metadata?.rawValue;
+            if (typeof rawVal === "string") {
+              try {
+                rawVal = JSON.parse(rawVal);
+              } catch {
+                // ignore
+              }
+            }
+            if (Array.isArray(rawVal?.medicines) && rawVal.medicines.length > 0) {
+              confirmedMedsList = rawVal.medicines;
+            }
+          }
+        }
+
+        if (
+          Array.isArray(confirmedMedsList) &&
+          confirmedMedsList.length > (msg.medicines?.length || 0)
+        ) {
+          const updatedMeds = confirmedMedsList.map((m) => ({
+            ...m,
+            selected: true,
+            isSaved: true,
+          }));
+          msg.medicines = updatedMeds;
+          if (msg.metadata) {
+            msg.metadata.medicines = updatedMeds;
+          }
+          chatSessionRepository
+            .updateMessageMetadata(msg.id, { ...(msg.metadata || {}), medicines: updatedMeds })
+            .catch(() => {});
+        }
+      }
+    }
+
     return { ...result, items };
   }
 

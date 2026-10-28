@@ -902,6 +902,7 @@ async function executeAddDocumentAction({
       content: replyText,
       metadata: {
         mode: "ACTION",
+        action: returnedActionType,
         actionType: returnedActionType,
         documentId: docResult?.document?.id,
         document: docResult?.document,

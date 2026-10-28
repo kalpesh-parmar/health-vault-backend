@@ -1362,6 +1362,30 @@ class V1Service {
               stateToUpdate.medicationFlowDone = true;
               stateToUpdate.medicinesToAdd = [];
               stateToUpdate.validMedsToBulkCreate = [];
+              if (effectiveSessionId && Array.isArray(medsToProcess) && medsToProcess.length > 0) {
+                try {
+                  const reviewMsg = await chatSessionRepository.findLatestAssistantMessageByAction(
+                    effectiveSessionId,
+                    "REVIEW_MEDICINES_LIST",
+                  );
+                  if (reviewMsg) {
+                    const updatedMeta = {
+                      ...(reviewMsg.metadata || {}),
+                      medicines: medsToProcess.map((m) => ({
+                        ...m,
+                        selected: true,
+                        isSaved: true,
+                      })),
+                    };
+                    await chatSessionRepository.updateMessageMetadata(reviewMsg.id, updatedMeta);
+                  }
+                } catch (updateErr) {
+                  console.warn(
+                    "[UnifiedChat] Failed to sync REVIEW_MEDICINES_LIST message with confirmed medicines:",
+                    updateErr.message,
+                  );
+                }
+              }
               stateToUpdate.currentStep = "MEDICINE_OPTIONS";
             } else {
               // Persistence failed: do not falsely mark medicines as saved to DB or wipe medicinesToAdd
@@ -1413,7 +1437,12 @@ class V1Service {
             reply: onboardingResult?.message || onboardingResult?.reply || "",
             onboardingState: onboardingResult?.state || stateToUpdate,
             options: onboardingResult?.options || [],
-            medicines: onboardingResult?.medicines || [],
+            medicines:
+              Array.isArray(onboardingResult?.medicines) && onboardingResult.medicines.length > 0
+                ? onboardingResult.medicines
+                : Array.isArray(medsToProcess) && medsToProcess.length > 0
+                  ? medsToProcess
+                  : [],
             sessionId: effectiveSessionId,
           });
           if (onboardingResult?.completionMessage) {
@@ -1512,6 +1541,31 @@ class V1Service {
             effectiveState?.preferredLanguage ||
             "english";
 
+          if (Array.isArray(medsToProcess) && medsToProcess.length > 0) {
+            try {
+              const reviewMsg = await chatSessionRepository.findLatestAssistantMessageByAction(
+                activeSessionId,
+                "REVIEW_MEDICINES_LIST",
+              );
+              if (reviewMsg) {
+                const updatedMeta = {
+                  ...(reviewMsg.metadata || {}),
+                  medicines: medsToProcess.map((m) => ({
+                    ...m,
+                    selected: true,
+                    isSaved: true,
+                  })),
+                };
+                await chatSessionRepository.updateMessageMetadata(reviewMsg.id, updatedMeta);
+              }
+            } catch (updateErr) {
+              console.warn(
+                "[UnifiedChat] Failed to sync post-onboarding REVIEW_MEDICINES_LIST message with confirmed medicines:",
+                updateErr.message,
+              );
+            }
+          }
+
           let userConfirmContent = displayLabel;
           if (
             !userConfirmContent ||
@@ -1552,7 +1606,10 @@ class V1Service {
               actionType: "CONFIRM_MEDICINES",
               isConfirmed: true,
               medicationIds: createdMeds.map((m) => m.id),
-              medicines: createdMeds,
+              medicines:
+                Array.isArray(medsToProcess) && medsToProcess.length > 0
+                  ? medsToProcess
+                  : createdMeds,
               medication: createdMed,
             },
           });
@@ -1564,7 +1621,8 @@ class V1Service {
           reply: replyText,
           sessionId: activeSessionId,
           medication: createdMed,
-          medicines: createdMeds,
+          medicines:
+            Array.isArray(medsToProcess) && medsToProcess.length > 0 ? medsToProcess : createdMeds,
           onboardingState: terminalOnboardingState,
         });
       }
@@ -2625,6 +2683,63 @@ class V1Service {
         }
         return true;
       });
+    }
+
+    {
+      // Heal / synchronize REVIEW_MEDICINES_LIST message with all confirmed medicines (including user-added ones like Testing_1)
+      const reviewMsgIndex = messages.findIndex(
+        (m) =>
+          m.role === "assistant" &&
+          (m.metadata?.action === "REVIEW_MEDICINES_LIST" ||
+            m.metadata?.actionType === "REVIEW_MEDICINES_LIST" ||
+            m.action === "REVIEW_MEDICINES_LIST" ||
+            m.actionType === "REVIEW_MEDICINES_LIST"),
+      );
+      if (reviewMsgIndex !== -1) {
+        const reviewMsg = messages[reviewMsgIndex];
+        const confirmTurn = messages.find(
+          (m, idx) =>
+            idx > reviewMsgIndex &&
+            m.role === "user" &&
+            (m.metadata?.actionType === "CONFIRM_MEDICINES" ||
+              m.metadata?.action === "CONFIRM_MEDICINES" ||
+              m.metadata?.stepKey === "MEDICINE_OPTIONS" ||
+              (typeof m.metadata?.rawValue === "string" &&
+                m.metadata.rawValue.includes('"medicines"')) ||
+              (typeof m.metadata?.rawValue === "object" && m.metadata?.rawValue?.medicines)),
+        );
+
+        let confirmedMedsList = null;
+        if (confirmTurn) {
+          let rawVal = confirmTurn.metadata?.rawValue;
+          if (typeof rawVal === "string") {
+            try {
+              rawVal = JSON.parse(rawVal);
+            } catch {
+              // ignore
+            }
+          }
+          if (Array.isArray(rawVal?.medicines) && rawVal.medicines.length > 0) {
+            confirmedMedsList = rawVal.medicines;
+          }
+        }
+
+        if (
+          Array.isArray(confirmedMedsList) &&
+          confirmedMedsList.length > (reviewMsg.metadata?.medicines?.length || 0)
+        ) {
+          const updatedMeta = {
+            ...(reviewMsg.metadata || {}),
+            medicines: confirmedMedsList.map((m) => ({ ...m, selected: true, isSaved: true })),
+          };
+          messages[reviewMsgIndex] = {
+            ...reviewMsg,
+            medicines: updatedMeta.medicines,
+            metadata: updatedMeta,
+          };
+          chatSessionRepository.updateMessageMetadata(reviewMsg.id, updatedMeta).catch(() => {});
+        }
+      }
     }
 
     let documentsName = [];

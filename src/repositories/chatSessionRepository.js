@@ -216,6 +216,34 @@ class ChatSessionRepository {
 
     return { items, nextCursor };
   }
+  async updateMessageMetadata(messageId, newMetadata) {
+    const [updated] = await this.client
+      .update(chatMessage)
+      .set({ metadata: newMetadata })
+      .where(eq(chatMessage.id, messageId))
+      .returning();
+    return updated || null;
+  }
+
+  async findLatestAssistantMessageByAction(sessionId, action) {
+    const [msg] = await this.client
+      .select()
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.sessionId, sessionId),
+          eq(chatMessage.role, "assistant"),
+          or(
+            sql`${chatMessage.metadata}->>'action' = ${String(action)}`,
+            sql`${chatMessage.metadata}->>'actionType' = ${String(action)}`,
+          ),
+        ),
+      )
+      .orderBy(desc(chatMessage.seq))
+      .limit(1);
+    return msg || null;
+  }
+
   async softDeleteSession(id, userId) {
     const [updated] = await this.client
       .update(chatSession)
