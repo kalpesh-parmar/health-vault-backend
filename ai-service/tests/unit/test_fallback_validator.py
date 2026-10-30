@@ -172,3 +172,41 @@ def test_apply_vision_result_rejects_script_collapse():
     assert "NO_GUJARATI_CHARS" in status
     assert page_text == ""
     assert lines == []
+
+
+def test_apply_vision_result_accepts_valid_length_truncation():
+    """Verify that _apply_vision_result retains extracted text when length truncation occurs with substantial content."""
+    handler = OcrStageHandler(
+        s3_client=None,
+        lifecycle=None,
+        vision_service=None,
+        paddle_engine=None,
+        quality_gate=None,
+    )
+
+    extracted_clinical_text = (
+        "Patient Name: Rajesh Sharma\n"
+        "Age: 45 Years\n"
+        "CBC Report\n"
+        "Hemoglobin: 13.5 g/dL\n"
+        "WBC: 7500 /cumm\n"
+        "Platelets: 250000 /cumm\n"
+    )
+
+    vision_res = {
+        "text": extracted_clinical_text,
+        "confidence": 0.95,
+        "finish_reason": "length",
+    }
+
+    page_text, conf, lines, engine_used, status = handler._apply_vision_result(
+        res=vision_res,
+        paddle_res=None,
+        fallback_reason=None,
+        expected_script="latin",
+    )
+
+    assert status == "PARTIAL"
+    assert engine_used == "qwen_vl"
+    assert "Rajesh Sharma" in page_text
+    assert len(lines) >= 6

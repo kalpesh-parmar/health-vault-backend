@@ -287,6 +287,9 @@ def _render_single_pdf_page(doc_bytes: bytes, page_idx: int, dpi: int = 150) -> 
     return out_bytes, mime
 
 
+render_pdf_page_to_image = _render_single_pdf_page
+
+
 SUPPORTED_MIME_TYPES = {
     "application/pdf",
     "image/png",
@@ -904,13 +907,18 @@ class OcrStageHandler:
         has_unclosed_think = bool(re.search(r"<(?:think|thinking|reasoning)\b[^>]*>(?![\s\S]*<\/(?:think|thinking|reasoning)>)", raw_vision_text, flags=re.IGNORECASE))
         clean_vision_text = strip_think_tokens(raw_vision_text)
 
-        if has_unclosed_think:
+        if has_unclosed_think and not clean_vision_text:
             logger.warning("VLM output rejected: UNCLOSED_THINK_BLOCK")
+            if paddle_res and paddle_res.get("lines"):
+                retained_lines = [
+                    dict(l) for l in paddle_res["lines"]
+                    if float(l.get("confidence") or 0.0) >= 0.70 and not self._is_pseudo_latin_noise(l)
+                ]
+                if retained_lines:
+                    page_text = "\n".join(l["text"] for l in retained_lines)
+                    conf = round(sum(float(l.get("confidence") or 0.0) for l in retained_lines) / len(retained_lines), 4)
+                    return page_text, conf, retained_lines, "paddleocr_partial", "FALLBACK_PARTIAL"
             return "", 0.0, [], "none", "FAILED: UNCLOSED_THINK_BLOCK"
-
-        if finish_reason in {"length", "MAX_TOKENS"}:
-            logger.warning("VLM output rejected: PREMATURE_LENGTH_TERMINATION")
-            return "", 0.0, [], "none", "FAILED: PREMATURE_LENGTH_TERMINATION"
 
         if not clean_vision_text:
             reason = "EMPTY_AFTER_THINK_STRIP" if raw_vision_text else "EMPTY_OUTPUT"
@@ -1036,7 +1044,12 @@ class OcrStageHandler:
                 for l in raw_vision_text.splitlines()
                 if l.strip()
             ]
-            status = "FALLBACK" if fallback_reason else "SUCCESS"
+            if fallback_reason:
+                status = "FALLBACK"
+            elif finish_reason in {"length", "MAX_TOKENS"}:
+                status = "PARTIAL"
+            else:
+                status = "SUCCESS"
             return raw_vision_text, vision_conf, lines, "qwen_vl", status
 
     async def _inspect_uncertain_regions_if_needed(
@@ -1405,30 +1418,42 @@ class OcrStageHandler:
                                 },
                             )
                             retry_text = (retry_res.get("text") or "").strip()
-                            if retry_text and f2_reason not in {"length", "MAX_TOKENS"}:
+                            clean_retry = strip_think_tokens(retry_text)
+                            clean_raw = strip_think_tokens(raw_text)
+
+                            if clean_retry and f2_reason not in {"length", "MAX_TOKENS"}:
                                 logger.info(
                                     "Page %d VLM escalation retry succeeded: %d chars, finish_reason=%s",
                                     page_num,
-                                    len(retry_text),
+                                    len(clean_retry),
                                     f2_reason,
                                 )
                                 res = retry_res
-                            elif retry_text and f2_reason in {"length", "MAX_TOKENS"}:
-                                logger.warning(
-                                    "Page %d VLM escalation retry also truncated on length: %d chars, finish_reason=%s",
+                            elif clean_retry and len(clean_retry) > len(clean_raw):
+                                logger.info(
+                                    "Page %d VLM escalation retry produced more characters (%d > %d) with finish_reason=%s; using retry result",
                                     page_num,
-                                    len(retry_text),
+                                    len(clean_retry),
+                                    len(clean_raw),
                                     f2_reason,
                                 )
                                 res = retry_res
+                            elif clean_raw:
+                                logger.warning(
+                                    "Page %d VLM escalation retry (chars=%d, finish_reason=%s) did not produce more characters than Attempt 1 (chars=%d); retaining Attempt 1 result",
+                                    page_num,
+                                    len(clean_retry),
+                                    f2_reason,
+                                    len(clean_raw),
+                                )
+                                # res already holds Attempt 1 result!
                             else:
-                                # M-1 FIX: Attempt 2 produced empty/unusable output.
-                                # Preserve Attempt 1 non-empty result and length finish reason so that
-                                # PREMATURE_LENGTH_TERMINATION is retained rather than masked as EMPTY_OUTPUT.
+                                if clean_retry:
+                                    res = retry_res
                                 logger.warning(
-                                    "Page %d VLM escalation retry produced empty/unusable output (chars=%d, finish_reason=%s); preserving Attempt 1 length termination",
+                                    "Page %d VLM escalation retry produced %d chars (finish_reason=%s)",
                                     page_num,
-                                    len(retry_text),
+                                    len(clean_retry),
                                     f2_reason,
                                 )
                         except Exception as retry_err:

@@ -793,13 +793,15 @@ function normalizeCreateMedicationInput(payload = {}) {
   const rawResolution = input.resolution || input.action || null;
   if (rawResolution) {
     const cleanRes = String(rawResolution).trim().toUpperCase().replace(/\s+/g, "_");
-    if (["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"].includes(cleanRes)) {
+    if (
+      ["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW", "KEEP_BOTH"].includes(cleanRes)
+    ) {
       input.resolution = cleanRes;
     } else {
-      input.resolution = "KEEP_NEW";
+      input.resolution = null;
     }
   } else {
-    input.resolution = "KEEP_NEW";
+    input.resolution = null;
   }
 
   const targetId =

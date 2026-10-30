@@ -160,3 +160,41 @@ async def test_orchestrator_syncs_canonical_document_id(mock_orchestrator):
     last_call = lifecycle.report_progress.call_args_list[-1]
     assert last_call.kwargs.get("document_id") == document_id
     assert last_call.kwargs.get("file_key") == logical_file_key
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_prioritizes_uploading_stage_s3_key_over_logical_doc_key(mock_orchestrator):
+    orchestrator, ocr_handler, s3_client, lifecycle, repo = mock_orchestrator
+
+    job_id = uuid4()
+    logical_file_key = "doc_21983b438090"
+    physical_upload_key = "documents/68055ead-b88c-4ff9-bf9d-50346c505924/fd47ea63-c076-4a5c-b517-a36779c21dd5-5069200904.pdf"
+
+    job = {
+        "id": job_id,
+        "file_key": logical_file_key,
+        "completed_stages": [],
+        "checkpoint_data": {
+            "s3Bucket": "health-vault-dev-bucket",
+            "s3Key": logical_file_key,
+            "UPLOADING": {
+                "uploaded": True,
+                "s3Bucket": "health-vault-dev-bucket",
+                "s3Key": physical_upload_key,
+            },
+        },
+        "metadata": {
+            "key": logical_file_key,
+            "s3Key": logical_file_key,
+            "originalName": "report.pdf",
+        },
+    }
+
+    await orchestrator.process_job(job)
+
+    ocr_handler.verify_upload.assert_any_call(
+        bucket="health-vault-dev-bucket",
+        key=physical_upload_key,
+        expected_sha256=None,
+    )
+    repo.sync_to_documents_table.assert_awaited_once()

@@ -3,6 +3,7 @@ const { and, eq, lt, ne, sql, or, isNull } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { env } = require("../configs/env");
 const { documentProcessingJob } = require("../models/documentProcessingJob");
+const { document } = require("../models/document");
 
 const DEFAULT_TTL_HOURS = 24;
 
@@ -174,14 +175,72 @@ class DocumentProcessingJobRepository {
   }
 
   async findByFileKey(fileKey, userId) {
+    if (!fileKey || !userId) return null;
+    const cleanKey = String(fileKey).trim().replace(/['"]+/g, "");
+    if (!cleanKey) return null;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanKey);
+
+    const conditions = [
+      eq(documentProcessingJob.fileKey, cleanKey),
+      sql`${documentProcessingJob.metadata}->>'s3Key' = ${cleanKey}`,
+      sql`${documentProcessingJob.metadata}->>'key' = ${cleanKey}`,
+      sql`${documentProcessingJob.metadata}->>'documentId' = ${cleanKey}`,
+      sql`${documentProcessingJob.checkpointData}->>'s3Key' = ${cleanKey}`,
+      sql`${documentProcessingJob.checkpointData}->>'documentId' = ${cleanKey}`,
+    ];
+
+    if (isUuid) {
+      conditions.push(eq(documentProcessingJob.id, cleanKey));
+    }
+
     const [row] = await db
       .select()
       .from(documentProcessingJob)
-      .where(
-        and(eq(documentProcessingJob.fileKey, fileKey), eq(documentProcessingJob.userId, userId)),
-      )
+      .where(and(eq(documentProcessingJob.userId, userId), or(...conditions)))
+      .orderBy(sql`${documentProcessingJob.createdAt} DESC`)
       .limit(1);
-    return row || null;
+
+    if (row) return row;
+
+    // Fallback: Check if cleanKey matches an existing document row (by id or s3Key)
+    try {
+      const docConditions = [eq(document.userId, userId)];
+      if (isUuid) {
+        docConditions.push(or(eq(document.id, cleanKey), eq(document.s3Key, cleanKey)));
+      } else {
+        docConditions.push(eq(document.s3Key, cleanKey));
+      }
+
+      const [foundDoc] = await db
+        .select({ id: document.id, s3Key: document.s3Key })
+        .from(document)
+        .where(and(...docConditions))
+        .limit(1);
+
+      if (foundDoc) {
+        const docMatches = [
+          eq(documentProcessingJob.fileKey, foundDoc.s3Key),
+          sql`${documentProcessingJob.metadata}->>'s3Key' = ${foundDoc.s3Key}`,
+          sql`${documentProcessingJob.metadata}->>'key' = ${foundDoc.s3Key}`,
+          sql`${documentProcessingJob.metadata}->>'documentId' = ${foundDoc.id}`,
+          sql`${documentProcessingJob.checkpointData}->>'s3Key' = ${foundDoc.s3Key}`,
+          sql`${documentProcessingJob.checkpointData}->>'documentId' = ${foundDoc.id}`,
+        ];
+        const [fallbackRow] = await db
+          .select()
+          .from(documentProcessingJob)
+          .where(and(eq(documentProcessingJob.userId, userId), or(...docMatches)))
+          .orderBy(sql`${documentProcessingJob.createdAt} DESC`)
+          .limit(1);
+
+        if (fallbackRow) return fallbackRow;
+      }
+    } catch {
+      // Ignore fallback lookup errors
+    }
+
+    return null;
   }
 
   async findActiveJobBySha256(userId, sha256, maxAgeMinutes = 60) {
@@ -209,6 +268,19 @@ class DocumentProcessingJobRepository {
   }
 
   async claimJobForRetry(fileKey, userId) {
+    if (!fileKey || !userId) return null;
+    const cleanKey = String(fileKey).trim().replace(/['"]+/g, "");
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanKey);
+
+    const matchConditions = [
+      eq(documentProcessingJob.fileKey, cleanKey),
+      sql`${documentProcessingJob.metadata}->>'s3Key' = ${cleanKey}`,
+      sql`${documentProcessingJob.checkpointData}->>'s3Key' = ${cleanKey}`,
+    ];
+    if (isUuid) {
+      matchConditions.push(eq(documentProcessingJob.id, cleanKey));
+    }
+
     const [row] = await db
       .update(documentProcessingJob)
       .set({
@@ -222,8 +294,8 @@ class DocumentProcessingJobRepository {
       })
       .where(
         and(
-          eq(documentProcessingJob.fileKey, fileKey),
           eq(documentProcessingJob.userId, userId),
+          or(...matchConditions),
           ne(documentProcessingJob.status, "RUNNING"),
         ),
       )

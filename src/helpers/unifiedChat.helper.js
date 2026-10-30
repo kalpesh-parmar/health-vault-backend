@@ -1,6 +1,7 @@
-const { eq, and } = require("drizzle-orm");
+const { eq, and, or } = require("drizzle-orm");
 const { db } = require("../configs/db");
 const { document } = require("../models/document");
+const documentRepository = require("../repositories/documentRepository");
 const { normalizeLanguage } = require("../utils/commonUtils");
 const medicationService = require("../services/medication.service");
 const userOnboardingRepository = require("../repositories/userOnboardingRepository");
@@ -267,13 +268,12 @@ async function executeAddDocumentAction({
 
   let docResult;
   let replyText;
+  let isExistingCompleted = false;
   const fileNames = [];
 
   if (!hasOcrData && filesList.length > 0) {
     const createdDocs = [];
     const createdJobs = [];
-
-    let isExistingCompleted = false;
     // let isExistingProcessing = false;
 
     for (const fItem of filesList) {
@@ -302,20 +302,47 @@ async function executeAddDocumentAction({
         existingJob?.metadata?.fileName;
 
       let existingDbDoc = null;
+      let isDocSoftDeleted = false;
       if (userId) {
         try {
+          const docIdCandidate = existingJob?.metadata?.documentId || existingJob?.id;
+          const isKeyUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            currentS3Key,
+          );
+          const isDocIdUuid =
+            docIdCandidate &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(docIdCandidate);
+
+          const physicalS3Candidates = [
+            currentS3Key,
+            existingJob?.metadata?.s3Key,
+            existingJob?.checkpointData?.s3Key,
+            existingJob?.checkpointData?.UPLOADING?.s3Key,
+          ].filter((k) => typeof k === "string" && k.trim());
+
+          const docOrConditions = physicalS3Candidates.map((k) => eq(document.s3Key, k.trim()));
+          if (isKeyUuid) {
+            docOrConditions.push(eq(document.id, currentS3Key));
+          }
+          if (isDocIdUuid) {
+            docOrConditions.push(eq(document.id, docIdCandidate));
+          }
+
           const [foundDoc] = await db
             .select()
             .from(document)
-            .where(
-              and(
-                eq(document.s3Key, currentS3Key),
-                eq(document.userId, userId),
-                eq(document.softDelete, false),
-              ),
-            )
+            .where(and(eq(document.userId, userId), or(...docOrConditions)))
             .limit(1);
+
           if (foundDoc) {
+            if (foundDoc.softDelete) {
+              // Restore soft-deleted document so it is active in documents table
+              await db
+                .update(document)
+                .set({ softDelete: false, updatedAt: new Date() })
+                .where(eq(document.id, foundDoc.id));
+              foundDoc.softDelete = false;
+            }
             existingDbDoc = foundDoc;
             if (foundDoc.fileName) {
               rawExtractedName = foundDoc.fileName;
@@ -329,9 +356,41 @@ async function executeAddDocumentAction({
       const fileName = rawExtractedName || currentS3Key.split("/").pop();
       fileNames.push(fileName);
 
-      if (existingJob) {
+      const isJobCompleted =
+        existingJob?.status === "COMPLETED" || existingJob?.status === "completed";
+
+      // If job completed in document_processing_jobs but missing in documents table, sync it now
+      if (isJobCompleted && !existingDbDoc && existingJob?.extractedStructuredData) {
+        try {
+          const synced = await documentRepository.upsertCompletedDocument({
+            id: existingJob.id,
+            userId,
+            fileName: fileName || "Document",
+            s3Bucket: existingJob.checkpointData?.s3Bucket || existingJob.metadata?.bucket,
+            s3Key: existingJob.checkpointData?.s3Key || existingJob.metadata?.s3Key || currentS3Key,
+            ocrStatus: "completed",
+            structuredExtractedData: existingJob.extractedStructuredData,
+            summaryEnglish: existingJob.extractedStructuredData?.summaryEnglish,
+            remarks:
+              existingJob.extractedStructuredData?.summaryInPreferredLanguage ||
+              existingJob.extractedStructuredData?.summaryEnglish,
+          });
+          if (synced) {
+            existingDbDoc = synced;
+          }
+        } catch (syncErr) {
+          console.warn("[unifiedChat] Sync to documents fallback:", syncErr?.message);
+        }
+      }
+
+      const canReuseCompletedJob = Boolean(
+        isJobCompleted &&
+        (existingJob?.extractedStructuredData || existingDbDoc?.structuredExtractedData),
+      );
+
+      if (existingJob && (!isJobCompleted || canReuseCompletedJob)) {
         let normStatus = "completed";
-        if (existingJob.status === "COMPLETED" || existingJob.status === "completed") {
+        if (canReuseCompletedJob) {
           normStatus = ocrStatusEnum?.COMPLETED || "completed";
           isExistingCompleted = true;
         } else if (
@@ -344,11 +403,13 @@ async function executeAddDocumentAction({
         } else {
           normStatus = String(existingJob.status || "in_progress").toLowerCase();
         }
-        const jobError = existingJob.error || existingJob.message || null;
+        const jobError =
+          existingJob.error ||
+          (String(existingJob.status).toUpperCase() === "FAILED" ? existingJob.message : null);
         const structData =
           existingJob.extractedStructuredData || existingDbDoc?.structuredExtractedData || null;
         createdDocs.push({
-          id: existingJob.id,
+          id: existingDbDoc?.id || existingJob.id,
           fileName,
           s3Key: currentS3Key,
           currentStep: existingJob.currentStep,
@@ -370,6 +431,7 @@ async function executeAddDocumentAction({
         createdJobs.push(existingJob);
       } else if (
         existingDbDoc &&
+        !isDocSoftDeleted &&
         (existingDbDoc.ocrStatus === "completed" ||
           existingDbDoc.ocrStatus === ocrStatusEnum?.COMPLETED)
       ) {
@@ -621,9 +683,7 @@ async function executeAddDocumentAction({
     });
 
     if (userId) {
-      extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList, {
-        skipDbCheck: true,
-      });
+      extractedMedicines = await medicationService.checkDuplicateMedicationsBatch(userId, rawList);
     } else {
       extractedMedicines = rawList;
     }
@@ -673,7 +733,21 @@ async function executeAddDocumentAction({
   }
 
   if (completedCount === 0 && (docResult?.document || docResult?.job)) {
-    completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
+    const allItems = [
+      ...(Array.isArray(docResult?.job) ? docResult.job : docResult?.job ? [docResult.job] : []),
+      ...(Array.isArray(docResult?.document)
+        ? docResult.document
+        : docResult?.document
+          ? [docResult.document]
+          : []),
+    ];
+    const anyInProgress = allItems.some((item) => {
+      const st = String(item?.status || item?.ocrStatus || item?.stageStatus || "").toUpperCase();
+      return st === "IN_PROGRESS" || st === "RUNNING" || st === "QUEUED" || st === "PROCESSING";
+    });
+    if (!anyInProgress) {
+      completedCount = Math.max(totalUploads - failedCount - rejectedCount, 0);
+    }
   }
   if (totalUploads === 0) {
     totalUploads = Math.max(batchDocumentsName.length, 1);
@@ -821,11 +895,19 @@ async function executeAddDocumentAction({
       if (docItem.structuredExtractedData) docItem.structuredExtractedData = struct;
     }
   }
-  replyText = await getLocalizedText(
-    "onboarding.document.extracted_review",
-    "Your document has been processed successfully. Please review it below.",
-    preferredLanguage,
-  );
+  if (completedCount > 0 || isExistingCompleted) {
+    replyText = await getLocalizedText(
+      "onboarding.document.extracted_review",
+      "Your document has been processed successfully. Please review it below.",
+      preferredLanguage,
+    );
+  } else {
+    replyText = await getLocalizedText(
+      "onboarding.document.processing",
+      "Your document is being processed. You can check its progress shortly.",
+      preferredLanguage,
+    );
+  }
 
   let activeSessionId = sessionId;
   if (!activeSessionId && userId) {

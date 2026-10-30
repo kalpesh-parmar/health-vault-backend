@@ -42,8 +42,6 @@ const { ocrOrchestrator, ocrService, embeddingService } = require("./ai");
 const documentPersistenceService = require("./documentPersistence.service");
 const aiClient = require("./ai/clients/aiClient.service");
 const { normalizeLanguage, extractKeyPoints } = require("../helpers/summary.helper");
-const { inferFileType } = require("../helpers/document.helper");
-const { ocrStatus } = require("../enums/ocrStatus");
 
 const documentQueue = require("./queue/documentQueue.service");
 const { documentType } = require("../enums/documentType");
@@ -78,13 +76,48 @@ const CANONICAL_M1_STAGES = [
 ];
 
 function calculateResumeFromStage(job) {
-  const completed = Array.isArray(job?.completedStages) ? job.completedStages : [];
+  const failedStage =
+    job?.checkpointData?.failedStage || job?.checkpoint_data?.failedStage || job?.stage;
+  if (failedStage && CANONICAL_M1_STAGES.includes(failedStage)) {
+    return failedStage;
+  }
+
+  const completed = Array.isArray(job?.completedStages)
+    ? job.completedStages
+    : Array.isArray(job?.completed_stages)
+      ? job.completed_stages
+      : Array.isArray(job?.checkpointData?.completedStages)
+        ? job.checkpointData.completedStages
+        : Array.isArray(job?.checkpoint_data?.completedStages)
+          ? job.checkpoint_data.completedStages
+          : [];
   for (const stage of CANONICAL_M1_STAGES) {
     if (!completed.includes(stage)) {
       return stage;
     }
   }
   return "VALIDATING";
+}
+
+function resolveStorageKey(job) {
+  const uploadKey = job?.checkpointData?.UPLOADING?.s3Key;
+  const candidates = [
+    uploadKey,
+    job?.checkpointData?.s3Key,
+    job?.metadata?.key,
+    job?.metadata?.s3Key,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.includes("/")) {
+      return c.trim();
+    }
+  }
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim() && !c.trim().startsWith("doc_")) {
+      return c.trim();
+    }
+  }
+  return job?.checkpointData?.s3Key || job?.metadata?.key || job?.metadata?.s3Key || job?.fileKey;
 }
 
 function withTimeout(promise, ms, stageName) {
@@ -468,11 +501,17 @@ const STAGES_PIPELINE = [
       const savedResult = await documentPersistenceService.addDocument({
         userId: ctx.patientId,
         payload: {
-          s3Key: ctx.fileKey,
+          s3Key: ctx.job?.metadata?.s3Key || ctx.job?.metadata?.key || ctx.fileKey,
           s3bucket: bucket,
-          fileName: ctx.record?.fileName || ctx.file?.originalname,
-          fileType: ctx.record?.mimeType || ctx.file?.mimetype,
-          fileSize: ctx.record?.sizeBytes || ctx.file?.size,
+          fileName:
+            ctx.job?.metadata?.originalName || ctx.record?.fileName || ctx.file?.originalname,
+          fileType: ctx.job?.metadata?.mimeType || ctx.record?.mimeType || ctx.file?.mimetype,
+          fileSize:
+            ctx.record?.sizeBytes ||
+            ctx.file?.size ||
+            ctx.job?.metadata?.fileSize ||
+            ctx.job?.checkpointData?.fileSize ||
+            0,
           rawOcrData: rawOcr,
           extractedStructuredData: ctx.structured,
           graphs: ctx.graphs || [],
@@ -741,17 +780,34 @@ class DocumentService {
               `  [NODE TIMING] [uploadDocuments] findActiveJobBySha256 took ${Date.now() - tSha}ms (hit=${Boolean(existingShaJob)})`,
             );
             if (existingShaJob) {
-              console.log(
-                `[uploadDocuments] SHA-256 deduplication hit: reusing existing job ${existingShaJob.id} for file ${file?.originalname || fileKey}`,
-              );
-              return {
-                jobId: existingShaJob.id,
-                fileKey: existingShaJob.fileKey,
-                documentId: existingShaJob.metadata?.documentId || null,
-                fileName: existingShaJob.originalName || file?.originalname || "",
-                status: existingShaJob.status,
-                streamUrl: `/sse/files/${existingShaJob.fileKey}/stream`,
-              };
+              let isReusable = true;
+              if (existingShaJob.status === "COMPLETED") {
+                const docS3Key =
+                  existingShaJob.metadata?.s3Key ||
+                  existingShaJob.metadata?.key ||
+                  existingShaJob.checkpointData?.s3Key ||
+                  existingShaJob.fileKey;
+                const activeDoc = await documentRepository
+                  .findByFileKey(docS3Key, authUserId)
+                  .catch(() => null);
+                if (!activeDoc) {
+                  isReusable = false;
+                }
+              }
+
+              if (isReusable) {
+                console.log(
+                  `[uploadDocuments] SHA-256 deduplication hit: reusing existing job ${existingShaJob.id} for file ${file?.originalname || fileKey}`,
+                );
+                return {
+                  jobId: existingShaJob.id,
+                  fileKey: existingShaJob.fileKey,
+                  documentId: existingShaJob.metadata?.documentId || null,
+                  fileName: existingShaJob.originalName || file?.originalname || "",
+                  status: existingShaJob.status,
+                  streamUrl: `/sse/files/${existingShaJob.fileKey}/stream`,
+                };
+              }
             }
 
             let s3Key = null;
@@ -776,7 +832,10 @@ class DocumentService {
                 (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
                 env.patientDocumentsBucket;
 
-              const documentId = crypto.randomUUID();
+              const canonicalDocumentId = crypto.randomUUID();
+              // Flow Requirement: On upload, only enter in document_processing_jobs.
+              // No initial row is entered in documents table until processing completes.
+              /*
 
               // 1.5 Create or link initial canonical document record in documents table
               const tUpsert = Date.now();
@@ -794,7 +853,7 @@ class DocumentService {
               console.log(
                 `  [NODE TIMING] [uploadDocuments] documentRepository.upsertInitialDocument took ${Date.now() - tUpsert}ms`,
               );
-              canonicalDocumentId = initialDoc?.id || documentId;
+              */
 
               // 2. Node creates initial document_processing_jobs row with status=QUEUED
               const tJob = Date.now();
@@ -817,6 +876,7 @@ class DocumentService {
                   processor: "python",
                   mimeType: file?.mimetype || "",
                   originalName: file?.originalname || "",
+                  fileSize: file?.size || 0,
                 },
                 checkpointData: {
                   pageCount,
@@ -825,6 +885,7 @@ class DocumentService {
                   s3Key,
                   sha256,
                   documentId: canonicalDocumentId,
+                  fileSize: file?.size || 0,
                 },
               });
               console.log(
@@ -885,11 +946,17 @@ class DocumentService {
                     message: failureMessage,
                   })
                   .catch(() => {});
-                await documentRepository
-                  .update(canonicalDocumentId, {
-                    ocrStatus: ocrStatus.FAILED,
+                // Flow Requirement: on failure, do not update documents table. Job stays in document_processing_jobs.
+                // await documentRepository
+                //   .update(canonicalDocumentId, {
+                //     ocrStatus: ocrStatus.FAILED,
+                //   })
+                //   .catch(() => {});
+                /*
+// ocrStatus: ocrStatus.FAILED,
                   })
                   .catch(() => {});
+                */
                 const emitter = ProgressEmitter.for({
                   fileKey: fileKey,
                   fileName: file?.originalname || "",
@@ -914,11 +981,17 @@ class DocumentService {
               if (s3Key) {
                 await objectStorageService.deleteFile(s3Key).catch(() => {});
               }
-              if (canonicalDocumentId) {
-                await documentRepository
-                  .deleteDocument(canonicalDocumentId, authUserId)
+              /* if (canonicalDocumentId) {
+                // Flow Requirement: on failure, do not update documents table. Job stays in document_processing_jobs.
+                // await documentRepository
+                //   .update(canonicalDocumentId, {
+                //     ocrStatus: ocrStatus.FAILED,
+                //   })
+                //   .catch(() => {});
+// .deleteDocument(canonicalDocumentId, authUserId) /*
                   .catch(() => {});
               }
+              */
               throw fileErr;
             }
           }),
@@ -965,13 +1038,15 @@ class DocumentService {
         `Maximum retry attempts (${env.documentMaxRetryAttempts || 3}) exceeded for this document.`,
       );
     }
+    const activeFileKey = job.fileKey || fileKey;
     if (job.status === "RUNNING") {
       return {
-        fileKey,
+        jobId: job.id,
+        fileKey: activeFileKey,
         status: "RUNNING",
         resumeStage: job.stage || DOCUMENT_STAGES.QUEUED,
         progress: job.percentage || 0,
-        streamUrl: `/sse/files/${fileKey}/stream`,
+        streamUrl: `/sse/files/${activeFileKey}/stream`,
       };
     }
 
@@ -993,7 +1068,7 @@ class DocumentService {
       job.metadata?.bucket ||
       (env.storageProvider === "gcp" ? env.gcpStorageBucket : env.awsBucketName) ||
       env.patientDocumentsBucket;
-    let updatedKey = job.checkpointData?.s3Key || job.fileKey;
+    let updatedKey = resolveStorageKey(job);
 
     if (file) {
       updatedSha256 = computeFileSha256(file);
@@ -1001,7 +1076,6 @@ class DocumentService {
         file,
         FileCategory.DOCUMENT,
         userId,
-        { fileKey },
       );
       if (uploadResult?.s3Bucket || uploadResult?.bucket) {
         updatedBucket = uploadResult?.s3Bucket || uploadResult?.bucket;
@@ -1024,6 +1098,7 @@ class DocumentService {
         ...(updatedSha256 ? { sha256: updatedSha256 } : {}),
         bucket: updatedBucket,
         key: updatedKey,
+        s3Key: updatedKey,
       },
       checkpointData: {
         ...(job.checkpointData || {}),
@@ -1038,20 +1113,27 @@ class DocumentService {
     if (!claimed) {
       // Another worker or request already claimed the retry lease
       return {
-        fileKey,
+        jobId: job.id,
+        fileKey: activeFileKey,
         status: "RUNNING",
         resumeStage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
         progress: job.percentage || 0,
-        streamUrl: `/sse/files/${fileKey}/stream`,
+        streamUrl: `/sse/files/${activeFileKey}/stream`,
       };
     }
 
-    sseConnectionService.reopen(fileKey);
+    sseConnectionService.reopen(activeFileKey);
+    if (fileKey && fileKey !== activeFileKey) {
+      sseConnectionService.reopen(fileKey);
+    }
     if (job.metadata?.batchId) {
-      sseConnectionService.unmarkDocumentDone(job.metadata.batchId, fileKey);
+      sseConnectionService.unmarkDocumentDone(job.metadata.batchId, activeFileKey);
+      if (fileKey && fileKey !== activeFileKey) {
+        sseConnectionService.unmarkDocumentDone(job.metadata.batchId, fileKey);
+      }
     }
 
-    sseConnectionService.publish(fileKey, {
+    const retryEvent = {
       type: "document.retrying",
       stage: resumeFromStage || job.stage || DOCUMENT_STAGES.QUEUED,
       stageStatus: "QUEUED",
@@ -1060,7 +1142,11 @@ class DocumentService {
       message: `Resuming execution from stage ${resumeFromStage || job.stage}`,
       failedStage: job.stage || job.checkpointData?.failedStage,
       attemptCount: (job.attemptCount || 1) + 1,
-    });
+    };
+    sseConnectionService.publish(activeFileKey, retryEvent);
+    if (fileKey && fileKey !== activeFileKey) {
+      sseConnectionService.publish(fileKey, retryEvent);
+    }
 
     const dispatchPayload = {
       jobId: job.id,
@@ -1086,11 +1172,11 @@ class DocumentService {
 
     return {
       jobId: job.id,
-      fileKey,
+      fileKey: activeFileKey,
       status: "RUNNING",
       resumeStage,
       progress,
-      streamUrl: `/sse/files/${fileKey}/stream`,
+      streamUrl: `/sse/files/${activeFileKey}/stream`,
     };
   }
 }

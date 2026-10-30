@@ -13,6 +13,7 @@ const medicationMapper = require("../helpers/medicationMapper.helper");
 const objectStorageService = require("./objectStorage.service");
 const { document } = require("../models/document");
 const { medication } = require("../models/medication");
+const { patientLabResult } = require("../models/patientLabResult");
 const { embeddingService } = require("./ai/chat/embedding.service");
 const { inferFileType, buildPatientSuggestions } = require("../helpers/document.helper");
 const { toDbDate } = require("../utils/dateUtils");
@@ -408,6 +409,47 @@ class DocumentPersistenceService {
           const [savedMed] = await tx.insert(medication).values(row).returning();
           insertedMedications.push(savedMed);
         }
+      }
+    }
+
+    // Persist lab results to patient_lab_results if present in extracted structured data
+    const rawLabs =
+      extractedStructuredData?.labResults || extractedStructuredData?.labReports || [];
+    if (Array.isArray(rawLabs) && rawLabs.length > 0) {
+      try {
+        const labRows = rawLabs.map((item) => ({
+          userId,
+          documentId,
+          reportId: s3Key,
+          canonicalKey:
+            item.canonicalKey ||
+            String(item.testName || item.name || "unknown_test")
+              .toLowerCase()
+              .replace(/[\s\-_]+/g, "_"),
+          testName: String(item.testName || item.name || "Unknown Test"),
+          valueNumeric:
+            typeof item.valueNumeric === "number"
+              ? item.valueNumeric
+              : typeof item.value === "number"
+                ? item.value
+                : null,
+          valueText: item.valueText || (item.value != null ? String(item.value) : null),
+          unit: item.unit || null,
+          referenceRange: item.referenceRange || null,
+          flag: item.flag || "NORMAL",
+          isAbnormal: Boolean(item.isAbnormal),
+          isCritical: Boolean(item.isCritical),
+          testDate: projectedReportDate || new Date(),
+          pageNo: item.pageNo || item.page || 1,
+          confidence: item.confidence != null ? Number(item.confidence) : null,
+          metadata: item.metadata || {},
+        }));
+        await tx
+          .insert(patientLabResult)
+          .values(labRows)
+          .catch(() => {});
+      } catch {
+        // non-blocking
       }
     }
 

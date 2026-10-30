@@ -36,6 +36,16 @@ class MedicationService {
   // CREATE MEDICATION
   async createMedication(userId, payload, options = {}) {
     const normalizedInput = normalizeCreateMedicationInput(payload);
+    delete normalizedInput.selected;
+    delete normalizedInput.id;
+    delete normalizedInput.client_med_id;
+    delete normalizedInput.clientMedId;
+    delete normalizedInput.refillAlert;
+    delete normalizedInput.unit;
+    delete normalizedInput.duplicateInfo;
+    delete normalizedInput.hasDuplicate;
+    delete normalizedInput.isBackendDuplicate;
+    delete normalizedInput.matchedMedication;
     const validData = await validateSchema(createMedicationSchema, normalizedInput);
     const patient = await patientRepository.findById(userId);
     if (!patient) {
@@ -849,12 +859,21 @@ class MedicationService {
         matchedMedications = similarMatches;
       }
 
+      const matchedMed = matchedMedications.length > 0 ? matchedMedications[0] : null;
+      const medId =
+        item.id || item.client_med_id || item.clientMedId || `med_${index}_${Date.now()}`;
+
       return {
         ...item,
+        id: item.id || medId,
+        client_med_id: item.client_med_id || item.clientMedId || medId,
+        hasDuplicate,
+        isBackendDuplicate: hasDuplicate,
+        matchedMedication: matchedMed,
         duplicateInfo: {
           hasDuplicate,
           conflictType,
-          matchedMedication: matchedMedications.length > 0 ? matchedMedications[0] : null,
+          matchedMedication: matchedMed,
           matchedMedications,
           suggestedActions: hasDuplicate ? [...SUGGESTED_ACTIONS] : [],
         },

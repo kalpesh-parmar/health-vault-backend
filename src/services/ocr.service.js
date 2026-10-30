@@ -1046,6 +1046,12 @@ class V1Service {
                 },
               });
 
+              const optionsList = [
+                { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+                { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+                { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+              ];
+
               // Turn 4: Assistant REVIEW_MEDICINES_LIST
               await chatSessionRepository.appendMessage({
                 sessionId: activeSessionId,
@@ -1057,6 +1063,7 @@ class V1Service {
                   actionType: "REVIEW_MEDICINES_LIST",
                   action: "REVIEW_MEDICINES_LIST",
                   medicines: reviewMeds,
+                  options: optionsList,
                 },
               });
             }
@@ -1066,6 +1073,11 @@ class V1Service {
               actionType: "REVIEW_MEDICINES_LIST",
               reply: reviewPrompt,
               medicines: reviewMeds,
+              options: [
+                { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+                { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+                { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+              ],
               sessionId: activeSessionId,
               onboardingState: {
                 ...effectiveState,
@@ -1301,10 +1313,139 @@ class V1Service {
             medsToProcess[i] = normalizeCreateMedicationInput(medData);
           }
 
+          let duplicateCheckedMeds = medsToProcess;
+          if (userId) {
+            try {
+              duplicateCheckedMeds = await medicationService.checkDuplicateMedicationsBatch(
+                userId,
+                medsToProcess,
+              );
+            } catch (dupErr) {
+              console.warn(
+                "[UnifiedChat] Duplicate check warning in CONFIRM_MEDICINES:",
+                dupErr.message,
+              );
+            }
+          }
+
+          const unresolvedConflicts = duplicateCheckedMeds.filter((m) => {
+            if (!m || m.selected === false) return false;
+            if (!m.hasDuplicate && !m.duplicateInfo?.hasDuplicate) return false;
+            const rawRes = m.resolution || m.action || "";
+            const res = String(rawRes).trim().toUpperCase().replace(/\s+/g, "_");
+            const isResolved =
+              res === "KEEP_EXISTING" ||
+              res === "REMOVE_NEW" ||
+              res === "REPLACE" ||
+              res === "EDIT" ||
+              res === "KEEP_NEW" ||
+              res === "KEEP_BOTH";
+            return !isResolved;
+          });
+
+          if (unresolvedConflicts.length > 0) {
+            const userLang =
+              preferredLanguage ||
+              patient?.preferredLanguage ||
+              effectiveState?.preferredLanguage ||
+              "english";
+            const reviewPrompt = await getLocalizedText(
+              "onboarding.reviewMedicinesList.reviewPrompt",
+              "Please review your medicines:",
+              userLang,
+            );
+
+            let docSummary = null;
+            let docsBatch = [];
+            let docsNames = [];
+            let primaryDoc = null;
+            if (userId) {
+              try {
+                const [latestDoc] = await db
+                  .select()
+                  .from(document)
+                  .where(and(eq(document.userId, userId), eq(document.ocrStatus, "completed")))
+                  .orderBy(desc(document.createdAt))
+                  .limit(1);
+                if (latestDoc) {
+                  primaryDoc = latestDoc;
+                  docsBatch = [latestDoc];
+                  docsNames = [latestDoc.fileName || "prescription"];
+                  const struct = latestDoc.structuredExtractedData || {};
+                  docSummary = struct.summary || latestDoc.summary || null;
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            const optionsList = [
+              { label: "Confirm Selected", value: "CONFIRM", actionType: "CONFIRM_MEDICINES" },
+              { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+              { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+            ];
+
+            let activeSessionId = effectiveSessionId;
+            if (!activeSessionId && userId) {
+              try {
+                if (chatService && typeof chatService.getOrCreateCanonicalSession === "function") {
+                  const canonical = await chatService.getOrCreateCanonicalSession({ userId });
+                  activeSessionId = canonical?.id || null;
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            if (activeSessionId) {
+              try {
+                await chatSessionRepository.appendMessage({
+                  sessionId: activeSessionId,
+                  userId,
+                  role: "assistant",
+                  content: reviewPrompt,
+                  metadata: {
+                    mode: "ACTION",
+                    action: "REVIEW_MEDICINES_LIST",
+                    actionType: "REVIEW_MEDICINES_LIST",
+                    medicines: duplicateCheckedMeds,
+                    options: optionsList,
+                    document: primaryDoc,
+                    documents: docsBatch,
+                    documentsName: docsNames,
+                    documentSummary: docSummary,
+                  },
+                });
+              } catch (appErr) {
+                console.warn("[UnifiedChat] Failed to append review message:", appErr.message);
+              }
+            }
+
+            return buildUnifiedResponse({
+              mode: "ACTION",
+              actionType: "REVIEW_MEDICINES_LIST",
+              reply: reviewPrompt,
+              medicines: duplicateCheckedMeds,
+              options: optionsList,
+              document: primaryDoc,
+              documents: docsBatch,
+              documentsName: docsNames,
+              documentSummary: docSummary,
+              sessionId: activeSessionId,
+              onboardingState: {
+                ...effectiveState,
+                currentStep: "REVIEW_MEDICINES_LIST",
+                medicinesToAdd: duplicateCheckedMeds,
+                isOnboardingCompleted: Boolean(isOnboardingCompleted),
+              },
+            });
+          }
+
           const unsavedMeds = deduplicateDraftMedicines(
-            medsToProcess.filter(
+            duplicateCheckedMeds.filter(
               (m) =>
                 m &&
+                m.selected !== false &&
                 !m.isSaved &&
                 !m.dbId &&
                 m.resolution !== "KEEP_EXISTING" &&
@@ -1313,20 +1454,56 @@ class V1Service {
           );
 
           if (unsavedMeds.length > 0) {
-            const bulkResult = await medicationService.bulkCreate(userId, unsavedMeds);
-            const created = bulkResult?.created || [];
-            const kept = bulkResult?.kept || [];
-            createdMeds =
-              created.length > 0
-                ? created
-                : kept.length > 0
-                  ? kept
-                  : Array.isArray(bulkResult)
-                    ? bulkResult
-                    : [];
+            try {
+              const bulkResult = await medicationService.bulkCreate(userId, unsavedMeds);
+              const created = bulkResult?.created || [];
+              const kept = bulkResult?.kept || [];
+              createdMeds =
+                created.length > 0
+                  ? created
+                  : kept.length > 0
+                    ? kept
+                    : Array.isArray(bulkResult)
+                      ? bulkResult
+                      : [];
+            } catch (bulkErr) {
+              if (bulkErr?.statusCode === 409 || bulkErr?.name === "ConflictException") {
+                const rechecked = await medicationService.checkDuplicateMedicationsBatch(
+                  userId,
+                  medsToProcess,
+                );
+                return buildUnifiedResponse({
+                  mode: "ACTION",
+                  actionType: "REVIEW_MEDICINES_LIST",
+                  reply: "Duplicate medication conflict detected. Please review and resolve:",
+                  medicines: rechecked,
+                  options: [
+                    {
+                      label: "Confirm Selected",
+                      value: "CONFIRM",
+                      actionType: "CONFIRM_MEDICINES",
+                    },
+                    { label: "Add New", value: "ADD", actionType: "ADD_MEDICINE" },
+                    { label: "Skip All", value: "SKIP", actionType: "SKIP_MEDICINES" },
+                  ],
+                  sessionId: effectiveSessionId,
+                });
+              }
+              throw bulkErr;
+            }
           } else {
-            const existingSaved = medsToProcess.filter((m) => m && (m.isSaved || m.dbId));
-            createdMeds = existingSaved.length > 0 ? existingSaved : [];
+            const existingSaved = duplicateCheckedMeds.filter(
+              (m) =>
+                m &&
+                (m.isSaved ||
+                  m.dbId ||
+                  m.resolution === "KEEP_EXISTING" ||
+                  m.resolution === "REMOVE_NEW"),
+            );
+            createdMeds =
+              existingSaved.length > 0
+                ? existingSaved.map((m) => m.duplicateInfo?.matchedMedication || m)
+                : [{ kept: true }];
           }
         } else if (isConfirmAction && hasMedicineActionData) {
           if (!actionData?.isSaved && !actionData?.dbId) {

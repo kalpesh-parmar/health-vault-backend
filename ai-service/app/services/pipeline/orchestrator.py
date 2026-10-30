@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.constants.stages import (
     PIPELINE_STAGES_ORDER,
@@ -92,6 +92,46 @@ class PipelineOrchestrator:
         self.embedding_handler = embedding_handler
         self.lab_result_repo = lab_result_repo
         self.intelligence_repo = intelligence_repo
+
+    @staticmethod
+    def _resolve_storage_s3_key(
+        checkpoint_data: dict[str, Any],
+        metadata: dict[str, Any],
+        file_key: str,
+        job: dict[str, Any] | None = None,
+    ) -> str:
+        """Resolves the genuine physical storage key for S3/MinIO operations.
+
+        Logical queue identifiers like 'doc_21983b438090' are not physical S3 object paths.
+        Physical object paths contain '/' (e.g. 'documents/<user>/<file>' or 'DOCUMENT/<user>/<file>').
+        """
+        upload_data = checkpoint_data.get("UPLOADING")
+        upload_s3_key = upload_data.get("s3Key") if isinstance(upload_data, dict) else None
+
+        candidates = [
+            upload_s3_key,
+            checkpoint_data.get("s3Key"),
+            metadata.get("key"),
+            metadata.get("s3Key"),
+            (job or {}).get("s3_key"),
+        ]
+
+        # 1. Prefer candidate containing '/' (actual object key with prefix)
+        for cand in candidates:
+            if isinstance(cand, str) and "/" in cand.strip():
+                return cand.strip()
+
+        # 2. Fall back to any candidate that does not start with logical 'doc_'
+        for cand in candidates:
+            if isinstance(cand, str) and cand.strip() and not cand.strip().startswith("doc_"):
+                return cand.strip()
+
+        # 3. Fall back to first non-empty candidate or file_key
+        for cand in candidates:
+            if isinstance(cand, str) and cand.strip():
+                return cand.strip()
+
+        return file_key
 
     async def _validate_and_restore_checkpoints(
         self,
@@ -309,8 +349,9 @@ class PipelineOrchestrator:
             or job.get("documentId")
             or checkpoint_data.get("documentId")
             or metadata.get("documentId")
+            or metadata.get("canonicalDocumentId")
         )
-        document_id = UUID(str(raw_doc_id)) if raw_doc_id else None
+        document_id = UUID(str(raw_doc_id)) if raw_doc_id else uuid4()
         batch_id = (
             metadata.get("batchId")
             or metadata.get("batch_id")
@@ -328,12 +369,11 @@ class PipelineOrchestrator:
         bucket = checkpoint_data.get("s3Bucket") or getattr(
             self.s3_client.settings, "aws_bucket_name", "health-vault-documents"
         )
-        s3_key = (
-            checkpoint_data.get("s3Key")
-            or metadata.get("key")
-            or metadata.get("s3Key")
-            or file_key
-        )
+        s3_key = self._resolve_storage_s3_key(checkpoint_data, metadata, file_key, job)
+        if checkpoint_data.get("s3Key") != s3_key:
+            checkpoint_data["s3Key"] = s3_key
+        if metadata.get("s3Key") != s3_key:
+            metadata["s3Key"] = s3_key
 
         logger.info(
             "Starting pipeline orchestration for job %s (fileKey=%s, batchId=%s, documentId=%s, s3Key=%s, attempt=%d, completed=%s, failedStage=%s)",
@@ -380,6 +420,15 @@ class PipelineOrchestrator:
                         bucket=bucket, key=s3_key, expected_sha256=expected_sha256
                     )
                     file_bytes = await asyncio.to_thread(temp_path.read_bytes)
+                    actual_file_size = len(file_bytes)
+                    checkpoint_data["fileSize"] = actual_file_size
+                    if metadata is not None and isinstance(metadata, dict):
+                        metadata["fileSize"] = actual_file_size
+                    if job is not None and isinstance(job, dict):
+                        if "metadata" in job and isinstance(job["metadata"], dict):
+                            job["metadata"]["fileSize"] = actual_file_size
+                        if "checkpoint_data" in job and isinstance(job["checkpoint_data"], dict):
+                            job["checkpoint_data"]["fileSize"] = actual_file_size
                     validation_res = await self.ocr_handler.validate_document(
                         file_bytes=file_bytes,
                         filename=metadata.get("originalName") or s3_key.split("/")[-1] or file_key,
@@ -438,6 +487,14 @@ class PipelineOrchestrator:
                         temp_path = await self.ocr_handler.verify_upload(
                             bucket=bucket, key=s3_key, expected_sha256=expected_sha256
                         )
+
+                    if temp_path and temp_path.exists():
+                        actual_size = temp_path.stat().st_size
+                        if actual_size > 0:
+                            if not checkpoint_data.get("fileSize"):
+                                checkpoint_data["fileSize"] = actual_size
+                            if not metadata.get("fileSize"):
+                                metadata["fileSize"] = actual_size
 
                     upload_res = {
                         "uploaded": True,
@@ -498,6 +555,14 @@ class PipelineOrchestrator:
                         temp_path = await self.ocr_handler.verify_upload(
                             bucket=bucket, key=s3_key, expected_sha256=expected_sha256
                         )
+
+                    if temp_path and temp_path.exists():
+                        actual_size = temp_path.stat().st_size
+                        if actual_size > 0:
+                            if not checkpoint_data.get("fileSize"):
+                                checkpoint_data["fileSize"] = actual_size
+                            if not metadata.get("fileSize"):
+                                metadata["fileSize"] = actual_size
 
                     raw_ocr_data = await self.ocr_handler.run_ocr(
                         file_path=temp_path,
@@ -632,6 +697,14 @@ class PipelineOrchestrator:
                             bucket=bucket, key=s3_key, expected_sha256=expected_sha256
                         )
 
+                    if temp_path and temp_path.exists():
+                        actual_size = temp_path.stat().st_size
+                        if actual_size > 0:
+                            if not checkpoint_data.get("fileSize"):
+                                checkpoint_data["fileSize"] = actual_size
+                            if not metadata.get("fileSize"):
+                                metadata["fileSize"] = actual_size
+
                     graphs_data = await self.graph_handler.extract_graphs(
                         file_path=temp_path,
                         file_key=file_key,
@@ -754,40 +827,8 @@ class PipelineOrchestrator:
                                 extracted_structured_data["clinicallyAnalyzed"] = False
                                 extracted_structured_data.setdefault("additionalInformation", {})["clinicallyAnalyzed"] = False
 
-                    # Persist evaluated lab results into relational patient_lab_results
-                    if self.lab_result_repo is not None and extracted_structured_data and not is_no_text:
-                        raw_labs = extracted_structured_data.get("labResults") or []
-                        target_user_id = (
-                            job.get("user_id")
-                            or (metadata.get("userId") if metadata else None)
-                            or (metadata.get("patientId") if metadata else None)
-                        )
-                        if target_user_id and raw_labs:
-                            try:
-                                user_uuid = UUID(str(target_user_id))
-                                doc_date = (
-                                    extracted_structured_data.get("documentInfo", {}).get("date")
-                                    or (metadata.get("reportDate") if metadata else None)
-                                    )
-                                persisted_labs = await self.lab_result_repo.persist_lab_results(
-                                    user_id=user_uuid,
-                                    document_id=document_id,
-                                    report_id=file_key,
-                                    lab_items=raw_labs,
-                                    test_date=doc_date,
-                                )
-                                logger.info(
-                                    "Persisted %d structured lab results to patient_lab_results (user=%s, doc=%s)",
-                                    len(persisted_labs),
-                                    user_uuid,
-                                    document_id,
-                                )
-                            except Exception as p_err:
-                                logger.error(
-                                    "Failed to persist lab results to patient_lab_results: %s",
-                                    p_err,
-                                    exc_info=True,
-                                )
+                    # Flow Requirement: Do NOT persist to patient_lab_results prematurely here.
+                    # Lab results are persisted ONLY at terminal completion, AFTER documents table entry.
 
                     completed_stages.append(STAGE_FIELD_EXTRACTION)
                     current_pct = ensure_monotonic_progress(
@@ -952,7 +993,10 @@ class PipelineOrchestrator:
                         if temp_path and temp_path.exists():
                             raw_file_bytes = temp_path.read_bytes()
                             if raw_file_bytes.startswith(b"%PDF"):
-                                from app.services.pipeline.ocr_stage import render_pdf_page_to_image
+                                try:
+                                    from app.services.pipeline.ocr_stage import render_pdf_page_to_image
+                                except ImportError:
+                                    from app.services.pipeline.ocr_stage import _render_single_pdf_page as render_pdf_page_to_image
                                 ocr_pages = (raw_ocr_data or {}).get("pages", [])
                                 full_text = (raw_ocr_data or {}).get("fullText", "")
 
@@ -1136,6 +1180,7 @@ class PipelineOrchestrator:
             # ─────────────────────────────────────────────────────────────────
             # 9. STAGE: EMBEDDING
             # ─────────────────────────────────────────────────────────────────
+            chunks: list[dict[str, Any]] = []
             if STAGE_EMBEDDING not in completed_stages:
                 try:
                     full_text = (raw_ocr_data or {}).get("fullText", "")
@@ -1149,21 +1194,6 @@ class PipelineOrchestrator:
                     )
 
                     chunks = embedding_data.get("chunks") or []
-                    persisted_chunk_count = 0
-                    persisted_embedding_count = 0
-
-                    if self.intelligence_repo is not None and document_id is not None:
-                        persisted_chunk_count, persisted_embedding_count = (
-                            await self.intelligence_repo.persist_document_chunks_and_embeddings(
-                                document_id=document_id,
-                                user_id=patient_id,
-                                chunks=chunks,
-                                model_name=getattr(self.embedding_handler.embeddings, "model_name", "bge-m3:latest"),
-                                expected_dim=getattr(self.embedding_handler.embeddings, "expected_dim", 1024),
-                            )
-                        )
-                    elif chunks and document_id is not None and self.intelligence_repo is None:
-                        raise RuntimeError("IntelligenceRepository is not configured; cannot persist document embeddings")
 
                     completed_stages.append(STAGE_EMBEDDING)
                     current_pct = 100
@@ -1173,11 +1203,9 @@ class PipelineOrchestrator:
                         bucket=bucket,
                         stage=STAGE_EMBEDDING,
                         progress_pct=current_pct,
-                        message="RAG dense vector embeddings generated and persisted",
+                        message="RAG dense vector embeddings generated",
                         stage_data={
                             "chunkCount": len(chunks),
-                            "persistedChunkCount": persisted_chunk_count,
-                            "persistedEmbeddingCount": persisted_embedding_count,
                         },
                         completed_stages=completed_stages,
                         checkpoint_data=checkpoint_data,
@@ -1224,11 +1252,88 @@ class PipelineOrchestrator:
             # Synchronize extracted results with the documents table.
             # A synchronization failure must not produce a successful completion.
             if document_id:
-                await self.repo.sync_to_documents_table(
+                synced_doc_id = await self.repo.sync_to_documents_table(
                     document_id=document_id,
                     extracted_structured_data=extracted_structured_data,
                     raw_ocr_data=raw_ocr_data,
+                    job=job,
                 )
+                target_doc_id = synced_doc_id or document_id
+
+                # Flow Requirement: Persist downstream linked tables ONLY after documents table entry is created:
+                # 1. document_chunks and embeddings
+                if self.intelligence_repo is not None and target_doc_id is not None:
+                    try:
+                        if not chunks:
+                            full_text = (raw_ocr_data or {}).get("fullText", "")
+                            summary_eng = (extracted_structured_data or {}).get("summaryEnglish") or ""
+                            if summary_eng and summary_eng not in full_text:
+                                full_text = f"{full_text}\n\n[CLINICAL SUMMARY AND IMAGING OBSERVATIONS]\n{summary_eng}".strip()
+                            if full_text:
+                                embedding_data = await self.embedding_handler.generate_embeddings(
+                                    full_text=full_text,
+                                    patient_id=patient_id,
+                                    document_id=target_doc_id,
+                                )
+                                chunks = embedding_data.get("chunks") or []
+
+                        if chunks:
+                            persisted_chunk_count, persisted_embedding_count = (
+                                await self.intelligence_repo.persist_document_chunks_and_embeddings(
+                                    document_id=target_doc_id,
+                                    user_id=patient_id,
+                                    chunks=chunks,
+                                    model_name=getattr(self.embedding_handler.embeddings, "model_name", "bge-m3:latest"),
+                                    expected_dim=getattr(self.embedding_handler.embeddings, "expected_dim", 1024),
+                                )
+                            )
+                            logger.info(
+                                "Persisted %d chunks and %d embeddings for doc=%s",
+                                persisted_chunk_count,
+                                persisted_embedding_count,
+                                target_doc_id,
+                            )
+                    except Exception as emb_err:
+                        logger.error(
+                            "Failed to persist document chunks and embeddings: %s",
+                            emb_err,
+                            exc_info=True,
+                        )
+
+                # 2. patient_lab_results
+                if self.lab_result_repo is not None and extracted_structured_data:
+                    raw_labs = extracted_structured_data.get("labResults") or []
+                    target_user_id = (
+                        job.get("user_id")
+                        or (metadata.get("userId") if metadata else None)
+                        or (metadata.get("patientId") if metadata else None)
+                    )
+                    if target_user_id and raw_labs:
+                        try:
+                            user_uuid = UUID(str(target_user_id))
+                            doc_date = (
+                                extracted_structured_data.get("documentInfo", {}).get("date")
+                                or (metadata.get("reportDate") if metadata else None)
+                            )
+                            persisted_labs = await self.lab_result_repo.persist_lab_results(
+                                user_id=user_uuid,
+                                document_id=target_doc_id,
+                                report_id=file_key,
+                                lab_items=raw_labs,
+                                test_date=doc_date,
+                            )
+                            logger.info(
+                                "Persisted %d structured lab results to patient_lab_results (user=%s, doc=%s)",
+                                len(persisted_labs),
+                                user_uuid,
+                                target_doc_id,
+                            )
+                        except Exception as p_err:
+                            logger.error(
+                                "Failed to persist lab results to patient_lab_results: %s",
+                                p_err,
+                                exc_info=True,
+                            )
 
             # Persist terminal job state only after synchronization succeeds.
             completed_ok = await self.repo.complete_job(

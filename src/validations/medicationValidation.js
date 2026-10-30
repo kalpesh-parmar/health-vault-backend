@@ -252,7 +252,7 @@ const createMedicationSchema = z
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
     resolution: z
-      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"])
+      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW", "KEEP_BOTH"])
       .optional()
       .nullable(),
     replaceMedicationId: z.string().optional().nullable(),
@@ -323,7 +323,9 @@ const updateMedicationSchema = z
       .int()
       .optional(),
     notes: z.string().trim().max(1000).optional().nullable(),
-    resolution: z.enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"]).optional(),
+    resolution: z
+      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW", "KEEP_BOTH"])
+      .optional(),
     replaceMedicationId: z.string().optional(),
   })
   .strict()
@@ -553,7 +555,7 @@ const batchMedicationItemSchema = z
       .nullable(),
     notes: z.string().trim().max(1000).optional().nullable(),
     resolution: z
-      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW"])
+      .enum(["REPLACE", "KEEP_EXISTING", "EDIT", "KEEP_NEW", "REMOVE_NEW", "KEEP_BOTH"])
       .optional()
       .nullable(),
     replaceMedicationId: z.string().optional().nullable(),

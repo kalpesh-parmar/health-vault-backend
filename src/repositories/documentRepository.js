@@ -133,6 +133,7 @@ class DocumentRepository {
       .onConflictDoUpdate({
         target: document.s3Key,
         set: {
+          softDelete: false,
           fileName: data.fileName,
           s3Bucket: data.s3Bucket,
           updatedAt: new Date(),
@@ -157,6 +158,52 @@ class DocumentRepository {
   // async updateById(id, data) {
   //   return this.update(id, data);
   // }
+
+  async upsertCompletedDocument(data) {
+    if (!data?.s3Key) return null;
+    const [row] = await db
+      .insert(document)
+      .values({
+        id: data.id || crypto.randomUUID(),
+        userId: data.userId,
+        documentType: data.documentType || "OTHER_MEDICAL_DOCUMENT",
+        fileName: data.fileName || "Document",
+        s3Bucket: data.s3Bucket,
+        s3Key: data.s3Key,
+        fileType: data.fileType || "application/pdf",
+        fileSize: data.fileSize || 0,
+        ocrStatus: data.ocrStatus || "completed",
+        ocrExtractedText: data.ocrExtractedText || null,
+        structuredExtractedData: data.structuredExtractedData || null,
+        reportDate: data.reportDate || null,
+        hospitalName: data.hospitalName || null,
+        doctorName: data.doctorName || null,
+        remarks: data.remarks || null,
+        summaryEnglish: data.summaryEnglish || null,
+      })
+      .onConflictDoUpdate({
+        target: document.s3Key,
+        set: {
+          softDelete: false,
+          documentType: data.documentType || "OTHER_MEDICAL_DOCUMENT",
+          fileName: data.fileName || "Document",
+          fileSize: data.fileSize || sql`${document.fileSize}`,
+          fileType: data.fileType || sql`${document.fileType}`,
+          s3Bucket: data.s3Bucket || sql`${document.s3Bucket}`,
+          ocrStatus: data.ocrStatus || "completed",
+          ocrExtractedText: data.ocrExtractedText,
+          structuredExtractedData: data.structuredExtractedData,
+          reportDate: data.reportDate,
+          hospitalName: data.hospitalName,
+          doctorName: data.doctorName,
+          remarks: data.remarks,
+          summaryEnglish: data.summaryEnglish,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return row || null;
+  }
 
   async updateOcrStatusByFileKey(fileKey, status, extraData = {}) {
     if (!fileKey) return null;
@@ -325,7 +372,14 @@ class DocumentRepository {
 
   async findByFileKey(fileKey, userId = null) {
     if (!fileKey) return null;
-    const conditions = [eq(document.s3Key, fileKey), eq(document.softDelete, false)];
+    const cleanKey = String(fileKey).trim().replace(/['"]+/g, "");
+    if (!cleanKey) return null;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanKey);
+    const orConditions = [eq(document.s3Key, cleanKey)];
+    if (isUuid) {
+      orConditions.push(eq(document.id, cleanKey));
+    }
+    const conditions = [or(...orConditions), eq(document.softDelete, false)];
     if (userId) {
       conditions.push(eq(document.userId, userId));
     }

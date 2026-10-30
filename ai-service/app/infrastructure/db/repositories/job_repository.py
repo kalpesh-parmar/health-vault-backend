@@ -407,7 +407,12 @@ class JobRepository:
         document_id: UUID,
         extracted_structured_data: dict[str, Any] | None = None,
         raw_ocr_data: dict[str, Any] | None = None,
-    ) -> None:
+        job: dict[str, Any] | None = None,
+    ) -> UUID | None:
+        """
+        Flow Requirement: Sync to documents table once processing is completed.
+        If the document row does not exist, insert it (upsert).
+        """
         raw_text = None
         if raw_ocr_data and isinstance(raw_ocr_data, dict):
             raw_text = raw_ocr_data.get("fullText")
@@ -421,8 +426,8 @@ class JobRepository:
 
         if extracted_structured_data and isinstance(extracted_structured_data, dict):
             summary_english = extracted_structured_data.get("summaryEnglish")
-            if extracted_structured_data.get("status") == "partial":
-                doc_ocr_status = "partial"
+            is_partial = extracted_structured_data.get("status") == "partial"
+            doc_ocr_status = "completed"
 
             raw_doc_type = (
                 (extracted_structured_data.get("documentInfo") or {}).get("documentType")
@@ -433,7 +438,7 @@ class JobRepository:
             doc_type = normalize_document_type(raw_doc_type)
 
             # Ensure retry and partial OCR processing cannot overwrite a valid classified type with an unknown fallback
-            if doc_ocr_status == "partial" and doc_type == "OTHER_MEDICAL_DOCUMENT":
+            if is_partial and doc_type == "OTHER_MEDICAL_DOCUMENT":
                 doc_type = None
 
             raw_date = (
@@ -469,22 +474,7 @@ class JobRepository:
                 or (extracted_structured_data.get("facilityInfo") or {}).get("name")
             )
 
-        query = text(
-            """
-            UPDATE documents
-            SET ocr_status = :doc_ocr_status,
-                document_type = COALESCE(CAST(:doc_type AS document_type), document_type),
-                structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
-                ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
-                summary_english = COALESCE(:summary_english, summary_english),
-                report_date = COALESCE(:report_date, report_date),
-                doctor_name = COALESCE(:doctor_name, doctor_name),
-                hospital_name = COALESCE(:hospital_name, hospital_name),
-                updated_at = NOW()
-            WHERE id = :document_id
-            """
-        )
-        params = {
+        params: dict[str, Any] = {
             "document_id": document_id,
             "doc_ocr_status": doc_ocr_status,
             "doc_type": doc_type,
@@ -495,9 +485,132 @@ class JobRepository:
             "doctor_name": doctor_name,
             "hospital_name": hospital_name,
         }
+
+        user_id = None
+        file_key = None
+        file_name = "Document"
+        s3_bucket = None
+        file_type = "application/pdf"
+        file_size = 0
+
+        if job:
+            user_id = job.get("user_id") or job.get("patient_id")
+            metadata = job.get("metadata") or {}
+            checkpoint_data = job.get("checkpoint_data") or {}
+            if not user_id:
+                user_id = metadata.get("userId") or metadata.get("patientId")
+            upload_stage = checkpoint_data.get("UPLOADING")
+            upload_s3 = upload_stage.get("s3Key") if isinstance(upload_stage, dict) else None
+            candidates = [
+                upload_s3,
+                metadata.get("s3Key"),
+                metadata.get("key"),
+                checkpoint_data.get("s3Key"),
+                job.get("s3_key"),
+            ]
+            file_key = None
+            for cand in candidates:
+                if isinstance(cand, str) and "/" in cand.strip():
+                    file_key = cand.strip()
+                    break
+            if not file_key:
+                for cand in candidates:
+                    if isinstance(cand, str) and cand.strip() and not cand.strip().startswith("doc_"):
+                        file_key = cand.strip()
+                        break
+            if not file_key:
+                file_key = (
+                    metadata.get("s3Key")
+                    or metadata.get("key")
+                    or checkpoint_data.get("s3Key")
+                    or job.get("file_key")
+                )
+            file_name = (
+                metadata.get("originalName")
+                or metadata.get("fileName")
+                or (str(file_key).split("/")[-1] if file_key else "Document")
+            )
+            s3_bucket = metadata.get("bucket") or metadata.get("s3Bucket") or checkpoint_data.get("s3Bucket")
+            raw_mime = metadata.get("mimeType") or "application/pdf"
+            valid_types = {"docx", "application/msword", "image/jpeg", "application/pdf", "image/png", "image/tiff", "text/plain", "image/webp", "image/jpg"}
+            file_type = raw_mime.lower().strip() if raw_mime.lower().strip() in valid_types else "application/pdf"
+            file_size = int(
+                metadata.get("fileSize")
+                or metadata.get("file_size")
+                or checkpoint_data.get("fileSize")
+                or checkpoint_data.get("file_size")
+                or (upload_stage.get("fileSize") if isinstance(upload_stage, dict) else 0)
+                or 0
+            )
+
+        if user_id and file_key:
+            query = text(
+                """
+                INSERT INTO documents (
+                    id, user_id, document_type, file_name, s3_bucket, s3_key, file_type, file_size,
+                    ocr_status, structured_extracted_data, ocr_extracted_text, summary_english,
+                    report_date, doctor_name, hospital_name, created_at, updated_at
+                )
+                VALUES (
+                    CAST(:document_id AS uuid), CAST(:user_id AS uuid),
+                    COALESCE(CAST(:doc_type AS document_type), 'OTHER_MEDICAL_DOCUMENT'::document_type),
+                    :file_name, :s3_bucket, :s3_key,
+                    CAST(:file_type AS file_type), :file_size,
+                    CAST(:doc_ocr_status AS ocr_status),
+                    CAST(:extracted_structured_data AS jsonb), :raw_text, :summary_english,
+                    :report_date, :doctor_name, :hospital_name, NOW(), NOW()
+                )
+                ON CONFLICT (s3_key) DO UPDATE
+                SET soft_delete = FALSE,
+                    ocr_status = EXCLUDED.ocr_status,
+                    document_type = COALESCE(EXCLUDED.document_type, documents.document_type),
+                    file_size = CASE WHEN EXCLUDED.file_size > 0 THEN EXCLUDED.file_size ELSE documents.file_size END,
+                    file_name = COALESCE(EXCLUDED.file_name, documents.file_name),
+                    s3_bucket = COALESCE(EXCLUDED.s3_bucket, documents.s3_bucket),
+                    file_type = COALESCE(EXCLUDED.file_type, documents.file_type),
+                    structured_extracted_data = COALESCE(EXCLUDED.structured_extracted_data, documents.structured_extracted_data),
+                    ocr_extracted_text = COALESCE(EXCLUDED.ocr_extracted_text, documents.ocr_extracted_text),
+                    summary_english = COALESCE(EXCLUDED.summary_english, documents.summary_english),
+                    report_date = COALESCE(EXCLUDED.report_date, documents.report_date),
+                    doctor_name = COALESCE(EXCLUDED.doctor_name, documents.doctor_name),
+                    hospital_name = COALESCE(EXCLUDED.hospital_name, documents.hospital_name),
+                    updated_at = NOW()
+                RETURNING id
+                """
+            )
+            params["user_id"] = str(user_id)
+            params["file_name"] = str(file_name)
+            params["s3_bucket"] = s3_bucket
+            params["s3_key"] = str(file_key)
+            params["file_type"] = file_type
+            params["file_size"] = file_size
+        else:
+            query = text(
+                """
+                UPDATE documents
+                SET ocr_status = :doc_ocr_status,
+                    document_type = COALESCE(CAST(:doc_type AS document_type), document_type),
+                    structured_extracted_data = COALESCE(:extracted_structured_data, structured_extracted_data),
+                    ocr_extracted_text = COALESCE(:raw_text, ocr_extracted_text),
+                    summary_english = COALESCE(:summary_english, summary_english),
+                    report_date = COALESCE(:report_date, report_date),
+                    doctor_name = COALESCE(:doctor_name, doctor_name),
+                    hospital_name = COALESCE(:hospital_name, hospital_name),
+                    updated_at = NOW()
+                WHERE id = :document_id
+                RETURNING id
+                """
+            )
+
         async for session in self.db.session():
-            await session.execute(query, params)
+            result = await session.execute(query, params)
             await session.commit()
+            row = result.first()
+            if row and row[0]:
+                return UUID(str(row[0]))
+            return document_id
+
+        return document_id
 
 
     async def fail_job(

@@ -1498,6 +1498,8 @@ async function updateStateFromMessage(state, message, userId = null) {
                   ...state.medicinesToAdd[idx],
                   ...updatedMed,
                 };
+              } else {
+                state.medicinesToAdd.push(updatedMed);
               }
             }
           });
@@ -1514,16 +1516,42 @@ async function updateStateFromMessage(state, message, userId = null) {
           return {
             ...m,
             selected: isSelected,
-            duplicateInfo: {
-              hasDuplicate: false,
-              conflictType: null,
-              matchedMedication: null,
-              matchedMedications: [],
-              suggestedActions: [],
-              isAlreadySaved: Boolean(m.isSaved || m.dbId),
-            },
           };
         });
+
+        if (userId && Array.isArray(state.medicinesToAdd) && state.medicinesToAdd.length > 0) {
+          try {
+            state.medicinesToAdd = await medicationService.checkDuplicateMedicationsBatch(
+              userId,
+              state.medicinesToAdd,
+            );
+          } catch (dupErr) {
+            console.warn("[OnboardingService] Duplicate check in confirm failed:", dupErr.message);
+          }
+        }
+
+        const hasUnresolvedDup = (state.medicinesToAdd || []).some((m) => {
+          if (!m || m.selected === false) return false;
+          if (!m.hasDuplicate && !m.duplicateInfo?.hasDuplicate) return false;
+          const res = String(m.resolution || m.action || "")
+            .trim()
+            .toUpperCase()
+            .replace(/\s+/g, "_");
+          return !(
+            res === "KEEP_EXISTING" ||
+            res === "REMOVE_NEW" ||
+            res === "REPLACE" ||
+            res === "EDIT" ||
+            res === "KEEP_NEW" ||
+            res === "KEEP_BOTH"
+          );
+        });
+
+        if (hasUnresolvedDup) {
+          state.medicinesConfirmed = false;
+          state.currentStep = "REVIEW_MEDICINES_LIST";
+          return;
+        }
 
         let nextIncompleteIndex = -1;
         for (let i = 0; i < state.medicinesToAdd.length; i++) {

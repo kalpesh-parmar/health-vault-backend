@@ -98,7 +98,14 @@ class DocumentOcrJobService {
    * background via `setImmediate` so the HTTP request can resolve in
    * tens of milliseconds.
    */
-  async enqueue({ fileKey, mimeType, userId, originalName, preferredLanguage = "english" }) {
+  async enqueue({
+    fileKey,
+    mimeType,
+    userId,
+    originalName,
+    preferredLanguage = "english",
+    fileSize = 0,
+  }) {
     if (!fileKey) {
       throw new InvalidRequestException(messageConstants.FILE_IS_REQUIRED || "fileKey is required");
     }
@@ -127,7 +134,8 @@ class DocumentOcrJobService {
 
     let canonicalDocumentId = existingDoc?.id || crypto.randomUUID();
 
-    if (!existingDoc) {
+    // Flow Requirement: On upload/enqueue, only enter in document_processing_jobs.
+    /* if (!existingDoc) {
       try {
         const initialDoc = await documentRepository.upsertInitialDocument({
           id: canonicalDocumentId,
@@ -149,6 +157,7 @@ class DocumentOcrJobService {
       }
     }
 
+    */
     const job = await documentProcessingJobRepository.startJob({
       fileKey,
       userId,
@@ -162,11 +171,13 @@ class DocumentOcrJobService {
         documentId: canonicalDocumentId,
         preferredLanguage,
         originalName,
+        fileSize: fileSize || 0,
       },
       checkpointData: {
         s3Bucket: bucket,
         s3Key: fileKey,
         documentId: canonicalDocumentId,
+        fileSize: fileSize || 0,
       },
     });
 
@@ -206,13 +217,16 @@ class DocumentOcrJobService {
           })
           .catch(() => {});
 
-        // Update initial document row to FAILED
-        await documentRepository
+        // Flow Requirement: do not create or update documents row on failure. Job stays in document_processing_jobs.
+        /*
+        // Flow Requirement: on failure, do not update documents table. Job stays in document_processing_jobs.
+      /*
           .update(canonicalDocumentId, {
             ocrStatus: ocrStatus.FAILED,
           })
           .catch(() => {});
 
+        */
         // Maintain SSE terminal event handling with retryable indicator
         await emitAndPersist(job.id, fileKey, STAGES.FAILED, {
           error: dispatchErr?.message || failureMessage,
@@ -503,8 +517,47 @@ class DocumentOcrJobService {
       // eslint-disable-next-line no-console
       console.time("[OCR]: updateOcrStatusByFileKey");
 
+      const jobRow = await documentProcessingJobRepository.findByFileKey(fileKey, userId);
+      const resolvedFileSize = jobRow?.metadata?.fileSize || jobRow?.checkpointData?.fileSize || 0;
+      const uploadS3 = jobRow?.checkpointData?.UPLOADING?.s3Key;
+      let resolvedS3Key = fileKey;
+      const candidates = [
+        uploadS3,
+        jobRow?.metadata?.s3Key,
+        jobRow?.metadata?.key,
+        jobRow?.checkpointData?.s3Key,
+      ];
+      for (const cand of candidates) {
+        if (typeof cand === "string" && cand.includes("/")) {
+          resolvedS3Key = cand.trim();
+          break;
+        }
+      }
+      if (resolvedS3Key === fileKey) {
+        for (const cand of candidates) {
+          if (typeof cand === "string" && cand.trim() && !cand.trim().startsWith("doc_")) {
+            resolvedS3Key = cand.trim();
+            break;
+          }
+        }
+      }
+      const resolvedBucket = jobRow?.metadata?.bucket || jobRow?.checkpointData?.s3Bucket || null;
+      const resolvedFileName =
+        jobRow?.metadata?.originalName ||
+        jobRow?.originalName ||
+        fileKey.split("/").pop() ||
+        "Document";
+
       const updatedDoc = await documentRepository
-        .updateOcrStatusByFileKey(fileKey, ocrStatus.COMPLETED, {
+        .upsertCompletedDocument({
+          userId,
+          fileName: resolvedFileName,
+          s3Bucket: resolvedBucket,
+          s3Key: resolvedS3Key,
+          fileType: inferMimeType(fileKey, mimeType),
+          fileSize: resolvedFileSize,
+          ocrStatus: ocrStatus.COMPLETED,
+          ocrExtractedText: rawOcrData?.fullText || null,
           documentType: analyzedDocumentType,
           remarks: summaryPreferredLanguage || summaryEnglish,
           summaryEnglish,
@@ -577,7 +630,8 @@ class DocumentOcrJobService {
       });
     } catch (error) {
       await documentProcessingJobRepository.markFailed(jobId, error).catch(() => {});
-      await documentRepository
+      // Flow Requirement: on failure, do not update documents table. Job stays in document_processing_jobs.
+      /*
         .updateOcrStatusByFileKey(fileKey, ocrStatus.FAILED, {
           remarks: `Processing failed: ${error.message}`,
         })
@@ -588,6 +642,7 @@ class DocumentOcrJobService {
             fileKey,
           });
         });
+      */
       ocrProgressBus.fail(fileKey, error);
       // eslint-disable-next-line no-console
       console.error("[ocr-job] pipeline failed", { error: error.message, fileKey, jobId, userId });

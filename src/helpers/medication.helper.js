@@ -41,7 +41,7 @@ function findMedicationDuplicates(activeMedications = [], incomingRaw = "", excl
   for (const med of activeMedications) {
     if (excludeId && String(med.id) === String(excludeId)) continue;
 
-    const existingRaw = med?.medicationName || "";
+    const existingRaw = med?.medicationName || med?.name || "";
     const existingNorm = normalizeMedicationName(existingRaw);
 
     if (!existingNorm && !existingRaw) continue;
